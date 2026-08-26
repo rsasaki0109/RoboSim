@@ -345,6 +345,20 @@ def dropout_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def recovery_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
+    contract = controller.get("measurement_fault_contract")
+    if (
+        isinstance(contract, dict)
+        and contract.get("kind") == "joint_feedback_dropout_recovery_hold_v1"
+    ):
+        return contract
+    return None
+
+
+def publication_dropout_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
+    return dropout_contract(controller) or recovery_contract(controller)
+
+
 def latency_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
     contract = controller.get("measurement_fault_contract")
     if (
@@ -382,6 +396,7 @@ def availability_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
         or latency_contract(controller)
         or jitter_contract(controller)
         or stale_age_contract(controller)
+        or recovery_contract(controller)
     )
 
 
@@ -419,7 +434,7 @@ def controller_stale_offset_frames(
 
 
 def sensor_sample_published(controller: dict[str, Any], sequence: int) -> bool:
-    contract = dropout_contract(controller)
+    contract = publication_dropout_contract(controller)
     if contract is None:
         return True
     start = contract["start_capture_sequence"]
@@ -520,6 +535,39 @@ def validate_measurement_fault(controller: dict[str, Any], action_count: int) ->
         ):
             raise ValueError("invalid OpenArm controller stale-age contract")
         return
+    if contract.get("kind") == "joint_feedback_dropout_recovery_hold_v1":
+        expected_keys = {
+            "kind",
+            "classification",
+            "start_capture_sequence",
+            "consecutive_dropped_frames",
+            "additional_recovery_hold_decisions",
+            "controller_visibility",
+            "application_order",
+        }
+        start = contract.get("start_capture_sequence")
+        count = contract.get("consecutive_dropped_frames")
+        additional = contract.get("additional_recovery_hold_decisions")
+        if (
+            set(contract) != expected_keys
+            or contract.get("classification") != "measurement_recovery_policy"
+            or not isinstance(start, int)
+            or isinstance(start, bool)
+            or not isinstance(count, int)
+            or isinstance(count, bool)
+            or not isinstance(additional, int)
+            or isinstance(additional, bool)
+            or not 1 <= start <= action_count
+            or count != 3
+            or not 0 <= additional <= action_count
+            or start + count > action_count + 1
+            or contract.get("controller_visibility")
+            != "missing_publications_then_fresh_confirmation_hold"
+            or contract.get("application_order")
+            != "after_typed_feedback_availability_before_controller_law"
+        ):
+            raise ValueError("invalid OpenArm dropout-recovery contract")
+        return
     expected_keys = {
         "kind",
         "classification",
@@ -557,8 +605,37 @@ def bounded_controller_decision(
     consumed_at_ticks: int,
     last_accepted_target: list[float],
     recovering_from_rejection: bool,
+    recovery_hold_remaining: int,
 ) -> dict[str, Any]:
     contract = controller.get("observation_contract")
+    if (
+        recovering_from_rejection
+        and recovery_hold_remaining > 0
+        and observation is not None
+        and recovery_contract(controller) is not None
+    ):
+        age_ticks = consumed_at_ticks - observation["sim_time_ticks"]
+        if age_ticks <= contract["maximum_age_ticks"]:
+            return {
+                "target": last_accepted_target.copy(),
+                "correction": [
+                    target - desired
+                    for target, desired in zip(last_accepted_target, reference)
+                ],
+                "integral_correction": integral_correction.copy(),
+                "controller_observation_position_rad": observation[
+                    "joint_position_rad"
+                ].copy(),
+                "joint_measurement_bias_rad": [0.0] * len(reference),
+                "observation_sequence": observation["step"],
+                "observation_age_ticks": age_ticks,
+                "bootstrap": False,
+                "controller_rejected": True,
+                "controller_rejection_reason": "recovery_confirmation_pending",
+                "fail_safe_hold_active": True,
+                "controller_state_frozen": True,
+                "controller_recovered": False,
+            }
     if observation is not None and availability_contract(controller) is not None:
         age_ticks = consumed_at_ticks - observation["sim_time_ticks"]
         if age_ticks > contract["maximum_age_ticks"]:
@@ -618,6 +695,7 @@ def apply_measurement_bias(
         "joint_feedback_controller_ingress_delay_v1",
         "joint_feedback_controller_ingress_jitter_pulse_v1",
         "joint_feedback_controller_stale_age_pulse_v1",
+        "joint_feedback_dropout_recovery_hold_v1",
     }:
         return positions, bias
     expected_keys = {
@@ -800,6 +878,7 @@ def run_success(
     applied_target_history: list[list[float]] = []
     last_accepted_target = action_artifact["actions"][0]["joint_position_target_rad"].copy()
     recovering_from_rejection = False
+    recovery_hold_remaining = 0
     for action in action_artifact["actions"]:
         consumed_at_ticks = (action["step"] - 1) * FIXED_DELTA_TICKS
         eligible_observations = [
@@ -828,7 +907,21 @@ def run_success(
             consumed_at_ticks,
             last_accepted_target,
             recovering_from_rejection,
+            recovery_hold_remaining,
         )
+        if (
+            decision["controller_rejection_reason"]
+            == "maximum_observation_age_ticks"
+            and not recovering_from_rejection
+        ):
+            recovery = recovery_contract(controller)
+            recovery_hold_remaining = (
+                recovery["additional_recovery_hold_decisions"]
+                if recovery is not None
+                else 0
+            )
+        elif decision["controller_rejection_reason"] == "recovery_confirmation_pending":
+            recovery_hold_remaining -= 1
         if not decision["controller_rejected"]:
             last_accepted_target = decision["target"].copy()
         recovering_from_rejection = decision["controller_rejected"]
@@ -1124,7 +1217,11 @@ def main() -> int:
                 or contract.get("stale_observation_policy")
                 != "hold_last_accepted_target_and_freeze_state"
                 or contract.get("recovery_policy")
-                != "resume_on_fresh_nominal_observation"
+                != (
+                    "resume_after_configured_fresh_observations"
+                    if recovery_contract(controller) is not None
+                    else "resume_on_fresh_nominal_observation"
+                )
             )
         )
         or contract.get("required_status") != "nominal"

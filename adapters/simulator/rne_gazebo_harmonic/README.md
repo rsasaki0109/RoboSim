@@ -718,6 +718,40 @@ cargo run --locked -p showcase_captures \
   --output artifacts/openarm-sensor-stale-age-robustness-lab/report/minimum-sensor-stale-age-failure.rne-replay
 ```
 
+## Prove bounded OpenArm sensor-dropout recovery
+
+The recovery dimension holds the trigger constant at three consecutive missing
+joint-feedback publications. That trigger produces one stale-observation
+rejection, target hold, and frozen controller state. The sweep then varies only
+the number of additional fresh-observation decisions held before the controller
+law resumes:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_feedback_dropout_recovery \
+  --output artifacts/openarm-sensor-recovery-robustness-lab
+```
+
+The fixed `[0, 1, 2, 3, 4]` additional-decision grid produces exact recovery
+counts `[1, 2, 3, 4, 5]`. Rapier, native MuJoCo, and Gazebo all pass immediate
+fresh-observation recovery at controller step 3245 and first fail the fixed
+one-decision requirement at step 3246 when one extra confirmation hold is
+introduced. The failing boundary records one stale rejection, one
+`recovery_confirmation_pending` rejection, zero target and integral-state
+delta during both holds, and green joint-5 RMSE/final-error gates. Each backend
+retains exact replay evidence.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-recovery-robustness-lab \
+  --output artifacts/openarm-sensor-recovery-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-sensor-recovery-robustness-lab/report/openarm-sensor-recovery-robustness-report.json \
+  --trace artifacts/openarm-sensor-recovery-robustness-lab/sensor-recovery-001decisions/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-sensor-recovery-robustness-lab/report/minimum-sensor-recovery-failure.rne-replay
+```
+
 ## Sweep the OpenArm actuator command-transport delay
 
 The fourth robustness dimension delays only right joint 5 after controller

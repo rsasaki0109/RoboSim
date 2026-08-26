@@ -297,6 +297,38 @@ class OpenArmRobustnessSuiteTests(unittest.TestCase):
             0,
         )
 
+    def test_sensor_recovery_grid_delays_only_fresh_observation_resume(self) -> None:
+        suite, controllers = MODULE.compile_robustness_suite(
+            COMPILER,
+            SCRIPT_DIR / "openarm_robustness_experiments.json",
+            ROOT / "docs/evidence/openarm-plant-lab/evidence/openarm-plant-lab-report.json",
+            SCRIPT_DIR / "openarm_plant_experiments.json",
+            SCRIPT_DIR / "openarm_right_pose_cycle.controller.json",
+            SCRIPT_DIR / "openarm_controller_requirements.json",
+            "joint_feedback_dropout_recovery",
+        )
+        self.assertEqual(suite["dimension_id"], "joint_feedback_dropout_recovery")
+        self.assertEqual(
+            [
+                controller["measurement_fault_contract"][
+                    "additional_recovery_hold_decisions"
+                ]
+                for controller in controllers.values()
+            ],
+            [0, 1, 2, 3, 4],
+        )
+        controller = controllers["sensor-recovery-001decisions"]
+        contract = controller["measurement_fault_contract"]
+        self.assertEqual(contract["consecutive_dropped_frames"], 3)
+        self.assertEqual(
+            controller["observation_contract"]["recovery_policy"],
+            "resume_after_configured_fresh_observations",
+        )
+        RUNNER.validate_measurement_fault(controller, 3600)
+        self.assertFalse(RUNNER.sensor_sample_published(controller, 3240))
+        self.assertFalse(RUNNER.sensor_sample_published(controller, 3242))
+        self.assertTrue(RUNNER.sensor_sample_published(controller, 3243))
+
     def test_command_rate_limit_uses_previous_applied_target_and_fixed_delta(self) -> None:
         suite, controllers = MODULE.compile_robustness_suite(
             COMPILER,

@@ -107,6 +107,7 @@ fn run() -> Result<()> {
     let latency_failure = dimension_id == "joint_feedback_controller_ingress_latency";
     let jitter_failure = dimension_id == "joint_feedback_controller_ingress_jitter";
     let stale_age_failure = dimension_id == "joint_feedback_controller_stale_age";
+    let recovery_failure = dimension_id == "joint_feedback_dropout_recovery";
     let command_delay_failure = dimension_id == "actuator_command_delay";
     let command_rate_limit_failure = dimension_id == "actuator_command_rate_limit";
     let command_deadband_failure = dimension_id == "actuator_command_deadband";
@@ -118,7 +119,7 @@ fn run() -> Result<()> {
         "joint_position_measurement_bias" => {
             required_u64(&report["dimension"], "start_controller_step")?
         }
-        "joint_feedback_publication_dropout" => {
+        "joint_feedback_publication_dropout" | "joint_feedback_dropout_recovery" => {
             required_u64(&report["dimension"], "start_capture_sequence")?
         }
         "joint_feedback_controller_ingress_latency" => 1,
@@ -160,6 +161,8 @@ fn run() -> Result<()> {
         state_digest: trace.initial_state_digest,
     });
     let mut consecutive_dropout_frames = 0_u64;
+    let mut recovery_decisions = 0_u64;
+    let mut recovery_started = false;
     for (observation_index, observation) in trace.observations[..=failure_index].iter().enumerate()
     {
         if availability_failure {
@@ -168,9 +171,19 @@ fn run() -> Result<()> {
             } else if observation.step >= disturbance_start_step {
                 consecutive_dropout_frames = 0;
             }
+        } else if recovery_failure {
+            if observation.controller_rejection_reason
+                == Some("maximum_observation_age_ticks".to_string())
+            {
+                recovery_started = true;
+                recovery_decisions = 0;
+            } else if recovery_started {
+                recovery_decisions += 1;
+            }
         } else if !latency_failure
             && !jitter_failure
             && !stale_age_failure
+            && !recovery_failure
             && !command_delay_failure
             && !command_rate_limit_failure
             && !command_deadband_failure
@@ -249,11 +262,12 @@ fn run() -> Result<()> {
                 "fail_safe_hold_active": observation.fail_safe_hold_active,
                 "controller_state_frozen": observation.controller_state_frozen,
                 "controller_recovered": observation.controller_recovered,
-                "cumulative_iae_rad_s": (!availability_failure && !latency_failure && !jitter_failure && !stale_age_failure && !command_delay_failure && !command_rate_limit_failure && !command_deadband_failure).then_some(cumulative_iae_rad_s),
+                "cumulative_iae_rad_s": (!availability_failure && !latency_failure && !jitter_failure && !stale_age_failure && !recovery_failure && !command_delay_failure && !command_rate_limit_failure && !command_deadband_failure).then_some(cumulative_iae_rad_s),
                 "consecutive_dropout_frames": availability_failure.then_some(consecutive_dropout_frames),
                 "controller_ingress_delay_frames": latency_failure.then(|| dimension_value(failure)).transpose()?,
                 "controller_ingress_jitter_frames": jitter_failure.then(|| observation.controller_observation_age_ticks.map(|age| age / trace.fixed_delta_ticks - 1)).flatten(),
                 "controller_selected_stale_frames": stale_age_failure.then(|| observation.controller_observation_age_ticks.map(|age| age / trace.fixed_delta_ticks - 1)).flatten(),
+                "sensor_recovery_decisions": recovery_failure.then_some(recovery_decisions),
                 "actuator_delay_steps": delay_steps,
                 "actuator_source_step": source_step,
                 "expected_source_controller_target_rad": expected_source_target_rad,
@@ -322,6 +336,16 @@ fn run() -> Result<()> {
         );
         format!(
             "OpenArm controller selected capture sequence {expected_sequence} with age {observed_age_ticks} ticks at step {failure_step}, exceeding the fixed {requirement_limit:.0}-tick stale-observation limit"
+        )
+    } else if recovery_failure {
+        anyhow::ensure!(
+            recovery_decisions as f64 == observed
+                && failure_observation.controller_recovered
+                && failure_observation.controller_rejection_reason.is_none(),
+            "replayed controller recovery timing differs from the report"
+        );
+        format!(
+            "OpenArm joint-feedback controller recovered after {observed:.0} decisions at step {failure_step}, exceeding the fixed {requirement_limit:.0}-decision recovery requirement"
         )
     } else if command_delay_failure {
         let source_step = required_u64(failure, "source_step")?;
@@ -440,6 +464,7 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
                 | "joint_feedback_controller_ingress_latency"
                 | "joint_feedback_controller_ingress_jitter"
                 | "joint_feedback_controller_stale_age"
+                | "joint_feedback_dropout_recovery"
         ),
         "unsupported robustness dimension"
     );
@@ -455,6 +480,7 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
             "controller.sensor.maximum_controller_ingress_jitter_frames"
         }
         "joint_feedback_controller_stale_age" => "controller.sensor.maximum_observation_age_ticks",
+        "joint_feedback_dropout_recovery" => "controller.sensor.maximum_recovery_decisions",
         "actuator_command_delay" => "controller.actuator.maximum_command_transport_delay_steps",
         "actuator_command_rate_limit" => "controller.actuator.minimum_command_slew_rate_rad_s",
         "actuator_command_deadband" => "controller.actuator.maximum_command_deadband_rad",

@@ -466,15 +466,18 @@ actuator-authority envelope. The next slices are:
    with nonphysical multipliers. The next inertia experiment must excite a
    dynamically sensitive joint/coupled mode or vary a physically sourced
    payload/link inertia with positive-definite tensor checks;
-4. **Latency, jitter, and stale-age selection complete; burst recovery next:**
+4. **Latency, jitter, stale-age selection, and bounded recovery complete:**
    controller-ingress latency has a fixed `[0, 1, 2, 3, 4]`-period sweep with
    original capture timestamps and a portable zero/one-period boundary.
    Deterministic jitter has a separate one/two-period boundary and an
    independently recomputed periodic schedule. Stale-age selection now proves
    the two/three-frame age boundary, 60-decision hold/freeze, and one-decision
-   fresh recovery without changing publication or availability. Continue with
-   burst-pattern and recovery-policy variants, then quantization, saturation,
-   and stuck-value envelopes;
+   fresh recovery without changing publication or availability. The recovery
+   successor fixes a three-publication trigger and sweeps additional
+   fresh-observation holds `[0, 1, 2, 3, 4]`; all three backends recover in
+   `[1, 2, 3, 4, 5]` decisions and first violate the one-decision requirement
+   at step 3246. Repeated burst patterns, then quantization, saturation, and
+   stuck-value envelopes remain;
 5. turn the joint-5 plant lab into per-joint and coupled operating-region
    identification with uncertainty, coherence, residual, and held-out
    prediction evidence;
@@ -714,7 +717,14 @@ Its fixed grid passes two additional frames at exactly `50,000,001 ticks` and
 first fails three at step 3243 with sequence 3238 and `66,666,668 ticks` on all
 three backends. The failing boundary rejects exactly 60 decisions, holds and
 freezes with zero delta, then recovers on the latest available sequence in one
-decision at step 3303. Physical parameter
+decision at step 3303. The independent dropout-recovery dimension fixes the
+three-frame publication gap that enters fail-safe, then varies only additional
+fresh-observation holds. Its grid yields one through five recovery decisions.
+All three backends pass immediate recovery at step 3245 and first fail the
+one-decision bound at step 3246 with one `recovery_confirmation_pending` hold.
+The boundary retains one age rejection, zero target and integral-state delta
+across both frozen decisions, exact replay, and green joint-5 RMSE/final-error
+gates. Physical parameter
 sweeps, actuator-authority degradation, command delay, command slew-rate limits,
 command deadband, viscous damping, and regularized Coulomb friction are recorded
 below; inertia and transmission-efficiency boundaries remain open.

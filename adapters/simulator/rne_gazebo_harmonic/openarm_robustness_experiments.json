@@ -116,6 +116,19 @@
       "maximum_age_ticks": 50000001,
       "stale_observation_policy": "hold_last_accepted_target_and_freeze_state",
       "recovery_policy": "resume_on_fresh_nominal_observation"
+    },
+    "joint_feedback_dropout_recovery": {
+      "kind": "joint_feedback_dropout_recovery_hold_v1",
+      "classification": "measurement_recovery_policy",
+      "unit": "controller_decision_count",
+      "values": [0, 1, 2, 3, 4],
+      "start_capture_sequence": 3240,
+      "consecutive_dropped_frames": 3,
+      "controller_visibility": "missing_publications_then_fresh_confirmation_hold",
+      "application_order": "after_typed_feedback_availability_before_controller_law",
+      "maximum_age_ticks": 50000001,
+      "stale_observation_policy": "hold_last_accepted_target_and_freeze_state",
+      "recovery_policy": "resume_after_configured_fresh_observations"
     }
   },
   "evaluation": {
@@ -199,6 +212,16 @@
       "controller.sensor.maximum_recovery_decisions",
       "controller.sensor_stale.maximum_controlled_joint_rmse_rad",
       "controller.sensor_stale.maximum_controlled_joint_final_error_rad"
+    ],
+    "boundary_rule": "smallest_grid_value_with_any_failed_requirement",
+    "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
+  },
+  "recovery_evaluation": {
+    "requirement_ids": [
+      "controller.sensor.maximum_fail_safe_target_delta_rad",
+      "controller.sensor.maximum_recovery_decisions",
+      "controller.sensor_recovery.maximum_controlled_joint_rmse_rad",
+      "controller.sensor_recovery.maximum_controlled_joint_final_error_rad"
     ],
     "boundary_rule": "smallest_grid_value_with_any_failed_requirement",
     "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"

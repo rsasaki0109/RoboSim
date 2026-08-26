@@ -29,6 +29,7 @@ def parse_args() -> argparse.Namespace:
             "joint_feedback_controller_ingress_latency",
             "joint_feedback_controller_ingress_jitter",
             "joint_feedback_controller_stale_age",
+            "joint_feedback_dropout_recovery",
         ),
         default="actuator_target_bias",
     )
@@ -113,6 +114,10 @@ def sensor_stale_case_id(stale_frames: int) -> str:
     return f"sensor-stale-{stale_frames:03d}frames"
 
 
+def sensor_recovery_case_id(additional_decisions: int) -> str:
+    return f"sensor-recovery-{additional_decisions:03d}decisions"
+
+
 def delay_case_id(delay_steps: int) -> str:
     return f"delay-{delay_steps:03d}steps"
 
@@ -165,6 +170,7 @@ def compile_robustness_suite(
         "joint_feedback_controller_ingress_latency",
         "joint_feedback_controller_ingress_jitter",
         "joint_feedback_controller_stale_age",
+        "joint_feedback_dropout_recovery",
     }
     integer_dimension = dimension_id in {
         "actuator_command_delay",
@@ -172,6 +178,7 @@ def compile_robustness_suite(
         "joint_feedback_controller_ingress_latency",
         "joint_feedback_controller_ingress_jitter",
         "joint_feedback_controller_stale_age",
+        "joint_feedback_dropout_recovery",
     }
     if dimension_id == "actuator_command_rate_limit":
         grid_valid = (
@@ -243,6 +250,10 @@ def compile_robustness_suite(
             "joint_feedback_controller_stale_age_pulse_v1",
             "measurement_selection_staleness",
         ),
+        "joint_feedback_dropout_recovery": (
+            "joint_feedback_dropout_recovery_hold_v1",
+            "measurement_recovery_policy",
+        ),
     }
     expected_kind, expected_classification = identities[dimension_id]
     if (
@@ -259,6 +270,7 @@ def compile_robustness_suite(
         "joint_feedback_controller_ingress_latency": "latency_evaluation",
         "joint_feedback_controller_ingress_jitter": "jitter_evaluation",
         "joint_feedback_controller_stale_age": "stale_age_evaluation",
+        "joint_feedback_dropout_recovery": "recovery_evaluation",
     }.get(dimension_id, "evaluation")
     evaluation = manifest[evaluation_key]
     if not set(evaluation["requirement_ids"]).issubset(requirement_ids):
@@ -287,6 +299,8 @@ def compile_robustness_suite(
             identifier = sensor_jitter_case_id(value)
         elif dimension_id == "joint_feedback_controller_stale_age":
             identifier = sensor_stale_case_id(value)
+        elif dimension_id == "joint_feedback_dropout_recovery":
+            identifier = sensor_recovery_case_id(value)
         controller = copy.deepcopy(base)
         controller["controller_id"] = (
             f"rne.controller.openarm_right.plant_state_feedback_integral.{identifier}.v1"
@@ -466,7 +480,7 @@ def compile_robustness_suite(
                 "application_order",
                 "controller_visibility",
             )
-        else:
+        elif dimension_id == "joint_feedback_controller_stale_age":
             controller["disturbance_contract"]["offset_rad"] = 0.0
             contract = {
                 key: item
@@ -498,6 +512,39 @@ def compile_robustness_suite(
                 "start_controller_step",
                 "end_controller_step",
                 "selection_policy",
+                "application_order",
+                "controller_visibility",
+            )
+        else:
+            controller["disturbance_contract"]["offset_rad"] = 0.0
+            contract = {
+                key: item
+                for key, item in dimension.items()
+                if key
+                not in {
+                    "unit",
+                    "values",
+                    "maximum_age_ticks",
+                    "stale_observation_policy",
+                    "recovery_policy",
+                }
+            }
+            contract["additional_recovery_hold_decisions"] = value
+            controller["measurement_fault_contract"] = contract
+            controller["observation_contract"]["maximum_age_ticks"] = dimension[
+                "maximum_age_ticks"
+            ]
+            controller["observation_contract"]["stale_observation_policy"] = dimension[
+                "stale_observation_policy"
+            ]
+            controller["observation_contract"]["recovery_policy"] = dimension[
+                "recovery_policy"
+            ]
+            fields = (
+                "kind",
+                "classification",
+                "start_capture_sequence",
+                "consecutive_dropped_frames",
                 "application_order",
                 "controller_visibility",
             )
@@ -569,6 +616,10 @@ def main() -> int:
             dimension_value = controller["measurement_fault_contract"][
                 "maximum_jitter_frames"
             ]
+        elif args.dimension == "joint_feedback_dropout_recovery":
+            dimension_value = controller["measurement_fault_contract"][
+                "additional_recovery_hold_decisions"
+            ]
         else:
             dimension_value = controller["measurement_fault_contract"][
                 "additional_stale_frames"
@@ -588,6 +639,8 @@ def main() -> int:
             declaration["maximum_jitter_frames"] = dimension_value
         elif args.dimension == "joint_feedback_controller_stale_age":
             declaration["additional_stale_frames"] = dimension_value
+        elif args.dimension == "joint_feedback_dropout_recovery":
+            declaration["additional_recovery_hold_decisions"] = dimension_value
         elif args.dimension == "actuator_command_delay":
             declaration["delay_steps"] = dimension_value
         elif args.dimension == "actuator_command_rate_limit":

@@ -359,6 +359,81 @@ class OpenArmRobustnessReportTests(unittest.TestCase):
         self.assertEqual(metrics["first_recovered_step"], 6)
         self.assertIsNone(metrics["first_controller_source_mismatch"])
 
+    def test_recovery_metrics_count_from_stale_rejection_until_fresh_resume(self) -> None:
+        observations = []
+        for step in range(1, 8):
+            stale_rejected = step == 5
+            recovery_hold = step == 6
+            sequence = None if step <= 2 else (1 if step <= 5 else step - 1)
+            observations.append(
+                {
+                    "step": step,
+                    "sim_time_ticks": step * 10,
+                    "sensor_sample_published": step not in {2, 3, 4},
+                    "controller_observation_sequence": sequence,
+                    "controller_observation_age_ticks": (
+                        None if sequence is None else 40 if stale_rejected else 10
+                    ),
+                    "joint_position_rad": [step / 100.0],
+                    "joint_reference_position_rad": [0.0],
+                    "joint_controller_observation_position_rad": (
+                        [] if sequence is None else [sequence / 100.0]
+                    ),
+                    "joint_controller_target_rad": [
+                        0.3 if step == 7 else 0.2 if step >= 4 else 0.1
+                    ],
+                    "joint_integral_correction_rad": [0.03 if step >= 4 else 0.02],
+                    "controller_rejected": stale_rejected or recovery_hold,
+                    "controller_rejection_reason": (
+                        "maximum_observation_age_ticks"
+                        if stale_rejected
+                        else "recovery_confirmation_pending"
+                        if recovery_hold
+                        else None
+                    ),
+                    "fail_safe_hold_active": stale_rejected or recovery_hold,
+                    "controller_state_frozen": stale_rejected or recovery_hold,
+                    "controller_recovered": step == 7,
+                }
+            )
+        controller = {
+            "measurement_fault_contract": {
+                "kind": "joint_feedback_dropout_recovery_hold_v1",
+                "start_capture_sequence": 2,
+                "consecutive_dropped_frames": 3,
+                "additional_recovery_hold_decisions": 1,
+            }
+        }
+        metrics = MODULE.recovery_metrics(controller, observations, 0)
+        self.assertIsNotNone(metrics)
+        self.assertIsNone(metrics["first_hold_mismatch"])
+        self.assertEqual(metrics["stale_rejected_decision_count"], 1)
+        self.assertEqual(metrics["recovery_hold_rejected_decision_count"], 1)
+        self.assertEqual(metrics["recovery_decision_count"], 2)
+        self.assertEqual(metrics["first_recovered_step"], 7)
+        requirements = {
+            "controller.sensor.maximum_recovery_decisions": {
+                "id": "recovery",
+                "unit": "controller_decision_count",
+                "maximum": 1,
+            },
+            "controller.sensor_recovery.maximum_controlled_joint_rmse_rad": {
+                "id": "rmse",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+            "controller.sensor_recovery.maximum_controlled_joint_final_error_rad": {
+                "id": "final",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+        }
+        violation = MODULE.first_recovery_violation(
+            metrics, observations, requirements
+        )
+        self.assertEqual(violation["requirement_id"], "recovery")
+        self.assertEqual(violation["step"], 7)
+
     def test_latency_metrics_preserve_capture_time_and_find_ingress_boundary(self) -> None:
         observations = []
         for step in range(1, 7):

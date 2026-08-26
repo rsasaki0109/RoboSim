@@ -164,6 +164,15 @@ enum MeasurementFaultContract {
         controller_visibility: String,
         application_order: String,
     },
+    #[serde(rename = "joint_feedback_dropout_recovery_hold_v1")]
+    JointFeedbackDropoutRecoveryHoldV1 {
+        classification: String,
+        start_capture_sequence: u64,
+        consecutive_dropped_frames: u64,
+        additional_recovery_hold_decisions: u64,
+        controller_visibility: String,
+        application_order: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -364,6 +373,12 @@ struct ControllerState {
     previous_observation_position_rad: Vec<Option<f64>>,
     previous_input_target_rad: Vec<Option<f64>>,
     previous_previous_input_target_rad: Vec<Option<f64>>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RecoveryState {
+    active: bool,
+    hold_remaining: u64,
 }
 
 impl ControllerState {
@@ -902,6 +917,25 @@ fn validate(
                         == "after_typed_feedback_availability_during_controller_selection",
                 "invalid OpenArm controller stale-age contract"
             ),
+            MeasurementFaultContract::JointFeedbackDropoutRecoveryHoldV1 {
+                classification,
+                start_capture_sequence,
+                consecutive_dropped_frames,
+                additional_recovery_hold_decisions,
+                controller_visibility,
+                application_order,
+            } => anyhow::ensure!(
+                classification == "measurement_recovery_policy"
+                    && *start_capture_sequence >= 1
+                    && *consecutive_dropped_frames == 3
+                    && start_capture_sequence.saturating_add(*consecutive_dropped_frames)
+                        <= (actions.actions.len() as u64).saturating_add(1)
+                    && *additional_recovery_hold_decisions <= actions.actions.len() as u64
+                    && controller_visibility == "missing_publications_then_fresh_confirmation_hold"
+                    && application_order
+                        == "after_typed_feedback_availability_before_controller_law",
+                "invalid OpenArm dropout-recovery contract"
+            ),
         }
     }
     match (&controller.observation_contract, &controller.feedback_law) {
@@ -917,7 +951,14 @@ fn validate(
                             && contract.stale_observation_policy.as_deref()
                                 == Some("hold_last_accepted_target_and_freeze_state")
                             && contract.recovery_policy.as_deref()
-                                == Some("resume_on_fresh_nominal_observation")
+                                == Some(if matches!(
+                                    controller.measurement_fault_contract.as_ref(),
+                                    Some(MeasurementFaultContract::JointFeedbackDropoutRecoveryHoldV1 { .. })
+                                ) {
+                                    "resume_after_configured_fresh_observations"
+                                } else {
+                                    "resume_on_fresh_nominal_observation"
+                                })
                     } else {
                         contract.maximum_age_ticks == FIXED_DELTA_TICKS
                             && contract.stale_observation_policy.is_none()
@@ -1137,7 +1178,7 @@ fn rollout(
         .context("MuJoCo rollout has no actions")?
         .joint_position_target_rad
         .clone();
-    let mut recovering_from_rejection = false;
+    let mut recovery = RecoveryState::default();
     let mut last_observation_sequence = 0;
     let mut maximum_sensor_backend_position_delta_rad = 0.0_f64;
     let mut maximum_sensor_backend_velocity_delta_rad_s = 0.0_f64;
@@ -1162,12 +1203,17 @@ fn rollout(
             visible_controller_observation,
             sim.sim_time.ticks(),
             &last_accepted_target_rad,
-            recovering_from_rejection,
+            recovery,
         )?;
+        if decision.rejection_reason == Some("maximum_observation_age_ticks") && !recovery.active {
+            recovery.hold_remaining = additional_recovery_hold_decisions(controller);
+        } else if decision.rejection_reason == Some("recovery_confirmation_pending") {
+            recovery.hold_remaining = recovery.hold_remaining.saturating_sub(1);
+        }
         if !decision.rejected {
             last_accepted_target_rad.clone_from(&decision.target_position_rad);
         }
-        recovering_from_rejection = decision.rejected;
+        recovery.active = decision.rejected;
         controller_target_history.push(decision.target_position_rad.clone());
         let (applied_target, _) = apply_actuator_disturbance(
             controller,
@@ -1819,12 +1865,51 @@ fn bounded_controller_decision(
     observation: Option<&ControllerObservation>,
     consumed_at_ticks: u64,
     last_accepted_target_rad: &[f64],
-    recovering_from_rejection: bool,
+    recovery: RecoveryState,
 ) -> Result<ControllerDecision> {
     let state_before = state.clone();
+    if recovery.active && recovery.hold_remaining > 0 {
+        if let (Some(observation), Some(contract)) =
+            (observation, controller.observation_contract.as_ref())
+        {
+            let age_ticks = consumed_at_ticks.saturating_sub(observation.capture_time_ticks);
+            if matches!(
+                controller.measurement_fault_contract.as_ref(),
+                Some(MeasurementFaultContract::JointFeedbackDropoutRecoveryHoldV1 { .. })
+            ) && observation.status == contract.required_status
+                && observation.available_time_ticks <= consumed_at_ticks
+                && age_ticks <= contract.maximum_age_ticks
+            {
+                anyhow::ensure!(
+                    last_accepted_target_rad.len() == reference.len(),
+                    "fail-safe hold target width mismatch"
+                );
+                return Ok(ControllerDecision {
+                    reference_position_rad: reference.to_vec(),
+                    target_position_rad: last_accepted_target_rad.to_vec(),
+                    correction_rad: last_accepted_target_rad
+                        .iter()
+                        .zip(reference)
+                        .map(|(target, reference)| target - reference)
+                        .collect(),
+                    integral_correction_rad: state.integral_correction_rad.clone(),
+                    controller_observation_position_rad: observation.joint_position_rad.clone(),
+                    measurement_bias_rad: vec![0.0; reference.len()],
+                    observation_sequence: Some(observation.sequence),
+                    observation_age_ticks: Some(age_ticks),
+                    bootstrap: false,
+                    rejected: true,
+                    rejection_reason: Some("recovery_confirmation_pending"),
+                    fail_safe_hold_active: true,
+                    state_frozen: true,
+                    recovered: false,
+                });
+            }
+        }
+    }
     match controller_decision(controller, reference, state, observation, consumed_at_ticks) {
         Ok(mut decision) => {
-            decision.recovered = recovering_from_rejection && !decision.bootstrap;
+            decision.recovered = recovery.active && !decision.bootstrap;
             Ok(decision)
         }
         Err(error) => {
@@ -1879,6 +1964,7 @@ fn has_availability_fault(controller: &ControllerSpec) -> bool {
                 | MeasurementFaultContract::JointFeedbackControllerIngressDelayV1 { .. }
                 | MeasurementFaultContract::JointFeedbackControllerIngressJitterPulseV1 { .. }
                 | MeasurementFaultContract::JointFeedbackControllerStaleAgePulseV1 { .. }
+                | MeasurementFaultContract::JointFeedbackDropoutRecoveryHoldV1 { .. }
         )
     )
 }
@@ -1935,7 +2021,24 @@ fn sensor_sample_published(controller: &ControllerSpec, sequence: u64) -> bool {
         }) => !(*start_capture_sequence
             ..start_capture_sequence.saturating_add(*consecutive_dropped_frames))
             .contains(&sequence),
+        Some(MeasurementFaultContract::JointFeedbackDropoutRecoveryHoldV1 {
+            start_capture_sequence,
+            consecutive_dropped_frames,
+            ..
+        }) => !(*start_capture_sequence
+            ..start_capture_sequence.saturating_add(*consecutive_dropped_frames))
+            .contains(&sequence),
         _ => true,
+    }
+}
+
+fn additional_recovery_hold_decisions(controller: &ControllerSpec) -> u64 {
+    match controller.measurement_fault_contract.as_ref() {
+        Some(MeasurementFaultContract::JointFeedbackDropoutRecoveryHoldV1 {
+            additional_recovery_hold_decisions,
+            ..
+        }) => *additional_recovery_hold_decisions,
+        _ => 0,
     }
 }
 
