@@ -252,6 +252,23 @@ cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-sensor-dropout-robustness-lab
 ```
 
+## Repeated-dropout re-arm boundary
+
+The repeated-burst successor fixes two two-frame publication dropouts and varies
+only the number of fresh publications between them over the descending
+`[4, 3, 2, 1, 0]` grid. One fresh frame is the portable last pass on Rapier,
+native MuJoCo, and Gazebo. With zero fresh frames, the two bursts merge into four
+consecutive missing publications and all three backends first fail
+`controller.sensor.minimum_interburst_fresh_frames` at capture sequence 3242.
+
+The raw publication schedule, controller-visible source sequence, observation
+age, hold/freeze metadata, RMSE, and final error are checked independently. The
+Rapier sweep remains below `0.005315 rad` RMSE and `3.6e-6 rad` final error, so
+the boundary is caused by the declared re-arm invariant rather than degraded
+terminal tracking. The browser report and minimum replay are generated as
+`openarm-sensor-rearm-robustness-report.html` and
+`openarm-sensor-rearm-failure.rne-replay` in the retained Failure Capsule.
+
 ## Physical payload fixture (in progress)
 
 The payload compiler generates content-addressed URDF variants for

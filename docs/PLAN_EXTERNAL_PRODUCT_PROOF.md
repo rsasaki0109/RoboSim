@@ -466,7 +466,7 @@ actuator-authority envelope. The next slices are:
    with nonphysical multipliers. The next inertia experiment must excite a
    dynamically sensitive joint/coupled mode or vary a physically sourced
    payload/link inertia with positive-definite tensor checks;
-4. **Latency, jitter, stale-age selection, and bounded recovery complete:**
+4. **Latency, jitter, stale-age selection, bounded recovery, and repeated re-arm complete:**
    controller-ingress latency has a fixed `[0, 1, 2, 3, 4]`-period sweep with
    original capture timestamps and a portable zero/one-period boundary.
    Deterministic jitter has a separate one/two-period boundary and an
@@ -476,8 +476,10 @@ actuator-authority envelope. The next slices are:
    successor fixes a three-publication trigger and sweeps additional
    fresh-observation holds `[0, 1, 2, 3, 4]`; all three backends recover in
    `[1, 2, 3, 4, 5]` decisions and first violate the one-decision requirement
-   at step 3246. Repeated burst patterns, then quantization, saturation, and
-   stuck-value envelopes remain;
+   at step 3246. The repeated-burst successor fixes two two-frame gaps and
+   sweeps interburst fresh frames `[4, 3, 2, 1, 0]`; one fresh frame passes and
+   zero first fails the portable re-arm-spacing requirement at sequence 3242.
+   Quantization, saturation, and stuck-value envelopes remain;
 5. turn the joint-5 plant lab into per-joint and coupled operating-region
    identification with uncertainty, coherence, residual, and held-out
    prediction evidence;
@@ -723,8 +725,12 @@ fresh-observation holds. Its grid yields one through five recovery decisions.
 All three backends pass immediate recovery at step 3245 and first fail the
 one-decision bound at step 3246 with one `recovery_confirmation_pending` hold.
 The boundary retains one age rejection, zero target and integral-state delta
-across both frozen decisions, exact replay, and green joint-5 RMSE/final-error
-gates. Physical parameter
+ across both frozen decisions, exact replay, and green joint-5 RMSE/final-error
+ gates. The repeated-dropout re-arm successor fixes two two-frame bursts and
+ varies only their fresh separator over `[4, 3, 2, 1, 0]`. Rapier, native
+ MuJoCo, and Gazebo pass one fresh frame and first fail zero at sequence 3242;
+ the zero-separator case merges into four missing publications while RMSE and
+ final-error gates stay green. Physical parameter
 sweeps, actuator-authority degradation, command delay, command slew-rate limits,
 command deadband, viscous damping, and regularized Coulomb friction are recorded
 below; inertia and transmission-efficiency boundaries remain open.

@@ -108,6 +108,7 @@ fn run() -> Result<()> {
     let jitter_failure = dimension_id == "joint_feedback_controller_ingress_jitter";
     let stale_age_failure = dimension_id == "joint_feedback_controller_stale_age";
     let recovery_failure = dimension_id == "joint_feedback_dropout_recovery";
+    let rearm_failure = dimension_id == "joint_feedback_repeated_dropout_rearm";
     let command_delay_failure = dimension_id == "actuator_command_delay";
     let command_rate_limit_failure = dimension_id == "actuator_command_rate_limit";
     let command_deadband_failure = dimension_id == "actuator_command_deadband";
@@ -119,7 +120,9 @@ fn run() -> Result<()> {
         "joint_position_measurement_bias" => {
             required_u64(&report["dimension"], "start_controller_step")?
         }
-        "joint_feedback_publication_dropout" | "joint_feedback_dropout_recovery" => {
+        "joint_feedback_publication_dropout"
+        | "joint_feedback_dropout_recovery"
+        | "joint_feedback_repeated_dropout_rearm" => {
             required_u64(&report["dimension"], "start_capture_sequence")?
         }
         "joint_feedback_controller_ingress_latency" => 1,
@@ -133,7 +136,7 @@ fn run() -> Result<()> {
     };
     let requirement_limit = required_f64(
         failure,
-        if command_rate_limit_failure {
+        if command_rate_limit_failure || rearm_failure {
             "minimum"
         } else {
             "maximum"
@@ -184,6 +187,7 @@ fn run() -> Result<()> {
             && !jitter_failure
             && !stale_age_failure
             && !recovery_failure
+            && !rearm_failure
             && !command_delay_failure
             && !command_rate_limit_failure
             && !command_deadband_failure
@@ -262,12 +266,13 @@ fn run() -> Result<()> {
                 "fail_safe_hold_active": observation.fail_safe_hold_active,
                 "controller_state_frozen": observation.controller_state_frozen,
                 "controller_recovered": observation.controller_recovered,
-                "cumulative_iae_rad_s": (!availability_failure && !latency_failure && !jitter_failure && !stale_age_failure && !recovery_failure && !command_delay_failure && !command_rate_limit_failure && !command_deadband_failure).then_some(cumulative_iae_rad_s),
+                "cumulative_iae_rad_s": (!availability_failure && !latency_failure && !jitter_failure && !stale_age_failure && !recovery_failure && !rearm_failure && !command_delay_failure && !command_rate_limit_failure && !command_deadband_failure).then_some(cumulative_iae_rad_s),
                 "consecutive_dropout_frames": availability_failure.then_some(consecutive_dropout_frames),
                 "controller_ingress_delay_frames": latency_failure.then(|| dimension_value(failure)).transpose()?,
                 "controller_ingress_jitter_frames": jitter_failure.then(|| observation.controller_observation_age_ticks.map(|age| age / trace.fixed_delta_ticks - 1)).flatten(),
                 "controller_selected_stale_frames": stale_age_failure.then(|| observation.controller_observation_age_ticks.map(|age| age / trace.fixed_delta_ticks - 1)).flatten(),
                 "sensor_recovery_decisions": recovery_failure.then_some(recovery_decisions),
+                "interburst_fresh_frames": rearm_failure.then(|| dimension_value(failure)).transpose()?,
                 "actuator_delay_steps": delay_steps,
                 "actuator_source_step": source_step,
                 "expected_source_controller_target_rad": expected_source_target_rad,
@@ -280,8 +285,8 @@ fn run() -> Result<()> {
                 "actuator_deadband_rad": deadband_rad,
                 "expected_deadband_target_rad": expected_deadband_target_rad,
                 "deadband_relationship_delta_rad": deadband_relationship_delta_rad,
-                "maximum": (!command_rate_limit_failure).then_some(requirement_limit),
-                "minimum": command_rate_limit_failure.then_some(requirement_limit),
+                "maximum": (!command_rate_limit_failure && !rearm_failure).then_some(requirement_limit),
+                "minimum": (command_rate_limit_failure || rearm_failure).then_some(requirement_limit),
                 "requirement_id": requirement_id,
                 "contract_status": if failed { "failed" } else { "pending" }
             }),
@@ -336,6 +341,18 @@ fn run() -> Result<()> {
         );
         format!(
             "OpenArm controller selected capture sequence {expected_sequence} with age {observed_age_ticks} ticks at step {failure_step}, exceeding the fixed {requirement_limit:.0}-tick stale-observation limit"
+        )
+    } else if rearm_failure {
+        let burst_length = required_u64(&report["dimension"], "burst_length_frames")?;
+        anyhow::ensure!(
+            observed == dimension_value(failure)?
+                && observed == 0.0
+                && failure_step == disturbance_start_step + burst_length
+                && !failure_observation.sensor_sample_published,
+            "replayed repeated-dropout re-arm boundary differs from the report"
+        );
+        format!(
+            "OpenArm repeated joint-feedback dropout provided {observed:.0} fresh frames between bursts at step {failure_step}, below the fixed {requirement_limit:.0}-frame re-arm minimum"
         )
     } else if recovery_failure {
         anyhow::ensure!(
@@ -465,6 +482,7 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
                 | "joint_feedback_controller_ingress_jitter"
                 | "joint_feedback_controller_stale_age"
                 | "joint_feedback_dropout_recovery"
+                | "joint_feedback_repeated_dropout_rearm"
         ),
         "unsupported robustness dimension"
     );
@@ -481,6 +499,9 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
         }
         "joint_feedback_controller_stale_age" => "controller.sensor.maximum_observation_age_ticks",
         "joint_feedback_dropout_recovery" => "controller.sensor.maximum_recovery_decisions",
+        "joint_feedback_repeated_dropout_rearm" => {
+            "controller.sensor.minimum_interburst_fresh_frames"
+        }
         "actuator_command_delay" => "controller.actuator.maximum_command_transport_delay_steps",
         "actuator_command_rate_limit" => "controller.actuator.minimum_command_slew_rate_rad_s",
         "actuator_command_deadband" => "controller.actuator.maximum_command_deadband_rad",
@@ -489,7 +510,10 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
     anyhow::ensure!(
         required_str(failure, "backend_id")? == "rne_rapier"
             && required_str(failure, "requirement_id")? == expected_requirement
-            && if dimension_id == "actuator_command_rate_limit" {
+            && if matches!(
+                dimension_id,
+                "actuator_command_rate_limit" | "joint_feedback_repeated_dropout_rearm"
+            ) {
                 required_f64(failure, "observed")? < required_f64(failure, "minimum")?
             } else {
                 required_f64(failure, "observed")? > required_f64(failure, "maximum")?

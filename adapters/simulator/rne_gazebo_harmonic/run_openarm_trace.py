@@ -355,8 +355,18 @@ def recovery_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def rearm_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
+    contract = controller.get("measurement_fault_contract")
+    if (
+        isinstance(contract, dict)
+        and contract.get("kind") == "joint_feedback_repeated_dropout_bursts_v1"
+    ):
+        return contract
+    return None
+
+
 def publication_dropout_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
-    return dropout_contract(controller) or recovery_contract(controller)
+    return dropout_contract(controller) or recovery_contract(controller) or rearm_contract(controller)
 
 
 def latency_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
@@ -397,6 +407,7 @@ def availability_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
         or jitter_contract(controller)
         or stale_age_contract(controller)
         or recovery_contract(controller)
+        or rearm_contract(controller)
     )
 
 
@@ -438,6 +449,13 @@ def sensor_sample_published(controller: dict[str, Any], sequence: int) -> bool:
     if contract is None:
         return True
     start = contract["start_capture_sequence"]
+    if contract["kind"] == "joint_feedback_repeated_dropout_bursts_v1":
+        burst_length = contract["burst_length_frames"]
+        second_start = start + burst_length + contract["interburst_fresh_frames"]
+        return not (
+            start <= sequence < start + burst_length
+            or second_start <= sequence < second_start + burst_length
+        )
     return not start <= sequence < start + contract["consecutive_dropped_frames"]
 
 
@@ -568,6 +586,46 @@ def validate_measurement_fault(controller: dict[str, Any], action_count: int) ->
         ):
             raise ValueError("invalid OpenArm dropout-recovery contract")
         return
+    if contract.get("kind") == "joint_feedback_repeated_dropout_bursts_v1":
+        expected_keys = {
+            "kind",
+            "classification",
+            "start_capture_sequence",
+            "burst_length_frames",
+            "burst_count",
+            "schedule",
+            "controller_visibility",
+            "application_order",
+            "interburst_fresh_frames",
+        }
+        start = contract.get("start_capture_sequence")
+        burst_length = contract.get("burst_length_frames")
+        burst_count = contract.get("burst_count")
+        fresh_frames = contract.get("interburst_fresh_frames")
+        if (
+            set(contract) != expected_keys
+            or contract.get("classification") != "measurement_rearm_spacing"
+            or not isinstance(start, int)
+            or isinstance(start, bool)
+            or not isinstance(burst_length, int)
+            or isinstance(burst_length, bool)
+            or not isinstance(burst_count, int)
+            or isinstance(burst_count, bool)
+            or not isinstance(fresh_frames, int)
+            or isinstance(fresh_frames, bool)
+            or not 1 <= start <= action_count
+            or burst_length != 2
+            or burst_count != 2
+            or fresh_frames < 0
+            or start + burst_length * burst_count + fresh_frames > action_count + 1
+            or contract.get("schedule") != "fixed_bursts_with_fresh_gap_v1"
+            or contract.get("controller_visibility")
+            != "missing_publications_with_declared_fresh_rearm_gap"
+            or contract.get("application_order")
+            != "after_typed_sensor_capture_before_controller_ingress"
+        ):
+            raise ValueError("invalid OpenArm repeated-dropout re-arm contract")
+        return
     expected_keys = {
         "kind",
         "classification",
@@ -696,6 +754,7 @@ def apply_measurement_bias(
         "joint_feedback_controller_ingress_jitter_pulse_v1",
         "joint_feedback_controller_stale_age_pulse_v1",
         "joint_feedback_dropout_recovery_hold_v1",
+        "joint_feedback_repeated_dropout_bursts_v1",
     }:
         return positions, bias
     expected_keys = {

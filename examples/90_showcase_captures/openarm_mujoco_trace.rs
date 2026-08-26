@@ -173,6 +173,17 @@ enum MeasurementFaultContract {
         controller_visibility: String,
         application_order: String,
     },
+    #[serde(rename = "joint_feedback_repeated_dropout_bursts_v1")]
+    JointFeedbackRepeatedDropoutBurstsV1 {
+        classification: String,
+        start_capture_sequence: u64,
+        burst_length_frames: u64,
+        burst_count: u64,
+        interburst_fresh_frames: u64,
+        schedule: String,
+        controller_visibility: String,
+        application_order: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -803,6 +814,7 @@ fn validate(
 ) -> Result<()> {
     task.validate()?;
     let width = controller.action_joint_order.len();
+    let final_step = actions.actions.len() as u64;
     anyhow::ensure!(
         controller.kind == "rne_joint_pose_cycle_controller"
             && controller.schema_version == 1
@@ -935,6 +947,30 @@ fn validate(
                     && application_order
                         == "after_typed_feedback_availability_before_controller_law",
                 "invalid OpenArm dropout-recovery contract"
+            ),
+            MeasurementFaultContract::JointFeedbackRepeatedDropoutBurstsV1 {
+                classification,
+                start_capture_sequence,
+                burst_length_frames,
+                burst_count,
+                interburst_fresh_frames,
+                schedule,
+                controller_visibility,
+                application_order,
+            } => anyhow::ensure!(
+                classification == "measurement_rearm_spacing"
+                    && *start_capture_sequence >= 1
+                    && *burst_length_frames == 2
+                    && *burst_count == 2
+                    && start_capture_sequence
+                        .saturating_add(burst_length_frames.saturating_mul(*burst_count))
+                        .saturating_add(*interburst_fresh_frames)
+                        <= final_step.saturating_add(1)
+                    && schedule == "fixed_bursts_with_fresh_gap_v1"
+                    && controller_visibility
+                        == "missing_publications_with_declared_fresh_rearm_gap"
+                    && application_order == "after_typed_sensor_capture_before_controller_ingress",
+                "invalid OpenArm repeated-dropout re-arm contract"
             ),
         }
     }
@@ -1965,6 +2001,7 @@ fn has_availability_fault(controller: &ControllerSpec) -> bool {
                 | MeasurementFaultContract::JointFeedbackControllerIngressJitterPulseV1 { .. }
                 | MeasurementFaultContract::JointFeedbackControllerStaleAgePulseV1 { .. }
                 | MeasurementFaultContract::JointFeedbackDropoutRecoveryHoldV1 { .. }
+                | MeasurementFaultContract::JointFeedbackRepeatedDropoutBurstsV1 { .. }
         )
     )
 }
@@ -2028,6 +2065,18 @@ fn sensor_sample_published(controller: &ControllerSpec, sequence: u64) -> bool {
         }) => !(*start_capture_sequence
             ..start_capture_sequence.saturating_add(*consecutive_dropped_frames))
             .contains(&sequence),
+        Some(MeasurementFaultContract::JointFeedbackRepeatedDropoutBurstsV1 {
+            start_capture_sequence,
+            burst_length_frames,
+            interburst_fresh_frames,
+            ..
+        }) => {
+            let first_end = start_capture_sequence.saturating_add(*burst_length_frames);
+            let second_start = first_end.saturating_add(*interburst_fresh_frames);
+            let second_end = second_start.saturating_add(*burst_length_frames);
+            !((*start_capture_sequence..first_end).contains(&sequence)
+                || (second_start..second_end).contains(&sequence))
+        }
         _ => true,
     }
 }

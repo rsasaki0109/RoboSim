@@ -752,6 +752,29 @@ cargo run --locked -p showcase_captures \
   --output artifacts/openarm-sensor-recovery-robustness-lab/report/minimum-sensor-recovery-failure.rne-replay
 ```
 
+## Prove repeated-dropout sensor re-arm spacing
+
+This dimension fixes two two-frame publication dropouts and varies only the
+number of fresh publications between them. The descending `[4, 3, 2, 1, 0]`
+grid passes one fresh frame and first fails zero on Rapier, native MuJoCo, and
+Gazebo. With zero separation, capture sequences 3240 through 3243 are all
+unpublished; the earliest failure is sequence 3242 against the fixed one-frame
+minimum. Joint-5 RMSE and final-error checks remain green.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_feedback_repeated_dropout_rearm \
+  --output artifacts/openarm-sensor-rearm-robustness-lab
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-rearm-robustness-lab \
+  --output artifacts/openarm-sensor-rearm-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-sensor-rearm-robustness-lab/report/openarm-sensor-rearm-robustness-report.json \
+  --trace artifacts/openarm-sensor-rearm-robustness-lab/sensor-rearm-000fresh/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-sensor-rearm-robustness-lab/report/minimum-sensor-rearm-failure.rne-replay
+```
+
 ## Sweep the OpenArm actuator command-transport delay
 
 The fourth robustness dimension delays only right joint 5 after controller

@@ -434,6 +434,84 @@ class OpenArmRobustnessReportTests(unittest.TestCase):
         self.assertEqual(violation["requirement_id"], "recovery")
         self.assertEqual(violation["step"], 7)
 
+    def test_rearm_metrics_find_missing_interburst_fresh_frame(self) -> None:
+        observations = []
+        for step in range(1, 8):
+            sequence = None if step <= 2 else (1 if step <= 6 else 6)
+            observations.append(
+                {
+                    "step": step,
+                    "sim_time_ticks": step * 10,
+                    "sensor_sample_published": step not in {2, 3, 4, 5},
+                    "controller_observation_sequence": sequence,
+                    "controller_observation_age_ticks": (
+                        None if sequence is None else 10 * (step - sequence)
+                    ),
+                    "joint_position_rad": [step / 100.0],
+                    "joint_reference_position_rad": [0.0],
+                    "joint_controller_observation_position_rad": (
+                        [] if sequence is None else [sequence / 100.0]
+                    ),
+                    "joint_controller_target_rad": [0.1],
+                    "joint_integral_correction_rad": [0.02],
+                    "controller_rejected": False,
+                    "controller_rejection_reason": None,
+                    "fail_safe_hold_active": False,
+                    "controller_state_frozen": False,
+                    "controller_recovered": False,
+                }
+            )
+        controller = {
+            "measurement_fault_contract": {
+                "kind": "joint_feedback_repeated_dropout_bursts_v1",
+                "start_capture_sequence": 2,
+                "burst_length_frames": 2,
+                "burst_count": 2,
+                "interburst_fresh_frames": 0,
+            }
+        }
+        metrics = MODULE.rearm_metrics(controller, observations, 0)
+        self.assertIsNotNone(metrics)
+        self.assertTrue(metrics["publication_realization_matches"])
+        self.assertEqual(metrics["maximum_consecutive_dropout_frames"], 4)
+        self.assertEqual(metrics["interburst_fresh_frames"], 0)
+        self.assertIsNone(metrics["first_controller_source_mismatch"])
+        requirements = {
+            "controller.sensor.minimum_interburst_fresh_frames": {
+                "id": "rearm",
+                "unit": "consecutive_frame_count",
+                "minimum": 1,
+            },
+            "controller.sensor.maximum_observation_age_ticks": {
+                "id": "age",
+                "unit": "tick",
+                "maximum": 100,
+            },
+            "controller.sensor.maximum_fail_safe_target_delta_rad": {
+                "id": "hold",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+            "controller.sensor.maximum_recovery_decisions": {
+                "id": "recovery",
+                "unit": "controller_decision_count",
+                "maximum": 1,
+            },
+            "controller.sensor_rearm.maximum_controlled_joint_rmse_rad": {
+                "id": "rmse",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+            "controller.sensor_rearm.maximum_controlled_joint_final_error_rad": {
+                "id": "final",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+        }
+        violation = MODULE.first_rearm_violation(metrics, observations, requirements)
+        self.assertEqual(violation["requirement_id"], "rearm")
+        self.assertEqual(violation["step"], 4)
+
     def test_latency_metrics_preserve_capture_time_and_find_ingress_boundary(self) -> None:
         observations = []
         for step in range(1, 7):

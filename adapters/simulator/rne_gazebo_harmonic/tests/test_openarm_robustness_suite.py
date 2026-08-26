@@ -329,6 +329,49 @@ class OpenArmRobustnessSuiteTests(unittest.TestCase):
         self.assertFalse(RUNNER.sensor_sample_published(controller, 3242))
         self.assertTrue(RUNNER.sensor_sample_published(controller, 3243))
 
+    def test_repeated_dropout_grid_rearms_on_one_fresh_frame(self) -> None:
+        suite, controllers = MODULE.compile_robustness_suite(
+            COMPILER,
+            SCRIPT_DIR / "openarm_robustness_experiments.json",
+            ROOT / "docs/evidence/openarm-plant-lab/evidence/openarm-plant-lab-report.json",
+            SCRIPT_DIR / "openarm_plant_experiments.json",
+            SCRIPT_DIR / "openarm_right_pose_cycle.controller.json",
+            SCRIPT_DIR / "openarm_controller_requirements.json",
+            "joint_feedback_repeated_dropout_rearm",
+        )
+        self.assertEqual(
+            suite["dimension_id"], "joint_feedback_repeated_dropout_rearm"
+        )
+        self.assertEqual(
+            [
+                controller["measurement_fault_contract"]["interburst_fresh_frames"]
+                for controller in controllers.values()
+            ],
+            [4, 3, 2, 1, 0],
+        )
+        self.assertEqual(
+            list(controllers),
+            [
+                "sensor-rearm-004fresh",
+                "sensor-rearm-003fresh",
+                "sensor-rearm-002fresh",
+                "sensor-rearm-001fresh",
+                "sensor-rearm-000fresh",
+            ],
+        )
+        one_fresh = controllers["sensor-rearm-001fresh"]
+        RUNNER.validate_measurement_fault(one_fresh, 3600)
+        self.assertEqual(
+            [RUNNER.sensor_sample_published(one_fresh, step) for step in range(3240, 3245)],
+            [False, False, True, False, False],
+        )
+        no_fresh = controllers["sensor-rearm-000fresh"]
+        RUNNER.validate_measurement_fault(no_fresh, 3600)
+        self.assertEqual(
+            [RUNNER.sensor_sample_published(no_fresh, step) for step in range(3240, 3244)],
+            [False, False, False, False],
+        )
+
     def test_command_rate_limit_uses_previous_applied_target_and_fixed_delta(self) -> None:
         suite, controllers = MODULE.compile_robustness_suite(
             COMPILER,
