@@ -155,6 +155,16 @@ enum MeasurementFaultContract {
         controller_visibility: String,
         application_order: String,
     },
+    #[serde(rename = "joint_feedback_controller_stale_age_pulse_v1")]
+    JointFeedbackControllerStaleAgePulseV1 {
+        classification: String,
+        additional_stale_frames: u64,
+        start_controller_step: u64,
+        end_controller_step: u64,
+        selection_policy: String,
+        controller_visibility: String,
+        application_order: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -921,6 +931,27 @@ fn validate(
                     && application_order
                         == "after_typed_feedback_availability_before_controller_ingress",
                 "invalid OpenArm controller-ingress jitter contract"
+            ),
+            MeasurementFaultContract::JointFeedbackControllerStaleAgePulseV1 {
+                classification,
+                additional_stale_frames,
+                start_controller_step,
+                end_controller_step,
+                selection_policy,
+                controller_visibility,
+                application_order,
+            } => anyhow::ensure!(
+                classification == "measurement_selection_staleness"
+                    && *additional_stale_frames <= final_step
+                    && *start_controller_step >= 1
+                    && start_controller_step <= end_controller_step
+                    && *end_controller_step <= final_step
+                    && selection_policy == "nth_older_available_publication_v1"
+                    && controller_visibility
+                        == "older_published_sample_with_original_capture_timestamp"
+                    && application_order
+                        == "after_typed_feedback_availability_during_controller_selection",
+                "invalid OpenArm controller stale-age contract"
             ),
         }
     }
@@ -1717,6 +1748,7 @@ fn has_availability_fault(controller: &ControllerSpec) -> bool {
             MeasurementFaultContract::JointFeedbackPublicationDropoutBurstV1 { .. }
                 | MeasurementFaultContract::JointFeedbackControllerIngressDelayV1 { .. }
                 | MeasurementFaultContract::JointFeedbackControllerIngressJitterPulseV1 { .. }
+                | MeasurementFaultContract::JointFeedbackControllerStaleAgePulseV1 { .. }
         )
     )
 }
@@ -1743,6 +1775,22 @@ fn controller_ingress_delay_ticks(controller: &ControllerSpec, capture_sequence:
             } else {
                 0
             }
+        }
+        _ => 0,
+    }
+}
+
+fn controller_stale_offset_frames(controller: &ControllerSpec, controller_step: u64) -> usize {
+    match controller.measurement_fault_contract.as_ref() {
+        Some(MeasurementFaultContract::JointFeedbackControllerStaleAgePulseV1 {
+            additional_stale_frames,
+            start_controller_step,
+            end_controller_step,
+            ..
+        }) if controller_step >= *start_controller_step
+            && controller_step <= *end_controller_step =>
+        {
+            usize::try_from(*additional_stale_frames).unwrap_or(usize::MAX)
         }
         _ => 0,
     }
@@ -1900,19 +1948,19 @@ fn rollout(
     let mut maximum_sensor_backend_position_delta_rad = 0.0_f64;
     let mut maximum_sensor_backend_velocity_delta_rad_s = 0.0_f64;
     for action in actions {
-        let visible_controller_observation =
-            controller_observation_history
-                .iter()
-                .rev()
-                .find(|observation| {
-                    observation
-                        .available_time_ticks
-                        .saturating_add(controller_ingress_delay_ticks(
-                            controller,
-                            observation.sequence,
-                        ))
-                        <= sim.sim_time().ticks()
-                });
+        let visible_controller_observation = controller_observation_history
+            .iter()
+            .rev()
+            .filter(|observation| {
+                observation
+                    .available_time_ticks
+                    .saturating_add(controller_ingress_delay_ticks(
+                        controller,
+                        observation.sequence,
+                    ))
+                    <= sim.sim_time().ticks()
+            })
+            .nth(controller_stale_offset_frames(controller, action.step));
         let decision = bounded_controller_decision(
             controller,
             &action.joint_position_target_rad,

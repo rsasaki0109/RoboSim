@@ -66,6 +66,10 @@ def controller_dimension_value(controller: dict[str, Any], dimension_id: str) ->
         return controller.get("measurement_fault_contract", {}).get(
             "maximum_jitter_frames"
         )
+    if dimension_id == "joint_feedback_controller_stale_age":
+        return controller.get("measurement_fault_contract", {}).get(
+            "additional_stale_frames"
+        )
     raise ValueError(f"unsupported robustness dimension {dimension_id}")
 
 
@@ -884,6 +888,200 @@ def first_jitter_violation(
     return min(candidates, key=lambda item: (item["step"], item["requirement_id"])) if candidates else None
 
 
+def stale_age_metrics(
+    controller: dict[str, Any],
+    observations: list[dict[str, Any]],
+    joint_index: int,
+    fixed_delta_ticks: int,
+) -> dict[str, Any] | None:
+    contract = controller.get("measurement_fault_contract")
+    if (
+        contract is None
+        or contract.get("kind") != "joint_feedback_controller_stale_age_pulse_v1"
+    ):
+        return None
+    maximum_age_ticks = 0
+    maximum_selected_stale_frames = 0
+    selected_stale_frames_by_step = []
+    maximum_source_delta_rad = 0.0
+    first_realization_mismatch = None
+    for frame in observations:
+        step = frame["step"]
+        offset = (
+            contract["additional_stale_frames"]
+            if contract["start_controller_step"]
+            <= step
+            <= contract["end_controller_step"]
+            else 0
+        )
+        expected_sequence = step - 2 - offset
+        if expected_sequence < 1:
+            expected_sequence = None
+        expected_age_ticks = (
+            None if expected_sequence is None else (offset + 1) * fixed_delta_ticks
+        )
+        sequence = frame["controller_observation_sequence"]
+        visible = frame["joint_controller_observation_position_rad"]
+        if expected_sequence is None:
+            source_delta = 0.0 if not visible else math.inf
+            selected_stale_frames = 0
+        else:
+            source = observations[expected_sequence - 1]
+            source_delta = max(
+                (
+                    abs(actual - raw)
+                    for actual, raw in zip(visible, source["joint_position_rad"])
+                ),
+                default=0.0,
+            )
+            selected_stale_frames = offset
+            maximum_age_ticks = max(maximum_age_ticks, expected_age_ticks)
+            maximum_selected_stale_frames = max(
+                maximum_selected_stale_frames, selected_stale_frames
+            )
+        selected_stale_frames_by_step.append(selected_stale_frames)
+        maximum_source_delta_rad = max(maximum_source_delta_rad, source_delta)
+        realization_matches = (
+            frame["sensor_sample_published"]
+            and sequence == expected_sequence
+            and frame["controller_observation_age_ticks"] == expected_age_ticks
+            and source_delta <= 1e-12
+        )
+        if first_realization_mismatch is None and not realization_matches:
+            first_realization_mismatch = {
+                "step": step,
+                "expected_observation_sequence": expected_sequence,
+                "actual_observation_sequence": sequence,
+                "expected_age_ticks": expected_age_ticks,
+                "actual_age_ticks": frame["controller_observation_age_ticks"],
+                "source_delta_rad": source_delta,
+                "sensor_sample_published": frame["sensor_sample_published"],
+            }
+    rejected = [frame for frame in observations if frame["controller_rejected"]]
+    recovered = [frame for frame in observations if frame["controller_recovered"]]
+    maximum_hold_target_delta_rad = 0.0
+    maximum_frozen_integral_delta_rad = 0.0
+    first_hold_mismatch = None
+    for frame in rejected:
+        previous = observations[frame["step"] - 2]
+        target_delta = max(
+            abs(actual - expected)
+            for actual, expected in zip(
+                frame["joint_controller_target_rad"],
+                previous["joint_controller_target_rad"],
+            )
+        )
+        integral_delta = max(
+            abs(actual - expected)
+            for actual, expected in zip(
+                frame["joint_integral_correction_rad"],
+                previous["joint_integral_correction_rad"],
+            )
+        )
+        maximum_hold_target_delta_rad = max(maximum_hold_target_delta_rad, target_delta)
+        maximum_frozen_integral_delta_rad = max(
+            maximum_frozen_integral_delta_rad, integral_delta
+        )
+        metadata_matches = (
+            frame["controller_rejection_reason"] == "maximum_observation_age_ticks"
+            and frame["fail_safe_hold_active"]
+            and frame["controller_state_frozen"]
+        )
+        if first_hold_mismatch is None and (
+            target_delta > 1e-12 or integral_delta > 1e-12 or not metadata_matches
+        ):
+            first_hold_mismatch = {
+                "step": frame["step"],
+                "target_delta_rad": target_delta,
+                "integral_delta_rad": integral_delta,
+                "metadata_matches": metadata_matches,
+            }
+    recovery_decisions = (
+        recovered[0]["step"] - rejected[-1]["step"] if rejected and recovered else 0
+    )
+    errors = [
+        frame["joint_position_rad"][joint_index]
+        - frame["joint_reference_position_rad"][joint_index]
+        for frame in observations
+    ]
+    return {
+        "contract": contract,
+        "base_sensor_latency_ticks": fixed_delta_ticks,
+        "maximum_selected_stale_frames": maximum_selected_stale_frames,
+        "maximum_controller_observation_age_ticks": maximum_age_ticks,
+        "selected_stale_frames_by_step": selected_stale_frames_by_step,
+        "rejected_decision_count": len(rejected),
+        "first_rejected_step": rejected[0]["step"] if rejected else None,
+        "maximum_fail_safe_target_delta_rad": maximum_hold_target_delta_rad,
+        "maximum_frozen_integral_delta_rad": maximum_frozen_integral_delta_rad,
+        "recovery_decision_count": recovery_decisions,
+        "first_recovered_step": recovered[0]["step"] if recovered else None,
+        "maximum_controller_source_delta_rad": maximum_source_delta_rad,
+        "first_realization_mismatch": first_realization_mismatch,
+        "first_hold_mismatch": first_hold_mismatch,
+        "controlled_joint_rmse_rad": math.sqrt(
+            sum(error * error for error in errors) / len(errors)
+        ),
+        "controlled_joint_final_error_rad": abs(errors[-1]),
+    }
+
+
+def first_stale_age_violation(
+    metrics: dict[str, Any],
+    observations: list[dict[str, Any]],
+    requirements: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    candidates = []
+    age_requirement = requirements["controller.sensor.maximum_observation_age_ticks"]
+    age_frame = next(
+        (
+            frame
+            for frame in observations
+            if frame["controller_observation_age_ticks"] is not None
+            and frame["controller_observation_age_ticks"] > age_requirement["maximum"]
+        ),
+        None,
+    )
+    if age_frame is not None:
+        candidates.append(
+            {
+                "requirement_id": age_requirement["id"],
+                "step": age_frame["step"],
+                "sim_time_ticks": age_frame["sim_time_ticks"],
+                "observed": age_frame["controller_observation_age_ticks"],
+                "maximum": age_requirement["maximum"],
+                "unit": age_requirement["unit"],
+                "controller_observation_sequence": age_frame[
+                    "controller_observation_sequence"
+                ],
+            }
+        )
+    final_frame = observations[-1]
+    for requirement_id, metric_key in (
+        (
+            "controller.sensor_stale.maximum_controlled_joint_rmse_rad",
+            "controlled_joint_rmse_rad",
+        ),
+        (
+            "controller.sensor_stale.maximum_controlled_joint_final_error_rad",
+            "controlled_joint_final_error_rad",
+        ),
+    ):
+        requirement = requirements[requirement_id]
+        if metrics[metric_key] > requirement["maximum"]:
+            candidates.append(
+                {
+                    "requirement_id": requirement["id"],
+                    "step": final_frame["step"],
+                    "sim_time_ticks": final_frame["sim_time_ticks"],
+                    "observed": metrics[metric_key],
+                    "maximum": requirement["maximum"],
+                    "unit": requirement["unit"],
+                }
+            )
+    return min(candidates, key=lambda item: (item["step"], item["requirement_id"])) if candidates else None
+
+
 def evaluate_trace(
     report_module: Any,
     controller: dict[str, Any],
@@ -921,9 +1119,47 @@ def evaluate_trace(
     jitter = jitter_metrics(
         controller, observations, joint_index, trace["fixed_delta_ticks"]
     )
+    stale_age = stale_age_metrics(
+        controller, observations, joint_index, trace["fixed_delta_ticks"]
+    )
     if metrics["first_realization_mismatch"] is not None:
         raise ValueError(f"{backend_id} robustness disturbance realization drifted")
-    if jitter is not None:
+    if stale_age is not None:
+        if (
+            stale_age["first_realization_mismatch"] is not None
+            or stale_age["first_hold_mismatch"] is not None
+        ):
+            raise ValueError(f"{backend_id} stale-age realization drifted")
+        checks = [
+            report_module.check(
+                requirements["controller.sensor.maximum_observation_age_ticks"],
+                stale_age["maximum_controller_observation_age_ticks"],
+            ),
+            report_module.check(
+                requirements["controller.sensor.maximum_fail_safe_target_delta_rad"],
+                stale_age["maximum_fail_safe_target_delta_rad"],
+            ),
+            report_module.check(
+                requirements["controller.sensor.maximum_recovery_decisions"],
+                stale_age["recovery_decision_count"],
+            ),
+            report_module.check(
+                requirements[
+                    "controller.sensor_stale.maximum_controlled_joint_rmse_rad"
+                ],
+                stale_age["controlled_joint_rmse_rad"],
+            ),
+            report_module.check(
+                requirements[
+                    "controller.sensor_stale.maximum_controlled_joint_final_error_rad"
+                ],
+                stale_age["controlled_joint_final_error_rad"],
+            ),
+        ]
+        first_violation = first_stale_age_violation(
+            stale_age, observations, requirements
+        )
+    elif jitter is not None:
         if (
             jitter["first_realization_mismatch"] is not None
             or jitter["first_hold_mismatch"] is not None
@@ -1128,6 +1364,7 @@ def evaluate_trace(
         "measurement_availability": availability,
         "measurement_latency": latency,
         "measurement_jitter": jitter,
+        "measurement_stale_age": stale_age,
         "checks": checks,
         "first_violation": first_violation,
         "plot": {
@@ -1175,6 +1412,7 @@ def main() -> int:
             "joint_feedback_publication_dropout",
             "joint_feedback_controller_ingress_latency",
             "joint_feedback_controller_ingress_jitter",
+            "joint_feedback_controller_stale_age",
         }
         or suite.get("primary_sweep_backend") != "rne_rapier"
         or suite.get("inputs", {}).get("requirements_sha256")
@@ -1327,6 +1565,7 @@ def main() -> int:
         "joint_feedback_publication_dropout": "openarm-sensor-dropout-robustness-report",
         "joint_feedback_controller_ingress_latency": "openarm-sensor-latency-robustness-report",
         "joint_feedback_controller_ingress_jitter": "openarm-sensor-jitter-robustness-report",
+        "joint_feedback_controller_stale_age": "openarm-sensor-stale-age-robustness-report",
     }
     stem = stems[suite["dimension_id"]]
     write_json(output / f"{stem}.json", report)
@@ -1344,9 +1583,9 @@ def write_html(path: Path, report: dict[str, Any]) -> None:
     payload = json.dumps(report, separators=(",", ":"), allow_nan=False).replace("</", "<\\/")
     document = r'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OpenArm robustness envelope</title><style>
 body{margin:0;background:#09121f;color:#eef5ff;font:14px system-ui,sans-serif}main{max-width:1240px;margin:auto;padding:28px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}.card{background:#132238;border:1px solid #2a4667;border-radius:10px;padding:14px}.passed{color:#6ee7aa}.failed{color:#ff8b78}table{width:100%;border-collapse:collapse}th,td{border:1px solid #2a4667;padding:7px;text-align:right}th:first-child,td:first-child{text-align:left}canvas{width:100%;height:260px;background:#fff;border-radius:8px}</style></head><body><main><h1>OpenArm actuator-bias robustness envelope</h1><div id="summary"></div><h2>Rapier sweep</h2><div id="sweep"></div><h2>Portable boundary</h2><div id="boundary" class="grid"></div><h2>Boundary traces</h2><div id="plots"></div><script>
-const r=__REPORT__,f=x=>x==null?'n/a':Number(x).toFixed(6),colors={rne_rapier:'#1261a0',mujoco_native:'#c2410c',gazebo_sim:'#15803d'},availability=r.dimension_id==='joint_feedback_publication_dropout',latency=r.dimension_id==='joint_feedback_controller_ingress_latency',jitter=r.dimension_id==='joint_feedback_controller_ingress_jitter',timing=q=>latency?q.measurement_latency:q.measurement_jitter;document.querySelector('#summary').innerHTML=`<section class=card><p>Status: <b class=${r.status}>${r.status}</b></p><p>Last passing value: ${f(r.boundary.last_passing_value)} ${r.dimension.unit}</p><p>First failing value: ${f(r.boundary.first_failing_value)} ${r.dimension.unit}</p><p>Portable first failure: <code>${r.boundary.portable_first_failed_requirement}</code></p><p>First violation: step ${r.first_failure.step}, ${f(r.first_failure.observed)} ${r.first_failure.unit}</p></section>`;
-document.querySelector('#sweep').innerHTML=availability?`<table><tr><th>case</th><th>dropped frames</th><th>max age ticks</th><th>rejections</th><th>recovery decisions</th><th>status</th></tr>${r.primary_backend_results.map(q=>`<tr><td>${q.case_id}</td><td>${q.dimension_value}</td><td>${q.measurement_availability.maximum_controller_observation_age_ticks}</td><td>${q.measurement_availability.rejected_decision_count}</td><td>${q.measurement_availability.recovery_decision_count}</td><td class=${q.status}>${q.status}</td></tr>`).join('')}</table>`:(latency||jitter)?`<table><tr><th>case</th><th>${latency?'ingress delay':'peak jitter'}</th><th>max age ticks</th><th>joint RMSE rad</th><th>final error rad</th><th>rejections</th><th>status</th></tr>${r.primary_backend_results.map(q=>`<tr><td>${q.case_id}</td><td>${q.dimension_value}</td><td>${timing(q).maximum_controller_observation_age_ticks}</td><td>${f(timing(q).controlled_joint_rmse_rad)}</td><td>${f(timing(q).controlled_joint_final_error_rad)}</td><td>${timing(q).rejected_decision_count}</td><td class=${q.status}>${q.status}</td></tr>`).join('')}</table>`:`<table><tr><th>case</th><th>value</th><th>peak rad</th><th>recovery s</th><th>IAE rad·s</th><th>status</th></tr>${r.primary_backend_results.map(q=>`<tr><td>${q.case_id}</td><td>${f(q.dimension_value)}</td><td>${f(q.metrics.peak_tracking_error_rad)}</td><td>${f(q.metrics.recovery_time_s)}</td><td>${f(q.metrics.iae_rad_s)}</td><td class=${q.status}>${q.status}</td></tr>`).join('')}</table>`;
-document.querySelector('h1').textContent=`OpenArm ${r.dimension_id.replaceAll('_',' ')} robustness envelope`;document.querySelector('#boundary').innerHTML=r.cross_backend_boundary_results.map(q=>availability?`<section class=card><h3>${q.case_id} / ${q.backend_id}</h3><p class=${q.status}>${q.status}</p><p>max age ${q.measurement_availability.maximum_controller_observation_age_ticks} ticks</p><p>rejections ${q.measurement_availability.rejected_decision_count}</p><p>recovery ${q.measurement_availability.recovery_decision_count} decision(s)</p></section>`:(latency||jitter)?`<section class=card><h3>${q.case_id} / ${q.backend_id}</h3><p class=${q.status}>${q.status}</p><p>max age ${timing(q).maximum_controller_observation_age_ticks} ticks</p><p>RMSE ${f(timing(q).controlled_joint_rmse_rad)} rad</p><p>final error ${f(timing(q).controlled_joint_final_error_rad)} rad</p><p>rejections ${timing(q).rejected_decision_count}</p></section>`:`<section class=card><h3>${q.case_id} / ${q.backend_id}</h3><p class=${q.status}>${q.status}</p><p>peak ${f(q.metrics.peak_tracking_error_rad)} rad</p><p>recovery ${f(q.metrics.recovery_time_s)} s</p><p>IAE ${f(q.metrics.iae_rad_s)} rad·s</p></section>`).join('');function plot(caseId){const rows=r.cross_backend_boundary_results.filter(q=>q.case_id===caseId),c=document.createElement('canvas');c.width=1160;c.height=260;const x=c.getContext('2d'),n=rows[0].plot.reference_rad.length,start=(r.dimension.start_step??r.dimension.start_controller_step??r.dimension.start_capture_sequence??1)-1,end=r.dimension.end_step??r.dimension.end_controller_step??r.dimension.end_capture_sequence??(r.dimension.start_capture_sequence?r.dimension.start_capture_sequence+r.boundary.first_failing_value:n);x.fillStyle='#ef444422';x.fillRect(start/(n-1)*c.width,0,(end-start)/(n-1)*c.width,c.height);function line(v,color,w=1.4){x.beginPath();for(let i=0;i<n;i++){const px=i/(n-1)*c.width,py=c.height-(v[i]+.16)/.34*c.height;i?x.lineTo(px,py):x.moveTo(px,py)}x.strokeStyle=color;x.lineWidth=w;x.stroke()}line(rows[0].plot.reference_rad,'#111',1.8);rows.forEach(q=>line(q.plot.position_rad,colors[q.backend_id]));const s=document.createElement('section');s.innerHTML=`<h3>${caseId}</h3>`;s.appendChild(c);return s}const plots=document.querySelector('#plots');plots.appendChild(plot(r.boundary.last_passing_case_id));plots.appendChild(plot(r.boundary.first_failing_case_id));
+const r=__REPORT__,f=x=>x==null?'n/a':Number(x).toFixed(6),colors={rne_rapier:'#1261a0',mujoco_native:'#c2410c',gazebo_sim:'#15803d'},availability=r.dimension_id==='joint_feedback_publication_dropout',latency=r.dimension_id==='joint_feedback_controller_ingress_latency',jitter=r.dimension_id==='joint_feedback_controller_ingress_jitter',stale=r.dimension_id==='joint_feedback_controller_stale_age',timingDimension=latency||jitter||stale,timing=q=>latency?q.measurement_latency:jitter?q.measurement_jitter:q.measurement_stale_age,timingLabel=latency?'ingress delay':jitter?'peak jitter':'additional stale age';document.querySelector('#summary').innerHTML=`<section class=card><p>Status: <b class=${r.status}>${r.status}</b></p><p>Last passing value: ${f(r.boundary.last_passing_value)} ${r.dimension.unit}</p><p>First failing value: ${f(r.boundary.first_failing_value)} ${r.dimension.unit}</p><p>Portable first failure: <code>${r.boundary.portable_first_failed_requirement}</code></p><p>First violation: step ${r.first_failure.step}, ${f(r.first_failure.observed)} ${r.first_failure.unit}</p></section>`;
+document.querySelector('#sweep').innerHTML=availability?`<table><tr><th>case</th><th>dropped frames</th><th>max age ticks</th><th>rejections</th><th>recovery decisions</th><th>status</th></tr>${r.primary_backend_results.map(q=>`<tr><td>${q.case_id}</td><td>${q.dimension_value}</td><td>${q.measurement_availability.maximum_controller_observation_age_ticks}</td><td>${q.measurement_availability.rejected_decision_count}</td><td>${q.measurement_availability.recovery_decision_count}</td><td class=${q.status}>${q.status}</td></tr>`).join('')}</table>`:timingDimension?`<table><tr><th>case</th><th>${timingLabel}</th><th>max age ticks</th><th>joint RMSE rad</th><th>final error rad</th><th>rejections</th><th>status</th></tr>${r.primary_backend_results.map(q=>`<tr><td>${q.case_id}</td><td>${q.dimension_value}</td><td>${timing(q).maximum_controller_observation_age_ticks}</td><td>${f(timing(q).controlled_joint_rmse_rad)}</td><td>${f(timing(q).controlled_joint_final_error_rad)}</td><td>${timing(q).rejected_decision_count}</td><td class=${q.status}>${q.status}</td></tr>`).join('')}</table>`:`<table><tr><th>case</th><th>value</th><th>peak rad</th><th>recovery s</th><th>IAE rad·s</th><th>status</th></tr>${r.primary_backend_results.map(q=>`<tr><td>${q.case_id}</td><td>${f(q.dimension_value)}</td><td>${f(q.metrics.peak_tracking_error_rad)}</td><td>${f(q.metrics.recovery_time_s)}</td><td>${f(q.metrics.iae_rad_s)}</td><td class=${q.status}>${q.status}</td></tr>`).join('')}</table>`;
+document.querySelector('h1').textContent=`OpenArm ${r.dimension_id.replaceAll('_',' ')} robustness envelope`;document.querySelector('#boundary').innerHTML=r.cross_backend_boundary_results.map(q=>availability?`<section class=card><h3>${q.case_id} / ${q.backend_id}</h3><p class=${q.status}>${q.status}</p><p>max age ${q.measurement_availability.maximum_controller_observation_age_ticks} ticks</p><p>rejections ${q.measurement_availability.rejected_decision_count}</p><p>recovery ${q.measurement_availability.recovery_decision_count} decision(s)</p></section>`:timingDimension?`<section class=card><h3>${q.case_id} / ${q.backend_id}</h3><p class=${q.status}>${q.status}</p><p>max age ${timing(q).maximum_controller_observation_age_ticks} ticks</p><p>RMSE ${f(timing(q).controlled_joint_rmse_rad)} rad</p><p>final error ${f(timing(q).controlled_joint_final_error_rad)} rad</p><p>rejections ${timing(q).rejected_decision_count}</p></section>`:`<section class=card><h3>${q.case_id} / ${q.backend_id}</h3><p class=${q.status}>${q.status}</p><p>peak ${f(q.metrics.peak_tracking_error_rad)} rad</p><p>recovery ${f(q.metrics.recovery_time_s)} s</p><p>IAE ${f(q.metrics.iae_rad_s)} rad·s</p></section>`).join('');function plot(caseId){const rows=r.cross_backend_boundary_results.filter(q=>q.case_id===caseId),c=document.createElement('canvas');c.width=1160;c.height=260;const x=c.getContext('2d'),n=rows[0].plot.reference_rad.length,start=(r.dimension.start_step??r.dimension.start_controller_step??r.dimension.start_capture_sequence??1)-1,end=r.dimension.end_step??r.dimension.end_controller_step??r.dimension.end_capture_sequence??(r.dimension.start_capture_sequence?r.dimension.start_capture_sequence+r.boundary.first_failing_value:n);x.fillStyle='#ef444422';x.fillRect(start/(n-1)*c.width,0,(end-start)/(n-1)*c.width,c.height);function line(v,color,w=1.4){x.beginPath();for(let i=0;i<n;i++){const px=i/(n-1)*c.width,py=c.height-(v[i]+.16)/.34*c.height;i?x.lineTo(px,py):x.moveTo(px,py)}x.strokeStyle=color;x.lineWidth=w;x.stroke()}line(rows[0].plot.reference_rad,'#111',1.8);rows.forEach(q=>line(q.plot.position_rad,colors[q.backend_id]));const s=document.createElement('section');s.innerHTML=`<h3>${caseId}</h3>`;s.appendChild(c);return s}const plots=document.querySelector('#plots');plots.appendChild(plot(r.boundary.last_passing_case_id));plots.appendChild(plot(r.boundary.first_failing_case_id));
 </script></main></body></html>'''.replace("__REPORT__", payload)
     path.write_text(document, encoding="utf-8")
 

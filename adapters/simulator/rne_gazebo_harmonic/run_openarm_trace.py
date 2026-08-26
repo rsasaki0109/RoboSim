@@ -366,8 +366,23 @@ def jitter_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def stale_age_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
+    contract = controller.get("measurement_fault_contract")
+    if (
+        isinstance(contract, dict)
+        and contract.get("kind") == "joint_feedback_controller_stale_age_pulse_v1"
+    ):
+        return contract
+    return None
+
+
 def availability_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
-    return dropout_contract(controller) or latency_contract(controller) or jitter_contract(controller)
+    return (
+        dropout_contract(controller)
+        or latency_contract(controller)
+        or jitter_contract(controller)
+        or stale_age_contract(controller)
+    )
 
 
 def controller_ingress_delay_frames(
@@ -388,6 +403,19 @@ def controller_ingress_delay_frames(
         return 0
     phase = (capture_sequence - contract["start_capture_sequence"]) % (maximum + 1)
     return maximum if phase < maximum else 0
+
+
+def controller_stale_offset_frames(
+    controller: dict[str, Any], controller_step: int
+) -> int:
+    contract = stale_age_contract(controller)
+    if (
+        contract is None
+        or controller_step < contract["start_controller_step"]
+        or controller_step > contract["end_controller_step"]
+    ):
+        return 0
+    return contract["additional_stale_frames"]
 
 
 def sensor_sample_published(controller: dict[str, Any], sequence: int) -> bool:
@@ -457,6 +485,40 @@ def validate_measurement_fault(controller: dict[str, Any], action_count: int) ->
             != "after_typed_feedback_availability_before_controller_ingress"
         ):
             raise ValueError("invalid OpenArm controller-ingress jitter contract")
+        return
+    if contract.get("kind") == "joint_feedback_controller_stale_age_pulse_v1":
+        expected_keys = {
+            "kind",
+            "classification",
+            "additional_stale_frames",
+            "start_controller_step",
+            "end_controller_step",
+            "selection_policy",
+            "controller_visibility",
+            "application_order",
+        }
+        additional = contract.get("additional_stale_frames")
+        start = contract.get("start_controller_step")
+        end = contract.get("end_controller_step")
+        if (
+            set(contract) != expected_keys
+            or contract.get("classification") != "measurement_selection_staleness"
+            or not isinstance(additional, int)
+            or isinstance(additional, bool)
+            or not 0 <= additional <= action_count
+            or not isinstance(start, int)
+            or isinstance(start, bool)
+            or not isinstance(end, int)
+            or isinstance(end, bool)
+            or not 1 <= start <= end <= action_count
+            or contract.get("selection_policy")
+            != "nth_older_available_publication_v1"
+            or contract.get("controller_visibility")
+            != "older_published_sample_with_original_capture_timestamp"
+            or contract.get("application_order")
+            != "after_typed_feedback_availability_during_controller_selection"
+        ):
+            raise ValueError("invalid OpenArm controller stale-age contract")
         return
     expected_keys = {
         "kind",
@@ -555,6 +617,7 @@ def apply_measurement_bias(
         "joint_feedback_publication_dropout_burst_v1",
         "joint_feedback_controller_ingress_delay_v1",
         "joint_feedback_controller_ingress_jitter_pulse_v1",
+        "joint_feedback_controller_stale_age_pulse_v1",
     }:
         return positions, bias
     expected_keys = {
@@ -739,18 +802,20 @@ def run_success(
     recovering_from_rejection = False
     for action in action_artifact["actions"]:
         consumed_at_ticks = (action["step"] - 1) * FIXED_DELTA_TICKS
-        delayed_observation = next(
-            (
-                frame
-                for frame in reversed(observations)
-                if frame["sensor_sample_published"]
-                and frame["sim_time_ticks"]
-                + FIXED_DELTA_TICKS
-                + controller_ingress_delay_frames(controller, frame["step"])
-                * FIXED_DELTA_TICKS
-                <= consumed_at_ticks
-            ),
-            None,
+        eligible_observations = [
+            frame
+            for frame in observations
+            if frame["sensor_sample_published"]
+            and frame["sim_time_ticks"]
+            + FIXED_DELTA_TICKS
+            + controller_ingress_delay_frames(controller, frame["step"])
+            * FIXED_DELTA_TICKS
+            <= consumed_at_ticks
+        ]
+        stale_offset = controller_stale_offset_frames(controller, action["step"])
+        selected_index = len(eligible_observations) - 1 - stale_offset
+        delayed_observation = (
+            eligible_observations[selected_index] if selected_index >= 0 else None
         )
         decision = bounded_controller_decision(
             controller,

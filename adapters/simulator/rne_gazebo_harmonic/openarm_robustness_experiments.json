@@ -101,6 +101,21 @@
       "maximum_age_ticks": 50000001,
       "stale_observation_policy": "hold_last_accepted_target_and_freeze_state",
       "recovery_policy": "resume_on_fresh_nominal_observation"
+    },
+    "joint_feedback_controller_stale_age": {
+      "kind": "joint_feedback_controller_stale_age_pulse_v1",
+      "classification": "measurement_selection_staleness",
+      "unit": "control_period_count",
+      "values": [0, 1, 2, 3, 4],
+      "base_sensor_latency_ticks": 16666667,
+      "start_controller_step": 3243,
+      "end_controller_step": 3302,
+      "selection_policy": "nth_older_available_publication_v1",
+      "controller_visibility": "older_published_sample_with_original_capture_timestamp",
+      "application_order": "after_typed_feedback_availability_during_controller_selection",
+      "maximum_age_ticks": 50000001,
+      "stale_observation_policy": "hold_last_accepted_target_and_freeze_state",
+      "recovery_policy": "resume_on_fresh_nominal_observation"
     }
   },
   "evaluation": {
@@ -173,6 +188,17 @@
       "controller.sensor.maximum_fail_safe_target_delta_rad",
       "controller.sensor_jitter.maximum_controlled_joint_rmse_rad",
       "controller.sensor_jitter.maximum_controlled_joint_final_error_rad"
+    ],
+    "boundary_rule": "smallest_grid_value_with_any_failed_requirement",
+    "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
+  },
+  "stale_age_evaluation": {
+    "requirement_ids": [
+      "controller.sensor.maximum_observation_age_ticks",
+      "controller.sensor.maximum_fail_safe_target_delta_rad",
+      "controller.sensor.maximum_recovery_decisions",
+      "controller.sensor_stale.maximum_controlled_joint_rmse_rad",
+      "controller.sensor_stale.maximum_controlled_joint_final_error_rad"
     ],
     "boundary_rule": "smallest_grid_value_with_any_failed_requirement",
     "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"

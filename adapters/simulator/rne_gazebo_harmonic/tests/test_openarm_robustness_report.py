@@ -489,6 +489,77 @@ class OpenArmRobustnessReportTests(unittest.TestCase):
         self.assertEqual(violation["requirement_id"], "jitter")
         self.assertEqual(violation["step"], 5)
 
+    def test_stale_age_metrics_separate_old_selection_hold_and_recovery(self) -> None:
+        sequences = [None, None, 1, 2, 3, 1, 2, 3, 7, 8]
+        observations = []
+        for step, sequence in enumerate(sequences, 1):
+            rejected = 6 <= step <= 8
+            observations.append(
+                {
+                    "step": step,
+                    "sim_time_ticks": step * 10,
+                    "sensor_sample_published": True,
+                    "controller_observation_sequence": sequence,
+                    "controller_observation_age_ticks": (
+                        None if sequence is None else (step - 1 - sequence) * 10
+                    ),
+                    "controller_bootstrap": sequence is None,
+                    "controller_rejected": rejected,
+                    "controller_rejection_reason": (
+                        "maximum_observation_age_ticks" if rejected else None
+                    ),
+                    "fail_safe_hold_active": rejected,
+                    "controller_state_frozen": rejected,
+                    "controller_recovered": step == 9,
+                    "joint_position_rad": [step / 100.0],
+                    "joint_reference_position_rad": [0.0],
+                    "joint_controller_observation_position_rad": (
+                        [] if sequence is None else [sequence / 100.0]
+                    ),
+                    "joint_controller_target_rad": [0.1],
+                    "joint_integral_correction_rad": [0.02],
+                }
+            )
+        controller = {
+            "measurement_fault_contract": {
+                "kind": "joint_feedback_controller_stale_age_pulse_v1",
+                "additional_stale_frames": 3,
+                "start_controller_step": 6,
+                "end_controller_step": 8,
+                "selection_policy": "nth_older_available_publication_v1",
+            }
+        }
+        metrics = MODULE.stale_age_metrics(controller, observations, 0, 10)
+        self.assertIsNotNone(metrics)
+        self.assertIsNone(metrics["first_realization_mismatch"])
+        self.assertIsNone(metrics["first_hold_mismatch"])
+        self.assertEqual(metrics["maximum_selected_stale_frames"], 3)
+        self.assertEqual(metrics["maximum_controller_observation_age_ticks"], 40)
+        self.assertEqual(metrics["rejected_decision_count"], 3)
+        self.assertEqual(metrics["recovery_decision_count"], 1)
+        requirements = {
+            "controller.sensor.maximum_observation_age_ticks": {
+                "id": "age",
+                "unit": "tick",
+                "maximum": 30,
+            },
+            "controller.sensor_stale.maximum_controlled_joint_rmse_rad": {
+                "id": "rmse",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+            "controller.sensor_stale.maximum_controlled_joint_final_error_rad": {
+                "id": "final",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+        }
+        violation = MODULE.first_stale_age_violation(
+            metrics, observations, requirements
+        )
+        self.assertEqual(violation["requirement_id"], "age")
+        self.assertEqual(violation["step"], 6)
+
 
 if __name__ == "__main__":
     unittest.main()

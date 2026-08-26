@@ -252,6 +252,51 @@ class OpenArmRobustnessSuiteTests(unittest.TestCase):
             [2, 2, 0, 2, 2, 0],
         )
 
+    def test_sensor_stale_age_grid_selects_older_available_publication(self) -> None:
+        suite, controllers = MODULE.compile_robustness_suite(
+            COMPILER,
+            SCRIPT_DIR / "openarm_robustness_experiments.json",
+            ROOT / "docs/evidence/openarm-plant-lab/evidence/openarm-plant-lab-report.json",
+            SCRIPT_DIR / "openarm_plant_experiments.json",
+            SCRIPT_DIR / "openarm_right_pose_cycle.controller.json",
+            SCRIPT_DIR / "openarm_controller_requirements.json",
+            "joint_feedback_controller_stale_age",
+        )
+        self.assertEqual(
+            suite["dimension_id"], "joint_feedback_controller_stale_age"
+        )
+        self.assertEqual(
+            [
+                controller["measurement_fault_contract"]["additional_stale_frames"]
+                for controller in controllers.values()
+            ],
+            [0, 1, 2, 3, 4],
+        )
+        controller = controllers["sensor-stale-003frames"]
+        contract = controller["measurement_fault_contract"]
+        self.assertEqual(
+            contract["selection_policy"], "nth_older_available_publication_v1"
+        )
+        RUNNER.validate_measurement_fault(controller, 3600)
+        self.assertEqual(
+            RUNNER.controller_stale_offset_frames(
+                controller, contract["start_controller_step"] - 1
+            ),
+            0,
+        )
+        self.assertEqual(
+            RUNNER.controller_stale_offset_frames(
+                controller, contract["start_controller_step"]
+            ),
+            3,
+        )
+        self.assertEqual(
+            RUNNER.controller_stale_offset_frames(
+                controller, contract["end_controller_step"] + 1
+            ),
+            0,
+        )
+
     def test_command_rate_limit_uses_previous_applied_target_and_fixed_delta(self) -> None:
         suite, controllers = MODULE.compile_robustness_suite(
             COMPILER,

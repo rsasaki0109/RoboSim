@@ -466,13 +466,14 @@ actuator-authority envelope. The next slices are:
    with nonphysical multipliers. The next inertia experiment must excite a
    dynamically sensitive joint/coupled mode or vary a physically sourced
    payload/link inertia with positive-definite tensor checks;
-4. **Latency and jitter complete; stale-age policy next:** controller-ingress latency now has a fixed
-   `[0, 1, 2, 3, 4]`-period sweep with original capture timestamps, exact
-   controller-visible age, cross-backend 0/1-period boundary evidence, stale-age
-   hold/freeze behavior, and a minimum failure replay. Continue with
-   deterministic jitter has a separate one/two-period portable boundary with
-   an independently recomputed periodic schedule. Continue with independently
-   varied stale age, burst patterns, recovery policy, quantization, saturation,
+4. **Latency, jitter, and stale-age selection complete; burst recovery next:**
+   controller-ingress latency has a fixed `[0, 1, 2, 3, 4]`-period sweep with
+   original capture timestamps and a portable zero/one-period boundary.
+   Deterministic jitter has a separate one/two-period boundary and an
+   independently recomputed periodic schedule. Stale-age selection now proves
+   the two/three-frame age boundary, 60-decision hold/freeze, and one-decision
+   fresh recovery without changing publication or availability. Continue with
+   burst-pattern and recovery-policy variants, then quantization, saturation,
    and stuck-value envelopes;
 5. turn the joint-5 plant lab into per-joint and coupled operating-region
    identification with uncertainty, coherence, residual, and held-out
@@ -706,7 +707,14 @@ Rapier, native MuJoCo, and Gazebo. Both boundary points remain within the
 three-period age limit with zero rejections and green joint-5 performance;
 step 3244 retains capture sequence 3240 at `50,000,001 ticks`, independently
 proving the first two-period jitter violation. Three and four periods exercise
-the stale hold/freeze policy separately. Physical parameter
+the stale hold/freeze policy separately. The independent stale-age selection
+dimension keeps all publications and base availability nominal, then selects
+the `N`th older already-available sequence over controller steps 3243–3302.
+Its fixed grid passes two additional frames at exactly `50,000,001 ticks` and
+first fails three at step 3243 with sequence 3238 and `66,666,668 ticks` on all
+three backends. The failing boundary rejects exactly 60 decisions, holds and
+freezes with zero delta, then recovers on the latest available sequence in one
+decision at step 3303. Physical parameter
 sweeps, actuator-authority degradation, command delay, command slew-rate limits,
 command deadband, viscous damping, and regularized Coulomb friction are recorded
 below; inertia and transmission-efficiency boundaries remain open.

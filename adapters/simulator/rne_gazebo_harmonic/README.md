@@ -685,6 +685,39 @@ cargo run --locked -p showcase_captures \
   --output artifacts/openarm-sensor-jitter-robustness-lab/report/minimum-sensor-jitter-failure.rne-replay
 ```
 
+## Sweep independently selected stale sensor age
+
+The stale-age dimension keeps capture, publication, base availability, and
+backend state nominal. During controller steps 3243 through 3302 it selects the
+`N`th older already-available publication while retaining that publication's
+original capture timestamp:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_feedback_controller_stale_age \
+  --output artifacts/openarm-sensor-stale-age-robustness-lab
+```
+
+The fixed `[0, 1, 2, 3, 4]` additional-frame grid passes two frames, whose
+total age equals the allowed `50,000,001 ticks`, and first fails at three.
+Rapier, native MuJoCo, and Gazebo all localize that failure to controller step
+3243: sequence 3238 is selected with age `66,666,668 ticks`. Each backend then
+rejects exactly 60 decisions, holds the last accepted target with zero delta,
+freezes controller state, and resumes in one decision at step 3303 after the
+selection window closes. Joint-5 RMSE remains green on both sides, separating
+the age/fail-safe contract from plant performance.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-stale-age-robustness-lab \
+  --output artifacts/openarm-sensor-stale-age-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-sensor-stale-age-robustness-lab/report/openarm-sensor-stale-age-robustness-report.json \
+  --trace artifacts/openarm-sensor-stale-age-robustness-lab/sensor-stale-003frames/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-sensor-stale-age-robustness-lab/report/minimum-sensor-stale-age-failure.rne-replay
+```
+
 ## Sweep the OpenArm actuator command-transport delay
 
 The fourth robustness dimension delays only right joint 5 after controller
