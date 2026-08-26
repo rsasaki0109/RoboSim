@@ -649,6 +649,42 @@ cargo run --locked -p showcase_captures \
   --output artifacts/openarm-sensor-latency-robustness-lab/report/minimum-sensor-latency-failure.rne-replay
 ```
 
+## Sweep deterministic OpenArm sensor jitter
+
+The jitter dimension varies controller-ingress availability without changing
+the typed capture time, base one-period sensor latency, publication count, or
+plant. Within capture sequences 3241 through 3300, the deterministic schedule
+delays `N` consecutive samples by `N` periods and then exposes one nominally
+timed sample before repeating:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_feedback_controller_ingress_jitter \
+  --output artifacts/openarm-sensor-jitter-robustness-lab
+```
+
+The fixed `[0, 1, 2, 3, 4]`-period peak-jitter grid supports one period and
+first fails the fixed jitter requirement at two. Rapier, native MuJoCo, and
+Gazebo reproduce the same one/two-period boundary, visible ages of
+`33,333,334` and `50,000,001` ticks, and zero rejected decisions at both
+points. The two-period failure is localized to controller step 3244, where the
+retained capture sequence is 3240 and the exact age proves two periods of
+jitter beyond base latency. Joint-5 RMSE remains within the fixed performance
+gate on every backend, so the report does not misclassify a transport-contract
+boundary as plant divergence. Three and four periods separately exercise the
+stale-observation hold/freeze path.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-jitter-robustness-lab \
+  --output artifacts/openarm-sensor-jitter-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-sensor-jitter-robustness-lab/report/openarm-sensor-jitter-robustness-report.json \
+  --trace artifacts/openarm-sensor-jitter-robustness-lab/sensor-jitter-002frames/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-sensor-jitter-robustness-lab/report/minimum-sensor-jitter-failure.rne-replay
+```
+
 ## Sweep the OpenArm actuator command-transport delay
 
 The fourth robustness dimension delays only right joint 5 after controller

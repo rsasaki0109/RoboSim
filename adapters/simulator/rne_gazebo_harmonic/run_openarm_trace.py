@@ -355,13 +355,39 @@ def latency_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def jitter_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
+    contract = controller.get("measurement_fault_contract")
+    if (
+        isinstance(contract, dict)
+        and contract.get("kind")
+        == "joint_feedback_controller_ingress_jitter_pulse_v1"
+    ):
+        return contract
+    return None
+
+
 def availability_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
-    return dropout_contract(controller) or latency_contract(controller)
+    return dropout_contract(controller) or latency_contract(controller) or jitter_contract(controller)
 
 
-def controller_ingress_delay_frames(controller: dict[str, Any]) -> int:
+def controller_ingress_delay_frames(
+    controller: dict[str, Any], capture_sequence: int | None = None
+) -> int:
     contract = latency_contract(controller)
-    return 0 if contract is None else contract["delay_frames"]
+    if contract is not None:
+        return contract["delay_frames"]
+    contract = jitter_contract(controller)
+    if contract is None or capture_sequence is None:
+        return 0
+    maximum = contract["maximum_jitter_frames"]
+    if (
+        maximum == 0
+        or capture_sequence < contract["start_capture_sequence"]
+        or capture_sequence > contract["end_capture_sequence"]
+    ):
+        return 0
+    phase = (capture_sequence - contract["start_capture_sequence"]) % (maximum + 1)
+    return maximum if phase < maximum else 0
 
 
 def sensor_sample_published(controller: dict[str, Any], sequence: int) -> bool:
@@ -397,6 +423,40 @@ def validate_measurement_fault(controller: dict[str, Any], action_count: int) ->
             != "after_typed_feedback_availability_before_controller_ingress"
         ):
             raise ValueError("invalid OpenArm controller-ingress latency contract")
+        return
+    if contract.get("kind") == "joint_feedback_controller_ingress_jitter_pulse_v1":
+        expected_keys = {
+            "kind",
+            "classification",
+            "maximum_jitter_frames",
+            "start_capture_sequence",
+            "end_capture_sequence",
+            "schedule",
+            "controller_visibility",
+            "application_order",
+        }
+        maximum = contract.get("maximum_jitter_frames")
+        start = contract.get("start_capture_sequence")
+        end = contract.get("end_capture_sequence")
+        if (
+            set(contract) != expected_keys
+            or contract.get("classification") != "measurement_transport_jitter"
+            or not isinstance(maximum, int)
+            or isinstance(maximum, bool)
+            or not 0 <= maximum <= action_count
+            or not isinstance(start, int)
+            or isinstance(start, bool)
+            or not isinstance(end, int)
+            or isinstance(end, bool)
+            or not 1 <= start <= end <= action_count
+            or contract.get("schedule")
+            != "maximum_delay_for_n_frames_then_nominal_v1"
+            or contract.get("controller_visibility")
+            != "jittered_nominal_publication_with_original_capture_timestamp"
+            or contract.get("application_order")
+            != "after_typed_feedback_availability_before_controller_ingress"
+        ):
+            raise ValueError("invalid OpenArm controller-ingress jitter contract")
         return
     expected_keys = {
         "kind",
@@ -494,6 +554,7 @@ def apply_measurement_bias(
     if contract.get("kind") in {
         "joint_feedback_publication_dropout_burst_v1",
         "joint_feedback_controller_ingress_delay_v1",
+        "joint_feedback_controller_ingress_jitter_pulse_v1",
     }:
         return positions, bias
     expected_keys = {
@@ -678,13 +739,15 @@ def run_success(
     recovering_from_rejection = False
     for action in action_artifact["actions"]:
         consumed_at_ticks = (action["step"] - 1) * FIXED_DELTA_TICKS
-        ingress_delay_ticks = controller_ingress_delay_frames(controller) * FIXED_DELTA_TICKS
         delayed_observation = next(
             (
                 frame
                 for frame in reversed(observations)
                 if frame["sensor_sample_published"]
-                and frame["sim_time_ticks"] + FIXED_DELTA_TICKS + ingress_delay_ticks
+                and frame["sim_time_ticks"]
+                + FIXED_DELTA_TICKS
+                + controller_ingress_delay_frames(controller, frame["step"])
+                * FIXED_DELTA_TICKS
                 <= consumed_at_ticks
             ),
             None,

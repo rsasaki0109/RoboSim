@@ -217,6 +217,41 @@ class OpenArmRobustnessSuiteTests(unittest.TestCase):
         RUNNER.validate_measurement_fault(controller, 3600)
         self.assertEqual(RUNNER.controller_ingress_delay_frames(controller), 3)
 
+    def test_sensor_jitter_grid_uses_deterministic_burst_schedule(self) -> None:
+        suite, controllers = MODULE.compile_robustness_suite(
+            COMPILER,
+            SCRIPT_DIR / "openarm_robustness_experiments.json",
+            ROOT / "docs/evidence/openarm-plant-lab/evidence/openarm-plant-lab-report.json",
+            SCRIPT_DIR / "openarm_plant_experiments.json",
+            SCRIPT_DIR / "openarm_right_pose_cycle.controller.json",
+            SCRIPT_DIR / "openarm_controller_requirements.json",
+            "joint_feedback_controller_ingress_jitter",
+        )
+        self.assertEqual(
+            suite["dimension_id"], "joint_feedback_controller_ingress_jitter"
+        )
+        self.assertEqual(
+            [
+                controller["measurement_fault_contract"]["maximum_jitter_frames"]
+                for controller in controllers.values()
+            ],
+            [0, 1, 2, 3, 4],
+        )
+        controller = controllers["sensor-jitter-002frames"]
+        contract = controller["measurement_fault_contract"]
+        self.assertEqual(
+            contract["schedule"], "maximum_delay_for_n_frames_then_nominal_v1"
+        )
+        RUNNER.validate_measurement_fault(controller, 3600)
+        start = contract["start_capture_sequence"]
+        self.assertEqual(
+            [
+                RUNNER.controller_ingress_delay_frames(controller, start + offset)
+                for offset in range(6)
+            ],
+            [2, 2, 0, 2, 2, 0],
+        )
+
     def test_command_rate_limit_uses_previous_applied_target_and_fixed_delta(self) -> None:
         suite, controllers = MODULE.compile_robustness_suite(
             COMPILER,

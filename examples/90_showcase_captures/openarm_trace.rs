@@ -145,6 +145,16 @@ enum MeasurementFaultContract {
         controller_visibility: String,
         application_order: String,
     },
+    #[serde(rename = "joint_feedback_controller_ingress_jitter_pulse_v1")]
+    JointFeedbackControllerIngressJitterPulseV1 {
+        classification: String,
+        maximum_jitter_frames: u64,
+        start_capture_sequence: u64,
+        end_capture_sequence: u64,
+        schedule: String,
+        controller_visibility: String,
+        application_order: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -890,6 +900,27 @@ fn validate(
                     && application_order
                         == "after_typed_feedback_availability_before_controller_ingress",
                 "invalid OpenArm controller-ingress latency contract"
+            ),
+            MeasurementFaultContract::JointFeedbackControllerIngressJitterPulseV1 {
+                classification,
+                maximum_jitter_frames,
+                start_capture_sequence,
+                end_capture_sequence,
+                schedule,
+                controller_visibility,
+                application_order,
+            } => anyhow::ensure!(
+                classification == "measurement_transport_jitter"
+                    && *maximum_jitter_frames <= final_step
+                    && *start_capture_sequence >= 1
+                    && start_capture_sequence <= end_capture_sequence
+                    && *end_capture_sequence <= final_step
+                    && schedule == "maximum_delay_for_n_frames_then_nominal_v1"
+                    && controller_visibility
+                        == "jittered_nominal_publication_with_original_capture_timestamp"
+                    && application_order
+                        == "after_typed_feedback_availability_before_controller_ingress",
+                "invalid OpenArm controller-ingress jitter contract"
             ),
         }
     }
@@ -1685,16 +1716,34 @@ fn has_availability_fault(controller: &ControllerSpec) -> bool {
         Some(
             MeasurementFaultContract::JointFeedbackPublicationDropoutBurstV1 { .. }
                 | MeasurementFaultContract::JointFeedbackControllerIngressDelayV1 { .. }
+                | MeasurementFaultContract::JointFeedbackControllerIngressJitterPulseV1 { .. }
         )
     )
 }
 
-fn controller_ingress_delay_ticks(controller: &ControllerSpec) -> u64 {
+fn controller_ingress_delay_ticks(controller: &ControllerSpec, capture_sequence: u64) -> u64 {
     match controller.measurement_fault_contract.as_ref() {
         Some(MeasurementFaultContract::JointFeedbackControllerIngressDelayV1 {
             delay_frames,
             ..
         }) => delay_frames.saturating_mul(FIXED_DELTA_TICKS),
+        Some(MeasurementFaultContract::JointFeedbackControllerIngressJitterPulseV1 {
+            maximum_jitter_frames,
+            start_capture_sequence,
+            end_capture_sequence,
+            ..
+        }) if *maximum_jitter_frames > 0
+            && capture_sequence >= *start_capture_sequence
+            && capture_sequence <= *end_capture_sequence =>
+        {
+            let phase = (capture_sequence - start_capture_sequence)
+                % maximum_jitter_frames.saturating_add(1);
+            if phase < *maximum_jitter_frames {
+                maximum_jitter_frames.saturating_mul(FIXED_DELTA_TICKS)
+            } else {
+                0
+            }
+        }
         _ => 0,
     }
 }
@@ -1851,7 +1900,6 @@ fn rollout(
     let mut maximum_sensor_backend_position_delta_rad = 0.0_f64;
     let mut maximum_sensor_backend_velocity_delta_rad_s = 0.0_f64;
     for action in actions {
-        let ingress_delay_ticks = controller_ingress_delay_ticks(controller);
         let visible_controller_observation =
             controller_observation_history
                 .iter()
@@ -1859,7 +1907,10 @@ fn rollout(
                 .find(|observation| {
                     observation
                         .available_time_ticks
-                        .saturating_add(ingress_delay_ticks)
+                        .saturating_add(controller_ingress_delay_ticks(
+                            controller,
+                            observation.sequence,
+                        ))
                         <= sim.sim_time().ticks()
                 });
         let decision = bounded_controller_decision(

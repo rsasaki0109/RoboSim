@@ -424,6 +424,71 @@ class OpenArmRobustnessReportTests(unittest.TestCase):
         self.assertEqual(violation["requirement_id"], "ingress")
         self.assertEqual(violation["step"], 4)
 
+    def test_jitter_metrics_recompute_schedule_and_first_peak(self) -> None:
+        sequences = [None, None, 1, 1, 1, 4, 4, 4]
+        ages = [None, None, 10, 20, 30, 10, 20, 30]
+        observations = []
+        for step, (sequence, age) in enumerate(zip(sequences, ages), 1):
+            observations.append(
+                {
+                    "step": step,
+                    "sim_time_ticks": step * 10,
+                    "sensor_sample_published": True,
+                    "controller_observation_sequence": sequence,
+                    "controller_observation_age_ticks": age,
+                    "controller_bootstrap": sequence is None,
+                    "controller_rejected": False,
+                    "joint_position_rad": [step / 100.0],
+                    "joint_reference_position_rad": [0.0],
+                    "joint_controller_observation_position_rad": (
+                        [] if sequence is None else [sequence / 100.0]
+                    ),
+                    "joint_controller_target_rad": [0.1],
+                    "joint_integral_correction_rad": [0.0],
+                }
+            )
+        controller = {
+            "measurement_fault_contract": {
+                "kind": "joint_feedback_controller_ingress_jitter_pulse_v1",
+                "maximum_jitter_frames": 2,
+                "start_capture_sequence": 2,
+                "end_capture_sequence": 6,
+                "schedule": "maximum_delay_for_n_frames_then_nominal_v1",
+            }
+        }
+        metrics = MODULE.jitter_metrics(controller, observations, 0, 10)
+        self.assertIsNotNone(metrics)
+        self.assertIsNone(metrics["first_realization_mismatch"])
+        self.assertEqual(metrics["maximum_realized_jitter_frames"], 2)
+        self.assertEqual(metrics["jittered_capture_count"], 4)
+        requirements = {
+            "controller.sensor.maximum_controller_ingress_jitter_frames": {
+                "id": "jitter",
+                "unit": "control_period_count",
+                "maximum": 1,
+            },
+            "controller.sensor.maximum_observation_age_ticks": {
+                "id": "age",
+                "unit": "tick",
+                "maximum": 30,
+            },
+            "controller.sensor_jitter.maximum_controlled_joint_rmse_rad": {
+                "id": "rmse",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+            "controller.sensor_jitter.maximum_controlled_joint_final_error_rad": {
+                "id": "final",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+        }
+        violation = MODULE.first_jitter_violation(
+            metrics, observations, requirements
+        )
+        self.assertEqual(violation["requirement_id"], "jitter")
+        self.assertEqual(violation["step"], 5)
+
 
 if __name__ == "__main__":
     unittest.main()

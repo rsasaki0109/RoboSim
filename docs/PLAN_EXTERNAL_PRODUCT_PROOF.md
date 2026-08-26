@@ -466,12 +466,14 @@ actuator-authority envelope. The next slices are:
    with nonphysical multipliers. The next inertia experiment must excite a
    dynamically sensitive joint/coupled mode or vary a physically sourced
    payload/link inertia with positive-definite tensor checks;
-4. **Latency complete; jitter next:** controller-ingress latency now has a fixed
+4. **Latency and jitter complete; stale-age policy next:** controller-ingress latency now has a fixed
    `[0, 1, 2, 3, 4]`-period sweep with original capture timestamps, exact
    controller-visible age, cross-backend 0/1-period boundary evidence, stale-age
    hold/freeze behavior, and a minimum failure replay. Continue with
-   deterministic jitter, independently varied stale age, burst patterns,
-   recovery policy, quantization, saturation, and stuck-value envelopes;
+   deterministic jitter has a separate one/two-period portable boundary with
+   an independently recomputed periodic schedule. Continue with independently
+   varied stale age, burst patterns, recovery policy, quantization, saturation,
+   and stuck-value envelopes;
 5. turn the joint-5 plant lab into per-joint and coupled operating-region
    identification with uncertainty, coherence, residual, and held-out
    prediction evidence;
@@ -696,7 +698,15 @@ fixed joint-5 performance gates there, while Gazebo remains performance-green.
 At three and four added periods, the three-period maximum-age policy rejects
 stale observations and proves zero-delta target hold with frozen controller
 state. The portable first failure is localized to the first delayed controller
-consumption at step 4 and retained as a minimum replay. Physical parameter
+consumption at step 4 and retained as a minimum replay. The deterministic
+jitter successor varies only controller-ingress availability over capture
+sequences 3241–3300 using an `N`-delayed/one-nominal periodic schedule. Its
+fixed `[0, 1, 2, 3, 4]`-period grid passes one and first fails two periods on
+Rapier, native MuJoCo, and Gazebo. Both boundary points remain within the
+three-period age limit with zero rejections and green joint-5 performance;
+step 3244 retains capture sequence 3240 at `50,000,001 ticks`, independently
+proving the first two-period jitter violation. Three and four periods exercise
+the stale hold/freeze policy separately. Physical parameter
 sweeps, actuator-authority degradation, command delay, command slew-rate limits,
 command deadband, viscous damping, and regularized Coulomb friction are recorded
 below; inertia and transmission-efficiency boundaries remain open.
