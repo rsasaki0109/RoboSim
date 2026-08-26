@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
+import tempfile
 import unittest
 
 
@@ -14,6 +16,7 @@ from openarm_actuation import (  # noqa: E402
     realize_joint_command,
     realize_joint_command_diagnostic,
     validate_actuation,
+    write_actuation_diagnostics,
 )
 
 
@@ -33,6 +36,16 @@ def effort_config() -> dict:
 
 
 class OpenArmActuationTests(unittest.TestCase):
+    def test_diagnostic_sidecar_is_compact_atomic_and_round_trips(self) -> None:
+        value = {"kind": "diagnostic", "steps": [{"step": 1, "values": [1.0, 2.0]}]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "diagnostics.json"
+            write_actuation_diagnostics(path, value)
+            encoded = path.read_text(encoding="utf-8")
+            self.assertEqual(json.loads(encoded), value)
+            self.assertNotIn("  ", encoded)
+            self.assertFalse(path.with_name(path.name + ".tmp").exists())
+
     def test_effort_pd_declares_limits_failure_behavior_and_substeps(self) -> None:
         self.assertEqual(
             validate_actuation(effort_config(), 3),

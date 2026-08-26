@@ -23,6 +23,7 @@ from openarm_actuation import (
     regularized_coulomb_effort,
     realize_joint_command_diagnostic,
     validate_actuation,
+    write_actuation_diagnostics,
 )
 
 
@@ -381,12 +382,7 @@ class GazeboOpenArmAdapter:
                 ),
                 "steps": self.actuation_diagnostics,
             }
-            self.actuation_diagnostics_output.parent.mkdir(parents=True, exist_ok=True)
-            # Stream multi-megabyte diagnostics instead of issuing one large
-            # write, which is unreliable on some WSL DrvFS mounts.
-            with self.actuation_diagnostics_output.open("w", encoding="utf-8") as sink:
-                json.dump(output, sink, indent=2, allow_nan=False)
-                sink.write("\n")
+            write_actuation_diagnostics(self.actuation_diagnostics_output, output)
         return self.response(request, {"type": "closed"})
 
 

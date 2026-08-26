@@ -152,12 +152,12 @@ python adapters/simulator/rne_gazebo_harmonic/build_openarm_coulomb_friction_sui
 python adapters/simulator/rne_gazebo_harmonic/build_openarm_coulomb_friction_report.py \
   --fixture-root artifacts/openarm-coulomb/fixtures \
   --trace-root artifacts/openarm-coulomb \
-  --controller artifacts/openarm-joint-loss/controller-tuning-report/openarm-joint-loss-selected.controller.json \
+  --controller artifacts/openarm-coulomb-controller-poles/candidates/openarm-coulomb-poles-fast.controller.json \
   --output artifacts/openarm-coulomb/report
 cargo run --locked -p showcase_captures \
   --bin rne-openarm-joint-loss-failure-replay -- \
   --report artifacts/openarm-coulomb/report/openarm-coulomb-friction-report.json \
-  --trace artifacts/openarm-coulomb/rapier/joint5-coulomb-0250mn/rapier-success-trace.json \
+  --trace artifacts/openarm-coulomb/rapier/joint5-coulomb-2000mn/rapier-success-trace.json \
   --output artifacts/openarm-coulomb/report/openarm-coulomb-friction-first-failure.rne-replay
 ```
 
@@ -169,15 +169,14 @@ as in the native backends; Gazebo evidence remains adapter diagnostics rather
 than a backend effort measurement.
 
 The frozen `[0, 0.25, 0.5, 1, 2] N*m` grid keeps plant viscous damping at
-10 N*m*s/rad and the transition velocity at 0.01 rad/s. All 15 real runs have
-exact same-runtime replay and exact independently checked parameter
-realization. The report deliberately remains `needs_tuning`: the first
-supported failure is Rapier at 0.25 N*m, where RMSE is 0.038961 rad against the
-unchanged 0.02 rad limit. MuJoCo and Gazebo pass through the declared 0.5 N*m
-point. A diagnostic Rapier controller-correction sweep at 0.5 N*m did not
-recover the limit, so transition-width/integration sensitivity is the next
-predeclared tuning dimension. The supported envelope and tolerance are not
-changed after observing this result.
+10 N*m*s/rad and the transition velocity at 0.01 rad/s. The predeclared
+`fast`, `baseline`, `medium`, and `slow` pole candidates were rerun after the
+typed actuator law and current 19-substep fixture were corrected. On the fixed
+0.5 N*m Rapier tuning case they produce `0.016882`, `0.021732`, `0.030511`,
+and `0.039050 rad` RMSE. The unchanged selection rule therefore chooses
+`fast`; no effort limit, friction envelope, or `0.02 rad` tolerance changes.
+The selected controller is then held byte-identical across the complete grid
+and all three backends.
 
 URDF cannot encode that transition width. Portable fixtures therefore bind it
 in the hashed robot asset rather than a runner-only argument:
@@ -191,27 +190,8 @@ coulomb_transition_velocity_rad_s = 0.01
 The asset loader requires articulation, a unique known joint, exactly one
 revolute or prismatic unit field, and a finite positive value. It preserves the
 URDF damping and Coulomb magnitude and overrides only the unrepresentable
-transition velocity. The predeclared Rapier tuning grid
-`[0.01, 0.02, 0.04, 0.05] rad/s` also requires at least 95% of the requested
-kinetic loss at 0.1 rad/s. All four candidates retain exact replay and exact
-realization but fail the fixed RMSE limit at `0.036139`, `0.041792`, `0.044637`,
-and `0.038900 rad`. No transition is selected; the browser report remains
-`needs_tuning`, and physics-substep sensitivity is the next predeclared
-experiment.
-
-The substep experiment partitions the exact `16,666,667 tick` control period
-without drift and freezes `[1, 2, 5, 10]` physics steps before execution. It
-also stays red: RMSE is `0.036139`, `0.047853`, `0.324674`, and `0.084528 rad`.
-The 5- and 10-substep cases materially worsen the force-based servo response,
-so no substep count is selected and the 1-step production behavior remains
-unchanged. Transition smoothing and numerical subdivision are therefore ruled
-out as fixes for this contract; controller/plant-model retuning at the fixed
-0.5 N*m case is next.
-
-The first controller retuning experiment freezes that same plant, TaskSpec,
-trajectory, observation/disturbance contracts, correction limits, and
-single-substep execution while replacing only the four desired closed-loop
-poles. Build its predeclared candidates and browser report with:
+transition velocity. Build the pole candidates and browser-readable selection
+report with:
 
 ```bash
 python adapters/simulator/rne_gazebo_harmonic/build_openarm_coulomb_controller_pole_tuning.py \
@@ -224,22 +204,22 @@ python adapters/simulator/rne_gazebo_harmonic/build_openarm_coulomb_controller_p
   --output artifacts/openarm-coulomb-controller-poles/report
 ```
 
-The `fast`, `baseline`, `medium`, and `slow` candidates produce respectively
-`0.055565`, `0.036139`, `0.034136`, and `0.035176 rad` RMSE. All retain exact
-replay, exact controller identity, and exact plant realization, but none passes
-the unchanged `0.02 rad` gate, so the report remains `needs_tuning` and selects
-no controller. The baseline spends 1,020 of 3,600 samples at the joint-5 effort
-command limit: its saturated-sample RMSE is `0.065922 rad`, versus `0.010210
-rad` while not saturated. The otherwise identical zero-Coulomb run reaches
-that command-model limit for only three samples and passes at `0.013454 rad`.
-The browser report deliberately distinguishes commands from measurements. At
-0.5 N*m, the retained sweep localizes both tracking-performance failures and
-actuator-realization evidence before bounded model-based Coulomb compensation
-is accepted. The experiment now has a fixed structural check that actuator-side
-effort exceeds its declared clamp by no more than `1e-12 N*m`. It uses native
-measured actuator force when available, the bounded command model otherwise,
-and Gazebo's adapter-owned post-clamp diagnostic. The supported friction
-envelope and tracking acceptance limits remain unchanged.
+The final 15-run report is `passed`. Rapier RMSE is `0.014596`, `0.015728`,
+`0.016882`, `0.019263`, and `0.023701 rad`; native MuJoCo is `0.014596`,
+`0.015727`, `0.016881`, `0.019284`, and `0.023813 rad`; Gazebo is `0.005441`,
+`0.006037`, `0.006932`, `0.009224`, and `0.014510 rad`. All supported points
+through 0.5 N*m pass. The 1 N*m rows remain performance-green but are
+`outside_declared_envelope`; Rapier and MuJoCo first fail the unchanged RMSE
+gate at 2 N*m, while Gazebo remains performance-green outside capacity. Model
+and transition realization, controller/action provenance, and same-runtime
+replay are exact in every row.
+
+The browser report deliberately distinguishes commands from measurements and
+has a fixed structural check that actuator-side effort exceeds its declared
+clamp by no more than `1e-12 N*m`. Rapier and MuJoCo use completed-step native
+measurement; Gazebo uses the adapter-owned post-clamp diagnostic. All 15 rows
+have zero excess. The largest native peak is `6.684050 N*m`, and Gazebo never
+exceeds `7 N*m`.
 
 The portable measurement boundary is `rne_physics::JointEffortMeasurement`.
 It is optional completed-step evidence, so a missing backend measurement stays
@@ -252,12 +232,16 @@ implicit actuator-damping cancellation had been added outside the bounded
 control law. Typed actuator damping is now evaluated inside the clamp, passive
 plant damping remains native, and regularized Coulomb loss is applied as a
 separate generalized plant force. A same-controller, same-action rerun retains
-all 3,600 measurements and exact replay while bounding both native measurement
-and command to a `6.362613 N*m` peak. Its joint-5 RMSE is `0.021737 rad`, just
-outside the unchanged `0.02 rad` performance gate, so actuator conformance is
-fixed but controller tuning remains explicitly open. Rapier continues to
-report effort unavailable until a qualifying solver or hardware measurement
-exists.
+all 3,600 measurements and exact replay. With the selected fast-pole controller,
+the same case reaches `0.016881 rad` RMSE and a `6.538169 N*m` measured peak.
+The 2 N*m Rapier boundary failure is retained as a step-3600 behavior replay
+and a verified 30-artifact Failure Capsule alongside all three focused traces,
+model/configuration inputs, hashes, and runner/report sources.
+
+Gazebo diagnostics are serialized as compact JSON through a sibling temporary
+file and atomically replaced on close. This keeps the unchanged 15-second wire
+response timeout viable on WSL shared mounts and prevents a killed adapter from
+leaving a valid-looking partial sidecar.
 
 ## Run conformance
 

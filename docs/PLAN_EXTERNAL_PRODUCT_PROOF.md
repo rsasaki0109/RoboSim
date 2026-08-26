@@ -450,23 +450,22 @@ actuator-authority envelope. The next slices are:
 1. **Complete:** add a source-step-verifiable actuator command-transport delay across
    Rapier, MuJoCo, and Gazebo at the shared boundary after controller limits
    and before backend actuation;
-2. **In progress:** the physical command slew-rate, command-deadband, and
-   viscous joint-damping boundaries are complete, including controller
-   retuning at the predeclared damping limit. The shared smooth Coulomb law,
-   explicit transition velocity, Rapier/MuJoCo realization, and Gazebo
-   substep-level effort diagnostics are implemented; complete its fixed sweep,
-   browser report, replay, and capsule before continuing with inertia and
-   transmission-efficiency, retaining the smallest failing value for each
-   mechanism;
-3. expand sensor timing evidence from the completed fixed dropout case to
+2. **Complete:** the physical command slew-rate, command-deadband, viscous
+   joint-damping, and regularized-Coulomb boundaries are complete. The Coulomb
+   slice includes predeclared controller selection, a fixed 15-run
+   Rapier/MuJoCo/Gazebo sweep, exact replay, a browser report, a minimum failure
+   replay, and a verified Failure Capsule;
+3. **Next:** add inertia and transmission-efficiency boundaries, retaining the
+   smallest failing value for each mechanism;
+4. expand sensor timing evidence from the completed fixed dropout case to
    latency, deterministic jitter, stale age, burst dropout, recovery policy,
    quantization, saturation, and stuck-value envelopes;
-4. turn the joint-5 plant lab into per-joint and coupled operating-region
+5. turn the joint-5 plant lab into per-joint and coupled operating-region
    identification with uncertainty, coherence, residual, and held-out
    prediction evidence;
-5. compare constrained PID and justified state-space control using identical
+6. compare constrained PID and justified state-space control using identical
    typed observations, limits, references, and perturbations;
-6. then advance camera/depth and metric 3DGS calibration, followed by lidar
+7. then advance camera/depth and metric 3DGS calibration, followed by lidar
    only when a retained navigation task consumes it.
 
 Sensor dropout/recovery at the typed controller boundary, actuator realization
@@ -678,8 +677,8 @@ zero delta, and recover in one decision on fresh sequence 3243. The earliest
 violation is still capture sequence 3242, where the third consecutive
 publication is absent; the minimum replay stops there. Physical parameter
 sweeps, actuator-authority degradation, command delay, command slew-rate limits,
-and command deadband are recorded below; friction/damping, inertia, and
-transmission-efficiency boundaries remain open.
+command deadband, viscous damping, and regularized Coulomb friction are recorded
+below; inertia and transmission-efficiency boundaries remain open.
 
 The first physical joint-loss dimension now separates URDF plant damping from
 actuator servo damping. Its predeclared `[0, 2.5, 5, 10, 20] N*m*s/rad` joint-5
@@ -696,29 +695,32 @@ delta. The declared 10-point now passes at `0.013450`, `0.017185`, and
 `0.021684 rad`. The browser report is `passed` and classifies those three rows
 as `expected_boundary_failure`; the step-3600 replay retains the first Rapier
 boundary failure. The portable regularized-Coulomb implementation now has a
-complete 15-run Rapier/native-MuJoCo/external-Gazebo sweep over the frozen
-`[0, 0.25, 0.5, 1, 2] N*m` grid. Model realization and same-runtime replay are
-exact in every row, but the report is honestly `needs_tuning`: Rapier first
-misses the fixed `0.02 rad` RMSE contract at the supported 0.25 N*m point
-(`0.038961 rad`). MuJoCo and Gazebo pass through 0.5 N*m. A predeclared
-controller-correction diagnostic at the Rapier 0.5 N*m point did not close the
-gap. Transition width is now a unit-bearing, hashed `.rne.robot.toml` override
-because URDF cannot represent it. The predeclared
-`[0.01, 0.02, 0.04, 0.05] rad/s` Rapier grid keeps at least 95% kinetic loss at
-0.1 rad/s, but every candidate still fails at `0.036139-0.044637 rad` RMSE.
-No candidate is selected and no tolerance is relaxed. This rules out transition
-regularization as the primary cause and advances the next experiment to
-physics-substep sensitivity with controller and plant held fixed. A verified
-Failure Capsule captures the first deviation. Inertia and
-transmission-efficiency dimensions also remain open.
+complete 15-run Rapier/native-MuJoCo/Gazebo sweep over the frozen
+`[0, 0.25, 0.5, 1, 2] N*m` grid. Transition width is a unit-bearing, hashed
+`.rne.robot.toml` override because URDF cannot represent it. Earlier transition
+and substep experiments did not recover the fixed `0.02 rad` RMSE gate. After
+correcting the typed actuator law and freezing the current 19-substep fixture,
+the predeclared `fast`, `baseline`, `medium`, and `slow` pole candidates produce
+`0.016882`, `0.021732`, `0.030511`, and `0.039050 rad` on the Rapier 0.5 N*m
+tuning case. The unchanged rule selects `fast`. That byte-identical controller
+then passes all three backends through the declared 0.5 N*m envelope; model
+realization and replay remain exact in all rows. Rapier and MuJoCo first fail
+the unchanged RMSE gate at the 2 N*m out-of-envelope point (`0.023701` and
+`0.023813 rad`), while Gazebo remains performance-green outside capacity. Every
+actuator-effort row stays within the 7 N*m limit. The browser report is
+`passed`; a step-3600 Rapier replay retains the first performance failure, and
+a verified 30-artifact Failure Capsule binds the three focused traces, inputs,
+hashes, diagnostics, and runner/report sources. Inertia and
+transmission-efficiency remain next.
 
-The exact-tick substep sweep is also complete. `[1, 2, 5, 10]` Rapier physics
-steps per 16,666,667-tick control period produce `0.036139`, `0.047853`,
+The earlier exact-tick substep sweep is retained as negative evidence.
+`[1, 2, 5, 10]` Rapier physics steps per 16,666,667-tick control period produce
+`0.036139`, `0.047853`,
 `0.324674`, and `0.084528 rad` RMSE. All replay and timing checks remain exact,
 but none passes and higher substep counts degrade the force-based motor
-response. No numerical setting is selected. The next bounded experiment must
-retune the controller/identified plant at the fixed supported 0.5 N*m point,
-then hold the selected controller unchanged across all backends and magnitudes.
+response. No numerical setting was selected; the later fixed-fixture pole
+selection and cross-backend validation above supersede it as the accepted
+controller experiment.
 
 The command slew-rate fixture clamps each joint-5 applied target against the
 previous applied target using the fixed control period. Its descending

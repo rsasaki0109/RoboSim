@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
+
+
+def write_actuation_diagnostics(path: Path, output: dict[str, Any]) -> None:
+    """Persist a compact diagnostic sidecar atomically for slow shared mounts."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("w", encoding="utf-8") as sink:
+        json.dump(output, sink, separators=(",", ":"), allow_nan=False)
+        sink.write("\n")
+    temporary.replace(path)
 
 
 def validate_actuation(
