@@ -18,13 +18,14 @@ macro_rules! ensure {
 
 const FIXTURE_KIND: &str = "rne_gaussian_splat_validation_fixture";
 const FIXTURE_SCHEMA_VERSION: u64 = 1;
-const EXPECTED_CONTRACTS: [&str; 6] = [
+const EXPECTED_CONTRACTS: [&str; 7] = [
     "floor_world_alignment",
     "camera_intrinsics_extrinsics",
     "semantic_landmark_reprojection",
     "collision_semantic_alignment",
     "independent_metric_scale_anchor",
     "real_sim_observation_comparison",
+    "sparse_depth_alignment",
 ];
 
 /// Result of rehashing and semantically auditing one 3DGS validation fixture.
@@ -151,6 +152,7 @@ pub fn audit_gaussian_splat_validation_fixture(
             "semantic_landmarks",
             "collision_semantic_alignment",
             "real_sim_observation_comparison",
+            "sparse_depth_alignment",
             "contracts",
         ],
         "fixture",
@@ -169,7 +171,8 @@ pub fn audit_gaussian_splat_validation_fixture(
     let declared_qualifying = boolean(root, "qualifying")?;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
 
-    validate_provenance(object(field(root, "provenance")?, "provenance")?, parent)?;
+    let provenance = object(field(root, "provenance")?, "provenance")?;
+    validate_provenance(provenance, parent)?;
     let source_to_world = object(field(root, "source_to_world")?, "source_to_world")?;
     validate_source_to_world(source_to_world)?;
     let floor_passed = validate_floor(object(field(root, "floor_alignment")?, "floor_alignment")?)?;
@@ -201,6 +204,19 @@ pub fn audit_gaussian_splat_validation_fixture(
         &environment_id,
         renderer_identity,
     )?;
+    let sparse_depth_passed = validate_sparse_depth_alignment(
+        object(
+            field(root, "sparse_depth_alignment")?,
+            "sparse_depth_alignment",
+        )?,
+        parent,
+        &environment_id,
+        string(
+            object(field(provenance, "splat_ply")?, "splat_ply")?,
+            "sha256",
+        )?,
+        metric_passed,
+    )?;
 
     let expected = BTreeMap::from([
         ("floor_world_alignment", pass_or_fail(floor_passed)),
@@ -221,6 +237,7 @@ pub fn audit_gaussian_splat_validation_fixture(
             "real_sim_observation_comparison",
             pass_or_fail(observation_passed),
         ),
+        ("sparse_depth_alignment", pass_or_fail(sparse_depth_passed)),
     ]);
     let contracts = validate_contracts(array(field(root, "contracts")?, "contracts")?)?;
     ensure!(
@@ -947,6 +964,230 @@ fn validate_observation_comparison(
     Ok(passed)
 }
 
+fn validate_sparse_depth_alignment(
+    value: &Map<String, Value>,
+    parent: &Path,
+    environment_id: &str,
+    expected_ply_sha256: &str,
+    metric_passed: bool,
+) -> Result<bool, GaussianSplatValidationError> {
+    ensure_exact_keys(
+        value,
+        &[
+            "status",
+            "reference_camera_id",
+            "depth_algorithm_identity",
+            "report",
+            "depth_frame_hash",
+            "finite_depth_pixels",
+            "finite_depth_fraction",
+            "matched_landmarks",
+            "mean_absolute_error_source_units",
+            "max_absolute_error_source_units",
+            "tolerances",
+            "metric_qualified",
+            "units_note",
+        ],
+        "sparse_depth_alignment",
+    )?;
+    let camera_id = nonempty_string(value, "reference_camera_id")?;
+    let algorithm = nonempty_string(value, "depth_algorithm_identity")?;
+    ensure!(
+        algorithm == "rne.gaussian_splat.proxy_depth.v1",
+        "unsupported sparse-depth algorithm"
+    );
+    let report_path = verify_artifact(
+        object(field(value, "report")?, "sparse-depth report artifact")?,
+        parent,
+        "sparse_depth_alignment.report",
+    )?;
+    let report_bytes =
+        fs::read(&report_path).map_err(|error| GaussianSplatValidationError::Io {
+            path: report_path.display().to_string(),
+            message: error.to_string(),
+        })?;
+    let report_value: Value = serde_json::from_slice(&report_bytes).map_err(|error| {
+        GaussianSplatValidationError::Parse {
+            path: report_path.display().to_string(),
+            message: error.to_string(),
+        }
+    })?;
+    let report = object(&report_value, "sparse-depth report")?;
+    ensure_exact_keys(
+        report,
+        &[
+            "kind",
+            "schema_version",
+            "environment_id",
+            "camera_id",
+            "camera_calibration_sha256",
+            "depth_algorithm_identity",
+            "ply_sha256",
+            "width_px",
+            "height_px",
+            "depth_frame_hash",
+            "finite_depth_pixels",
+            "finite_depth_fraction",
+            "patch_radius_px",
+            "landmarks",
+            "matched_landmarks",
+            "mean_absolute_error_source_units",
+            "max_absolute_error_source_units",
+            "tolerances",
+            "passed",
+            "metric_qualified",
+            "units_note",
+        ],
+        "sparse-depth report",
+    )?;
+    ensure!(
+        string(report, "kind")? == "rne_registered_splat_sparse_depth_report"
+            && unsigned(report, "schema_version")? == 1,
+        "unsupported sparse-depth report identity"
+    );
+    ensure!(
+        string(report, "environment_id")? == environment_id
+            && string(report, "camera_id")? == camera_id
+            && string(report, "depth_algorithm_identity")? == algorithm,
+        "sparse-depth report identity drifted"
+    );
+    ensure_sha256(
+        string(report, "camera_calibration_sha256")?,
+        "camera_calibration_sha256",
+    )?;
+    ensure!(
+        string(report, "ply_sha256")? == expected_ply_sha256,
+        "sparse-depth report PLY digest drifted"
+    );
+    let width = unsigned(report, "width_px")?;
+    let height = unsigned(report, "height_px")?;
+    ensure!(width > 0 && height > 0, "sparse-depth extent is empty");
+    let finite_pixels = unsigned(report, "finite_depth_pixels")?;
+    ensure!(
+        finite_pixels <= width * height,
+        "sparse-depth finite pixel count exceeds extent"
+    );
+    let finite_fraction = finite(report, "finite_depth_fraction")?;
+    let recomputed_fraction = finite_pixels as f64 / (width * height) as f64;
+    ensure!(
+        within_tolerance(finite_fraction, recomputed_fraction, 1.0e-12),
+        "sparse-depth coverage fraction drifted"
+    );
+    ensure!(
+        unsigned(report, "patch_radius_px")? == 1,
+        "sparse-depth sampling patch drifted"
+    );
+
+    let landmarks = array(field(report, "landmarks")?, "sparse-depth landmarks")?;
+    let mut errors = Vec::with_capacity(landmarks.len());
+    let mut landmark_ids = BTreeSet::new();
+    for landmark in landmarks {
+        let landmark = object(landmark, "sparse-depth landmark")?;
+        ensure_exact_keys(
+            landmark,
+            &[
+                "landmark_id",
+                "semantic_class",
+                "pixel_u_px",
+                "pixel_v_px",
+                "reference_depth_source_units",
+                "rne_proxy_depth_source_units",
+                "absolute_error_source_units",
+            ],
+            "sparse-depth landmark",
+        )?;
+        ensure!(
+            landmark_ids.insert(nonempty_string(landmark, "landmark_id")?),
+            "duplicate sparse-depth landmark"
+        );
+        let _ = nonempty_string(landmark, "semantic_class")?;
+        let _ = finite(landmark, "pixel_u_px")?;
+        let _ = finite(landmark, "pixel_v_px")?;
+        let reference = finite(landmark, "reference_depth_source_units")?;
+        let proxy = finite(landmark, "rne_proxy_depth_source_units")?;
+        let declared_error = finite(landmark, "absolute_error_source_units")?;
+        ensure!(
+            within_tolerance(declared_error, (reference - proxy).abs(), 1.0e-9),
+            "sparse-depth landmark error drifted"
+        );
+        errors.push(declared_error);
+    }
+    let matched = unsigned(report, "matched_landmarks")? as usize;
+    ensure!(
+        matched == landmarks.len() && matched == errors.len(),
+        "sparse-depth matched landmark count drifted"
+    );
+    let mean_error = finite(report, "mean_absolute_error_source_units")?;
+    let max_error = finite(report, "max_absolute_error_source_units")?;
+    ensure!(!errors.is_empty(), "sparse-depth report has no landmarks");
+    let recomputed_mean = errors.iter().sum::<f64>() / errors.len() as f64;
+    let recomputed_max = errors.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    ensure!(
+        within_tolerance(mean_error, recomputed_mean, 1.0e-12)
+            && within_tolerance(max_error, recomputed_max, 1.0e-12),
+        "sparse-depth aggregate metrics drifted"
+    );
+
+    let tolerances = object(field(report, "tolerances")?, "sparse-depth tolerances")?;
+    ensure_exact_keys(
+        tolerances,
+        &[
+            "min_finite_depth_fraction",
+            "min_matched_landmarks",
+            "max_mean_absolute_error_source_units",
+            "max_absolute_error_source_units",
+        ],
+        "sparse-depth tolerances",
+    )?;
+    let min_fraction = finite(tolerances, "min_finite_depth_fraction")?;
+    let min_matched = unsigned(tolerances, "min_matched_landmarks")? as usize;
+    let max_mean = finite(tolerances, "max_mean_absolute_error_source_units")?;
+    let max_single = finite(tolerances, "max_absolute_error_source_units")?;
+    ensure!(
+        min_fraction == 0.75 && min_matched == 6 && max_mean == 0.25 && max_single == 0.75,
+        "sparse-depth tolerances are not the registered limits"
+    );
+    let passed = finite_fraction >= min_fraction
+        && matched >= min_matched
+        && mean_error <= max_mean
+        && max_error <= max_single;
+    ensure!(
+        boolean(report, "passed")? == passed,
+        "sparse-depth report verdict drifted"
+    );
+    ensure!(
+        boolean(report, "metric_qualified")? == metric_passed,
+        "sparse-depth metric qualification drifted"
+    );
+    let units_note = nonempty_string(report, "units_note")?;
+    if !metric_passed {
+        ensure!(
+            units_note.contains("not metres"),
+            "non-metric sparse depth must disclaim metres"
+        );
+    }
+    ensure!(
+        field(value, "depth_algorithm_identity")? == field(report, "depth_algorithm_identity")?
+            && field(value, "depth_frame_hash")? == field(report, "depth_frame_hash")?
+            && field(value, "finite_depth_pixels")? == field(report, "finite_depth_pixels")?
+            && field(value, "finite_depth_fraction")? == field(report, "finite_depth_fraction")?
+            && field(value, "matched_landmarks")? == field(report, "matched_landmarks")?
+            && field(value, "mean_absolute_error_source_units")?
+                == field(report, "mean_absolute_error_source_units")?
+            && field(value, "max_absolute_error_source_units")?
+                == field(report, "max_absolute_error_source_units")?
+            && field(value, "tolerances")? == field(report, "tolerances")?
+            && field(value, "metric_qualified")? == field(report, "metric_qualified")?
+            && field(value, "units_note")? == field(report, "units_note")?,
+        "sparse-depth fixture and report disagree"
+    );
+    ensure!(
+        string(value, "status")? == pass_status(passed),
+        "sparse-depth fixture status drifted"
+    );
+    Ok(passed)
+}
+
 fn compare_observations(
     reference_rgb8: &[u8],
     rendered_rgb8: &[u8],
@@ -1348,6 +1589,7 @@ mod tests {
                 "semantic_landmark_reprojection",
                 "collision_semantic_alignment",
                 "real_sim_observation_comparison",
+                "sparse_depth_alignment",
             ]
         );
         assert_eq!(audit.missing_contracts, ["independent_metric_scale_anchor"]);
@@ -1355,6 +1597,39 @@ mod tests {
         assert!(matches!(
             require_qualifying_gaussian_splat_fixture(&committed_fixture()),
             Err(GaussianSplatValidationError::NotQualifying { .. })
+        ));
+    }
+
+    #[test]
+    fn sparse_depth_contract_rejects_declared_metric_tampering() {
+        let fixture_path = committed_fixture();
+        let parent = fixture_path.parent().unwrap();
+        let fixture: Value = serde_json::from_slice(&fs::read(&fixture_path).unwrap()).unwrap();
+        let root = fixture.as_object().unwrap();
+        let provenance = root["provenance"].as_object().unwrap();
+        let ply_sha256 = provenance["splat_ply"]["sha256"].as_str().unwrap();
+        let sparse = root["sparse_depth_alignment"].clone();
+        assert!(validate_sparse_depth_alignment(
+            sparse.as_object().unwrap(),
+            parent,
+            root["environment_id"].as_str().unwrap(),
+            ply_sha256,
+            false,
+        )
+        .unwrap());
+
+        let mut forged = sparse;
+        forged["mean_absolute_error_source_units"] = json!(0.0);
+        assert!(matches!(
+            validate_sparse_depth_alignment(
+                forged.as_object().unwrap(),
+                parent,
+                root["environment_id"].as_str().unwrap(),
+                ply_sha256,
+                false,
+            ),
+            Err(GaussianSplatValidationError::Invalid(message))
+                if message.contains("fixture and report disagree")
         ));
     }
 

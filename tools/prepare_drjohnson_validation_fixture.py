@@ -706,6 +706,70 @@ def build(
     if observation_report.get("status") != ("verified" if observation_passed else "failed"):
         raise ValueError("registered observation status does not match metrics")
 
+    depth_report_path = asset_root / "IMG_6293.depth.json"
+    depth_report = json.loads(depth_report_path.read_text(encoding="utf-8"))
+    if depth_report.get("kind") != "rne_registered_splat_sparse_depth_report":
+        raise ValueError("unexpected registered sparse-depth report kind")
+    if depth_report.get("schema_version") != 1:
+        raise ValueError("unsupported registered sparse-depth report schema")
+    if depth_report.get("environment_id") != manifest["environment_id"]:
+        raise ValueError("registered sparse-depth environment mismatch")
+    if depth_report.get("camera_id") != f"colmap.{comparison_name}":
+        raise ValueError("registered sparse-depth camera mismatch")
+    if depth_report.get("ply_sha256") != sha256_file(asset_root / manifest["ply_path"]):
+        raise ValueError("registered sparse-depth PLY mismatch")
+    expected_depth_tolerances = {
+        "min_finite_depth_fraction": 0.75,
+        "min_matched_landmarks": 6,
+        "max_mean_absolute_error_source_units": 0.25,
+        "max_absolute_error_source_units": 0.75,
+    }
+    if depth_report.get("tolerances") != expected_depth_tolerances:
+        raise ValueError("registered sparse-depth tolerances drifted")
+    depth_passed = (
+        depth_report["finite_depth_fraction"]
+        >= expected_depth_tolerances["min_finite_depth_fraction"]
+        and depth_report["matched_landmarks"]
+        >= expected_depth_tolerances["min_matched_landmarks"]
+        and depth_report["mean_absolute_error_source_units"]
+        <= expected_depth_tolerances["max_mean_absolute_error_source_units"]
+        and depth_report["max_absolute_error_source_units"]
+        <= expected_depth_tolerances["max_absolute_error_source_units"]
+    )
+    if depth_report.get("passed") is not depth_passed:
+        raise ValueError("registered sparse-depth verdict drifted")
+    if depth_report.get("metric_qualified") is not (metric_anchor is not None):
+        raise ValueError("registered sparse-depth metric qualification drifted")
+    depth_landmark_inputs = [
+        (
+            landmark["landmark_id"],
+            landmark["semantic_class"],
+            landmark["observed_pixel_uv"],
+            landmark["optical_depth_source_units"],
+        )
+        for landmark in semantic_landmarks
+        if landmark["camera_id"] == f"colmap.{comparison_name}"
+    ]
+    retained_depth_inputs = [
+        (
+            landmark["landmark_id"],
+            landmark["semantic_class"],
+            [landmark["pixel_u_px"], landmark["pixel_v_px"]],
+            landmark["reference_depth_source_units"],
+        )
+        for landmark in depth_report["landmarks"]
+    ]
+    if len(retained_depth_inputs) != len(depth_landmark_inputs) or any(
+        retained[0:2] != expected[0:2]
+        or any(
+            abs(retained_pixel - expected_pixel) > 1.0e-9
+            for retained_pixel, expected_pixel in zip(retained[2], expected[2])
+        )
+        or abs(retained[3] - expected[3]) > 1.0e-12
+        for retained, expected in zip(retained_depth_inputs, depth_landmark_inputs)
+    ):
+        raise ValueError("registered sparse-depth landmark inputs drifted")
+
     ply_path = asset_root / manifest["ply_path"]
     reprojection_rmse = math.sqrt(
         sum(error * error for error in reprojection_errors) / len(reprojection_errors)
@@ -790,6 +854,25 @@ def build(
             "tolerances": tolerances,
             "photometric_note": observation_report["photometric_note"],
         },
+        "sparse_depth_alignment": {
+            "status": "verified" if depth_passed else "failed",
+            "reference_camera_id": f"colmap.{comparison_name}",
+            "depth_algorithm_identity": depth_report["depth_algorithm_identity"],
+            "report": file_artifact(depth_report_path, "IMG_6293.depth.json"),
+            "depth_frame_hash": depth_report["depth_frame_hash"],
+            "finite_depth_pixels": depth_report["finite_depth_pixels"],
+            "finite_depth_fraction": depth_report["finite_depth_fraction"],
+            "matched_landmarks": depth_report["matched_landmarks"],
+            "mean_absolute_error_source_units": depth_report[
+                "mean_absolute_error_source_units"
+            ],
+            "max_absolute_error_source_units": depth_report[
+                "max_absolute_error_source_units"
+            ],
+            "tolerances": depth_report["tolerances"],
+            "metric_qualified": depth_report["metric_qualified"],
+            "units_note": depth_report["units_note"],
+        },
         "contracts": [
             {
                 "id": "floor_world_alignment",
@@ -814,6 +897,10 @@ def build(
             {
                 "id": "real_sim_observation_comparison",
                 "status": "passed" if observation_passed else "failed",
+            },
+            {
+                "id": "sparse_depth_alignment",
+                "status": "passed" if depth_passed else "failed",
             },
         ],
     }

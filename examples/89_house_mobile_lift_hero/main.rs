@@ -380,6 +380,7 @@ fn run() -> Result<()> {
                     "semantic_landmark_reprojection",
                     "collision_semantic_alignment",
                     "real_sim_observation_comparison",
+                    "sparse_depth_alignment",
                 ]
             && validation_audit.missing_contracts == ["independent_metric_scale_anchor"]
             && !validation_audit.qualifying,

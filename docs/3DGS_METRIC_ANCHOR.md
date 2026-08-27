@@ -53,3 +53,9 @@ rehashes the anchor record and every evidence artifact, and compares the raw
 record with the resolved fixture fields. Missing evidence remains `missing`;
 malformed, substituted, or inconsistent evidence is an error and cannot turn
 the contract green.
+
+The registered sparse-depth report (`IMG_6293.depth.json`) is intentionally
+evaluated in COLMAP reconstruction units before this anchor exists. Its PLY,
+camera calibration, full-frame hash, coverage, and semantic landmark residuals
+are useful alignment evidence, but they do not convert those values to metres
+or satisfy the independent metric-scale contract.

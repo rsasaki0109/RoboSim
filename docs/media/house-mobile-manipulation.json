@@ -8,14 +8,15 @@
   "house_ply_sha256": "9e1c89c18b6dd70f3f77ef1463983d86d34d859e118aec56d77394b36a41458f",
   "validation": {
     "fixture_path": "assets/environments/voxel51_drjohnson_3dgs/drjohnson.validation.json",
-    "fixture_sha256": "3599b4ecddf1731c4c4f325f8c0bdf40dd2cc1e400b4124a0df0a0d66c4839a0",
+    "fixture_sha256": "2b4b77f264cefaa8b5945d5700e15e5ff2ec793683ff85bbc2fa88517fd02612",
     "qualifying": false,
     "passed_contracts": [
       "floor_world_alignment",
       "camera_intrinsics_extrinsics",
       "semantic_landmark_reprojection",
       "collision_semantic_alignment",
-      "real_sim_observation_comparison"
+      "real_sim_observation_comparison",
+      "sparse_depth_alignment"
     ],
     "missing_contracts": [
       "independent_metric_scale_anchor"

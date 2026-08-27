@@ -66,10 +66,18 @@ The retained render identifies its execution adapter as an NVIDIA GeForce GTX
 1660 Ti using Vulkan and NVIDIA driver `596.36`; GPU byte-level output is not
 claimed portable, while the registered metric limits are.
 
+`IMG_6293.depth.json` independently runs the checked-in Gaussian PLY through
+RNE's deterministic proxy-depth path at the same registered camera. It binds
+the PLY and camera calibration hashes plus the full `1332 x 876` depth-frame
+hash. Proxy depth covers `80.08%` of the image and matches all six semantic
+COLMAP landmarks with `0.179327` mean and `0.652182` maximum absolute error in
+reconstruction units. The report deliberately stores no duplicate full depth
+image and explicitly rejects a metre claim before physical scale exists.
+
 This is deliberately **not yet a qualifying metric calibration**. COLMAP
 reconstruction units are only defined up to scale, and the archive contains no
 independently measured physical length. Plausible camera height is not accepted
-as a scale anchor. The fixture therefore passes five of six contracts and
+as a scale anchor. The fixture therefore passes six of seven contracts and
 reports one as missing:
 
 - `independent_metric_scale_anchor`
@@ -91,6 +99,7 @@ inside declared uncertainty. No placeholder anchor is committed.
 ```text
 python tools/prepare_voxel51_drjohnson_3dgs.py
 python tools/prepare_voxel51_drjohnson_3dgs.py --check
+cargo run -p rne_render_3dgs --example registered_splat_depth -- --manifest assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml --camera colmap.IMG_6293.jpg --output assets/environments/voxel51_drjohnson_3dgs/IMG_6293.depth.json
 python tools/prepare_drjohnson_validation_fixture.py --source-archive E:\RNE-tools\tandt_db.zip
 python tools/prepare_drjohnson_validation_fixture.py --source-archive E:\RNE-tools\tandt_db.zip --check
 ```

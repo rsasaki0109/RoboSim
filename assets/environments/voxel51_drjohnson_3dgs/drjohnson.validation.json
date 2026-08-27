@@ -420,6 +420,30 @@
     },
     "photometric_note": "Raw PSNR is retained and bounded; luminance and gradient correlation provide exposure-robust structural registration metrics."
   },
+  "sparse_depth_alignment": {
+    "status": "verified",
+    "reference_camera_id": "colmap.IMG_6293.jpg",
+    "depth_algorithm_identity": "rne.gaussian_splat.proxy_depth.v1",
+    "report": {
+      "path": "IMG_6293.depth.json",
+      "size_bytes": 3181,
+      "sha256": "d4c656e87e6cefa9117b3ca4e126a5e7fb599070ce907d4ca6f388748a4cfd08"
+    },
+    "depth_frame_hash": 3366640260583796914,
+    "finite_depth_pixels": 934375,
+    "finite_depth_fraction": 0.8007793752656767,
+    "matched_landmarks": 6,
+    "mean_absolute_error_source_units": 0.17932670667569903,
+    "max_absolute_error_source_units": 0.6521817176609748,
+    "tolerances": {
+      "min_finite_depth_fraction": 0.75,
+      "min_matched_landmarks": 6,
+      "max_mean_absolute_error_source_units": 0.25,
+      "max_absolute_error_source_units": 0.75
+    },
+    "metric_qualified": false,
+    "units_note": "Depth values remain COLMAP reconstruction units, not metres, until an independent physical scale anchor is retained."
+  },
   "contracts": [
     {
       "id": "floor_world_alignment",
@@ -443,6 +467,10 @@
     },
     {
       "id": "real_sim_observation_comparison",
+      "status": "passed"
+    },
+    {
+      "id": "sparse_depth_alignment",
       "status": "passed"
     }
   ]
