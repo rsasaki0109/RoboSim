@@ -7,9 +7,10 @@ Stars, forks, self-authored reference implementations, screenshots, and copied
 JSON reports do not satisfy an external-use gate.
 
 The machine-readable route registry is
-`release/external-evidence-intake.toml`. Registry v5 binds the archive-only
-installed flagship quickstart and its non-acceptance candidate submission
-template. It retains the content-addressed simulator-adapter route and
+`release/external-evidence-intake.toml`. Registry v7 binds the archive-only
+installed flagship quickstart and the acyclic candidate templates for both
+flagship and third-party controller-plugin submissions. It retains the
+content-addressed simulator-adapter route and
 continues to distinguish qualifying systems from audited nonqualifying
 accelerator evidence. Validate the registry, guides, template, and all
 required issue-form fields before publishing a release:
@@ -165,6 +166,37 @@ rne-asset plugin check \
 The readiness audit validates both typed files, rehashes the exact library,
 checks its file name and size, and requires the negotiated controller identity
 to match the manifest. See [Controller plugin SDK](PLUGIN_SDK.md).
+
+Complete `release/external-plugin-submission-template.json` only after the
+release archive, controller library, manifest, conformance report, and command
+logs have their final digests. Commit the candidate and both logs to the
+external repository; pass the exact 40-character revision separately so the
+candidate does not hash or identify the commit that contains itself. The
+candidate is a review input, never accepted evidence by itself.
+
+After downloading the immutable bytes, a maintainer runs:
+
+```powershell
+cargo run --locked -p xtask -- external-plugin-check `
+  --release-archive path/to/rne-0.2.0-TARGET.zip `
+  --library path/to/controller.dll `
+  --manifest path/to/rne-plugin.json `
+  --report path/to/controller-conformance.json `
+  --submission path/to/external-plugin-submission.json `
+  --evidence-repo-dir path/to/clean-external-plugin-repository `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --output external-controller-plugin-submission.json
+```
+
+The checker rejects dirty or mismatched Git state, origin drift, unknown JSON
+fields, mutable-looking URLs, nonzero commands, path escapes, symlinks,
+oversized files, platform/library mismatches, digest drift, failed or malformed
+conformance reports, and manifest/controller identity drift. It deliberately
+does not load the untrusted shared library on the maintainer workstation;
+maintainers rerun executable conformance only inside an appropriate sandbox.
+The exact checker output is retained as `maintainer_report`; readiness manifest
+v6 reparses it and rehashes all seven submitted artifacts, so the qualifying
+gate cannot silently fall back to the older library/manifest/report-only path.
 
 ## `external_system`
 

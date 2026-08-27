@@ -1,4 +1,4 @@
-schema_version = 5
+schema_version = 6
 # External conformance entries must retain their exact tested subjects; a
 # report-only entry is intentionally not representable. Platform releases also
 # require separate archive/install-report attestations and the extracted
@@ -6,6 +6,8 @@ schema_version = 5
 # accelerator adapters without letting them satisfy the 1.0 external-system gate.
 # Schema v5 adds content-addressed simulator adapters without relabelling them
 # as hardware adapters.
+# Schema v6 requires third-party plugin entries to retain the release archive,
+# acyclic candidate, committed logs, and maintainer verification report.
 release_version = "0.2.0"
 project_owner = "rsasaki0109"
 minimum_stability_days = 183

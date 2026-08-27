@@ -6,6 +6,7 @@ mod capability_report;
 mod dataset;
 mod evidence;
 mod external_intake;
+mod external_plugin;
 mod lekiwi_evidence;
 mod readiness_pack;
 mod release_artifacts;
@@ -165,6 +166,7 @@ fn run() -> anyhow::Result<()> {
         "release-bundle" => release_artifacts::release_bundle(&mut args),
         "release-install-smoke" => release_artifacts::release_install_smoke(&mut args),
         "external-flagship-check" => release_artifacts::external_flagship_check(&mut args),
+        "external-plugin-check" => external_plugin::run(&mut args),
         "release-exit" => release_exit::release_exit(&mut args),
         "release-readiness" => release_readiness::release_readiness(&mut args),
         "readiness-pack" => readiness_pack::run(&mut args),
@@ -1625,6 +1627,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             u64::from(
                 release_artifacts::EXTERNAL_FLAGSHIP_REPRODUCTION_REPORT_SCHEMA_VERSION,
             ),
+        ),
+        (
+            "evidence",
+            "external_controller_plugin_submission_report",
+            u64::from(external_plugin::EXTERNAL_PLUGIN_SUBMISSION_REPORT_SCHEMA_VERSION),
         ),
         (
             "evidence",

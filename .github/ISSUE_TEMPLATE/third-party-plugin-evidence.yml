@@ -53,6 +53,18 @@ body:
     validations:
       required: true
   - type: textarea
+    id: release_archive
+    attributes:
+      label: RNE release archive
+      description: Immutable URL, exact file name, size, and lowercase sha256 for the archive used to run conformance.
+      placeholder: |
+        URL:
+        file:
+        size_bytes:
+        sha256:
+    validations:
+      required: true
+  - type: textarea
     id: library
     attributes:
       label: Controller library
@@ -89,6 +101,42 @@ body:
     validations:
       required: true
   - type: textarea
+    id: submission_candidate
+    attributes:
+      label: Submission candidate
+      description: Immutable URL, exact file name, size, and lowercase sha256 for the completed schema-v1 candidate committed at the tested revision. Keep the Git revision outside the JSON.
+      placeholder: |
+        URL:
+        file:
+        size_bytes:
+        sha256:
+    validations:
+      required: true
+  - type: textarea
+    id: stdout_log
+    attributes:
+      label: Conformance stdout log
+      description: Repository-relative committed path plus immutable URL, size, and lowercase sha256.
+      placeholder: |
+        path: logs/plugin-check.stdout.txt
+        URL:
+        size_bytes:
+        sha256:
+    validations:
+      required: true
+  - type: textarea
+    id: stderr_log
+    attributes:
+      label: Conformance stderr log
+      description: Repository-relative committed path plus immutable URL, size, and lowercase sha256.
+      placeholder: |
+        path: logs/plugin-check.stderr.txt
+        URL:
+        size_bytes:
+        sha256:
+    validations:
+      required: true
+  - type: textarea
     id: conformance_command
     attributes:
       label: Exact conformance command
@@ -106,6 +154,8 @@ body:
         - label: Two identical seeded resets produced identical typed frames.
           required: true
         - label: Exact downloadable library, manifest, and report bytes will remain available.
+          required: true
+        - label: The candidate and both logs are committed unchanged at the submitted revision.
           required: true
     validations:
       required: true

@@ -40,7 +40,7 @@ use rne_hardware_gateway::simulator::conformance::{
     SimulatorAdapterConformanceCheck, SimulatorAdapterConformanceSubject,
 };
 
-pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 5;
+pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 6;
 pub(crate) const REPORT_SCHEMA_VERSION: u32 = 1;
 const REPORT_KIND: &str = "rne_one_zero_readiness_report";
 const DEFAULT_MANIFEST: &str = "release/one-zero-readiness.toml";
@@ -145,9 +145,14 @@ struct ThirdPartyPluginEvidence {
     owner: String,
     repository: String,
     revision: String,
+    release_archive: EvidenceRef,
     library: EvidenceRef,
     manifest: EvidenceRef,
     report: EvidenceRef,
+    submission_candidate: EvidenceRef,
+    stdout_log: EvidenceRef,
+    stderr_log: EvidenceRef,
+    submission_report: EvidenceRef,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -987,9 +992,14 @@ fn verify_third_party_plugins(
             "third-party plugin repository is duplicated: {}",
             entry.repository
         );
+        let release_archive = verify_evidence(evidence_root, &entry.release_archive)?;
         let library = verify_evidence(evidence_root, &entry.library)?;
         let manifest_evidence = verify_evidence(evidence_root, &entry.manifest)?;
         let report_evidence = verify_evidence(evidence_root, &entry.report)?;
+        let submission_candidate = verify_evidence(evidence_root, &entry.submission_candidate)?;
+        let stdout_log = verify_evidence(evidence_root, &entry.stdout_log)?;
+        let stderr_log = verify_evidence(evidence_root, &entry.stderr_log)?;
+        let submission_report = verify_evidence(evidence_root, &entry.submission_report)?;
         let plugin_manifest: PluginManifest = serde_json::from_slice(&manifest_evidence.bytes)
             .with_context(|| format!("parse third-party plugin {} manifest", entry.id))?;
         plugin_manifest
@@ -1039,10 +1049,30 @@ fn verify_third_party_plugins(
             "third-party plugin subject is duplicated: {}",
             entry.library.path
         );
+        super::external_plugin::validate_staged_submission_report(
+            &submission_report.bytes,
+            super::external_plugin::StagedSubmission {
+                owner: &entry.owner,
+                repository: &entry.repository,
+                revision: &entry.revision,
+                release_archive: &release_archive.path,
+                library: &library.path,
+                manifest: &manifest_evidence.path,
+                conformance_report: &report_evidence.path,
+                submission_candidate: &submission_candidate.path,
+                stdout_log: &stdout_log.path,
+                stderr_log: &stderr_log.path,
+            },
+        )?;
         digests.extend([
+            release_archive.sha256,
             library.sha256,
             manifest_evidence.sha256,
             report_evidence.sha256,
+            submission_candidate.sha256,
+            stdout_log.sha256,
+            stderr_log.sha256,
+            submission_report.sha256,
         ]);
     }
     Ok(digests)
@@ -2292,7 +2322,7 @@ mod tests {
 
         let manifest_text = format!(
             r#"
-schema_version = 5
+schema_version = 6
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2432,7 +2462,7 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
 
         let manifest_text = format!(
             r#"
-schema_version = 5
+schema_version = 6
 release_version = "0.2.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2519,7 +2549,7 @@ report = {{ path = "simulator-report.json", sha256 = "{}" }}
         let digest = |name: &str| sha256_prefixed(&fs::read(temp.path().join(name)).unwrap());
         let manifest_text = format!(
             r#"
-schema_version = 5
+schema_version = 6
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2806,7 +2836,7 @@ report = {{ path = "process-conformance-report-v1.json", sha256 = "{}" }}
     #[test]
     fn unknown_manifest_fields_are_rejected() {
         let manifest = r#"
-schema_version = 5
+schema_version = 6
 release_version = "0.1.0"
 project_owner = "owner"
 minimum_stability_days = 183
@@ -2835,7 +2865,7 @@ policy_url = ""
     #[test]
     fn platform_release_manifest_v5_requires_the_complete_archive_chain() {
         let manifest = r#"
-schema_version = 5
+schema_version = 6
 release_version = "0.1.0"
 project_owner = "owner"
 minimum_stability_days = 183
@@ -2890,7 +2920,7 @@ install_attestation_verification = { path = "release/install-receipt.json", sha2
     #[test]
     fn legacy_unbound_external_reports_cannot_be_relabelled_as_manifest_v5() {
         let manifest = r#"
-schema_version = 5
+schema_version = 6
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183

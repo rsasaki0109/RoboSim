@@ -1,7 +1,8 @@
-schema_version = 6
+schema_version = 7
 guide_path = "docs/EXTERNAL_EVIDENCE_INTAKE.md"
 installed_flagship_quickstart_path = "docs/EXTERNAL_FLAGSHIP_REPRODUCTION.md"
 installed_flagship_submission_template_path = "release/external-flagship-submission-template.json"
+third_party_plugin_submission_template_path = "release/external-plugin-submission-template.json"
 
 [[route]]
 id = "installed_flagship_reproduction"
@@ -39,8 +40,8 @@ author_assistance_allowed = true
 qualifying_kinds = []
 audited_nonqualifying_kinds = []
 required_metadata = ["owner", "repository", "revision"]
-required_artifacts = ["library", "manifest", "report"]
-form_fields = ["independence", "repository", "revision", "rne_release", "platform", "library", "manifest", "report", "conformance_command", "verification"]
+required_artifacts = ["release_archive", "library", "manifest", "report", "submission_candidate", "stdout_log", "stderr_log", "maintainer_report"]
+form_fields = ["independence", "repository", "revision", "rne_release", "platform", "release_archive", "library", "manifest", "report", "submission_candidate", "stdout_log", "stderr_log", "conformance_command", "verification"]
 
 [[route]]
 id = "external_system"

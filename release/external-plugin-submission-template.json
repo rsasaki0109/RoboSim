@@ -1,0 +1,50 @@
+{
+  "kind": "rne_external_controller_plugin_submission_candidate",
+  "schema_version": 1,
+  "candidate_status": "not_accepted_pending_maintainer_verification",
+  "author_assistance": null,
+  "evidence_repository": {
+    "owner": null,
+    "url": null
+  },
+  "release": {
+    "tag": "v0.2.0",
+    "target": null,
+    "archive": {
+      "url": null,
+      "file_name": null,
+      "size_bytes": null,
+      "sha256": null
+    }
+  },
+  "platform": {
+    "operating_system": null,
+    "architecture": "x86_64"
+  },
+  "artifacts": {
+    "library": {
+      "url": null,
+      "file_name": null,
+      "size_bytes": null,
+      "sha256": null
+    },
+    "manifest": {
+      "url": null,
+      "file_name": "rne-plugin.json",
+      "size_bytes": null,
+      "sha256": null
+    },
+    "report": {
+      "url": null,
+      "file_name": "controller-conformance.json",
+      "size_bytes": null,
+      "sha256": null
+    }
+  },
+  "reproduction": {
+    "commands": [],
+    "exit_statuses": [],
+    "stdout_log_path": "logs/plugin-check.stdout.txt",
+    "stderr_log_path": "logs/plugin-check.stderr.txt"
+  }
+}

@@ -209,6 +209,18 @@ Acceptance criteria:
   interventions;
 - the 15-minute time-to-proof target is measured, not inferred from CI.
 
+The third-party controller-plugin intake is now mechanically ready for that
+independent run. Its schema-v1 acyclic candidate binds the exact release
+archive, library, manifest, conformance report, command statuses, and committed
+logs while keeping the containing Git revision separate. The maintainer-side
+`external-plugin-check` rehashes every downloaded byte, requires clean
+repository `HEAD`/origin and exact committed candidate/log bytes, validates the
+typed passing report and negotiated controller identity, and emits the
+registered schema-v1 staging report without loading the untrusted shared
+library on the maintainer workstation. This closes an intake-tooling gap; it
+does not count as the required independent plugin evidence until a genuinely
+external owner submits and maintainers sandbox-rerun it.
+
 ## Immediate implementation slices
 
 Work proceeds in this order, one mergeable slice at a time:
