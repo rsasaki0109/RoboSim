@@ -104,6 +104,19 @@ body:
     validations:
       required: true
   - type: textarea
+    id: simulator_submission
+    attributes:
+      label: Simulator release and submission chain or not-applicable declaration
+      description: For simulator adapters, provide immutable identities for the official RNE release archive, committed candidate, stdout/stderr logs, and maintainer report. Otherwise state not applicable.
+      placeholder: |
+        release_archive: URL, file, size_bytes, sha256
+        submission_candidate: URL, file, size_bytes, sha256
+        stdout_log: URL, file, size_bytes, sha256
+        stderr_log: URL, file, size_bytes, sha256
+        maintainer_report: URL, file, size_bytes, sha256
+    validations:
+      required: true
+  - type: textarea
     id: accelerator_manifest
     attributes:
       label: Accelerator manifest or not-applicable declaration

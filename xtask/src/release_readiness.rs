@@ -40,7 +40,7 @@ use rne_hardware_gateway::simulator::conformance::{
     SimulatorAdapterConformanceCheck, SimulatorAdapterConformanceSubject,
 };
 
-pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 6;
+pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 7;
 pub(crate) const REPORT_SCHEMA_VERSION: u32 = 1;
 const REPORT_KIND: &str = "rne_one_zero_readiness_report";
 const DEFAULT_MANIFEST: &str = "release/one-zero-readiness.toml";
@@ -181,6 +181,16 @@ struct ExternalSystemEvidence {
     #[serde(default)]
     runtime_artifacts: Vec<EvidenceRef>,
     report: EvidenceRef,
+    #[serde(default)]
+    release_archive: Option<EvidenceRef>,
+    #[serde(default)]
+    submission_candidate: Option<EvidenceRef>,
+    #[serde(default)]
+    stdout_log: Option<EvidenceRef>,
+    #[serde(default)]
+    stderr_log: Option<EvidenceRef>,
+    #[serde(default)]
+    submission_report: Option<EvidenceRef>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1113,7 +1123,12 @@ fn verify_external_systems(
                     entry.task_spec.is_none()
                         && entry.adapter_arguments.is_empty()
                         && entry.runtime_manifest.is_none()
-                        && entry.runtime_artifacts.is_empty(),
+                        && entry.runtime_artifacts.is_empty()
+                        && entry.release_archive.is_none()
+                        && entry.submission_candidate.is_none()
+                        && entry.stdout_log.is_none()
+                        && entry.stderr_log.is_none()
+                        && entry.submission_report.is_none(),
                     "external physics backend {} must not declare adapter-only evidence",
                     entry.id
                 );
@@ -1139,7 +1154,13 @@ fn verify_external_systems(
             }
             ExternalSystemKind::HardwareAdapter => {
                 anyhow::ensure!(
-                    entry.runtime_manifest.is_none() && entry.runtime_artifacts.is_empty(),
+                    entry.runtime_manifest.is_none()
+                        && entry.runtime_artifacts.is_empty()
+                        && entry.release_archive.is_none()
+                        && entry.submission_candidate.is_none()
+                        && entry.stdout_log.is_none()
+                        && entry.stderr_log.is_none()
+                        && entry.submission_report.is_none(),
                     "external hardware adapter {} must not declare simulator runtime evidence",
                     entry.id
                 );
@@ -1208,8 +1229,46 @@ fn verify_external_systems(
                         entry.id
                     )
                 })?;
+                let release_reference = entry.release_archive.as_ref().with_context(|| {
+                    format!(
+                        "external simulator adapter {} omitted its RNE release archive",
+                        entry.id
+                    )
+                })?;
+                let candidate_reference =
+                    entry.submission_candidate.as_ref().with_context(|| {
+                        format!(
+                            "external simulator adapter {} omitted its submission candidate",
+                            entry.id
+                        )
+                    })?;
+                let stdout_reference = entry.stdout_log.as_ref().with_context(|| {
+                    format!(
+                        "external simulator adapter {} omitted its stdout log",
+                        entry.id
+                    )
+                })?;
+                let stderr_reference = entry.stderr_log.as_ref().with_context(|| {
+                    format!(
+                        "external simulator adapter {} omitted its stderr log",
+                        entry.id
+                    )
+                })?;
+                let submission_report_reference =
+                    entry.submission_report.as_ref().with_context(|| {
+                        format!(
+                            "external simulator adapter {} omitted its maintainer report",
+                            entry.id
+                        )
+                    })?;
                 let task = verify_evidence(evidence_root, task_reference)?;
                 let runtime_evidence = verify_evidence(evidence_root, runtime_reference)?;
+                let release_archive = verify_evidence(evidence_root, release_reference)?;
+                let submission_candidate = verify_evidence(evidence_root, candidate_reference)?;
+                let stdout_log = verify_evidence(evidence_root, stdout_reference)?;
+                let stderr_log = verify_evidence(evidence_root, stderr_reference)?;
+                let submission_report =
+                    verify_evidence(evidence_root, submission_report_reference)?;
                 let task_spec: TaskSpec =
                     serde_json::from_slice(&task.bytes).with_context(|| {
                         format!("parse external simulator adapter {} TaskSpec", entry.id)
@@ -1285,6 +1344,7 @@ fn verify_external_systems(
                     entry.id
                 );
                 let mut retained = Vec::with_capacity(entry.runtime_artifacts.len());
+                let mut retained_paths = Vec::with_capacity(entry.runtime_artifacts.len());
                 for (reference, artifact) in entry.runtime_artifacts.iter().zip(&runtime.artifacts)
                 {
                     let evidence = verify_evidence(evidence_root, reference)?;
@@ -1296,12 +1356,36 @@ fn verify_external_systems(
                         Some(artifact.size_bytes),
                     )?;
                     retained.push(evidence.sha256);
+                    retained_paths.push(evidence.path);
                 }
+                super::external_simulator::validate_staged_submission_report(
+                    &submission_report.bytes,
+                    super::external_simulator::StagedSubmission {
+                        owner: &entry.owner,
+                        repository: &entry.repository,
+                        revision: &entry.revision,
+                        release_archive: &release_archive.path,
+                        adapter: &subject.path,
+                        task_spec: &task.path,
+                        runtime_manifest: &runtime_evidence.path,
+                        runtime_artifacts: &retained_paths,
+                        conformance_report: &report_evidence.path,
+                        submission_candidate: &submission_candidate.path,
+                        stdout_log: &stdout_log.path,
+                        stderr_log: &stderr_log.path,
+                        adapter_arguments: &entry.adapter_arguments,
+                    },
+                )?;
                 digests.extend([
                     subject.sha256.clone(),
                     task.sha256,
                     runtime_evidence.sha256,
                     report_evidence.sha256.clone(),
+                    release_archive.sha256,
+                    submission_candidate.sha256,
+                    stdout_log.sha256,
+                    stderr_log.sha256,
+                    submission_report.sha256,
                 ]);
                 digests.extend(retained);
             }
@@ -2322,7 +2406,7 @@ mod tests {
 
         let manifest_text = format!(
             r#"
-schema_version = 6
+schema_version = 7
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2459,10 +2543,51 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
             report.to_json_pretty().unwrap(),
         )
         .unwrap();
+        let release_name = "rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz";
+        fs::write(temp.path().join(release_name), b"official release archive").unwrap();
+        fs::write(temp.path().join("submission.json"), b"candidate bytes").unwrap();
+        fs::write(temp.path().join("stdout.txt"), b"passed\n").unwrap();
+        fs::write(temp.path().join("stderr.txt"), b"empty\n").unwrap();
+        let member = |name: &str| {
+            serde_json::json!({
+                "path": name,
+                "size_bytes": bytes(name).len(),
+                "sha256": hex(name),
+            })
+        };
+        let submission_report = serde_json::json!({
+            "kind": "rne_external_simulator_adapter_submission_report",
+            "schema_version": 1,
+            "status": "passed",
+            "owner": "external-owner",
+            "repository": "https://github.com/external-owner/gazebo",
+            "revision": "1111111111111111111111111111111111111111",
+            "author_assistance": false,
+            "release_tag": "v0.2.0",
+            "release_target": "x86_64-unknown-linux-gnu",
+            "operating_system": "linux",
+            "architecture": "x86_64",
+            "adapter_arguments": arguments,
+            "adapter_identity": report.adapter.as_ref().unwrap(),
+            "release_archive": member(release_name),
+            "adapter": member("gazebo-adapter.bin"),
+            "task_spec": member("task.json"),
+            "runtime_manifest": member("runtime.json"),
+            "runtime_artifacts": [member("world.sdf"), member("robot.urdf"), member("adapter.toml")],
+            "conformance_report": member("simulator-report.json"),
+            "submission_candidate": member("submission.json"),
+            "stdout_log": member("stdout.txt"),
+            "stderr_log": member("stderr.txt"),
+        });
+        fs::write(
+            temp.path().join("submission-report.json"),
+            serde_json::to_vec_pretty(&submission_report).unwrap(),
+        )
+        .unwrap();
 
         let manifest_text = format!(
             r#"
-schema_version = 6
+schema_version = 7
 release_version = "0.2.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2487,7 +2612,7 @@ policy_url = ""
 [[external_system]]
 id = "external-gazebo"
 owner = "external-owner"
-repository = "https://example.invalid/gazebo"
+repository = "https://github.com/external-owner/gazebo"
 revision = "1111111111111111111111111111111111111111"
 kind = "simulator_adapter"
 subject = {{ path = "gazebo-adapter.bin", sha256 = "{}" }}
@@ -2500,6 +2625,11 @@ runtime_artifacts = [
   {{ path = "adapter.toml", sha256 = "{}" }},
 ]
 report = {{ path = "simulator-report.json", sha256 = "{}" }}
+release_archive = {{ path = "{release_name}", sha256 = "{}" }}
+submission_candidate = {{ path = "submission.json", sha256 = "{}" }}
+stdout_log = {{ path = "stdout.txt", sha256 = "{}" }}
+stderr_log = {{ path = "stderr.txt", sha256 = "{}" }}
+submission_report = {{ path = "submission-report.json", sha256 = "{}" }}
 "#,
             digest("gazebo-adapter.bin"),
             digest("task.json"),
@@ -2508,10 +2638,15 @@ report = {{ path = "simulator-report.json", sha256 = "{}" }}
             digest("robot.urdf"),
             digest("adapter.toml"),
             digest("simulator-report.json"),
+            digest(release_name),
+            digest("submission.json"),
+            digest("stdout.txt"),
+            digest("stderr.txt"),
+            digest("submission-report.json"),
         );
         let mut manifest: ReadinessManifest = toml::from_str(&manifest_text).unwrap();
         let verified = verify_external_systems(temp.path(), &manifest).unwrap();
-        assert_eq!(verified.len(), 7);
+        assert_eq!(verified.len(), 12);
 
         fs::write(temp.path().join("robot.urdf"), b"tampered robot").unwrap();
         manifest.external_system[0].runtime_artifacts[1].sha256 = digest("robot.urdf");
@@ -2549,7 +2684,7 @@ report = {{ path = "simulator-report.json", sha256 = "{}" }}
         let digest = |name: &str| sha256_prefixed(&fs::read(temp.path().join(name)).unwrap());
         let manifest_text = format!(
             r#"
-schema_version = 6
+schema_version = 7
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2836,7 +2971,7 @@ report = {{ path = "process-conformance-report-v1.json", sha256 = "{}" }}
     #[test]
     fn unknown_manifest_fields_are_rejected() {
         let manifest = r#"
-schema_version = 6
+schema_version = 7
 release_version = "0.1.0"
 project_owner = "owner"
 minimum_stability_days = 183
@@ -2865,7 +3000,7 @@ policy_url = ""
     #[test]
     fn platform_release_manifest_v5_requires_the_complete_archive_chain() {
         let manifest = r#"
-schema_version = 6
+schema_version = 7
 release_version = "0.1.0"
 project_owner = "owner"
 minimum_stability_days = 183
@@ -2920,7 +3055,7 @@ install_attestation_verification = { path = "release/install-receipt.json", sha2
     #[test]
     fn legacy_unbound_external_reports_cannot_be_relabelled_as_manifest_v5() {
         let manifest = r#"
-schema_version = 6
+schema_version = 7
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183

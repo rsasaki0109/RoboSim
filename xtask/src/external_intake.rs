@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const DEFAULT_REGISTRY: &str = "release/external-evidence-intake.toml";
-const REGISTRY_SCHEMA_VERSION: u32 = 7;
+const REGISTRY_SCHEMA_VERSION: u32 = 8;
 const MAX_INTAKE_FILE_BYTES: u64 = 128 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -19,6 +19,7 @@ struct IntakeRegistry {
     installed_flagship_quickstart_path: String,
     installed_flagship_submission_template_path: String,
     third_party_plugin_submission_template_path: String,
+    external_simulator_submission_template_path: String,
     route: Vec<IntakeRoute>,
 }
 
@@ -184,6 +185,11 @@ const EXPECTED_ROUTES: [ExpectedRoute; 4] = [
             "simulator_adapter.adapter_arguments",
             "simulator_adapter.runtime_manifest",
             "simulator_adapter.runtime_artifacts",
+            "simulator_adapter.release_archive",
+            "simulator_adapter.submission_candidate",
+            "simulator_adapter.stdout_log",
+            "simulator_adapter.stderr_log",
+            "simulator_adapter.maintainer_report",
             "accelerator_adapter.task_spec",
             "accelerator_adapter.adapter_arguments",
             "accelerator_adapter.accelerator_manifest",
@@ -201,6 +207,7 @@ const EXPECTED_ROUTES: [ExpectedRoute; 4] = [
             "adapter_arguments",
             "simulator_runtime_manifest",
             "simulator_runtime_artifacts",
+            "simulator_submission",
             "accelerator_manifest",
             "runtime_contract",
             "report",
@@ -290,6 +297,10 @@ fn validate_registry(root: &Path, path: &Path) -> Result<()> {
         root,
         &registry.third_party_plugin_submission_template_path,
     )?)?;
+    validate_simulator_submission_template(&read_repository_file(
+        root,
+        &registry.external_simulator_submission_template_path,
+    )?)?;
     anyhow::ensure!(
         guide.contains(&registry.installed_flagship_quickstart_path)
             || guide.contains("EXTERNAL_FLAGSHIP_REPRODUCTION.md"),
@@ -353,6 +364,42 @@ fn validate_plugin_submission_template(text: &str) -> Result<()> {
             "controller-plugin submission template omitted {object}"
         );
     }
+    Ok(())
+}
+
+fn validate_simulator_submission_template(text: &str) -> Result<()> {
+    let value: serde_json::Value =
+        serde_json::from_str(text).context("parse simulator-adapter submission template")?;
+    anyhow::ensure!(
+        value.get("kind").and_then(serde_json::Value::as_str)
+            == Some("rne_external_simulator_adapter_submission_candidate")
+            && value
+                .get("schema_version")
+                .and_then(serde_json::Value::as_u64)
+                == Some(1)
+            && value
+                .get("candidate_status")
+                .and_then(serde_json::Value::as_str)
+                == Some("not_accepted_pending_maintainer_verification"),
+        "simulator-adapter submission template identity drifted"
+    );
+    let repository = value
+        .get("evidence_repository")
+        .and_then(serde_json::Value::as_object)
+        .context("simulator-adapter submission template omitted evidence_repository")?;
+    let runtime_artifacts = value
+        .pointer("/artifacts/runtime_artifacts")
+        .and_then(serde_json::Value::as_array)
+        .context("simulator-adapter submission template omitted runtime artifacts")?;
+    anyhow::ensure!(
+        repository.keys().map(String::as_str).eq(["owner", "url"])
+            && repository.values().all(serde_json::Value::is_null)
+            && runtime_artifacts.len() == 3
+            && value
+                .get("adapter_arguments")
+                .is_some_and(serde_json::Value::is_array),
+        "simulator-adapter submission template must be acyclic and retain three ordered artifacts"
+    );
     Ok(())
 }
 

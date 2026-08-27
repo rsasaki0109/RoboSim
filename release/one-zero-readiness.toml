@@ -1,4 +1,4 @@
-schema_version = 6
+schema_version = 7
 # External conformance entries must retain their exact tested subjects; a
 # report-only entry is intentionally not representable. Platform releases also
 # require separate archive/install-report attestations and the extracted

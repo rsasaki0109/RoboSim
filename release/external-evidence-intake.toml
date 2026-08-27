@@ -1,8 +1,9 @@
-schema_version = 7
+schema_version = 8
 guide_path = "docs/EXTERNAL_EVIDENCE_INTAKE.md"
 installed_flagship_quickstart_path = "docs/EXTERNAL_FLAGSHIP_REPRODUCTION.md"
 installed_flagship_submission_template_path = "release/external-flagship-submission-template.json"
 third_party_plugin_submission_template_path = "release/external-plugin-submission-template.json"
+external_simulator_submission_template_path = "release/external-simulator-submission-template.json"
 
 [[route]]
 id = "installed_flagship_reproduction"
@@ -54,5 +55,5 @@ qualifying_kinds = ["physics_backend", "hardware_adapter", "simulator_adapter"]
 audited_nonqualifying_kinds = ["accelerator_adapter"]
 required_metadata = ["owner", "repository", "revision", "kind"]
 required_artifacts = ["subject", "report"]
-conditional_requirements = ["hardware_adapter.task_spec", "hardware_adapter.adapter_arguments", "hardware_adapter.safety_authorization", "simulator_adapter.task_spec", "simulator_adapter.adapter_arguments", "simulator_adapter.runtime_manifest", "simulator_adapter.runtime_artifacts", "accelerator_adapter.task_spec", "accelerator_adapter.adapter_arguments", "accelerator_adapter.accelerator_manifest", "accelerator_adapter.runtime_contract"]
-form_fields = ["independence", "kind", "repository", "revision", "rne_release", "platform", "subject", "task_spec", "adapter_arguments", "simulator_runtime_manifest", "simulator_runtime_artifacts", "accelerator_manifest", "runtime_contract", "report", "conformance_command", "safety", "verification"]
+conditional_requirements = ["hardware_adapter.task_spec", "hardware_adapter.adapter_arguments", "hardware_adapter.safety_authorization", "simulator_adapter.task_spec", "simulator_adapter.adapter_arguments", "simulator_adapter.runtime_manifest", "simulator_adapter.runtime_artifacts", "simulator_adapter.release_archive", "simulator_adapter.submission_candidate", "simulator_adapter.stdout_log", "simulator_adapter.stderr_log", "simulator_adapter.maintainer_report", "accelerator_adapter.task_spec", "accelerator_adapter.adapter_arguments", "accelerator_adapter.accelerator_manifest", "accelerator_adapter.runtime_contract"]
+form_fields = ["independence", "kind", "repository", "revision", "rne_release", "platform", "subject", "task_spec", "adapter_arguments", "simulator_runtime_manifest", "simulator_runtime_artifacts", "simulator_submission", "accelerator_manifest", "runtime_contract", "report", "conformance_command", "safety", "verification"]

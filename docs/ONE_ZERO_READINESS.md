@@ -83,7 +83,10 @@ regular files no larger than 64 MiB and rejects symlinks or paths outside the
 pack. It does not download URLs, create tags, or infer evidence from GitHub
 stars.
 
-Manifest v6 requires the accelerator evidence collection to be explicit. Use
+Manifest v7 retains the explicit accelerator collection from v6 and requires
+an external simulator entry to include the official release archive, acyclic
+candidate, committed stdout/stderr logs, and the schema-v1 maintainer report.
+Use
 `accelerator_adapter = []` at the top level while no entries are retained;
 replace that empty array with one or more `[[accelerator_adapter]]` tables when
 evidence is accepted.
@@ -95,7 +98,7 @@ evidence is accepted.
 | `stability_window` | At least 183 calendar days since the immutable Rust API baseline, at least 183 days of observed external-project use, and zero declared unplanned breaks |
 | `external_projects` | At least two distinct repositories, owned outside the RNE repository owner, each with a valid TaskSpec and fully verifiable Failure Capsule produced without repository-author assistance |
 | `third_party_plugin` | At least one externally owned controller plugin whose passing typed report and maintainer submission report are rebound to the exact release archive, library, manifest, acyclic candidate, committed logs, repository revision, and ownership |
-| `external_system` | At least one externally owned physics backend, simulator adapter, or hardware adapter whose passing typed report is rebound to the exact retained implementation subject; simulator evidence also retains its TaskSpec, runtime manifest, world, robot model, adapter config, and normalized launch arguments, while hardware retains its TaskSpec and arguments. Audited accelerator adapters are reported separately and do not satisfy this check |
+| `external_system` | At least one externally owned physics backend, simulator adapter, or hardware adapter whose passing typed report is rebound to the exact retained implementation subject; simulator evidence also retains its TaskSpec, runtime manifest, world, robot model, adapter config, normalized arguments, official release archive, acyclic candidate, committed logs, and maintainer report, while hardware retains its TaskSpec and arguments. Audited accelerator adapters are reported separately and do not satisfy this check |
 | `reference_hardware` | A full LeKiwi physical-evidence manifest accepted by the safety and provenance verifier |
 | `release_artifacts` | Linux x86-64 and Windows x86-64 archives plus archive-bound twelve-check install reports, including the installed flagship and external simulator proofs, both freshly Sigstore-verified from retained bundles; extracted release reports and SHA256SUMS must reconstruct the same clean tagged artifact graph |
 | `historical_compatibility` | A retained report exactly equal to a fresh execution of at least 36 registered typed-reader checks, including fail-closed accelerator capability/status/protocol/process/conformance/scale/scaffold, the controller scaffold, future/unknown-field mutations, and verified historical Git revision/tree/blob provenance |
@@ -103,7 +106,7 @@ evidence is accepted.
 | `support_commitment` | A named maintainer, unambiguous support period, and published HTTPS policy are explicitly committed; an uncommitted table must contain no partial claims |
 
 The manifest, report, and attestation receipt schemas are registered as
-`evidence.one_zero_readiness_manifest = 6`,
+`evidence.one_zero_readiness_manifest = 7`,
 `evidence.one_zero_readiness_report = 1`, and
 `evidence.github_attestation_verification = 1` in `release/contracts.toml`.
 The archive-bound install result is separately registered as
@@ -178,6 +181,28 @@ task_spec = { path = "systems/task.json", sha256 = "sha256:<64-lowercase-hex>" }
 # subject path is represented by the runner as "<adapter-subject>".
 adapter_arguments = ["<adapter-subject>", "--sandbox", "isolated-v1"]
 report = { path = "systems/hardware-report.json", sha256 = "sha256:<64-lowercase-hex>" }
+
+[[external_system]]
+id = "external-gazebo"
+owner = "external-owner"
+repository = "https://github.com/external-owner/gazebo-adapter"
+revision = "<40-lowercase-hex-commit>"
+kind = "simulator_adapter"
+subject = { path = "systems/gazebo/adapter.py", sha256 = "sha256:<64-lowercase-hex>" }
+task_spec = { path = "systems/gazebo/task.json", sha256 = "sha256:<64-lowercase-hex>" }
+adapter_arguments = ["<adapter-subject>", "--runtime-manifest", "<runtime-manifest>"]
+runtime_manifest = { path = "systems/gazebo/runtime.json", sha256 = "sha256:<64-lowercase-hex>" }
+runtime_artifacts = [
+  { path = "systems/gazebo/world.sdf", sha256 = "sha256:<64-lowercase-hex>" },
+  { path = "systems/gazebo/robot.sdf", sha256 = "sha256:<64-lowercase-hex>" },
+  { path = "systems/gazebo/adapter.json", sha256 = "sha256:<64-lowercase-hex>" },
+]
+report = { path = "systems/gazebo/conformance.json", sha256 = "sha256:<64-lowercase-hex>" }
+release_archive = { path = "systems/gazebo/rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz", sha256 = "sha256:<64-lowercase-hex>" }
+submission_candidate = { path = "systems/gazebo/submission.json", sha256 = "sha256:<64-lowercase-hex>" }
+stdout_log = { path = "systems/gazebo/simulator-check.stdout.txt", sha256 = "sha256:<64-lowercase-hex>" }
+stderr_log = { path = "systems/gazebo/simulator-check.stderr.txt", sha256 = "sha256:<64-lowercase-hex>" }
+submission_report = { path = "systems/gazebo/maintainer-report.json", sha256 = "sha256:<64-lowercase-hex>" }
 
 [[accelerator_adapter]]
 id = "external-accelerator"

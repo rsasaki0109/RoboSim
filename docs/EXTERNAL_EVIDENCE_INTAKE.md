@@ -195,7 +195,7 @@ conformance reports, and manifest/controller identity drift. It deliberately
 does not load the untrusted shared library on the maintainer workstation;
 maintainers rerun executable conformance only inside an appropriate sandbox.
 The exact checker output is retained as `maintainer_report`; readiness manifest
-v6 reparses it and rehashes all seven submitted artifacts, so the qualifying
+v7 reparses it and rehashes all seven submitted artifacts, so the qualifying
 gate cannot silently fall back to the older library/manifest/report-only path.
 
 ## `external_system`
@@ -245,6 +245,38 @@ rne-simulator-conformance \
   --task path/to/task.json \
   --output path/to/simulator-conformance.json
 ```
+
+Then complete `release/external-simulator-submission-template.json` with the
+official RNE release archive, adapter, TaskSpec, runtime manifest, three runtime
+artifacts in manifest order, report, normalized arguments, and successful
+commands. Commit that acyclic candidate and its distinct stdout/stderr logs to
+the clean external repository; provide its 40-character Git revision outside
+the candidate.
+
+After downloading the immutable files, a maintainer runs:
+
+```powershell
+cargo run --locked -p xtask -- external-simulator-check `
+  --release-archive path/to/rne-0.2.0-TARGET.tar.gz `
+  --adapter path/to/adapter.py `
+  --task path/to/task.json `
+  --runtime-manifest path/to/runtime.json `
+  --runtime-artifact path/to/world.sdf `
+  --runtime-artifact path/to/robot.sdf `
+  --runtime-artifact path/to/adapter.json `
+  --report path/to/simulator-conformance.json `
+  --submission path/to/external-simulator-submission.json `
+  --evidence-repo-dir path/to/clean-external-simulator-repository `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --output external-simulator-maintainer-report.json
+```
+
+The checker does not execute the untrusted adapter. It validates clean Git
+provenance and committed logs, rehashes every byte, reparses the TaskSpec,
+runtime manifest and passing conformance report, and rebinds the fixed step,
+vector widths, handshake identity, argument hash, and canonical runtime files.
+Readiness manifest v7 requires this maintainer report and all twelve retained
+digests before a simulator can satisfy the external-system gate.
 
 The readiness audit rehashes every retained file, binds the handshake simulator
 identity and exact fixed step to the TaskSpec and runtime manifest, and reruns

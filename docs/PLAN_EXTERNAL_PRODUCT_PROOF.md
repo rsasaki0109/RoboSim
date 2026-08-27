@@ -221,6 +221,15 @@ library on the maintainer workstation. This closes an intake-tooling gap; it
 does not count as the required independent plugin evidence until a genuinely
 external owner submits and maintainers sandbox-rerun it.
 
+The external simulator intake now has the same fail-closed path. Its acyclic
+candidate retains the official release, adapter, TaskSpec, runtime manifest,
+ordered world/robot/config files, normalized arguments, conformance report,
+and committed logs. `external-simulator-check` binds those bytes to a clean
+external Git revision and emits the registered schema-v1 maintainer report
+without executing the untrusted adapter. Readiness v7 requires that complete
+12-digest chain. This makes the next concrete adoption action an independent
+Gazebo adapter submission rather than another in-repository simulator demo.
+
 ## Immediate implementation slices
 
 Work proceeds in this order, one mergeable slice at a time:

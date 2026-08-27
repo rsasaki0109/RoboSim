@@ -103,7 +103,17 @@ The retained evidence pack includes:
 - normalized ordered adapter arguments;
 - runtime manifest;
 - world, robot model, and adapter config files;
-- complete passing simulator conformance report.
+- complete passing simulator conformance report;
+- official RNE release archive used for the run;
+- acyclic submission candidate and committed stdout/stderr logs;
+- schema-v1 maintainer report from `external-simulator-check`.
+
+Start from `release/external-simulator-submission-template.json`. The candidate
+does not contain its own Git revision: commit the final candidate and logs,
+then pass the clean repository's exact revision separately to the checker.
+This avoids a self-referential digest while binding acceptance to immutable
+Git state. The maintainer checker parses and rehashes the typed evidence but
+does not execute the untrusted simulator adapter outside a sandbox.
 
 An in-repository implementation, renamed mock, or copied reference cannot
 satisfy the independent external-system gate.

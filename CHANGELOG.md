@@ -15,6 +15,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add an acyclic external simulator-adapter submission contract and
+  `external-simulator-check`. The maintainer checker binds a clean independent
+  Git revision to the official release, adapter, TaskSpec, runtime manifest,
+  ordered world/robot/config files, normalized arguments, typed conformance
+  report, candidate, and logs without executing untrusted adapter code.
+  Readiness manifest v7 requires the resulting complete digest chain.
+
 - Add an acyclic third-party controller-plugin submission contract and
   `external-plugin-check`. The maintainer checker binds a clean external Git
   revision to the exact release archive, library, manifest, typed conformance
