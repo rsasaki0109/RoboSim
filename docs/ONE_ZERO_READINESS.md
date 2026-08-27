@@ -93,6 +93,40 @@ empty-array placeholder, validates the complete schema-v9 manifest, and then
 atomically replaces only the manifest. Other evidence types still use the
 typed entries shown below. Staging alone never changes a readiness check.
 
+An accepted external Gazebo or other simulator adapter uses the same boundary
+for its complete twelve-file chain. `--runtime-artifact` is ordered and appears
+exactly three times; `--adapter-argument` repeats the exact normalized launch
+arguments recorded by the candidate and maintainer report:
+
+```powershell
+cargo run --locked -p xtask -- readiness-pack accept-external-simulator `
+  --pack E:/RoboSim-readiness `
+  --id external-gazebo-a `
+  --owner external-owner `
+  --repository https://github.com/external-owner/gazebo-adapter `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --adapter systems/gazebo/adapter.py `
+  --task-spec systems/gazebo/task.json `
+  --runtime-manifest systems/gazebo/runtime.json `
+  --runtime-artifact systems/gazebo/world.sdf `
+  --runtime-artifact systems/gazebo/robot.sdf `
+  --runtime-artifact systems/gazebo/adapter.json `
+  --adapter-argument "<adapter-subject>" `
+  --adapter-argument "--runtime-manifest" `
+  --adapter-argument "<runtime-manifest>" `
+  --conformance-report systems/gazebo/conformance.json `
+  --release-archive systems/gazebo/rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz `
+  --submission-candidate systems/gazebo/submission.json `
+  --stdout-log systems/gazebo/stdout.txt `
+  --stderr-log systems/gazebo/stderr.txt `
+  --submission-report systems/gazebo/maintainer-report.json
+```
+
+The command reruns the typed simulator-adapter validator before writing the
+manifest, requires twelve distinct contained regular files, and rehashes every
+file again immediately before the atomic swap. It does not execute the
+untrusted adapter or infer external ownership.
+
 Independent projects and extension authors submit the complete metadata and
 artifact checklist through the fixed
 [external evidence intake](EXTERNAL_EVIDENCE_INTAKE.md). Its issue forms are a

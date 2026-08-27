@@ -436,7 +436,8 @@ canonical TOML reference. It cannot add manifest claims, determine ownership,
 or turn staged bytes into a passing check. For a reviewed installed flagship
 run, `readiness-pack accept-installed-flagship` revalidates all six staged
 artifacts and atomically adds the schema-v9 entry without trusting copied
-digests.
+digests. The external-simulator acceptance command applies the same operation
+to the adapter's twelve-file chain and ordered launch arguments.
 The companion external-intake registry fixes four public submission routes
 for the installed flagship, task reproductions, controller plugins, and
 backend/hardware/accelerator systems. Readiness manifest v4 audits accelerator subjects, TaskSpecs,

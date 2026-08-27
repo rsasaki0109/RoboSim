@@ -39,7 +39,9 @@ fresh copies, review ownership and provenance, stage them into an external
 pack with `xtask readiness-pack stage`, and rerun `xtask release-readiness`.
 For the installed flagship route, `xtask readiness-pack
 accept-installed-flagship` revalidates and atomically registers the six staged
-files after human independence review. The audit rehashes and parses the
+files after human independence review. `readiness-pack
+accept-external-simulator` does the same for the complete twelve-file simulator
+chain and its exact ordered arguments. The audit rehashes and parses the
 retained bytes; it does not trust issue text.
 
 Compute digests with one of:

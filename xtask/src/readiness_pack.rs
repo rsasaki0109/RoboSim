@@ -1,6 +1,6 @@
 //! Safe authoring helpers for an external RNE 1.0 readiness evidence pack.
 
-use super::{release_artifacts, release_readiness, workspace_root};
+use super::{external_simulator, release_artifacts, release_readiness, workspace_root};
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -27,7 +27,7 @@ pub(crate) fn run(args: &mut impl Iterator<Item = String>) -> Result<()> {
     let command = args
         .next()
         .context(
-            "readiness-pack requires a command: init, stage, or accept-installed-flagship; use readiness-pack --help",
+            "readiness-pack requires a command: init, stage, accept-installed-flagship, or accept-external-simulator; use readiness-pack --help",
         )?;
     match command.as_str() {
         "init" => {
@@ -51,6 +51,16 @@ pub(crate) fn run(args: &mut impl Iterator<Item = String>) -> Result<()> {
             accept_installed_flagship(&root, &options)?;
             println!(
                 "installed flagship evidence accepted: id={} manifest={}",
+                options.id,
+                options.pack.join(MANIFEST_NAME).display()
+            );
+            Ok(())
+        }
+        "accept-external-simulator" => {
+            let options = parse_accept_external_simulator_options(args, &root)?;
+            accept_external_simulator(&root, &options)?;
+            println!(
+                "external simulator evidence accepted: id={} manifest={}",
                 options.id,
                 options.pack.join(MANIFEST_NAME).display()
             );
@@ -97,11 +107,48 @@ struct AcceptedInstalledFlagshipEvidence {
     report: StagedEvidence,
 }
 
+#[derive(Debug)]
+struct AcceptExternalSimulatorOptions {
+    pack: PathBuf,
+    id: String,
+    owner: String,
+    repository: String,
+    revision: String,
+    adapter: String,
+    task_spec: String,
+    runtime_manifest: String,
+    runtime_artifacts: Vec<String>,
+    adapter_arguments: Vec<String>,
+    conformance_report: String,
+    release_archive: String,
+    submission_candidate: String,
+    stdout_log: String,
+    stderr_log: String,
+    submission_report: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct AcceptedExternalSimulatorEvidence {
+    adapter: StagedEvidence,
+    task_spec: StagedEvidence,
+    runtime_manifest: StagedEvidence,
+    runtime_artifacts: Vec<StagedEvidence>,
+    conformance_report: StagedEvidence,
+    release_archive: StagedEvidence,
+    submission_candidate: StagedEvidence,
+    stdout_log: StagedEvidence,
+    stderr_log: StagedEvidence,
+    submission_report: StagedEvidence,
+}
+
 fn print_usage() {
     println!("readiness-pack init --output DIR");
     println!("readiness-pack stage --pack DIR --source FILE --path FORWARD/SLASH/PATH");
     println!(
         "readiness-pack accept-installed-flagship --pack DIR --id ID --owner OWNER \\\n+         --repository URL --revision COMMIT --measured-on YYYY-MM-DD \\\n+         --release-archive PATH --proof-bundle PATH --submission-candidate PATH \\\n+         --stdout-log PATH --stderr-log PATH --report PATH"
+    );
+    println!(
+        "readiness-pack accept-external-simulator --pack DIR --id ID --owner OWNER \\\n+         --repository URL --revision COMMIT --adapter PATH --task-spec PATH \\\n+         --runtime-manifest PATH --runtime-artifact PATH (three times) \\\n+         --adapter-argument VALUE (repeat as required) --conformance-report PATH \\\n+         --release-archive PATH --submission-candidate PATH --stdout-log PATH \\\n+         --stderr-log PATH --submission-report PATH"
     );
 }
 
@@ -223,6 +270,105 @@ fn parse_accept_installed_flagship_options(
         stdout_log: stdout_log.context("accept-installed-flagship requires --stdout-log PATH")?,
         stderr_log: stderr_log.context("accept-installed-flagship requires --stderr-log PATH")?,
         report: report.context("accept-installed-flagship requires --report PATH")?,
+    })
+}
+
+fn parse_accept_external_simulator_options(
+    args: &mut impl Iterator<Item = String>,
+    root: &Path,
+) -> Result<AcceptExternalSimulatorOptions> {
+    let mut pack = None;
+    let mut id = None;
+    let mut owner = None;
+    let mut repository = None;
+    let mut revision = None;
+    let mut adapter = None;
+    let mut task_spec = None;
+    let mut runtime_manifest = None;
+    let mut runtime_artifacts = Vec::new();
+    let mut adapter_arguments = Vec::new();
+    let mut conformance_report = None;
+    let mut release_archive = None;
+    let mut submission_candidate = None;
+    let mut stdout_log = None;
+    let mut stderr_log = None;
+    let mut submission_report = None;
+    while let Some(argument) = args.next() {
+        anyhow::ensure!(
+            matches!(
+                argument.as_str(),
+                "--pack"
+                    | "--id"
+                    | "--owner"
+                    | "--repository"
+                    | "--revision"
+                    | "--adapter"
+                    | "--task-spec"
+                    | "--runtime-manifest"
+                    | "--runtime-artifact"
+                    | "--adapter-argument"
+                    | "--conformance-report"
+                    | "--release-archive"
+                    | "--submission-candidate"
+                    | "--stdout-log"
+                    | "--stderr-log"
+                    | "--submission-report"
+            ),
+            "unknown readiness-pack accept-external-simulator argument: {argument}"
+        );
+        let value = next_value(args, &argument)?;
+        match argument.as_str() {
+            "--pack" => set_once(&mut pack, absolute_from(root, value), "--pack")?,
+            "--id" => set_once(&mut id, value, "--id")?,
+            "--owner" => set_once(&mut owner, value, "--owner")?,
+            "--repository" => set_once(&mut repository, value, "--repository")?,
+            "--revision" => set_once(&mut revision, value, "--revision")?,
+            "--adapter" => set_once(&mut adapter, value, "--adapter")?,
+            "--task-spec" => set_once(&mut task_spec, value, "--task-spec")?,
+            "--runtime-manifest" => set_once(&mut runtime_manifest, value, "--runtime-manifest")?,
+            "--runtime-artifact" => runtime_artifacts.push(value),
+            "--adapter-argument" => adapter_arguments.push(value),
+            "--conformance-report" => {
+                set_once(&mut conformance_report, value, "--conformance-report")?
+            }
+            "--release-archive" => set_once(&mut release_archive, value, "--release-archive")?,
+            "--submission-candidate" => {
+                set_once(&mut submission_candidate, value, "--submission-candidate")?
+            }
+            "--stdout-log" => set_once(&mut stdout_log, value, "--stdout-log")?,
+            "--stderr-log" => set_once(&mut stderr_log, value, "--stderr-log")?,
+            "--submission-report" => {
+                set_once(&mut submission_report, value, "--submission-report")?
+            }
+            _ => unreachable!("accepted argument was matched above"),
+        }
+    }
+    anyhow::ensure!(
+        runtime_artifacts.len() == 3,
+        "accept-external-simulator requires exactly three ordered --runtime-artifact paths"
+    );
+    Ok(AcceptExternalSimulatorOptions {
+        pack: pack.context("accept-external-simulator requires --pack DIR")?,
+        id: id.context("accept-external-simulator requires --id ID")?,
+        owner: owner.context("accept-external-simulator requires --owner OWNER")?,
+        repository: repository.context("accept-external-simulator requires --repository URL")?,
+        revision: revision.context("accept-external-simulator requires --revision COMMIT")?,
+        adapter: adapter.context("accept-external-simulator requires --adapter PATH")?,
+        task_spec: task_spec.context("accept-external-simulator requires --task-spec PATH")?,
+        runtime_manifest: runtime_manifest
+            .context("accept-external-simulator requires --runtime-manifest PATH")?,
+        runtime_artifacts,
+        adapter_arguments,
+        conformance_report: conformance_report
+            .context("accept-external-simulator requires --conformance-report PATH")?,
+        release_archive: release_archive
+            .context("accept-external-simulator requires --release-archive PATH")?,
+        submission_candidate: submission_candidate
+            .context("accept-external-simulator requires --submission-candidate PATH")?,
+        stdout_log: stdout_log.context("accept-external-simulator requires --stdout-log PATH")?,
+        stderr_log: stderr_log.context("accept-external-simulator requires --stderr-log PATH")?,
+        submission_report: submission_report
+            .context("accept-external-simulator requires --submission-report PATH")?,
     })
 }
 
@@ -370,19 +516,36 @@ fn accept_installed_flagship(root: &Path, options: &AcceptInstalledFlagshipOptio
         },
     )?;
 
+    let current = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("read readiness manifest {}", manifest_path.display()))?;
+    let updated = manifest_with_installed_flagship_entry(&current, options, &evidence)?;
+    atomically_replace_manifest(root, &options.pack, &current, &updated, || {
+        anyhow::ensure!(
+            verify_installed_flagship_evidence(options)? == evidence,
+            "installed flagship evidence changed during acceptance"
+        );
+        Ok(())
+    })
+}
+
+fn atomically_replace_manifest(
+    root: &Path,
+    pack: &Path,
+    expected_current: &str,
+    updated: &str,
+    verify_evidence_unchanged: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let manifest_path = pack.join(MANIFEST_NAME);
     let manifest_metadata = fs::symlink_metadata(&manifest_path)
         .with_context(|| format!("inspect readiness manifest {}", manifest_path.display()))?;
     anyhow::ensure!(
         manifest_metadata.is_file() && !manifest_metadata.file_type().is_symlink(),
         "readiness manifest must be a regular non-symlink file"
     );
-    let current = fs::read_to_string(&manifest_path)
-        .with_context(|| format!("read readiness manifest {}", manifest_path.display()))?;
-    let updated = manifest_with_installed_flagship_entry(&current, options, &evidence)?;
     let mut temporary = tempfile::Builder::new()
         .prefix(".rne-readiness-manifest-")
-        .tempfile_in(&options.pack)
-        .with_context(|| format!("create staged manifest in {}", options.pack.display()))?;
+        .tempfile_in(pack)
+        .with_context(|| format!("create staged manifest in {}", pack.display()))?;
     temporary.write_all(updated.as_bytes())?;
     temporary
         .as_file()
@@ -390,13 +553,10 @@ fn accept_installed_flagship(root: &Path, options: &AcceptInstalledFlagshipOptio
     temporary.as_file_mut().sync_all()?;
     release_readiness::validate_manifest_path(root, temporary.path())?;
     anyhow::ensure!(
-        fs::read(&manifest_path)? == current.as_bytes(),
-        "readiness manifest changed during installed flagship acceptance"
+        fs::read(&manifest_path)? == expected_current.as_bytes(),
+        "readiness manifest changed during evidence acceptance"
     );
-    anyhow::ensure!(
-        verify_installed_flagship_evidence(options)? == evidence,
-        "installed flagship evidence changed during acceptance"
-    );
+    verify_evidence_unchanged()?;
     temporary
         .persist(&manifest_path)
         .map_err(|error| error.error)
@@ -415,6 +575,169 @@ fn verify_installed_flagship_evidence(
         stderr_log: verify_staged_file(&options.pack, &options.stderr_log)?,
         report: verify_staged_file(&options.pack, &options.report)?,
     })
+}
+
+fn accept_external_simulator(root: &Path, options: &AcceptExternalSimulatorOptions) -> Result<()> {
+    let manifest_path = options.pack.join(MANIFEST_NAME);
+    release_readiness::validate_manifest_path(root, &manifest_path)?;
+    let evidence = verify_external_simulator_evidence(options)?;
+    let unique_paths = std::iter::once(&evidence.adapter.relative_path)
+        .chain(std::iter::once(&evidence.task_spec.relative_path))
+        .chain(std::iter::once(&evidence.runtime_manifest.relative_path))
+        .chain(
+            evidence
+                .runtime_artifacts
+                .iter()
+                .map(|reference| &reference.relative_path),
+        )
+        .chain(std::iter::once(&evidence.conformance_report.relative_path))
+        .chain(std::iter::once(&evidence.release_archive.relative_path))
+        .chain(std::iter::once(
+            &evidence.submission_candidate.relative_path,
+        ))
+        .chain(std::iter::once(&evidence.stdout_log.relative_path))
+        .chain(std::iter::once(&evidence.stderr_log.relative_path))
+        .chain(std::iter::once(&evidence.submission_report.relative_path))
+        .collect::<BTreeSet<_>>();
+    anyhow::ensure!(
+        unique_paths.len() == 12,
+        "external simulator evidence roles must reference twelve distinct files"
+    );
+
+    let staged_path = |reference: &StagedEvidence| options.pack.join(&reference.relative_path);
+    let runtime_artifacts = evidence
+        .runtime_artifacts
+        .iter()
+        .map(staged_path)
+        .collect::<Vec<_>>();
+    let submission_report_path = staged_path(&evidence.submission_report);
+    let report_bytes = fs::read(&submission_report_path).with_context(|| {
+        format!(
+            "read staged external simulator report {}",
+            submission_report_path.display()
+        )
+    })?;
+    external_simulator::validate_staged_submission_report(
+        &report_bytes,
+        external_simulator::StagedSubmission {
+            owner: &options.owner,
+            repository: &options.repository,
+            revision: &options.revision,
+            release_archive: &staged_path(&evidence.release_archive),
+            adapter: &staged_path(&evidence.adapter),
+            task_spec: &staged_path(&evidence.task_spec),
+            runtime_manifest: &staged_path(&evidence.runtime_manifest),
+            runtime_artifacts: &runtime_artifacts,
+            conformance_report: &staged_path(&evidence.conformance_report),
+            submission_candidate: &staged_path(&evidence.submission_candidate),
+            stdout_log: &staged_path(&evidence.stdout_log),
+            stderr_log: &staged_path(&evidence.stderr_log),
+            adapter_arguments: &options.adapter_arguments,
+        },
+    )?;
+
+    let current = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("read readiness manifest {}", manifest_path.display()))?;
+    let updated = manifest_with_external_simulator_entry(&current, options, &evidence)?;
+    atomically_replace_manifest(root, &options.pack, &current, &updated, || {
+        anyhow::ensure!(
+            verify_external_simulator_evidence(options)? == evidence,
+            "external simulator evidence changed during acceptance"
+        );
+        Ok(())
+    })
+}
+
+fn verify_external_simulator_evidence(
+    options: &AcceptExternalSimulatorOptions,
+) -> Result<AcceptedExternalSimulatorEvidence> {
+    Ok(AcceptedExternalSimulatorEvidence {
+        adapter: verify_staged_file(&options.pack, &options.adapter)?,
+        task_spec: verify_staged_file(&options.pack, &options.task_spec)?,
+        runtime_manifest: verify_staged_file(&options.pack, &options.runtime_manifest)?,
+        runtime_artifacts: options
+            .runtime_artifacts
+            .iter()
+            .map(|path| verify_staged_file(&options.pack, path))
+            .collect::<Result<Vec<_>>>()?,
+        conformance_report: verify_staged_file(&options.pack, &options.conformance_report)?,
+        release_archive: verify_staged_file(&options.pack, &options.release_archive)?,
+        submission_candidate: verify_staged_file(&options.pack, &options.submission_candidate)?,
+        stdout_log: verify_staged_file(&options.pack, &options.stdout_log)?,
+        stderr_log: verify_staged_file(&options.pack, &options.stderr_log)?,
+        submission_report: verify_staged_file(&options.pack, &options.submission_report)?,
+    })
+}
+
+fn manifest_with_external_simulator_entry(
+    current: &str,
+    options: &AcceptExternalSimulatorOptions,
+    evidence: &AcceptedExternalSimulatorEvidence,
+) -> Result<String> {
+    anyhow::ensure!(
+        !current.contains('\r') || !current.replace("\r\n", "").contains('\r'),
+        "readiness manifest contains a non-canonical carriage return"
+    );
+    let mut updated = current.replace("\r\n", "\n");
+    if !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push('\n');
+    updated.push_str("[[external_system]]\n");
+    for (key, value) in [
+        ("id", options.id.as_str()),
+        ("owner", options.owner.as_str()),
+        ("repository", options.repository.as_str()),
+        ("revision", options.revision.as_str()),
+    ] {
+        updated.push_str(key);
+        updated.push_str(" = ");
+        updated.push_str(&toml_string(value));
+        updated.push('\n');
+    }
+    updated.push_str("kind = \"simulator_adapter\"\n");
+    for (key, reference) in [
+        ("subject", &evidence.adapter),
+        ("task_spec", &evidence.task_spec),
+        ("runtime_manifest", &evidence.runtime_manifest),
+    ] {
+        updated.push_str(key);
+        updated.push_str(" = ");
+        updated.push_str(&inline_reference(reference));
+        updated.push('\n');
+    }
+    let arguments = toml::Value::Array(
+        options
+            .adapter_arguments
+            .iter()
+            .cloned()
+            .map(toml::Value::String)
+            .collect(),
+    );
+    updated.push_str("adapter_arguments = ");
+    updated.push_str(&arguments.to_string());
+    updated.push('\n');
+    updated.push_str("runtime_artifacts = [\n");
+    for reference in &evidence.runtime_artifacts {
+        updated.push_str("  ");
+        updated.push_str(&inline_reference(reference));
+        updated.push_str(",\n");
+    }
+    updated.push_str("]\n");
+    for (key, reference) in [
+        ("report", &evidence.conformance_report),
+        ("release_archive", &evidence.release_archive),
+        ("submission_candidate", &evidence.submission_candidate),
+        ("stdout_log", &evidence.stdout_log),
+        ("stderr_log", &evidence.stderr_log),
+        ("submission_report", &evidence.submission_report),
+    ] {
+        updated.push_str(key);
+        updated.push_str(" = ");
+        updated.push_str(&inline_reference(reference));
+        updated.push('\n');
+    }
+    Ok(updated)
 }
 
 fn verify_staged_file(pack: &Path, path: &str) -> Result<StagedEvidence> {
@@ -699,6 +1022,54 @@ mod tests {
         }
     }
 
+    fn external_simulator_options(pack: PathBuf) -> AcceptExternalSimulatorOptions {
+        AcceptExternalSimulatorOptions {
+            pack,
+            id: "external-gazebo".to_string(),
+            owner: "external-owner".to_string(),
+            repository: "https://github.com/external-owner/gazebo-adapter".to_string(),
+            revision: "b".repeat(40),
+            adapter: "simulator/adapter.py".to_string(),
+            task_spec: "simulator/task.json".to_string(),
+            runtime_manifest: "simulator/runtime.json".to_string(),
+            runtime_artifacts: vec![
+                "simulator/world.sdf".to_string(),
+                "simulator/robot.sdf".to_string(),
+                "simulator/adapter.json".to_string(),
+            ],
+            adapter_arguments: vec![
+                "<adapter-subject>".to_string(),
+                "--runtime-manifest".to_string(),
+                "<runtime-manifest>".to_string(),
+            ],
+            conformance_report: "simulator/conformance.json".to_string(),
+            release_archive: "simulator/release.tar.gz".to_string(),
+            submission_candidate: "simulator/submission.json".to_string(),
+            stdout_log: "simulator/stdout.txt".to_string(),
+            stderr_log: "simulator/stderr.txt".to_string(),
+            submission_report: "simulator/maintainer-report.json".to_string(),
+        }
+    }
+
+    fn external_simulator_evidence() -> AcceptedExternalSimulatorEvidence {
+        AcceptedExternalSimulatorEvidence {
+            adapter: accepted_reference("simulator/adapter.py", 1),
+            task_spec: accepted_reference("simulator/task.json", 2),
+            runtime_manifest: accepted_reference("simulator/runtime.json", 3),
+            runtime_artifacts: vec![
+                accepted_reference("simulator/world.sdf", 4),
+                accepted_reference("simulator/robot.sdf", 5),
+                accepted_reference("simulator/adapter.json", 6),
+            ],
+            conformance_report: accepted_reference("simulator/conformance.json", 7),
+            release_archive: accepted_reference("simulator/release.tar.gz", 8),
+            submission_candidate: accepted_reference("simulator/submission.json", 9),
+            stdout_log: accepted_reference("simulator/stdout.txt", 10),
+            stderr_log: accepted_reference("simulator/stderr.txt", 11),
+            submission_report: accepted_reference("simulator/maintainer-report.json", 12),
+        }
+    }
+
     #[test]
     fn initializes_an_external_pack_from_the_honest_baseline() {
         let root = workspace_root().unwrap();
@@ -926,6 +1297,38 @@ mod tests {
     }
 
     #[test]
+    fn external_simulator_entry_is_complete_ordered_and_duplicate_safe() {
+        let root = workspace_root().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let pack = temp.path().join("readiness");
+        init_pack(&root, &pack).unwrap();
+        let manifest_path = pack.join(MANIFEST_NAME);
+        let current = fs::read_to_string(&manifest_path).unwrap();
+        let options = external_simulator_options(pack.clone());
+        let evidence = external_simulator_evidence();
+
+        let updated = manifest_with_external_simulator_entry(&current, &options, &evidence)
+            .expect("external simulator entry");
+        let value = updated.parse::<toml::Value>().expect("valid TOML");
+        let entries = value["external_system"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["id"].as_str(), Some("external-gazebo"));
+        assert_eq!(entries[0]["kind"].as_str(), Some("simulator_adapter"));
+        assert_eq!(entries[0]["runtime_artifacts"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            entries[0]["adapter_arguments"].as_array().unwrap()[2].as_str(),
+            Some("<runtime-manifest>")
+        );
+        fs::write(&manifest_path, &updated).unwrap();
+        release_readiness::validate_manifest_path(&root, &manifest_path).unwrap();
+
+        let duplicate =
+            manifest_with_external_simulator_entry(&updated, &options, &evidence).unwrap();
+        fs::write(&manifest_path, duplicate).unwrap();
+        assert!(release_readiness::validate_manifest_path(&root, &manifest_path).is_err());
+    }
+
+    #[test]
     fn rejects_unsafe_destinations_and_oversized_sources() {
         let root = workspace_root().unwrap();
         let temp = tempfile::tempdir().unwrap();
@@ -1035,5 +1438,56 @@ mod tests {
         let parsed = parse_accept_installed_flagship_options(&mut complete, root).unwrap();
         assert_eq!(parsed.pack, root.join("pack"));
         assert_eq!(parsed.id, "run-a");
+
+        assert!(parse_accept_external_simulator_options(
+            &mut ["--pack", "pack", "--runtime-artifact", "only-one"]
+                .map(str::to_string)
+                .into_iter(),
+            root
+        )
+        .is_err());
+        let mut simulator = [
+            "--pack",
+            "pack",
+            "--id",
+            "gazebo-a",
+            "--owner",
+            "external-owner",
+            "--repository",
+            "https://github.com/external-owner/gazebo-adapter",
+            "--revision",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "--adapter",
+            "sim/adapter.py",
+            "--task-spec",
+            "sim/task.json",
+            "--runtime-manifest",
+            "sim/runtime.json",
+            "--runtime-artifact",
+            "sim/world.sdf",
+            "--runtime-artifact",
+            "sim/robot.sdf",
+            "--runtime-artifact",
+            "sim/adapter.json",
+            "--adapter-argument",
+            "--runtime-manifest",
+            "--conformance-report",
+            "sim/conformance.json",
+            "--release-archive",
+            "sim/release.tar.gz",
+            "--submission-candidate",
+            "sim/submission.json",
+            "--stdout-log",
+            "sim/stdout.txt",
+            "--stderr-log",
+            "sim/stderr.txt",
+            "--submission-report",
+            "sim/maintainer.json",
+        ]
+        .map(str::to_string)
+        .into_iter();
+        let parsed = parse_accept_external_simulator_options(&mut simulator, root).unwrap();
+        assert_eq!(parsed.runtime_artifacts.len(), 3);
+        assert_eq!(parsed.adapter_arguments, ["--runtime-manifest"]);
     }
 }

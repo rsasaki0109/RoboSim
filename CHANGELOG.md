@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Add `readiness-pack accept-external-simulator` for independently maintained
+  Gazebo and other simulator adapters. It revalidates twelve distinct staged
+  files, exact ordered adapter arguments, typed conformance identity, and the
+  maintainer report before atomically adding the readiness entry.
+
 - Add a fail-closed `readiness-pack accept-installed-flagship` operation. It
   rehashes and revalidates all six staged external-run artifacts before
   atomically appending the schema-v9 readiness entry, eliminating manual digest
