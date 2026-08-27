@@ -282,6 +282,15 @@ Work proceeds in this order, one mergeable slice at a time:
 8. Ask the first external operator to run the next tagged release without
    maintainer intervention and audit the retained report.
 
+The tag publisher now promotes both platform attestation bundles and attested
+archive-install reports from expiring Actions artifacts into permanent Release
+assets. A deterministic release-level `SHA256SUMS` covers the four primary
+archive/wheel assets and those four evidence files before publication. The
+release exit gate rejects removal, publication before checksumming, or an
+eight-file partial set. This makes the next `v0.2.0` tag durable enough for the
+independent operator and the later 183-day readiness audit; it does not create
+the tag or claim an external run occurred.
+
 Each slice includes tests and a short documentation update. No unrelated demo
 or subsystem expansion enters these slices.
 

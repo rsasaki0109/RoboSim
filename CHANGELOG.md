@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Publish platform-specific attestation bundles and archive-install rehearsal
+  reports as durable tagged-release assets, together with a release-level
+  `SHA256SUMS`, so independent reproduction evidence survives Actions artifact
+  expiry and can be reverified on another machine.
+
 - Requalify the OpenArm Gazebo adapter after its transmitted-effort change and
   add dedicated Ubuntu 22.04 / Gazebo Harmonic 8.15.0 CI. The job reruns all
   ten fixed-step simulator checks, byte-compares fresh and committed reports,

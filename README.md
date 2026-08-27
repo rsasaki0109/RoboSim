@@ -94,7 +94,9 @@ source tree is not required to submit evidence.
 Read the [external evidence intake guide](docs/EXTERNAL_EVIDENCE_INTAKE.md)
 before running a qualifying test. Opening an issue is only the start of review:
 it does not imply acceptance, and in-repository reference implementations do
-not count as independent evidence.
+not count as independent evidence. Tagged releases retain a release-level
+`SHA256SUMS`, platform attestation bundles, and attested install reports beside
+the native archives so another machine can audit the exact operator input.
 
 ## Vehicle dynamics at the grip limit
 

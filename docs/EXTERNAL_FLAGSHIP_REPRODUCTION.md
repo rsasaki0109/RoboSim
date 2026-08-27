@@ -16,6 +16,12 @@ release target, operating system, and a stable non-sensitive machine label.
 Verify the archive's published provenance and digest before extraction. Keep
 the downloaded archive unchanged.
 
+Download the release-level `SHA256SUMS` beside the archive and verify the
+archive's matching entry before extraction. The same Release page retains the
+platform-specific attestation bundle and archive-install report, allowing a
+different machine and later readiness audit to reverify the exact published
+bytes after the workflow artifact retention window has expired.
+
 Create a new public evidence repository owned outside the RNE repository owner.
 The repository author, machine operator, and commands must be real; do not use
 RNE CI, a copied report, or placeholder metadata. Do not record the final Git

@@ -12,6 +12,18 @@ anything, first verify that the archive itself has GitHub/Sigstore provenance
 bound to this repository, then verify every extracted entry in `SHA256SUMS`:
 
 ```bash
+gh release download v0.2.0 -R rsasaki0109/RoboSim \
+  --pattern SHA256SUMS \
+  --pattern 'rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz'
+sha256sum --ignore-missing --check SHA256SUMS
+```
+
+On Windows, download the ZIP plus the release-level `SHA256SUMS` and compare
+the matching line with `Get-FileHash -Algorithm SHA256`. This release-level
+manifest checks downloaded asset identity before extraction; the separate
+`SHA256SUMS` inside the archive checks every extracted member.
+
+```bash
 REVISION="$(gh api repos/rsasaki0109/RoboSim/commits/v0.2.0 --jq .sha)"
 gh attestation verify rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz \
   -R rsasaki0109/RoboSim \
@@ -40,6 +52,10 @@ build workflow and the requested tag as source ref, and must reject self-hosted
 builders. Replace `REVISION` with the exact 40-character commit resolved by the
 verified tag. Maintainer readiness audits additionally pass the retained action
 bundle through `--bundle` so the evidence pack remains independently replayable.
+Each tagged release permanently publishes that platform-specific bundle as
+`rne-VERSION-TARGET.attestation-bundle.json` and its attested install report as
+`rne-VERSION-TARGET.archive-install-rehearsal-report.json`; they are not left
+only in expiring Actions artifacts.
 The committed policy is
 `release/artifact-attestation.toml`; GitHub's verifier checks the signed SLSA
 provenance and subject digest. Checksums remain a separate, offline integrity
