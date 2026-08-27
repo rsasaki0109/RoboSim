@@ -15,6 +15,9 @@ pub use splat::{
     GaussianSplatError,
 };
 pub use validation::{
-    validate_registered_splat_depth, RegisteredSplatDepthLandmark, RegisteredSplatDepthReport,
-    RegisteredSplatDepthTolerances,
+    validate_registered_splat_depth, validate_registered_splat_multiview_depth,
+    RegisteredSplatDepthFrameEvidence, RegisteredSplatDepthLandmark, RegisteredSplatDepthReport,
+    RegisteredSplatDepthTolerances, RegisteredSplatMultiviewDepthReport,
+    RegisteredSplatMultiviewDepthTolerances, RegisteredSplatMultiviewTrackEvidence,
+    RegisteredSplatMultiviewViewEvidence,
 };

@@ -423,18 +423,18 @@
   "sparse_depth_alignment": {
     "status": "verified",
     "reference_camera_id": "colmap.IMG_6293.jpg",
-    "depth_algorithm_identity": "rne.gaussian_splat.proxy_depth.v1",
+    "depth_algorithm_identity": "rne.gaussian_splat.alpha_proxy_depth.v2",
     "report": {
       "path": "IMG_6293.depth.json",
-      "size_bytes": 3181,
-      "sha256": "d4c656e87e6cefa9117b3ca4e126a5e7fb599070ce907d4ca6f388748a4cfd08"
+      "size_bytes": 3200,
+      "sha256": "d050eaa136d12867c264aee6a695318ae0166444f0e9834050ab7b63739f1f3a"
     },
-    "depth_frame_hash": 3366640260583796914,
-    "finite_depth_pixels": 934375,
-    "finite_depth_fraction": 0.8007793752656767,
+    "depth_frame_hash": 17887784150483714575,
+    "finite_depth_pixels": 1005237,
+    "finite_depth_fraction": 0.8615096260644206,
     "matched_landmarks": 6,
-    "mean_absolute_error_source_units": 0.17932670667569903,
-    "max_absolute_error_source_units": 0.6521817176609748,
+    "mean_absolute_error_source_units": 0.1480057030612072,
+    "max_absolute_error_source_units": 0.6048472850590461,
     "tolerances": {
       "min_finite_depth_fraction": 0.75,
       "min_matched_landmarks": 6,
@@ -442,7 +442,57 @@
       "max_absolute_error_source_units": 0.75
     },
     "metric_qualified": false,
-    "units_note": "Depth values remain COLMAP reconstruction units, not metres, until an independent physical scale anchor is retained."
+    "units_note": "Depth values remain COLMAP reconstruction units, not metres; metric qualification is owned by the independent physical-scale contract."
+  },
+  "multiview_depth_occlusion_alignment": {
+    "status": "verified",
+    "track_fixture": {
+      "path": "IMG_6292-IMG_6293.multiview-tracks.json",
+      "size_bytes": 35513,
+      "sha256": "4b0aa189e37be3c0420fbf79caf4a72c643af4e04f136badf62ee2555567a496"
+    },
+    "report": {
+      "path": "IMG_6292-IMG_6293.multiview-depth.json",
+      "size_bytes": 40128,
+      "sha256": "cdc5580ee1ded05eb2e92a12db3fe66ced5e6d4eb39a9558809b851405aa05f8"
+    },
+    "depth_algorithm_identity": "rne.gaussian_splat.alpha_proxy_depth.v2",
+    "frames": [
+      {
+        "camera_id": "colmap.IMG_6292.jpg",
+        "width_px": 1332,
+        "height_px": 876,
+        "depth_frame_hash": 4348874904651447855,
+        "finite_depth_pixels": 995848,
+        "finite_depth_fraction": 0.8534630520931891
+      },
+      {
+        "camera_id": "colmap.IMG_6293.jpg",
+        "width_px": 1332,
+        "height_px": 876,
+        "depth_frame_hash": 17887784150483714575,
+        "finite_depth_pixels": 1005237,
+        "finite_depth_fraction": 0.8615096260644206
+      }
+    ],
+    "matched_track_count": 40,
+    "matched_view_count": 80,
+    "mean_absolute_error_source_units": 0.04996857122654062,
+    "max_absolute_error_source_units": 0.5253079228781297,
+    "depth_delta_mae_source_units": 0.03530184380393081,
+    "false_occlusion_view_count": 0,
+    "false_occlusion_fraction": 0.0,
+    "tolerances": {
+      "min_finite_depth_fraction_per_camera": 0.75,
+      "min_matched_tracks": 36,
+      "max_mean_absolute_error_source_units": 0.25,
+      "max_absolute_error_source_units": 0.75,
+      "max_depth_delta_mae_source_units": 0.25,
+      "false_occlusion_margin_source_units": 0.25,
+      "max_false_occlusion_fraction": 0.1
+    },
+    "metric_qualified": false,
+    "units_note": "Depth values are COLMAP reconstruction units, not metres, until an independent physical scale anchor is retained."
   },
   "contracts": [
     {
@@ -471,6 +521,10 @@
     },
     {
       "id": "sparse_depth_alignment",
+      "status": "passed"
+    },
+    {
+      "id": "multiview_depth_occlusion_alignment",
       "status": "passed"
     }
   ]

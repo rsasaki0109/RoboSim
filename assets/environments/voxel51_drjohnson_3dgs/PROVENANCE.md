@@ -67,17 +67,24 @@ The retained render identifies its execution adapter as an NVIDIA GeForce GTX
 claimed portable, while the registered metric limits are.
 
 `IMG_6293.depth.json` independently runs the checked-in Gaussian PLY through
-RNE's deterministic proxy-depth path at the same registered camera. It binds
-the PLY and camera calibration hashes plus the full `1332 x 876` depth-frame
-hash. Proxy depth covers `80.08%` of the image and matches all six semantic
-COLMAP landmarks with `0.179327` mean and `0.652182` maximum absolute error in
-reconstruction units. The report deliberately stores no duplicate full depth
-image and explicitly rejects a metre claim before physical scale exists.
+RNE's deterministic anisotropic, front-to-back alpha-composited proxy-depth
+path at the same registered camera. It binds the PLY and camera calibration
+hashes plus the full `1332 x 876` depth-frame hash. Proxy depth covers `86.15%`
+of the image and matches all six semantic COLMAP landmarks with `0.148006` mean
+and `0.604847` maximum absolute error in reconstruction units.
+
+`IMG_6292-IMG_6293.multiview-tracks.json` deterministically selects 42 occupied
+cells from an `8 x 6` grid after filtering 823 shared real COLMAP tracks to 756
+with at most `2 px` reprojection error in both cameras. The corresponding
+multi-view report matches 40 tracks in both RNE depth frames, retains `0.035302`
+source-unit depth-delta MAE, and reports zero false occlusions across 80 matched
+real-visible observations. Neither report stores a duplicate full depth image,
+and both explicitly reject a metre claim before physical scale exists.
 
 This is deliberately **not yet a qualifying metric calibration**. COLMAP
 reconstruction units are only defined up to scale, and the archive contains no
 independently measured physical length. Plausible camera height is not accepted
-as a scale anchor. The fixture therefore passes six of seven contracts and
+as a scale anchor. The fixture therefore passes seven of eight contracts and
 reports one as missing:
 
 - `independent_metric_scale_anchor`
@@ -100,6 +107,8 @@ inside declared uncertainty. No placeholder anchor is committed.
 python tools/prepare_voxel51_drjohnson_3dgs.py
 python tools/prepare_voxel51_drjohnson_3dgs.py --check
 cargo run -p rne_render_3dgs --example registered_splat_depth -- --manifest assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml --camera colmap.IMG_6293.jpg --output assets/environments/voxel51_drjohnson_3dgs/IMG_6293.depth.json
+python tools/prepare_drjohnson_multiview_tracks.py --source-archive E:\RNE-tools\tandt_db.zip
+cargo run -p rne_render_3dgs --example registered_splat_multiview_depth -- --manifest assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml --tracks assets/environments/voxel51_drjohnson_3dgs/IMG_6292-IMG_6293.multiview-tracks.json --output assets/environments/voxel51_drjohnson_3dgs/IMG_6292-IMG_6293.multiview-depth.json
 python tools/prepare_drjohnson_validation_fixture.py --source-archive E:\RNE-tools\tandt_db.zip
 python tools/prepare_drjohnson_validation_fixture.py --source-archive E:\RNE-tools\tandt_db.zip --check
 ```

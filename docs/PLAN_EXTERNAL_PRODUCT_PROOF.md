@@ -81,9 +81,12 @@ the pickup collision proxy into the retained real-image rug polygon. A retained
 same-camera RNE render now passes fixed raw-PSNR, luminance-correlation, and
 gradient-correlation limits, with the validator recomputing every metric from
 the content-addressed images. The same registered camera now produces a
-content-bound proxy-depth frame: all six semantic landmarks are observed, with
-`0.179327` source-unit mean absolute error and deterministic replay. Six of
-seven contracts pass. It intentionally remains non-qualifying, and the depth
+content-bound alpha-composited proxy-depth frame: all six semantic landmarks
+are observed with `0.148006` source-unit mean absolute error. A second real
+camera adds 42 spatially distributed shared tracks; 40 match in both RNE depth
+frames with `0.035302` source-unit depth-delta MAE and zero false occlusions
+across 80 matched observations. Seven of eight contracts pass. It intentionally
+remains non-qualifying, and the depth
 report explicitly refuses a metre claim, because COLMAP scale lacks an
 independent physical anchor; that anchor is the remaining geometric-sensor
 deliverable and may not be inferred from visual plausibility.
@@ -508,7 +511,7 @@ actuator-authority envelope. The next slices are:
 
 Sensor dropout/recovery at the typed controller boundary, actuator realization
 diagnostics, payload robustness, and actuator-authority degradation are already
-complete. Camera/depth and 3DGS calibration now have a fail-closed 6/7 Dr
+complete. Camera/depth and 3DGS calibration now have a fail-closed 7/8 Dr
 Johnson fixture; an independent metric anchor remains the next geometric-sensor
 stage. It does not displace the joint-feedback and control-loop work above.
 

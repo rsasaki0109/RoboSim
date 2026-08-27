@@ -18,7 +18,7 @@ macro_rules! ensure {
 
 const FIXTURE_KIND: &str = "rne_gaussian_splat_validation_fixture";
 const FIXTURE_SCHEMA_VERSION: u64 = 1;
-const EXPECTED_CONTRACTS: [&str; 7] = [
+const EXPECTED_CONTRACTS: [&str; 8] = [
     "floor_world_alignment",
     "camera_intrinsics_extrinsics",
     "semantic_landmark_reprojection",
@@ -26,6 +26,7 @@ const EXPECTED_CONTRACTS: [&str; 7] = [
     "independent_metric_scale_anchor",
     "real_sim_observation_comparison",
     "sparse_depth_alignment",
+    "multiview_depth_occlusion_alignment",
 ];
 
 /// Result of rehashing and semantically auditing one 3DGS validation fixture.
@@ -153,6 +154,7 @@ pub fn audit_gaussian_splat_validation_fixture(
             "collision_semantic_alignment",
             "real_sim_observation_comparison",
             "sparse_depth_alignment",
+            "multiview_depth_occlusion_alignment",
             "contracts",
         ],
         "fixture",
@@ -215,7 +217,18 @@ pub fn audit_gaussian_splat_validation_fixture(
             object(field(provenance, "splat_ply")?, "splat_ply")?,
             "sha256",
         )?,
-        metric_passed,
+    )?;
+    let multiview_depth_passed = validate_multiview_depth_occlusion_alignment(
+        object(
+            field(root, "multiview_depth_occlusion_alignment")?,
+            "multiview_depth_occlusion_alignment",
+        )?,
+        parent,
+        &environment_id,
+        string(
+            object(field(provenance, "splat_ply")?, "splat_ply")?,
+            "sha256",
+        )?,
     )?;
 
     let expected = BTreeMap::from([
@@ -238,6 +251,10 @@ pub fn audit_gaussian_splat_validation_fixture(
             pass_or_fail(observation_passed),
         ),
         ("sparse_depth_alignment", pass_or_fail(sparse_depth_passed)),
+        (
+            "multiview_depth_occlusion_alignment",
+            pass_or_fail(multiview_depth_passed),
+        ),
     ]);
     let contracts = validate_contracts(array(field(root, "contracts")?, "contracts")?)?;
     ensure!(
@@ -969,7 +986,6 @@ fn validate_sparse_depth_alignment(
     parent: &Path,
     environment_id: &str,
     expected_ply_sha256: &str,
-    metric_passed: bool,
 ) -> Result<bool, GaussianSplatValidationError> {
     ensure_exact_keys(
         value,
@@ -993,7 +1009,7 @@ fn validate_sparse_depth_alignment(
     let camera_id = nonempty_string(value, "reference_camera_id")?;
     let algorithm = nonempty_string(value, "depth_algorithm_identity")?;
     ensure!(
-        algorithm == "rne.gaussian_splat.proxy_depth.v1",
+        algorithm == "rne.gaussian_splat.alpha_proxy_depth.v2",
         "unsupported sparse-depth algorithm"
     );
     let report_path = verify_artifact(
@@ -1074,7 +1090,7 @@ fn validate_sparse_depth_alignment(
         "sparse-depth coverage fraction drifted"
     );
     ensure!(
-        unsigned(report, "patch_radius_px")? == 1,
+        unsigned(report, "patch_radius_px")? == 2,
         "sparse-depth sampling patch drifted"
     );
 
@@ -1156,16 +1172,14 @@ fn validate_sparse_depth_alignment(
         "sparse-depth report verdict drifted"
     );
     ensure!(
-        boolean(report, "metric_qualified")? == metric_passed,
-        "sparse-depth metric qualification drifted"
+        !boolean(report, "metric_qualified")?,
+        "sparse-depth report must remain independent of metric qualification"
     );
     let units_note = nonempty_string(report, "units_note")?;
-    if !metric_passed {
-        ensure!(
-            units_note.contains("not metres"),
-            "non-metric sparse depth must disclaim metres"
-        );
-    }
+    ensure!(
+        units_note.contains("not metres"),
+        "source-unit sparse depth must disclaim metres"
+    );
     ensure!(
         field(value, "depth_algorithm_identity")? == field(report, "depth_algorithm_identity")?
             && field(value, "depth_frame_hash")? == field(report, "depth_frame_hash")?
@@ -1184,6 +1198,347 @@ fn validate_sparse_depth_alignment(
     ensure!(
         string(value, "status")? == pass_status(passed),
         "sparse-depth fixture status drifted"
+    );
+    Ok(passed)
+}
+
+fn validate_multiview_depth_occlusion_alignment(
+    value: &Map<String, Value>,
+    parent: &Path,
+    environment_id: &str,
+    expected_ply_sha256: &str,
+) -> Result<bool, GaussianSplatValidationError> {
+    ensure_exact_keys(
+        value,
+        &[
+            "status",
+            "track_fixture",
+            "report",
+            "depth_algorithm_identity",
+            "frames",
+            "matched_track_count",
+            "matched_view_count",
+            "mean_absolute_error_source_units",
+            "max_absolute_error_source_units",
+            "depth_delta_mae_source_units",
+            "false_occlusion_view_count",
+            "false_occlusion_fraction",
+            "tolerances",
+            "metric_qualified",
+            "units_note",
+        ],
+        "multiview_depth_occlusion_alignment",
+    )?;
+    let track_path = verify_artifact(
+        object(field(value, "track_fixture")?, "multi-view track fixture")?,
+        parent,
+        "multiview_depth_occlusion_alignment.track_fixture",
+    )?;
+    let report_path = verify_artifact(
+        object(field(value, "report")?, "multi-view depth report")?,
+        parent,
+        "multiview_depth_occlusion_alignment.report",
+    )?;
+    let track_bytes = fs::read(&track_path).map_err(|error| GaussianSplatValidationError::Io {
+        path: track_path.display().to_string(),
+        message: error.to_string(),
+    })?;
+    let report_bytes =
+        fs::read(&report_path).map_err(|error| GaussianSplatValidationError::Io {
+            path: report_path.display().to_string(),
+            message: error.to_string(),
+        })?;
+    let track_value: Value = serde_json::from_slice(&track_bytes).map_err(|error| {
+        GaussianSplatValidationError::Parse {
+            path: track_path.display().to_string(),
+            message: error.to_string(),
+        }
+    })?;
+    let report_value: Value = serde_json::from_slice(&report_bytes).map_err(|error| {
+        GaussianSplatValidationError::Parse {
+            path: report_path.display().to_string(),
+            message: error.to_string(),
+        }
+    })?;
+    let track_fixture = object(&track_value, "multi-view track fixture")?;
+    ensure!(
+        string(track_fixture, "kind")? == "rne_registered_colmap_multiview_tracks"
+            && unsigned(track_fixture, "schema_version")? == 1
+            && string(track_fixture, "environment_id")? == environment_id
+            && string(track_fixture, "status")? == "verified",
+        "multi-view track fixture identity drifted"
+    );
+    let source_tracks = array(field(track_fixture, "tracks")?, "multi-view source tracks")?;
+    ensure!(
+        unsigned(track_fixture, "track_count")? as usize == source_tracks.len(),
+        "multi-view source track count drifted"
+    );
+
+    let report = object(&report_value, "multi-view depth report")?;
+    ensure_exact_keys(
+        report,
+        &[
+            "kind",
+            "schema_version",
+            "environment_id",
+            "track_fixture_sha256",
+            "ply_sha256",
+            "depth_algorithm_identity",
+            "frames",
+            "tracks",
+            "matched_track_count",
+            "matched_view_count",
+            "mean_absolute_error_source_units",
+            "max_absolute_error_source_units",
+            "depth_delta_mae_source_units",
+            "false_occlusion_view_count",
+            "false_occlusion_fraction",
+            "tolerances",
+            "passed",
+            "metric_qualified",
+            "units_note",
+        ],
+        "multi-view depth report",
+    )?;
+    ensure!(
+        string(report, "kind")? == "rne_registered_splat_multiview_depth_report"
+            && unsigned(report, "schema_version")? == 1
+            && string(report, "environment_id")? == environment_id
+            && string(report, "track_fixture_sha256")? == sha256_hex(&track_bytes)
+            && string(report, "ply_sha256")? == expected_ply_sha256
+            && string(report, "depth_algorithm_identity")?
+                == "rne.gaussian_splat.alpha_proxy_depth.v2",
+        "multi-view depth report identity drifted"
+    );
+
+    let frames = array(field(report, "frames")?, "multi-view depth frames")?;
+    ensure!(
+        frames.len() == 2,
+        "multi-view report must retain two frames"
+    );
+    let mut camera_ids = BTreeSet::new();
+    let mut frame_fractions = Vec::new();
+    for frame in frames {
+        let frame = object(frame, "multi-view depth frame")?;
+        ensure_exact_keys(
+            frame,
+            &[
+                "camera_id",
+                "width_px",
+                "height_px",
+                "depth_frame_hash",
+                "finite_depth_pixels",
+                "finite_depth_fraction",
+            ],
+            "multi-view depth frame",
+        )?;
+        ensure!(
+            camera_ids.insert(nonempty_string(frame, "camera_id")?),
+            "duplicate multi-view frame camera"
+        );
+        let width = unsigned(frame, "width_px")?;
+        let height = unsigned(frame, "height_px")?;
+        let _ = unsigned(frame, "depth_frame_hash")?;
+        let finite_pixels = unsigned(frame, "finite_depth_pixels")?;
+        ensure!(
+            width > 0 && height > 0 && finite_pixels <= width * height,
+            "invalid multi-view depth frame extent or coverage"
+        );
+        let fraction = finite(frame, "finite_depth_fraction")?;
+        ensure!(
+            within_tolerance(
+                fraction,
+                finite_pixels as f64 / (width * height) as f64,
+                1.0e-12,
+            ),
+            "multi-view frame coverage drifted"
+        );
+        frame_fractions.push(fraction);
+    }
+
+    let report_tracks = array(field(report, "tracks")?, "multi-view report tracks")?;
+    ensure!(
+        report_tracks.len() == source_tracks.len(),
+        "multi-view report track count differs from source"
+    );
+    let mut absolute_errors = Vec::new();
+    let mut delta_errors = Vec::new();
+    let mut false_occlusions = 0_u64;
+    for (source_track, report_track) in source_tracks.iter().zip(report_tracks) {
+        let source_track = object(source_track, "multi-view source track")?;
+        let report_track = object(report_track, "multi-view report track")?;
+        ensure_exact_keys(
+            report_track,
+            &[
+                "colmap_point3d_id",
+                "views",
+                "depth_delta_error_source_units",
+            ],
+            "multi-view report track",
+        )?;
+        let point_id = unsigned(source_track, "colmap_point3d_id")?;
+        ensure!(
+            unsigned(report_track, "colmap_point3d_id")? == point_id,
+            "multi-view track identity drifted"
+        );
+        let source_views = array(field(source_track, "views")?, "multi-view source views")?;
+        let report_views = array(field(report_track, "views")?, "multi-view report views")?;
+        ensure!(
+            source_views.len() == 2 && report_views.len() == 2,
+            "multi-view track must retain two views"
+        );
+        let mut matched_depths = Vec::with_capacity(2);
+        for (source_view, report_view) in source_views.iter().zip(report_views) {
+            let source_view = object(source_view, "multi-view source view")?;
+            let report_view = object(report_view, "multi-view report view")?;
+            ensure_exact_keys(
+                report_view,
+                &[
+                    "camera_id",
+                    "observed_pixel_uv",
+                    "reference_depth_source_units",
+                    "rne_proxy_depth_source_units",
+                    "signed_error_source_units",
+                    "false_occlusion",
+                ],
+                "multi-view report view",
+            )?;
+            ensure!(
+                field(source_view, "camera_id")? == field(report_view, "camera_id")?
+                    && field(source_view, "observed_pixel_uv")?
+                        == field(report_view, "observed_pixel_uv")?
+                    && field(source_view, "reference_depth_source_units")?
+                        == field(report_view, "reference_depth_source_units")?,
+                "multi-view source and report observation drifted"
+            );
+            let reference = finite(report_view, "reference_depth_source_units")?;
+            let proxy = optional_finite(report_view, "rne_proxy_depth_source_units")?;
+            let signed = optional_finite(report_view, "signed_error_source_units")?;
+            let occluded = optional_boolean(report_view, "false_occlusion")?;
+            ensure!(
+                proxy.is_some() == signed.is_some() && proxy.is_some() == occluded.is_some(),
+                "multi-view optional depth fields disagree"
+            );
+            if let (Some(proxy), Some(signed), Some(occluded)) = (proxy, signed, occluded) {
+                ensure!(
+                    within_tolerance(signed, proxy - reference, 1.0e-9),
+                    "multi-view signed depth error drifted"
+                );
+                ensure!(
+                    occluded == (signed < -0.25),
+                    "multi-view false-occlusion verdict drifted"
+                );
+                absolute_errors.push(signed.abs());
+                false_occlusions += u64::from(occluded);
+                matched_depths.push((reference, proxy));
+            }
+        }
+        let declared_delta = optional_finite(report_track, "depth_delta_error_source_units")?;
+        let expected_delta = (matched_depths.len() == 2).then(|| {
+            let reference_delta = matched_depths[1].0 - matched_depths[0].0;
+            let proxy_delta = matched_depths[1].1 - matched_depths[0].1;
+            (proxy_delta - reference_delta).abs()
+        });
+        ensure!(
+            declared_delta.is_some() == expected_delta.is_some()
+                && declared_delta
+                    .zip(expected_delta)
+                    .is_none_or(|(declared, expected)| {
+                        within_tolerance(declared, expected, 1.0e-9)
+                    }),
+            "multi-view depth-delta error drifted"
+        );
+        if let Some(delta) = expected_delta {
+            delta_errors.push(delta);
+        }
+    }
+    ensure!(
+        !absolute_errors.is_empty() && !delta_errors.is_empty(),
+        "multi-view report has no matched evidence"
+    );
+    let matched_tracks = delta_errors.len() as u64;
+    let matched_views = absolute_errors.len() as u64;
+    let mean_error = absolute_errors.iter().sum::<f64>() / absolute_errors.len() as f64;
+    let max_error = absolute_errors
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    let delta_mae = delta_errors.iter().sum::<f64>() / delta_errors.len() as f64;
+    let false_fraction = false_occlusions as f64 / matched_views as f64;
+    for (field_name, actual) in [
+        ("mean_absolute_error_source_units", mean_error),
+        ("max_absolute_error_source_units", max_error),
+        ("depth_delta_mae_source_units", delta_mae),
+        ("false_occlusion_fraction", false_fraction),
+    ] {
+        ensure!(
+            within_tolerance(finite(report, field_name)?, actual, 1.0e-12),
+            "multi-view aggregate {field_name} drifted"
+        );
+    }
+    ensure!(
+        unsigned(report, "matched_track_count")? == matched_tracks
+            && unsigned(report, "matched_view_count")? == matched_views
+            && unsigned(report, "false_occlusion_view_count")? == false_occlusions,
+        "multi-view aggregate counts drifted"
+    );
+
+    let tolerances = object(field(report, "tolerances")?, "multi-view tolerances")?;
+    let min_fraction = finite(tolerances, "min_finite_depth_fraction_per_camera")?;
+    let min_tracks = unsigned(tolerances, "min_matched_tracks")?;
+    let max_mean = finite(tolerances, "max_mean_absolute_error_source_units")?;
+    let max_single = finite(tolerances, "max_absolute_error_source_units")?;
+    let max_delta = finite(tolerances, "max_depth_delta_mae_source_units")?;
+    let occlusion_margin = finite(tolerances, "false_occlusion_margin_source_units")?;
+    let max_occlusion = finite(tolerances, "max_false_occlusion_fraction")?;
+    ensure!(
+        min_fraction == 0.75
+            && min_tracks == 36
+            && max_mean == 0.25
+            && max_single == 0.75
+            && max_delta == 0.25
+            && occlusion_margin == 0.25
+            && max_occlusion == 0.10,
+        "multi-view tolerances are not the registered limits"
+    );
+    let passed = frame_fractions
+        .iter()
+        .all(|fraction| *fraction >= min_fraction)
+        && matched_tracks >= min_tracks
+        && mean_error <= max_mean
+        && max_error <= max_single
+        && delta_mae <= max_delta
+        && false_fraction <= max_occlusion;
+    ensure!(
+        boolean(report, "passed")? == passed && !boolean(report, "metric_qualified")?,
+        "multi-view report verdict or metric qualification drifted"
+    );
+    ensure!(
+        nonempty_string(report, "units_note")?.contains("not metres"),
+        "source-unit multi-view depth must disclaim metres"
+    );
+    for name in [
+        "depth_algorithm_identity",
+        "frames",
+        "matched_track_count",
+        "matched_view_count",
+        "mean_absolute_error_source_units",
+        "max_absolute_error_source_units",
+        "depth_delta_mae_source_units",
+        "false_occlusion_view_count",
+        "false_occlusion_fraction",
+        "tolerances",
+        "metric_qualified",
+        "units_note",
+    ] {
+        ensure!(
+            field(value, name)? == field(report, name)?,
+            "multi-view fixture field {name} differs from report"
+        );
+    }
+    ensure!(
+        string(value, "status")? == pass_status(passed),
+        "multi-view fixture status drifted"
     );
     Ok(passed)
 }
@@ -1415,12 +1770,40 @@ fn boolean(value: &Map<String, Value>, name: &str) -> Result<bool, GaussianSplat
         .ok_or_else(|| GaussianSplatValidationError::Invalid(format!("{name} is not a boolean")))
 }
 
+fn optional_boolean(
+    value: &Map<String, Value>,
+    name: &str,
+) -> Result<Option<bool>, GaussianSplatValidationError> {
+    let field = field(value, name)?;
+    if field.is_null() {
+        return Ok(None);
+    }
+    field.as_bool().map(Some).ok_or_else(|| {
+        GaussianSplatValidationError::Invalid(format!("{name} is not boolean or null"))
+    })
+}
+
 fn finite(value: &Map<String, Value>, name: &str) -> Result<f64, GaussianSplatValidationError> {
     let result = field(value, name)?
         .as_f64()
         .ok_or_else(|| GaussianSplatValidationError::Invalid(format!("{name} is not numeric")))?;
     ensure!(result.is_finite(), "{name} must be finite");
     Ok(result)
+}
+
+fn optional_finite(
+    value: &Map<String, Value>,
+    name: &str,
+) -> Result<Option<f64>, GaussianSplatValidationError> {
+    let field = field(value, name)?;
+    if field.is_null() {
+        return Ok(None);
+    }
+    let number = field.as_f64().ok_or_else(|| {
+        GaussianSplatValidationError::Invalid(format!("{name} is not numeric or null"))
+    })?;
+    ensure!(number.is_finite(), "{name} must be finite");
+    Ok(Some(number))
 }
 
 fn finite_vector(
@@ -1590,6 +1973,7 @@ mod tests {
                 "collision_semantic_alignment",
                 "real_sim_observation_comparison",
                 "sparse_depth_alignment",
+                "multiview_depth_occlusion_alignment",
             ]
         );
         assert_eq!(audit.missing_contracts, ["independent_metric_scale_anchor"]);
@@ -1614,7 +1998,6 @@ mod tests {
             parent,
             root["environment_id"].as_str().unwrap(),
             ply_sha256,
-            false,
         )
         .unwrap());
 
@@ -1626,10 +2009,40 @@ mod tests {
                 parent,
                 root["environment_id"].as_str().unwrap(),
                 ply_sha256,
-                false,
             ),
             Err(GaussianSplatValidationError::Invalid(message))
                 if message.contains("fixture and report disagree")
+        ));
+    }
+
+    #[test]
+    fn multiview_depth_contract_rejects_declared_metric_tampering() {
+        let fixture_path = committed_fixture();
+        let parent = fixture_path.parent().unwrap();
+        let fixture: Value = serde_json::from_slice(&fs::read(&fixture_path).unwrap()).unwrap();
+        let root = fixture.as_object().unwrap();
+        let provenance = root["provenance"].as_object().unwrap();
+        let ply_sha256 = provenance["splat_ply"]["sha256"].as_str().unwrap();
+        let retained = root["multiview_depth_occlusion_alignment"].clone();
+        assert!(validate_multiview_depth_occlusion_alignment(
+            retained.as_object().unwrap(),
+            parent,
+            root["environment_id"].as_str().unwrap(),
+            ply_sha256,
+        )
+        .unwrap());
+
+        let mut forged = retained;
+        forged["false_occlusion_fraction"] = json!(0.05);
+        assert!(matches!(
+            validate_multiview_depth_occlusion_alignment(
+                forged.as_object().unwrap(),
+                parent,
+                root["environment_id"].as_str().unwrap(),
+                ply_sha256,
+            ),
+            Err(GaussianSplatValidationError::Invalid(message))
+                if message.contains("differs from report")
         ));
     }
 

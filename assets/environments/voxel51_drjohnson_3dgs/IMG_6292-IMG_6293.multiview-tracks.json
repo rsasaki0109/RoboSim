@@ -1,0 +1,1284 @@
+{
+  "kind": "rne_registered_colmap_multiview_tracks",
+  "schema_version": 1,
+  "environment_id": "voxel51.drjohnson.real_capture.v1",
+  "source_artifacts": {
+    "colmap_cameras_sha256": "23bbdd44ed6eb004bfdfa3cfa17c01b8ba9abe0edf22fcbbef183b7c03aecf5a",
+    "colmap_images_sha256": "17174cd0bb2ddfa322f3a415c6c6de3c820e9ce796097233c92badfc0b3a2b01",
+    "colmap_points3d_sha256": "9b8ecf96dc829f6a337dae0680ed9d42cb22ed056a44102b857605ba1cad667b"
+  },
+  "cameras": [
+    {
+      "camera_id": "colmap.IMG_6292.jpg",
+      "source_image_name": "IMG_6292.jpg",
+      "intrinsics": {
+        "model": "PINHOLE",
+        "width_px": 1332,
+        "height_px": 876,
+        "fx_px": 1035.4965990500061,
+        "fy_px": 1034.9718637370904,
+        "cx_px": 666.0,
+        "cy_px": 438.0,
+        "fov_y_rad": 0.8006899358019289
+      },
+      "colmap_world_to_camera": {
+        "qvec_wxyz": [
+          0.6344146554381073,
+          -0.6065711066353383,
+          0.344850274559718,
+          -0.3326677406912426
+        ],
+        "tvec": [
+          3.124420002371587,
+          0.18842233599122887,
+          1.6303488165907067
+        ]
+      },
+      "rne_camera_to_world": {
+        "translation_source_units": [
+          -3.0931825391041468,
+          1.7659454980051779,
+          -1.6703942672852992
+        ],
+        "rotation_xyzw": [
+          -0.004500635104163675,
+          -0.46853351171850544,
+          -0.017629964025584668,
+          0.88325832973646
+        ]
+      }
+    },
+    {
+      "camera_id": "colmap.IMG_6293.jpg",
+      "source_image_name": "IMG_6293.jpg",
+      "intrinsics": {
+        "model": "PINHOLE",
+        "width_px": 1332,
+        "height_px": 876,
+        "fx_px": 1035.4965990500061,
+        "fy_px": 1034.9718637370904,
+        "cx_px": 666.0,
+        "cy_px": 438.0,
+        "fov_y_rad": 0.8006899358019289
+      },
+      "colmap_world_to_camera": {
+        "qvec_wxyz": [
+          0.6285409095132551,
+          -0.6216228071404817,
+          0.3378640315342164,
+          -0.3230623885667964
+        ],
+        "tvec": [
+          3.1608197681767036,
+          -0.11868367491420065,
+          1.5901130845070022
+        ]
+      },
+      "rne_camera_to_world": {
+        "translation_source_units": [
+          -3.1177810177525904,
+          1.3349392922347922,
+          -1.6729264041668501
+        ],
+        "rotation_xyzw": [
+          1.3278783118818292e-16,
+          -0.4611488223097617,
+          -4.236869607959736e-17,
+          0.887322806921089
+        ]
+      }
+    }
+  ],
+  "selection": {
+    "selection_camera_id": "colmap.IMG_6293.jpg",
+    "grid_width": 8,
+    "grid_height": 6,
+    "image_margin_px": 4.0,
+    "max_reprojection_error_px": 2.0,
+    "shared_track_count": 823,
+    "valid_track_count": 756,
+    "occupied_grid_cell_count": 42,
+    "tie_break": "minimum squared distance to cell center, then lowest COLMAP point ID"
+  },
+  "tracks": [
+    {
+      "colmap_point3d_id": 84037,
+      "source_position": [
+        -0.8147534509011409,
+        -2.585039064004828,
+        -3.6944934681854367
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            558.0955922335535,
+            130.15930467830276
+          ],
+          "reference_depth_source_units": 4.143524230557565,
+          "reprojection_error_px": 0.45980113763246383
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            588.5937527436533,
+            50.14546914821682
+          ],
+          "reference_depth_source_units": 4.197453695118062,
+          "reprojection_error_px": 0.3162831586693757
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83852,
+      "source_position": [
+        -0.46640072289605816,
+        -2.6497865436688026,
+        -3.0560792404737285
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            737.8426272413819,
+            148.69912021759012
+          ],
+          "reference_depth_source_units": 4.213163897720864,
+          "reprojection_error_px": 1.5330998493251402
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            765.8208514841565,
+            71.93073347313015
+          ],
+          "reference_depth_source_units": 4.253421027652775,
+          "reprojection_error_px": 0.3172882060898252
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 84042,
+      "source_position": [
+        -0.308965286398365,
+        -2.2915571314636844,
+        -2.5378342059538097
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            884.121658571567,
+            164.72785948463877
+          ],
+          "reference_depth_source_units": 3.8635448851197287,
+          "reprojection_error_px": 0.22588209003382628
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            910.917163500532,
+            82.98079133096297
+          ],
+          "reference_depth_source_units": 3.891066424282841,
+          "reprojection_error_px": 0.3476014680515466
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 82758,
+      "source_position": [
+        -2.4704474152629827,
+        -2.2781735137984973,
+        -4.853215287314085
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            48.97717509121401,
+            316.1793605166772
+          ],
+          "reference_depth_source_units": 3.8627334606319232,
+          "reprojection_error_px": 0.18639543083365415
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            84.12226498408972,
+            213.56821963522378
+          ],
+          "reference_depth_source_units": 3.930192269067189,
+          "reprojection_error_px": 0.12522096887812992
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83437,
+      "source_position": [
+        -2.1806853498906418,
+        -2.2827407028445927,
+        -4.502181434169343
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            170.51340189973604,
+            301.40749151543696
+          ],
+          "reference_depth_source_units": 3.866681524633867,
+          "reprojection_error_px": 0.4646733206917189
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            203.2101256777458,
+            202.42101405374004
+          ],
+          "reference_depth_source_units": 3.927673362795563,
+          "reprojection_error_px": 0.12084198446520421
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83152,
+      "source_position": [
+        -1.8937458818064963,
+        -2.2808802833740716,
+        -3.7934859316068867
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            373.14133649881984,
+            341.03828508675014
+          ],
+          "reference_depth_source_units": 3.873710181607205,
+          "reprojection_error_px": 1.414780193734699
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            399.7476392554381,
+            244.68551028144708
+          ],
+          "reference_depth_source_units": 3.9183880991555613,
+          "reprojection_error_px": 0.2515385597969441
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83798,
+      "source_position": [
+        -1.4157255843821452,
+        -2.5359448256279844,
+        -3.1563097027219733
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            591.2929504209756,
+            328.88037657069503
+          ],
+          "reference_depth_source_units": 4.1290520865068085,
+          "reprojection_error_px": 1.9320365566029931
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            611.9739439348086,
+            245.74717478202774
+          ],
+          "reference_depth_source_units": 4.161630776383754,
+          "reprojection_error_px": 1.9938997763590351
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83760,
+      "source_position": [
+        -1.0593293828965855,
+        -2.5467368204801604,
+        -2.590921338450789
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            757.2473485413122,
+            331.20071010073735
+          ],
+          "reference_depth_source_units": 4.142592217924099,
+          "reprojection_error_px": 0.8441836092567316
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            780.2177515865171,
+            252.07712726451578
+          ],
+          "reference_depth_source_units": 4.163554223539706,
+          "reprojection_error_px": 0.38909006101727567
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83953,
+      "source_position": [
+        -0.9753371784912956,
+        -1.8807931512977856,
+        -2.128720629367613
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            902.8570178219225,
+            370.9690567919759
+          ],
+          "reference_depth_source_units": 3.4865650467048024,
+          "reprojection_error_px": 1.1815874956427044
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            926.327012603701,
+            275.7509554692288
+          ],
+          "reference_depth_source_units": 3.4953259006847324,
+          "reprojection_error_px": 0.4884225006067857
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83729,
+      "source_position": [
+        -0.6317524670163214,
+        -1.5238106503886688,
+        -1.9239143679759203
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            1049.2523500876448,
+            309.9911612974751
+          ],
+          "reference_depth_source_units": 3.1236226071852817,
+          "reprojection_error_px": 0.9759104611184073
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            1074.900358543986,
+            203.60493216514874
+          ],
+          "reference_depth_source_units": 3.13027759085618,
+          "reprojection_error_px": 0.26822692585489116
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 92814,
+      "source_position": [
+        -0.44246465853194095,
+        -1.526019581073976,
+        -1.4550357546931374
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            1212.8727177243804,
+            341.7731992145351
+          ],
+          "reference_depth_source_units": 3.1317282589124584,
+          "reprojection_error_px": 0.5272491963980184
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            1239.7017982335797,
+            239.31351277049262
+          ],
+          "reference_depth_source_units": 3.127586043228694,
+          "reprojection_error_px": 0.7313024592128974
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 77679,
+      "source_position": [
+        -2.9775796581826177,
+        -2.292606326224637,
+        -4.551498759750792
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            49.748609153179814,
+            473.4326652245851
+          ],
+          "reference_depth_source_units": 3.9023217566479627,
+          "reprojection_error_px": 0.19369483885040895
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            77.97706708246619,
+            369.00383245991804
+          ],
+          "reference_depth_source_units": 3.9559820775631884,
+          "reprojection_error_px": 0.4687943510916637
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 94266,
+      "source_position": [
+        -2.718696215455039,
+        -2.2468277623904367,
+        -4.191145073755674
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            161.54249476301567,
+            469.2849268820761
+          ],
+          "reference_depth_source_units": 3.857265022335318,
+          "reprojection_error_px": 0.9367762974426075
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            188.6441424044251,
+            365.3395401218822
+          ],
+          "reference_depth_source_units": 3.903832869956526,
+          "reprojection_error_px": 0.5790172617107661
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83764,
+      "source_position": [
+        -2.1922259812061804,
+        -2.287950443800233,
+        -3.6043139662599275
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            373.83010151858923,
+            433.8191313753101
+          ],
+          "reference_depth_source_units": 3.8958921577510033,
+          "reprojection_error_px": 0.7314567366345279
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            397.94701150732755,
+            337.84036515314676
+          ],
+          "reference_depth_source_units": 3.932129819923646,
+          "reprojection_error_px": 0.6129298158542009
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 51511,
+      "source_position": [
+        -1.6874401076491814,
+        -2.53933605865452,
+        -2.9134054024958695
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            604.3441082048389,
+            418.97859918186407
+          ],
+          "reference_depth_source_units": 4.148062099490325,
+          "reprojection_error_px": 0.3275915268283866
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            626.1875890274661,
+            335.6248984011301
+          ],
+          "reference_depth_source_units": 4.1710159526707224,
+          "reprojection_error_px": 0.27309923689757293
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 51181,
+      "source_position": [
+        -1.3609610635802685,
+        -2.554904484732031,
+        -2.4795420228399956
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            739.1106500430427,
+            408.6387660639368
+          ],
+          "reference_depth_source_units": 4.163931871317217,
+          "reprojection_error_px": 0.4370041909828784
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            760.6439040227596,
+            328.9920938605444
+          ],
+          "reference_depth_source_units": 4.178554103363633,
+          "reprojection_error_px": 0.6193691511113312
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83808,
+      "source_position": [
+        -1.1710083777403442,
+        -2.0238454906657206,
+        -2.012960726161019
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            891.6654675863635,
+            438.8016295509857
+          ],
+          "reference_depth_source_units": 3.639179152940442,
+          "reprojection_error_px": 1.4332612777516531
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            912.9360908197726,
+            345.56292569897545
+          ],
+          "reference_depth_source_units": 3.64272424818014,
+          "reprojection_error_px": 1.1381702339418858
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 43479,
+      "source_position": [
+        -0.9834994208260317,
+        -1.5162083179725585,
+        -1.593721714583153
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            1077.5853049925036,
+            467.775837699627
+          ],
+          "reference_depth_source_units": 3.136664585284949,
+          "reprojection_error_px": 0.37763699798741207
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            1099.0856919080072,
+            361.90026958624657
+          ],
+          "reference_depth_source_units": 3.1304200433400435,
+          "reprojection_error_px": 0.8084898495878787
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 84052,
+      "source_position": [
+        -0.7662407452873932,
+        -1.5290192617746345,
+        -1.2298091200144186
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            1215.7533167683664,
+            471.73705393599926
+          ],
+          "reference_depth_source_units": 3.1516513670537103,
+          "reprojection_error_px": 1.1085772832650387
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            1238.446437005446,
+            369.98788472403896
+          ],
+          "reference_depth_source_units": 3.1378012348676565,
+          "reprojection_error_px": 0.07739313528363177
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83988,
+      "source_position": [
+        -3.444529310486076,
+        -2.29319849442042,
+        -4.230263193146838
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            58.73533351674985,
+            622.6205461807879
+          ],
+          "reference_depth_source_units": 3.927230015659286,
+          "reprojection_error_px": 0.576065723442221
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            81.45172933593972,
+            517.3174055485548
+          ],
+          "reference_depth_source_units": 3.9669855143145165,
+          "reprojection_error_px": 0.7961217834255956
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 78523,
+      "source_position": [
+        -3.192876400420855,
+        -2.2828522044041146,
+        -3.637696310497595
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            225.46866834987594,
+            651.643968617753
+          ],
+          "reference_depth_source_units": 3.9239256465713668,
+          "reprojection_error_px": 0.42272553576035016
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            243.87115590628912,
+            550.432232763266
+          ],
+          "reference_depth_source_units": 3.9501626415230806,
+          "reprojection_error_px": 0.20768292744160807
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83928,
+      "source_position": [
+        -2.6649423275000768,
+        -2.2774826887152724,
+        -2.93102135938452
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            455.54441620807347,
+            635.3694193081856
+          ],
+          "reference_depth_source_units": 3.9192056237882875,
+          "reprojection_error_px": 1.5344115443648398
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            475.3233965853813,
+            540.838031728867
+          ],
+          "reference_depth_source_units": 3.931810117393332,
+          "reprojection_error_px": 1.5279181443282528
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 94265,
+      "source_position": [
+        -2.3597378827323454,
+        -2.5653464778913504,
+        -2.7015775597108
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            559.2044632536472,
+            586.5158203916458
+          ],
+          "reference_depth_source_units": 4.202466072014567,
+          "reprojection_error_px": 0.16348838491018947
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            576.6171755282296,
+            502.22440117540276
+          ],
+          "reference_depth_source_units": 4.212293711888544,
+          "reprojection_error_px": 0.27950771192865637
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 78402,
+      "source_position": [
+        -2.0330868588636664,
+        -2.4756023618180087,
+        -2.091544183395004
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            730.9386876411786,
+            604.2716090086036
+          ],
+          "reference_depth_source_units": 4.117747925789626,
+          "reprojection_error_px": 0.47671820542394805
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            747.5986397389362,
+            523.2308110387755
+          ],
+          "reference_depth_source_units": 4.114343681560165,
+          "reprojection_error_px": 0.5623451514090336
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 82834,
+      "source_position": [
+        -1.6091753091600176,
+        -2.162200810727055,
+        -1.6875403043352288
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            891.408960347877,
+            584.4081238343416
+          ],
+          "reference_depth_source_units": 3.8008552558847386,
+          "reprojection_error_px": 0.3388253322029046
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            909.1133048703543,
+            498.59829736669957
+          ],
+          "reference_depth_source_units": 3.7907851012536,
+          "reprojection_error_px": 0.3945449586327486
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83137,
+      "source_position": [
+        -1.5272737113086052,
+        -1.5212041350089738,
+        -1.2382567014636694
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            1074.938086253621,
+            678.5484089846449
+          ],
+          "reference_depth_source_units": 3.1694833657119674,
+          "reprojection_error_px": 0.4689757479649436
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            1093.4091485171793,
+            575.6116246554332
+          ],
+          "reference_depth_source_units": 3.1475600053408224,
+          "reprojection_error_px": 0.2550510198536973
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 84029,
+      "source_position": [
+        -0.9456871861370514,
+        -1.5390066882396605,
+        -0.8632407625119327
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            1279.1927492607338,
+            584.328442497152
+          ],
+          "reference_depth_source_units": 3.17736825814597,
+          "reprojection_error_px": 0.6032547604897435
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            1302.439857023106,
+            487.48263333982476
+          ],
+          "reference_depth_source_units": 3.151511349028121,
+          "reprojection_error_px": 0.8508209236109863
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 84048,
+      "source_position": [
+        -3.811008369854542,
+        -2.2577363230918572,
+        -3.921273830115042
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            72.1038389704621,
+            749.2267315044754
+          ],
+          "reference_depth_source_units": 3.912380890146882,
+          "reprojection_error_px": 0.12905639435724836
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            89.57182568033772,
+            642.926511667283
+          ],
+          "reference_depth_source_units": 3.9396395806860935,
+          "reprojection_error_px": 0.1327448119444092
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83192,
+      "source_position": [
+        -3.210445812438271,
+        -2.0630362020568165,
+        -3.4374884692091547
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            244.71494710283753,
+            700.8310055642257
+          ],
+          "reference_depth_source_units": 3.7101751205281053,
+          "reprojection_error_px": 0.47074031137204064
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            261.5125022531703,
+            594.7781671540671
+          ],
+          "reference_depth_source_units": 3.7305837222219767,
+          "reprojection_error_px": 1.4820355630663562
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 61821,
+      "source_position": [
+        -3.0924989105122154,
+        -2.0873497931462857,
+        -3.1043024907486036
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            342.69793309790776,
+            721.3156582631264
+          ],
+          "reference_depth_source_units": 3.73922072612173,
+          "reprojection_error_px": 0.6613480854842279
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            358.06295896810286,
+            618.0958471493541
+          ],
+          "reference_depth_source_units": 3.7517911367942975,
+          "reprojection_error_px": 0.9044777612796837
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 80007,
+      "source_position": [
+        -2.9904000071011927,
+        -2.3032499696247712,
+        -2.344980006639895
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            541.4617783776051,
+            785.9769004827111
+          ],
+          "reference_depth_source_units": 3.9714217164055166,
+          "reprojection_error_px": 1.013536642623055
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            554.151331568562,
+            696.6219390566966
+          ],
+          "reference_depth_source_units": 3.9644164603001144,
+          "reprojection_error_px": 0.45652688790894597
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 44075,
+      "source_position": [
+        -2.4598692986577944,
+        -2.454017324250279,
+        -1.797500001150221
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            734.062457251443,
+            735.1276275963774
+          ],
+          "reference_depth_source_units": 4.11841934549693,
+          "reprojection_error_px": 0.8588896273250805
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            747.3429088973339,
+            653.80019635005
+          ],
+          "reference_depth_source_units": 4.10227973666339,
+          "reprojection_error_px": 0.673432119466487
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 80021,
+      "source_position": [
+        -2.064140751053957,
+        -1.9889391378177699,
+        -1.5026451712230393
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            874.6410661916891,
+            728.3040870240892
+          ],
+          "reference_depth_source_units": 3.6480773073256962,
+          "reprojection_error_px": 1.0004472690529798
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            889.9190670325088,
+            638.2033829599669
+          ],
+          "reference_depth_source_units": 3.627859164344027,
+          "reprojection_error_px": 0.5829781056401334
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83182,
+      "source_position": [
+        -1.7437339801711578,
+        -1.5038165996102801,
+        -1.2035971688968103
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            1047.5986851378748,
+            745.46899030387
+          ],
+          "reference_depth_source_units": 3.160379359655503,
+          "reprojection_error_px": 0.45688857128401095
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            1064.6699320768805,
+            642.2530813158675
+          ],
+          "reference_depth_source_units": 3.1351330239643675,
+          "reprojection_error_px": 0.9101867849160752
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 80009,
+      "source_position": [
+        -1.5206615167041106,
+        -1.545298276772692,
+        -0.7186896217402601
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            1211.944815813455,
+            765.5509618020419
+          ],
+          "reference_depth_source_units": 3.2069949373462796,
+          "reprojection_error_px": 0.9721244639471801
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            1231.8780852236168,
+            668.4360234721627
+          ],
+          "reference_depth_source_units": 3.170905918747245,
+          "reprojection_error_px": 0.5324065426277209
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 68155,
+      "source_position": [
+        -4.092631062845662,
+        -2.248158047298288,
+        -3.528108022393898
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            120.85104092602592,
+            867.2193986743503
+          ],
+          "reference_depth_source_units": 3.922721893618396,
+          "reprojection_error_px": 0.22635974153567973
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            132.62574169240588,
+            762.5478122992962
+          ],
+          "reference_depth_source_units": 3.9361169575241206,
+          "reprojection_error_px": 0.027228610874093544
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 79256,
+      "source_position": [
+        -3.8306846651211295,
+        -2.152138864884969,
+        -3.191716214484612
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            222.2016907675756,
+            868.8298087096757
+          ],
+          "reference_depth_source_units": 3.826736672000499,
+          "reprojection_error_px": 0.35541067172514657
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            232.90690369746852,
+            764.4342138153831
+          ],
+          "reference_depth_source_units": 3.8336970333472014,
+          "reprojection_error_px": 0.05630133651659504
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 71434,
+      "source_position": [
+        -3.4001361369121086,
+        -2.1413764490533884,
+        -2.62368300257737
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            414.0172093456656,
+            854.4013277078187
+          ],
+          "reference_depth_source_units": 3.8162919524725556,
+          "reprojection_error_px": 0.4916442977241571
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            424.4532767487367,
+            756.1823744442027
+          ],
+          "reference_depth_source_units": 3.8123576234833116,
+          "reprojection_error_px": 0.7352207498823442
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 71727,
+      "source_position": [
+        -3.195820495466049,
+        -2.4171606476855425,
+        -2.079205114522099
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            574.3935174279368,
+            852.9543796416885
+          ],
+          "reference_depth_source_units": 4.0991977159452695,
+          "reprojection_error_px": 1.0782668802018243
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            584.3602666096531,
+            768.7173765692996
+          ],
+          "reference_depth_source_units": 4.0827357860954825,
+          "reprojection_error_px": 0.46068313359722024
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 83162,
+      "source_position": [
+        -2.6850008884018393,
+        -2.501046337663994,
+        -1.5263846953753166
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            760.0698856209071,
+            812.9783834614484
+          ],
+          "reference_depth_source_units": 4.180185747544492,
+          "reprojection_error_px": 0.3189229463391224
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            771.5078572784917,
+            735.5578942827402
+          ],
+          "reference_depth_source_units": 4.15418406537407,
+          "reprojection_error_px": 0.16458481594036853
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 80000,
+      "source_position": [
+        -2.5120878269678326,
+        -2.0108288990036236,
+        -1.3774647722602211
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            834.4512315211452,
+            849.4557268746015
+          ],
+          "reference_depth_source_units": 3.68846156045553,
+          "reprojection_error_px": 0.8965183038166686
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            846.290965307013,
+            760.4633831443691
+          ],
+          "reference_depth_source_units": 3.659938323106897,
+          "reprojection_error_px": 1.0605922874945797
+        }
+      ]
+    },
+    {
+      "colmap_point3d_id": 79478,
+      "source_position": [
+        -1.6908607260617405,
+        -1.5438547607829547,
+        -0.4726173648646359
+      ],
+      "views": [
+        {
+          "camera_id": "colmap.IMG_6292.jpg",
+          "observed_pixel_uv": [
+            1247.1617176590594,
+            852.5599704245296
+          ],
+          "reference_depth_source_units": 3.2178082025364483,
+          "reprojection_error_px": 0.33612727354392496
+        },
+        {
+          "camera_id": "colmap.IMG_6293.jpg",
+          "observed_pixel_uv": [
+            1266.4409709458494,
+            758.9796461609121
+          ],
+          "reference_depth_source_units": 3.1731113920614,
+          "reprojection_error_px": 0.14640726222030465
+        }
+      ]
+    }
+  ],
+  "track_count": 42,
+  "status": "verified",
+  "units_note": "Depth values are COLMAP reconstruction units, not metres, until an independent physical scale anchor is retained."
+}

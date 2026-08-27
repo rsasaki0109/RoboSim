@@ -8,7 +8,7 @@
   "house_ply_sha256": "9e1c89c18b6dd70f3f77ef1463983d86d34d859e118aec56d77394b36a41458f",
   "validation": {
     "fixture_path": "assets/environments/voxel51_drjohnson_3dgs/drjohnson.validation.json",
-    "fixture_sha256": "2b4b77f264cefaa8b5945d5700e15e5ff2ec793683ff85bbc2fa88517fd02612",
+    "fixture_sha256": "ca611a5362b0d49dafb7a96910ff37a6dd0bd84c3dc8f1fbd8aba6a3a0166e5f",
     "qualifying": false,
     "passed_contracts": [
       "floor_world_alignment",
@@ -16,7 +16,8 @@
       "semantic_landmark_reprojection",
       "collision_semantic_alignment",
       "real_sim_observation_comparison",
-      "sparse_depth_alignment"
+      "sparse_depth_alignment",
+      "multiview_depth_occlusion_alignment"
     ],
     "missing_contracts": [
       "independent_metric_scale_anchor"

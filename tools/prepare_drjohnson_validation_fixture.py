@@ -718,6 +718,12 @@ def build(
         raise ValueError("registered sparse-depth camera mismatch")
     if depth_report.get("ply_sha256") != sha256_file(asset_root / manifest["ply_path"]):
         raise ValueError("registered sparse-depth PLY mismatch")
+    if (
+        depth_report.get("depth_algorithm_identity")
+        != "rne.gaussian_splat.alpha_proxy_depth.v2"
+        or depth_report.get("patch_radius_px") != 2
+    ):
+        raise ValueError("registered sparse-depth algorithm drifted")
     expected_depth_tolerances = {
         "min_finite_depth_fraction": 0.75,
         "min_matched_landmarks": 6,
@@ -738,7 +744,7 @@ def build(
     )
     if depth_report.get("passed") is not depth_passed:
         raise ValueError("registered sparse-depth verdict drifted")
-    if depth_report.get("metric_qualified") is not (metric_anchor is not None):
+    if depth_report.get("metric_qualified") is not False:
         raise ValueError("registered sparse-depth metric qualification drifted")
     depth_landmark_inputs = [
         (
@@ -769,6 +775,74 @@ def build(
         for retained, expected in zip(retained_depth_inputs, depth_landmark_inputs)
     ):
         raise ValueError("registered sparse-depth landmark inputs drifted")
+
+    multiview_tracks_path = asset_root / "IMG_6292-IMG_6293.multiview-tracks.json"
+    multiview_tracks = json.loads(multiview_tracks_path.read_text(encoding="utf-8"))
+    if (
+        multiview_tracks.get("kind") != "rne_registered_colmap_multiview_tracks"
+        or multiview_tracks.get("schema_version") != 1
+        or multiview_tracks.get("environment_id") != manifest["environment_id"]
+        or multiview_tracks.get("status") != "verified"
+        or multiview_tracks.get("track_count") != len(multiview_tracks.get("tracks", []))
+    ):
+        raise ValueError("registered multi-view track fixture drifted")
+    if multiview_tracks["source_artifacts"] != {
+        "colmap_cameras_sha256": sha256_bytes(camera_bytes),
+        "colmap_images_sha256": sha256_bytes(image_bytes),
+        "colmap_points3d_sha256": sha256_bytes(point_bytes),
+    }:
+        raise ValueError("registered multi-view source artifacts drifted")
+
+    multiview_report_path = asset_root / "IMG_6292-IMG_6293.multiview-depth.json"
+    multiview_report = json.loads(multiview_report_path.read_text(encoding="utf-8"))
+    if (
+        multiview_report.get("kind")
+        != "rne_registered_splat_multiview_depth_report"
+        or multiview_report.get("schema_version") != 1
+        or multiview_report.get("environment_id") != manifest["environment_id"]
+        or multiview_report.get("track_fixture_sha256")
+        != sha256_file(multiview_tracks_path)
+        or multiview_report.get("ply_sha256")
+        != sha256_file(asset_root / manifest["ply_path"])
+        or multiview_report.get("depth_algorithm_identity")
+        != "rne.gaussian_splat.alpha_proxy_depth.v2"
+    ):
+        raise ValueError("registered multi-view depth report identity drifted")
+    expected_multiview_tolerances = {
+        "min_finite_depth_fraction_per_camera": 0.75,
+        "min_matched_tracks": 36,
+        "max_mean_absolute_error_source_units": 0.25,
+        "max_absolute_error_source_units": 0.75,
+        "max_depth_delta_mae_source_units": 0.25,
+        "false_occlusion_margin_source_units": 0.25,
+        "max_false_occlusion_fraction": 0.1,
+    }
+    if multiview_report.get("tolerances") != expected_multiview_tolerances:
+        raise ValueError("registered multi-view depth tolerances drifted")
+    multiview_passed = (
+        len(multiview_report["frames"]) == 2
+        and all(
+            frame["finite_depth_fraction"]
+            >= expected_multiview_tolerances[
+                "min_finite_depth_fraction_per_camera"
+            ]
+            for frame in multiview_report["frames"]
+        )
+        and multiview_report["matched_track_count"]
+        >= expected_multiview_tolerances["min_matched_tracks"]
+        and multiview_report["mean_absolute_error_source_units"]
+        <= expected_multiview_tolerances["max_mean_absolute_error_source_units"]
+        and multiview_report["max_absolute_error_source_units"]
+        <= expected_multiview_tolerances["max_absolute_error_source_units"]
+        and multiview_report["depth_delta_mae_source_units"]
+        <= expected_multiview_tolerances["max_depth_delta_mae_source_units"]
+        and multiview_report["false_occlusion_fraction"]
+        <= expected_multiview_tolerances["max_false_occlusion_fraction"]
+    )
+    if multiview_report.get("passed") is not multiview_passed:
+        raise ValueError("registered multi-view depth verdict drifted")
+    if multiview_report.get("metric_qualified") is not False:
+        raise ValueError("registered multi-view metric qualification drifted")
 
     ply_path = asset_root / manifest["ply_path"]
     reprojection_rmse = math.sqrt(
@@ -873,6 +947,39 @@ def build(
             "metric_qualified": depth_report["metric_qualified"],
             "units_note": depth_report["units_note"],
         },
+        "multiview_depth_occlusion_alignment": {
+            "status": "verified" if multiview_passed else "failed",
+            "track_fixture": file_artifact(
+                multiview_tracks_path, "IMG_6292-IMG_6293.multiview-tracks.json"
+            ),
+            "report": file_artifact(
+                multiview_report_path, "IMG_6292-IMG_6293.multiview-depth.json"
+            ),
+            "depth_algorithm_identity": multiview_report[
+                "depth_algorithm_identity"
+            ],
+            "frames": multiview_report["frames"],
+            "matched_track_count": multiview_report["matched_track_count"],
+            "matched_view_count": multiview_report["matched_view_count"],
+            "mean_absolute_error_source_units": multiview_report[
+                "mean_absolute_error_source_units"
+            ],
+            "max_absolute_error_source_units": multiview_report[
+                "max_absolute_error_source_units"
+            ],
+            "depth_delta_mae_source_units": multiview_report[
+                "depth_delta_mae_source_units"
+            ],
+            "false_occlusion_view_count": multiview_report[
+                "false_occlusion_view_count"
+            ],
+            "false_occlusion_fraction": multiview_report[
+                "false_occlusion_fraction"
+            ],
+            "tolerances": multiview_report["tolerances"],
+            "metric_qualified": multiview_report["metric_qualified"],
+            "units_note": multiview_report["units_note"],
+        },
         "contracts": [
             {
                 "id": "floor_world_alignment",
@@ -901,6 +1008,10 @@ def build(
             {
                 "id": "sparse_depth_alignment",
                 "status": "passed" if depth_passed else "failed",
+            },
+            {
+                "id": "multiview_depth_occlusion_alignment",
+                "status": "passed" if multiview_passed else "failed",
             },
         ],
     }
