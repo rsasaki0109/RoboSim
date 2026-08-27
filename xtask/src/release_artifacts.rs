@@ -677,6 +677,18 @@ struct ExternalFlagshipReproductionReport {
     failure_capsule_manifest: MemberDigest,
 }
 
+pub(crate) struct StagedExternalFlagshipReproduction<'a> {
+    pub(crate) owner: &'a str,
+    pub(crate) repository: &'a str,
+    pub(crate) revision: &'a str,
+    pub(crate) measured_on: &'a str,
+    pub(crate) release_archive: &'a Path,
+    pub(crate) proof_bundle: &'a Path,
+    pub(crate) submission_candidate: &'a Path,
+    pub(crate) stdout_log: &'a Path,
+    pub(crate) stderr_log: &'a Path,
+}
+
 impl InstallRehearsalReport {
     fn all_passed(&self) -> bool {
         self.status == "passed"
@@ -1411,6 +1423,134 @@ pub(crate) fn external_flagship_check(
     Ok(())
 }
 
+/// Revalidates the retained bytes that make an accepted installed flagship run
+/// eligible for the 1.0 readiness gate.
+pub(crate) fn validate_staged_external_flagship_report(
+    report_bytes: &[u8],
+    staged: StagedExternalFlagshipReproduction<'_>,
+) -> anyhow::Result<()> {
+    let report: ExternalFlagshipReproductionReport = serde_json::from_slice(report_bytes)
+        .context("parse staged external flagship reproduction report")?;
+    validate_external_operator(
+        staged.owner,
+        staged.repository,
+        staged.revision,
+        staged.measured_on,
+    )?;
+    anyhow::ensure!(
+        report.kind == "rne_external_flagship_reproduction_report"
+            && report.schema_version == EXTERNAL_FLAGSHIP_REPRODUCTION_REPORT_SCHEMA_VERSION
+            && report.status == "passed"
+            && report.owner == staged.owner
+            && report.repository == staged.repository
+            && report.revision == staged.revision
+            && report.measured_on == staged.measured_on
+            && !report.author_assistance
+            && report.release_version == RELEASE_VERSION
+            && is_lower_git_object_id(&report.release_revision)
+            && report.elapsed_ms <= report.target_ms
+            && report.target_ms == 15 * 60 * 1_000
+            && report.task_id == "rne.flagship.mobile_lift_shared_aisle.v1"
+            && report.physics_execution_paths == ["rapier_native", "mujoco_native"]
+            && report.first_violation_step > 0
+            && report.first_violation_sim_time_ticks > 0,
+        "staged external flagship report identity or qualifying verdict drifted"
+    );
+    validate_release_target(&report.release_target)?;
+    validate_external_machine_label(&report.machine_label)?;
+    anyhow::ensure!(
+        matches!(report.operating_system.as_str(), "windows" | "linux")
+            && report.architecture == "x86_64",
+        "staged external flagship report platform is not qualifying"
+    );
+
+    let candidate_bytes = read_external_regular_file(
+        staged.submission_candidate,
+        "staged submission candidate",
+        MAX_EXTERNAL_SUBMISSION_BYTES,
+    )?;
+    let candidate: ExternalFlagshipSubmissionCandidate =
+        serde_json::from_slice(&candidate_bytes)
+            .context("parse staged external flagship submission candidate")?;
+    validate_external_submission_candidate(&candidate)?;
+    anyhow::ensure!(
+        candidate.evidence_repository.owner == staged.owner
+            && candidate.evidence_repository.url == staged.repository
+            && candidate.measurement.measured_on == staged.measured_on
+            && candidate.measurement.machine_label == report.machine_label
+            && candidate.measurement.operating_system == report.operating_system
+            && candidate.measurement.architecture == report.architecture
+            && candidate.measurement.release_target == report.release_target
+            && candidate.measurement.elapsed_ms == report.elapsed_ms
+            && candidate.measurement.target_ms == report.target_ms,
+        "staged external flagship candidate does not bind the accepted report"
+    );
+    validate_submission_artifact(
+        &candidate.release_archive,
+        staged.release_archive,
+        "staged release archive",
+    )?;
+    validate_submission_artifact(
+        &candidate.proof_bundle,
+        staged.proof_bundle,
+        "staged proof bundle",
+    )?;
+    anyhow::ensure!(
+        candidate.reproduction.stdout_log_path == report.stdout_log.path
+            && candidate.reproduction.stderr_log_path == report.stderr_log.path,
+        "staged external flagship log paths differ from the candidate"
+    );
+
+    validate_report_member(
+        &report.archive,
+        staged.release_archive,
+        None,
+        "release archive",
+    )?;
+    validate_report_member(
+        &report.proof_bundle,
+        staged.proof_bundle,
+        None,
+        "proof bundle",
+    )?;
+    validate_relative_member(Path::new(&report.submission_candidate.path))?;
+    validate_report_member(
+        &report.submission_candidate,
+        staged.submission_candidate,
+        Some(&report.submission_candidate.path),
+        "submission candidate",
+    )?;
+    validate_report_member(
+        &report.stdout_log,
+        staged.stdout_log,
+        Some(&candidate.reproduction.stdout_log_path),
+        "stdout log",
+    )?;
+    validate_report_member(
+        &report.stderr_log,
+        staged.stderr_log,
+        Some(&candidate.reproduction.stderr_log_path),
+        "stderr log",
+    )?;
+    Ok(())
+}
+
+fn validate_report_member(
+    expected: &MemberDigest,
+    path: &Path,
+    expected_path: Option<&str>,
+    label: &str,
+) -> anyhow::Result<()> {
+    let actual = digest_external_file(path, label)?;
+    anyhow::ensure!(
+        expected.path == expected_path.unwrap_or(&actual.path)
+            && expected.size_bytes == actual.size_bytes
+            && expected.sha256 == actual.sha256,
+        "staged external flagship {label} differs from the accepted report"
+    );
+    Ok(())
+}
+
 fn member_digest_from_bytes(path: &str, bytes: &[u8]) -> MemberDigest {
     MemberDigest {
         path: path.to_string(),
@@ -1495,6 +1635,13 @@ fn validate_submission_artifact_shape(
 
 fn is_lower_sha256(value: &str) -> bool {
     value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn is_lower_git_object_id(value: &str) -> bool {
+    value.len() == 40
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
@@ -3902,6 +4049,86 @@ mod tests {
                 stderr_log_path: "logs/stderr.txt".to_string(),
             },
         }
+    }
+
+    #[test]
+    fn staged_external_flagship_report_rebinds_every_retained_input() {
+        let directory = tempfile::tempdir().expect("external flagship evidence");
+        let archive = directory.path().join("rne-0.2.0-windows.zip");
+        let proof_bundle = directory.path().join("proof.zip");
+        let candidate_path = directory.path().join("candidate.json");
+        let stdout = directory.path().join("stdout.txt");
+        let stderr = directory.path().join("stderr.txt");
+        fs::write(&archive, b"archive").expect("archive");
+        fs::write(&proof_bundle, b"proof").expect("proof bundle");
+        fs::write(&stdout, b"stdout").expect("stdout");
+        fs::write(&stderr, b"stderr").expect("stderr");
+        let candidate = valid_external_submission_candidate();
+        write_pretty_json(&candidate_path, &candidate).expect("candidate");
+
+        let mut stdout_member = digest_external_file(&stdout, "stdout").expect("stdout digest");
+        stdout_member.path = candidate.reproduction.stdout_log_path.clone();
+        let mut stderr_member = digest_external_file(&stderr, "stderr").expect("stderr digest");
+        stderr_member.path = candidate.reproduction.stderr_log_path.clone();
+        let mut submission_member =
+            digest_external_file(&candidate_path, "candidate").expect("candidate digest");
+        submission_member.path = "submissions/candidate.json".to_string();
+        let retained_member = MemberDigest {
+            path: "retained.json".to_string(),
+            size_bytes: 1,
+            sha256: sha256_hex(b"x"),
+        };
+        let report = ExternalFlagshipReproductionReport {
+            kind: "rne_external_flagship_reproduction_report".to_string(),
+            schema_version: EXTERNAL_FLAGSHIP_REPRODUCTION_REPORT_SCHEMA_VERSION,
+            status: "passed".to_string(),
+            owner: candidate.evidence_repository.owner.clone(),
+            repository: candidate.evidence_repository.url.clone(),
+            revision: "a".repeat(40),
+            measured_on: candidate.measurement.measured_on.clone(),
+            author_assistance: false,
+            release_version: RELEASE_VERSION.to_string(),
+            release_revision: "b".repeat(40),
+            release_target: candidate.measurement.release_target.clone(),
+            machine_label: candidate.measurement.machine_label.clone(),
+            operating_system: candidate.measurement.operating_system.clone(),
+            architecture: candidate.measurement.architecture.clone(),
+            elapsed_ms: candidate.measurement.elapsed_ms,
+            target_ms: candidate.measurement.target_ms,
+            task_id: "rne.flagship.mobile_lift_shared_aisle.v1".to_string(),
+            physics_execution_paths: vec!["rapier_native".to_string(), "mujoco_native".to_string()],
+            first_violation_step: 240,
+            first_violation_sim_time_ticks: 2_000_000_000,
+            archive: digest_external_file(&archive, "archive").expect("archive digest"),
+            proof_bundle: digest_external_file(&proof_bundle, "proof").expect("proof digest"),
+            submission_candidate: submission_member,
+            stdout_log: stdout_member,
+            stderr_log: stderr_member,
+            release_report: retained_member.clone(),
+            checksum_manifest: retained_member.clone(),
+            producer_executable: retained_member.clone(),
+            installed_proof_report: retained_member.clone(),
+            time_to_proof_report: retained_member.clone(),
+            cross_backend_report: retained_member.clone(),
+            failure_capsule_manifest: retained_member,
+        };
+        let report_bytes = pretty_json_bytes(&report).expect("report");
+        let staged = || StagedExternalFlagshipReproduction {
+            owner: &candidate.evidence_repository.owner,
+            repository: &candidate.evidence_repository.url,
+            revision: &report.revision,
+            measured_on: &candidate.measurement.measured_on,
+            release_archive: &archive,
+            proof_bundle: &proof_bundle,
+            submission_candidate: &candidate_path,
+            stdout_log: &stdout,
+            stderr_log: &stderr,
+        };
+        validate_staged_external_flagship_report(&report_bytes, staged())
+            .expect("complete retained chain");
+
+        fs::write(&stdout, b"tampered").expect("tamper stdout");
+        assert!(validate_staged_external_flagship_report(&report_bytes, staged()).is_err());
     }
 
     #[test]

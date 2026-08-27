@@ -1,4 +1,4 @@
-schema_version = 8
+schema_version = 9
 # External conformance entries must retain their exact tested subjects; a
 # report-only entry is intentionally not representable. Platform releases also
 # require separate archive/install-report attestations and the extracted
@@ -11,6 +11,9 @@ schema_version = 8
 # Schema v7 requires the equivalent complete chain for simulator adapters.
 # Schema v8 applies the same complete chain to external-project TaskSpecs and
 # every member of their verified Failure Capsules.
+# Schema v9 makes one independently reproduced installed flagship run an
+# explicit gate and binds its archive, proof bundle, candidate, logs, and
+# maintainer verification report.
 release_version = "0.2.0"
 project_owner = "rsasaki0109"
 minimum_stability_days = 183
@@ -20,6 +23,7 @@ unplanned_breaking_changes = 0
 blocker_registry = "release/blockers.toml"
 required_platforms = ["linux_x86_64", "windows_x86_64"]
 accelerator_adapter = []
+installed_flagship_reproduction = []
 compatibility_report = { path = "evidence/compatibility-report-v1.json", sha256 = "sha256:aa17844d4f4de4e6b4109ea9a95ba587e0f84513271f824b06d849a468aa7258" }
 
 [candidate]

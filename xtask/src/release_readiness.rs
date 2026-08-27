@@ -40,7 +40,7 @@ use rne_hardware_gateway::simulator::conformance::{
     SimulatorAdapterConformanceCheck, SimulatorAdapterConformanceSubject,
 };
 
-pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 8;
+pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 9;
 pub(crate) const REPORT_SCHEMA_VERSION: u32 = 1;
 const REPORT_KIND: &str = "rne_one_zero_readiness_report";
 const DEFAULT_MANIFEST: &str = "release/one-zero-readiness.toml";
@@ -59,9 +59,10 @@ const MAX_ADAPTER_ARGUMENTS: usize = 128;
 const MAX_ADAPTER_ARGUMENT_BYTES: usize = 4_096;
 const ACCELERATOR_ADAPTER_EVIDENCE_FILES: usize = 5;
 const PLATFORM_RELEASE_EVIDENCE_FILES: usize = 7;
-const CHECK_IDS: [&str; 9] = [
+const CHECK_IDS: [&str; 10] = [
     "stability_window",
     "external_projects",
+    "installed_flagship_reproduction",
     "third_party_plugin",
     "external_system",
     "reference_hardware",
@@ -87,6 +88,8 @@ struct ReadinessManifest {
     support: SupportCommitment,
     #[serde(default)]
     external_project: Vec<ExternalProjectEvidence>,
+    #[serde(default)]
+    installed_flagship_reproduction: Vec<InstalledFlagshipReproductionEvidence>,
     #[serde(default)]
     third_party_plugin: Vec<ThirdPartyPluginEvidence>,
     #[serde(default)]
@@ -141,6 +144,23 @@ struct ExternalProjectEvidence {
     stdout_log: EvidenceRef,
     stderr_log: EvidenceRef,
     submission_report: EvidenceRef,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstalledFlagshipReproductionEvidence {
+    id: String,
+    owner: String,
+    repository: String,
+    revision: String,
+    measured_on: String,
+    author_assistance: bool,
+    release_archive: EvidenceRef,
+    proof_bundle: EvidenceRef,
+    submission_candidate: EvidenceRef,
+    stdout_log: EvidenceRef,
+    stderr_log: EvidenceRef,
+    report: EvidenceRef,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -720,6 +740,13 @@ fn validate_unique_manifest_entries(manifest: &ReadinessManifest) -> anyhow::Res
             .map(|entry| entry.id.as_str()),
     )?;
     unique_ids(
+        "installed flagship reproduction",
+        manifest
+            .installed_flagship_reproduction
+            .iter()
+            .map(|entry| entry.id.as_str()),
+    )?;
+    unique_ids(
         "third-party plugin",
         manifest
             .third_party_plugin
@@ -782,6 +809,8 @@ fn evaluate(
         && manifest.unplanned_breaking_changes == 0;
     let external_projects_passed = projects.len() >= manifest.minimum_external_projects;
 
+    let flagship_digests =
+        verify_installed_flagship_reproductions(evidence_root, manifest, candidate_since, as_of)?;
     let plugin_digests = verify_third_party_plugins(evidence_root, manifest)?;
     let system_digests = verify_external_systems(evidence_root, manifest)?;
     let accelerator_adapter_digests = verify_accelerator_adapters(evidence_root, manifest)?;
@@ -822,6 +851,15 @@ fn evaluate(
         ),
         ReadinessCheck::new(
             CHECK_IDS[2],
+            !manifest.installed_flagship_reproduction.is_empty(),
+            format!(
+                "verified_installed_flagship_reproductions={}/1",
+                manifest.installed_flagship_reproduction.len()
+            ),
+            flagship_digests,
+        ),
+        ReadinessCheck::new(
+            CHECK_IDS[3],
             !manifest.third_party_plugin.is_empty(),
             format!(
                 "verified_third_party_plugins={}",
@@ -830,7 +868,7 @@ fn evaluate(
             plugin_digests,
         ),
         ReadinessCheck::new(
-            CHECK_IDS[3],
+            CHECK_IDS[4],
             !manifest.external_system.is_empty(),
             format!(
                 "verified_external_systems={} audited_accelerator_adapters={}",
@@ -840,13 +878,13 @@ fn evaluate(
             system_digests,
         ),
         ReadinessCheck::new(
-            CHECK_IDS[4],
+            CHECK_IDS[5],
             !hardware_digests.is_empty(),
             format!("verified_reference_hardware_runs={}", hardware_digests.len()),
             hardware_digests,
         ),
         ReadinessCheck::new(
-            CHECK_IDS[5],
+            CHECK_IDS[6],
             release_digests.len()
                 == manifest.required_platforms.len() * PLATFORM_RELEASE_EVIDENCE_FILES,
             format!(
@@ -857,7 +895,7 @@ fn evaluate(
             release_digests,
         ),
         ReadinessCheck::new(
-            CHECK_IDS[6],
+            CHECK_IDS[7],
             !compatibility_digests.is_empty(),
             format!(
                 "minimum_compatibility_checks={}",
@@ -866,13 +904,13 @@ fn evaluate(
             compatibility_digests,
         ),
         ReadinessCheck::new(
-            CHECK_IDS[7],
+            CHECK_IDS[8],
             true,
             "release blocker registry has zero open P0/P1 entries",
             [normalized_text_sha256(&blocker_text)?],
         ),
         ReadinessCheck::new(
-            CHECK_IDS[8],
+            CHECK_IDS[9],
             support_passed,
             format!(
                 "committed={} maintainer={} support_period={}",
@@ -1008,6 +1046,79 @@ fn verify_external_projects(
         });
     }
     Ok(projects)
+}
+
+fn verify_installed_flagship_reproductions(
+    evidence_root: &Path,
+    manifest: &ReadinessManifest,
+    candidate_since: CivilDate,
+    as_of: CivilDate,
+) -> anyhow::Result<Vec<String>> {
+    let mut repositories = BTreeSet::new();
+    let mut digests = Vec::new();
+    for entry in &manifest.installed_flagship_reproduction {
+        validate_identifier("installed flagship reproduction id", &entry.id)?;
+        validate_external_owner(
+            &manifest.project_owner,
+            &entry.owner,
+            &entry.repository,
+            "installed flagship reproduction",
+        )?;
+        validate_external_revision(
+            "installed flagship reproduction",
+            &entry.id,
+            &entry.revision,
+        )?;
+        anyhow::ensure!(
+            !entry.author_assistance,
+            "installed flagship reproduction {} required repository-author assistance",
+            entry.id
+        );
+        anyhow::ensure!(
+            repositories.insert(entry.repository.as_str()),
+            "installed flagship reproduction repository is duplicated: {}",
+            entry.repository
+        );
+        let measured_on = CivilDate::parse(&entry.measured_on)?;
+        candidate_since.days_until(measured_on)?;
+        measured_on.days_until(as_of)?;
+
+        let release_archive = verify_evidence(evidence_root, &entry.release_archive)?;
+        let proof_bundle = verify_evidence(evidence_root, &entry.proof_bundle)?;
+        let submission_candidate = verify_evidence(evidence_root, &entry.submission_candidate)?;
+        let stdout_log = verify_evidence(evidence_root, &entry.stdout_log)?;
+        let stderr_log = verify_evidence(evidence_root, &entry.stderr_log)?;
+        let report = verify_evidence(evidence_root, &entry.report)?;
+        release_artifacts::validate_staged_external_flagship_report(
+            &report.bytes,
+            release_artifacts::StagedExternalFlagshipReproduction {
+                owner: &entry.owner,
+                repository: &entry.repository,
+                revision: &entry.revision,
+                measured_on: &entry.measured_on,
+                release_archive: &release_archive.path,
+                proof_bundle: &proof_bundle.path,
+                submission_candidate: &submission_candidate.path,
+                stdout_log: &stdout_log.path,
+                stderr_log: &stderr_log.path,
+            },
+        )
+        .with_context(|| {
+            format!(
+                "validate installed flagship reproduction {} report",
+                entry.id
+            )
+        })?;
+        digests.extend([
+            release_archive.sha256,
+            proof_bundle.sha256,
+            submission_candidate.sha256,
+            stdout_log.sha256,
+            stderr_log.sha256,
+            report.sha256,
+        ]);
+    }
+    Ok(digests)
 }
 
 fn verify_third_party_plugins(
@@ -2441,7 +2552,7 @@ mod tests {
 
         let manifest_text = format!(
             r#"
-schema_version = 8
+schema_version = 9
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2622,7 +2733,7 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
 
         let manifest_text = format!(
             r#"
-schema_version = 8
+schema_version = 9
 release_version = "0.2.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2719,7 +2830,7 @@ submission_report = {{ path = "submission-report.json", sha256 = "{}" }}
         let digest = |name: &str| sha256_prefixed(&fs::read(temp.path().join(name)).unwrap());
         let manifest_text = format!(
             r#"
-schema_version = 8
+schema_version = 9
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -3006,7 +3117,7 @@ report = {{ path = "process-conformance-report-v1.json", sha256 = "{}" }}
     #[test]
     fn unknown_manifest_fields_are_rejected() {
         let manifest = r#"
-schema_version = 8
+schema_version = 9
 release_version = "0.1.0"
 project_owner = "owner"
 minimum_stability_days = 183
@@ -3035,7 +3146,7 @@ policy_url = ""
     #[test]
     fn platform_release_manifest_v5_requires_the_complete_archive_chain() {
         let manifest = r#"
-schema_version = 8
+schema_version = 9
 release_version = "0.1.0"
 project_owner = "owner"
 minimum_stability_days = 183
@@ -3090,7 +3201,7 @@ install_attestation_verification = { path = "release/install-receipt.json", sha2
     #[test]
     fn legacy_unbound_external_reports_cannot_be_relabelled_as_manifest_v5() {
         let manifest = r#"
-schema_version = 8
+schema_version = 9
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183

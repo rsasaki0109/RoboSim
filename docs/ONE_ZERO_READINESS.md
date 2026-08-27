@@ -83,11 +83,12 @@ regular files no larger than 64 MiB and rejects symlinks or paths outside the
 pack. It does not download URLs, create tags, or infer evidence from GitHub
 stars.
 
-Manifest v8 retains the external simulator chain from v7 and now requires each
-external project to include the official release archive, acyclic candidate,
-committed stdout/stderr logs, and schema-v1 maintainer report. That report
-binds every Failure Capsule member and requires its `rne_task_spec` digest to
-match the separately submitted typed TaskSpec.
+Manifest v9 retains the external-project chain from v8 and makes the public
+installed-flagship intake route an explicit readiness gate. An accepted run
+retains and rehashes the official release archive, proof bundle, acyclic
+candidate, committed stdout/stderr logs, and schema-v2 maintainer report. The
+audit rebinds their exact bytes to the independent owner, repository revision,
+measurement date, machine, 15-minute verdict, and Rapier/MuJoCo execution paths.
 Use
 `accelerator_adapter = []` at the top level while no entries are retained;
 replace that empty array with one or more `[[accelerator_adapter]]` tables when
@@ -99,6 +100,7 @@ evidence is accepted.
 |---|---|
 | `stability_window` | At least 183 calendar days since the immutable Rust API baseline, at least 183 days of observed external-project use, and zero declared unplanned breaks |
 | `external_projects` | At least two distinct repositories, owned outside the RNE repository owner, each with an official release archive, valid TaskSpec, fully verifiable Failure Capsule, acyclic candidate, committed logs, and revalidated maintainer report produced without repository-author assistance |
+| `installed_flagship_reproduction` | At least one independently owned, author-assistance-free installed run whose accepted report rebinds the exact release archive, proof bundle, acyclic candidate, committed logs, repository revision, named machine, 15-minute verdict, and Rapier/MuJoCo proof paths |
 | `third_party_plugin` | At least one externally owned controller plugin whose passing typed report and maintainer submission report are rebound to the exact release archive, library, manifest, acyclic candidate, committed logs, repository revision, and ownership |
 | `external_system` | At least one externally owned physics backend, simulator adapter, or hardware adapter whose passing typed report is rebound to the exact retained implementation subject; simulator evidence also retains its TaskSpec, runtime manifest, world, robot model, adapter config, normalized arguments, official release archive, acyclic candidate, committed logs, and maintainer report, while hardware retains its TaskSpec and arguments. Audited accelerator adapters are reported separately and do not satisfy this check |
 | `reference_hardware` | A full LeKiwi physical-evidence manifest accepted by the safety and provenance verifier |
@@ -108,7 +110,7 @@ evidence is accepted.
 | `support_commitment` | A named maintainer, unambiguous support period, and published HTTPS policy are explicitly committed; an uncommitted table must contain no partial claims |
 
 The manifest, report, and attestation receipt schemas are registered as
-`evidence.one_zero_readiness_manifest = 8`,
+`evidence.one_zero_readiness_manifest = 9`,
 `evidence.one_zero_readiness_report = 1`, and
 `evidence.github_attestation_verification = 1` in `release/contracts.toml`.
 The archive-bound install result is separately registered as
@@ -118,7 +120,7 @@ honest baseline. `manifest_sha256` binds the complete normalized input,
 including external identities and support fields. The retained 36-check
 compatibility report is byte-for-byte equal to a fresh typed-reader replay and
 the blocker registry is clean, so the committed 2026-08-16 baseline is
-`eligible=false` with 2 of 9 checks satisfied. The remaining seven checks still
+`eligible=false` with 2 of 10 checks satisfied. The remaining eight checks still
 require real external, physical, signed-release, elapsed-time, or maintainer
 evidence.
 

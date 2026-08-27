@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Connect the public installed-flagship intake route to the 1.0 readiness
+  tracker. Manifest schema v9 adds a fail-closed gate that rehashes the retained
+  archive, proof bundle, candidate, logs, and maintainer report before one
+  independent reproduction can count.
+
 - Make the installed flagship a genuinely one-command verified path. The
   packaged runner now rejects any missing, extra, modified, duplicate,
   escaping, or symlinked bundle member before proof execution and binds the
