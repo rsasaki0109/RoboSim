@@ -299,6 +299,24 @@ failure. The browser report and minimum replay are emitted as
 `openarm-sensor-saturation-robustness-report.html` and
 `openarm-sensor-saturation-failure.rne-replay`.
 
+## Joint-position stuck-value boundary
+
+The status-aware successor holds only the joint-5 position and velocity visible
+to the controller at the last nominal sample while retaining the raw typed
+backend values. The fixed `[0, 1, 2, 3, 4]` consecutive-frame grid passes two
+stuck samples and first fails the declared maximum at three on Rapier, native
+MuJoCo, and Gazebo.
+
+Every consumed stuck sample is rejected with `required_sensor_status`; the
+controller holds its previous target, freezes controller state, and resumes on
+the first fresh nominal sample. The first failing Rapier decision is step 904,
+which consumes sequence 902 while holding sequence 899. The report independently
+reconstructs the status, held value, raw-source divergence, safe target, and
+one-decision recovery with zero realization delta. Its deterministic browser
+report and minimum replay are emitted as
+`openarm-sensor-stuck-robustness-report.html` and
+`openarm-sensor-stuck-failure.rne-replay`.
+
 ## Physical payload fixture (in progress)
 
 The payload compiler generates content-addressed URDF variants for

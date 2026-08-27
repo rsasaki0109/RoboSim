@@ -379,6 +379,16 @@ def rearm_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def stuck_value_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
+    contract = controller.get("measurement_fault_contract")
+    if (
+        isinstance(contract, dict)
+        and contract.get("kind") == "joint_position_stuck_value_burst_v1"
+    ):
+        return contract
+    return None
+
+
 def publication_dropout_contract(controller: dict[str, Any]) -> dict[str, Any] | None:
     return dropout_contract(controller) or recovery_contract(controller) or rearm_contract(controller)
 
@@ -471,6 +481,37 @@ def sensor_sample_published(controller: dict[str, Any], sequence: int) -> bool:
             or second_start <= sequence < second_start + burst_length
         )
     return not start <= sequence < start + contract["consecutive_dropped_frames"]
+
+
+def sensor_status_for_sequence(controller: dict[str, Any], sequence: int) -> str:
+    contract = stuck_value_contract(controller)
+    if contract is None:
+        return "nominal"
+    start = contract["start_capture_sequence"]
+    return (
+        "stuck_value"
+        if start <= sequence < start + contract["consecutive_stuck_frames"]
+        else "nominal"
+    )
+
+
+def stuck_controller_observation(
+    controller: dict[str, Any],
+    observations: list[dict[str, Any]],
+    observation: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    contract = stuck_value_contract(controller)
+    if observation is None or contract is None or observation["sensor_status"] != "stuck_value":
+        return observation
+    source_sequence = contract["start_capture_sequence"] - 1
+    source = observations[source_sequence - 1]
+    transformed = observation.copy()
+    transformed["joint_position_rad"] = observation["joint_position_rad"].copy()
+    transformed["joint_velocity_rad_s"] = observation["joint_velocity_rad_s"].copy()
+    index = controller["action_joint_order"].index(contract["joint"])
+    transformed["joint_position_rad"][index] = source["joint_position_rad"][index]
+    transformed["joint_velocity_rad_s"][index] = source["joint_velocity_rad_s"][index]
+    return transformed
 
 
 def validate_measurement_fault(controller: dict[str, Any], action_count: int) -> None:
@@ -717,6 +758,41 @@ def validate_measurement_fault(controller: dict[str, Any], action_count: int) ->
         ):
             raise ValueError("invalid OpenArm measurement-saturation contract")
         return
+    if contract.get("kind") == "joint_position_stuck_value_burst_v1":
+        expected_keys = {
+            "kind",
+            "classification",
+            "joint",
+            "start_capture_sequence",
+            "consecutive_stuck_frames",
+            "hold_source",
+            "sensor_status",
+            "controller_visibility",
+            "application_order",
+        }
+        start = contract.get("start_capture_sequence")
+        count = contract.get("consecutive_stuck_frames")
+        if (
+            set(contract) != expected_keys
+            or contract.get("classification") != "measurement_stuck_value"
+            or contract.get("joint") not in controller["action_joint_order"]
+            or not isinstance(start, int)
+            or isinstance(start, bool)
+            or not isinstance(count, int)
+            or isinstance(count, bool)
+            or not 2 <= start <= action_count
+            or not 0 <= count
+            or start + count > action_count + 1
+            or contract.get("hold_source")
+            != "last_nominal_position_before_burst_v1"
+            or contract.get("sensor_status") != "stuck_value"
+            or contract.get("controller_visibility")
+            != "stuck_status_and_held_position_with_raw_source_retained"
+            or contract.get("application_order")
+            != "after_typed_feedback_capture_before_controller_law"
+        ):
+            raise ValueError("invalid OpenArm measurement-stuck-value contract")
+        return
     expected_keys = {
         "kind",
         "classification",
@@ -757,6 +833,35 @@ def bounded_controller_decision(
     recovery_hold_remaining: int,
 ) -> dict[str, Any]:
     contract = controller.get("observation_contract")
+    if (
+        observation is not None
+        and stuck_value_contract(controller) is not None
+        and observation["sensor_status"] != contract["required_status"]
+    ):
+        age_ticks = consumed_at_ticks - observation["sim_time_ticks"]
+        if age_ticks < 0 or age_ticks > contract["maximum_age_ticks"]:
+            raise RuntimeError("stuck-value observation is stale or future")
+        if len(last_accepted_target) != len(reference):
+            raise RuntimeError("fail-safe hold target width mismatch")
+        return {
+            "target": last_accepted_target.copy(),
+            "correction": [
+                target - desired for target, desired in zip(last_accepted_target, reference)
+            ],
+            "integral_correction": integral_correction.copy(),
+            "controller_observation_position_rad": observation[
+                "joint_position_rad"
+            ].copy(),
+            "joint_measurement_bias_rad": [0.0] * len(reference),
+            "observation_sequence": observation["step"],
+            "observation_age_ticks": age_ticks,
+            "bootstrap": False,
+            "controller_rejected": True,
+            "controller_rejection_reason": "required_sensor_status",
+            "fail_safe_hold_active": True,
+            "controller_state_frozen": True,
+            "controller_recovered": False,
+        }
     if (
         recovering_from_rejection
         and recovery_hold_remaining > 0
@@ -846,6 +951,7 @@ def apply_measurement_bias(
         "joint_feedback_controller_stale_age_pulse_v1",
         "joint_feedback_dropout_recovery_hold_v1",
         "joint_feedback_repeated_dropout_bursts_v1",
+        "joint_position_stuck_value_burst_v1",
     }:
         return positions, bias
     if contract.get("kind") == "joint_position_quantization_pulse_v1":
@@ -1079,6 +1185,9 @@ def run_success(
         delayed_observation = (
             eligible_observations[selected_index] if selected_index >= 0 else None
         )
+        delayed_observation = stuck_controller_observation(
+            controller, observations, delayed_observation
+        )
         decision = bounded_controller_decision(
             controller,
             action["joint_position_target_rad"],
@@ -1158,7 +1267,9 @@ def run_success(
             {
                 "step": action["step"],
                 "sim_time_ticks": action["sim_time_ticks"],
-                "sensor_status": "nominal",
+                "sensor_status": sensor_status_for_sequence(
+                    controller, action["step"]
+                ),
                 "sensor_sample_published": sensor_sample_published(
                     controller, action["step"]
                 ),

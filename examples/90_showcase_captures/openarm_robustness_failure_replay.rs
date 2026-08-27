@@ -1,5 +1,7 @@
 //! Converts the first OpenArm robustness-boundary failure into a portable replay.
 
+#![recursion_limit = "256"]
+
 use anyhow::{bail, Context, Result};
 use rne_ai::{
     BehaviorContractDescriptor, BehaviorContractKind, BehaviorReplayAction, BehaviorReplayArtifact,
@@ -111,6 +113,7 @@ fn run() -> Result<()> {
     let rearm_failure = dimension_id == "joint_feedback_repeated_dropout_rearm";
     let quantization_failure = dimension_id == "joint_position_measurement_quantization";
     let saturation_failure = dimension_id == "joint_position_measurement_saturation";
+    let stuck_value_failure = dimension_id == "joint_position_stuck_value";
     let command_delay_failure = dimension_id == "actuator_command_delay";
     let command_rate_limit_failure = dimension_id == "actuator_command_rate_limit";
     let command_deadband_failure = dimension_id == "actuator_command_deadband";
@@ -124,6 +127,9 @@ fn run() -> Result<()> {
         }
         "joint_position_measurement_quantization" | "joint_position_measurement_saturation" => {
             required_u64(&report["dimension"], "start_controller_step")?
+        }
+        "joint_position_stuck_value" => {
+            required_u64(&report["dimension"], "start_capture_sequence")?
         }
         "joint_feedback_publication_dropout"
         | "joint_feedback_dropout_recovery"
@@ -195,6 +201,7 @@ fn run() -> Result<()> {
             && !rearm_failure
             && !quantization_failure
             && !saturation_failure
+            && !stuck_value_failure
             && !command_delay_failure
             && !command_rate_limit_failure
             && !command_deadband_failure
@@ -273,7 +280,7 @@ fn run() -> Result<()> {
                 "fail_safe_hold_active": observation.fail_safe_hold_active,
                 "controller_state_frozen": observation.controller_state_frozen,
                 "controller_recovered": observation.controller_recovered,
-                "cumulative_iae_rad_s": (!availability_failure && !latency_failure && !jitter_failure && !stale_age_failure && !recovery_failure && !rearm_failure && !quantization_failure && !saturation_failure && !command_delay_failure && !command_rate_limit_failure && !command_deadband_failure).then_some(cumulative_iae_rad_s),
+                "cumulative_iae_rad_s": (!availability_failure && !latency_failure && !jitter_failure && !stale_age_failure && !recovery_failure && !rearm_failure && !quantization_failure && !saturation_failure && !stuck_value_failure && !command_delay_failure && !command_rate_limit_failure && !command_deadband_failure).then_some(cumulative_iae_rad_s),
                 "consecutive_dropout_frames": availability_failure.then_some(consecutive_dropout_frames),
                 "controller_ingress_delay_frames": latency_failure.then(|| dimension_value(failure)).transpose()?,
                 "controller_ingress_jitter_frames": jitter_failure.then(|| observation.controller_observation_age_ticks.map(|age| age / trace.fixed_delta_ticks - 1)).flatten(),
@@ -282,6 +289,7 @@ fn run() -> Result<()> {
                 "interburst_fresh_frames": rearm_failure.then(|| dimension_value(failure)).transpose()?,
                 "sensor_quantization_step_rad": quantization_failure.then(|| dimension_value(failure)).transpose()?,
                 "sensor_saturation_limit_abs_rad": saturation_failure.then(|| dimension_value(failure)).transpose()?,
+                "sensor_consecutive_stuck_frames": stuck_value_failure.then(|| dimension_value(failure)).transpose()?,
                 "actuator_delay_steps": delay_steps,
                 "actuator_source_step": source_step,
                 "expected_source_controller_target_rad": expected_source_target_rad,
@@ -390,6 +398,29 @@ fn run() -> Result<()> {
         );
         format!(
             "OpenArm joint 5 position saturation limit reached {observed:.6} rad at step {failure_step}, below the fixed {requirement_limit:.6} rad minimum measurement range"
+        )
+    } else if stuck_value_failure {
+        let sequence = failure_observation
+            .controller_observation_sequence
+            .context("stuck-value failure has no controller observation")?;
+        let expected_sequence = required_u64(failure, "controller_observation_sequence")?;
+        let held_position = required_f64(failure, "held_position_rad")?;
+        anyhow::ensure!(
+            observed == dimension_value(failure)?
+                && sequence == expected_sequence
+                && failure_observation.controller_rejected
+                && failure_observation.controller_rejection_reason.as_deref()
+                    == Some("required_sensor_status")
+                && failure_observation.fail_safe_hold_active
+                && failure_observation.controller_state_frozen
+                && (failure_observation.joint_controller_observation_position_rad[JOINT_INDEX]
+                    - held_position)
+                    .abs()
+                    <= 1e-12,
+            "replayed measurement stuck-value boundary differs from the report"
+        );
+        format!(
+            "OpenArm joint 5 feedback reached {observed:.0} consecutive stuck-value frames at controller step {failure_step}, exceeding the fixed {requirement_limit:.0}-frame requirement"
         )
     } else if rearm_failure {
         let burst_length = required_u64(&report["dimension"], "burst_length_frames")?;
@@ -534,6 +565,7 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
                 | "joint_feedback_repeated_dropout_rearm"
                 | "joint_position_measurement_quantization"
                 | "joint_position_measurement_saturation"
+                | "joint_position_stuck_value"
         ),
         "unsupported robustness dimension"
     );
@@ -559,6 +591,7 @@ fn validate_inputs(report: &Value, trace: &RapierTrace, trace_sha256: &str) -> R
         "joint_position_measurement_saturation" => {
             "controller.sensor.minimum_position_saturation_limit_abs_rad"
         }
+        "joint_position_stuck_value" => "controller.sensor.maximum_consecutive_stuck_value_frames",
         "actuator_command_delay" => "controller.actuator.maximum_command_transport_delay_steps",
         "actuator_command_rate_limit" => "controller.actuator.minimum_command_slew_rate_rad_s",
         "actuator_command_deadband" => "controller.actuator.maximum_command_deadband_rad",

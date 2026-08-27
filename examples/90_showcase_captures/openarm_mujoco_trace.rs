@@ -208,6 +208,17 @@ enum MeasurementFaultContract {
         controller_visibility: String,
         application_order: String,
     },
+    #[serde(rename = "joint_position_stuck_value_burst_v1")]
+    JointPositionStuckValueBurstV1 {
+        classification: String,
+        joint: String,
+        start_capture_sequence: u64,
+        consecutive_stuck_frames: u64,
+        hold_source: String,
+        sensor_status: JointFeedbackStatus,
+        controller_visibility: String,
+        application_order: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -1046,6 +1057,28 @@ fn validate(
                         == "after_typed_feedback_availability_before_controller_law",
                 "invalid OpenArm measurement-saturation contract"
             ),
+            MeasurementFaultContract::JointPositionStuckValueBurstV1 {
+                classification,
+                joint,
+                start_capture_sequence,
+                consecutive_stuck_frames,
+                hold_source,
+                sensor_status,
+                controller_visibility,
+                application_order,
+            } => anyhow::ensure!(
+                classification == "measurement_stuck_value"
+                    && controller.action_joint_order.contains(joint)
+                    && *start_capture_sequence >= 2
+                    && start_capture_sequence.saturating_add(*consecutive_stuck_frames)
+                        <= final_step.saturating_add(1)
+                    && hold_source == "last_nominal_position_before_burst_v1"
+                    && *sensor_status == JointFeedbackStatus::StuckValue
+                    && controller_visibility
+                        == "stuck_status_and_held_position_with_raw_source_retained"
+                    && application_order == "after_typed_feedback_capture_before_controller_law",
+                "invalid OpenArm measurement-stuck-value contract"
+            ),
         }
     }
     match (&controller.observation_contract, &controller.feedback_law) {
@@ -1363,10 +1396,16 @@ fn rollout(
             if frame.sequence > last_observation_sequence {
                 let published = sensor_sample_published(controller, frame.sequence);
                 if published {
-                    controller_observation_history.push(controller_observation(&frame)?);
+                    let ingress = apply_stuck_controller_observation(
+                        controller,
+                        &controller_observation_history,
+                        controller_observation(&frame)?,
+                    )?;
+                    controller_observation_history.push(ingress);
                 }
                 observations.push(observation_frame(
                     frame,
+                    controller,
                     now.ticks(),
                     published,
                     &state_hashes,
@@ -1385,6 +1424,7 @@ fn rollout(
         let final_published = sensor_sample_published(controller, final_frame.sequence);
         observations.push(observation_frame(
             final_frame,
+            controller,
             final_time.ticks(),
             final_published,
             &state_hashes,
@@ -2076,11 +2116,15 @@ fn bounded_controller_decision(
                 return Err(error);
             };
             let age_ticks = consumed_at_ticks.saturating_sub(observation.capture_time_ticks);
-            if !has_availability_fault(controller)
-                || observation.status != contract.required_status
-                || observation.available_time_ticks > consumed_at_ticks
-                || age_ticks <= contract.maximum_age_ticks
-            {
+            let stuck_status_rejection = has_stuck_value_fault(controller)
+                && observation.status == JointFeedbackStatus::StuckValue
+                && observation.available_time_ticks <= consumed_at_ticks
+                && age_ticks <= contract.maximum_age_ticks;
+            let stale_rejection = has_availability_fault(controller)
+                && observation.status == contract.required_status
+                && observation.available_time_ticks <= consumed_at_ticks
+                && age_ticks > contract.maximum_age_ticks;
+            if !stuck_status_rejection && !stale_rejection {
                 return Err(error);
             }
             *state = state_before;
@@ -2103,7 +2147,11 @@ fn bounded_controller_decision(
                 observation_age_ticks: Some(age_ticks),
                 bootstrap: false,
                 rejected: true,
-                rejection_reason: Some("maximum_observation_age_ticks"),
+                rejection_reason: Some(if stuck_status_rejection {
+                    "required_sensor_status"
+                } else {
+                    "maximum_observation_age_ticks"
+                }),
                 fail_safe_hold_active: true,
                 state_frozen: true,
                 recovered: false,
@@ -2123,6 +2171,13 @@ fn has_availability_fault(controller: &ControllerSpec) -> bool {
                 | MeasurementFaultContract::JointFeedbackDropoutRecoveryHoldV1 { .. }
                 | MeasurementFaultContract::JointFeedbackRepeatedDropoutBurstsV1 { .. }
         )
+    )
+}
+
+fn has_stuck_value_fault(controller: &ControllerSpec) -> bool {
+    matches!(
+        controller.measurement_fault_contract.as_ref(),
+        Some(MeasurementFaultContract::JointPositionStuckValueBurstV1 { .. })
     )
 }
 
@@ -2201,6 +2256,57 @@ fn sensor_sample_published(controller: &ControllerSpec, sequence: u64) -> bool {
     }
 }
 
+fn sensor_status_for_sequence(controller: &ControllerSpec, sequence: u64) -> JointFeedbackStatus {
+    match controller.measurement_fault_contract.as_ref() {
+        Some(MeasurementFaultContract::JointPositionStuckValueBurstV1 {
+            start_capture_sequence,
+            consecutive_stuck_frames,
+            ..
+        }) if (*start_capture_sequence
+            ..start_capture_sequence.saturating_add(*consecutive_stuck_frames))
+            .contains(&sequence) =>
+        {
+            JointFeedbackStatus::StuckValue
+        }
+        _ => JointFeedbackStatus::Nominal,
+    }
+}
+
+fn apply_stuck_controller_observation(
+    controller: &ControllerSpec,
+    history: &[ControllerObservation],
+    mut observation: ControllerObservation,
+) -> Result<ControllerObservation> {
+    let Some(MeasurementFaultContract::JointPositionStuckValueBurstV1 {
+        joint,
+        start_capture_sequence,
+        consecutive_stuck_frames,
+        ..
+    }) = controller.measurement_fault_contract.as_ref()
+    else {
+        return Ok(observation);
+    };
+    if !(*start_capture_sequence..start_capture_sequence.saturating_add(*consecutive_stuck_frames))
+        .contains(&observation.sequence)
+    {
+        return Ok(observation);
+    }
+    let source_sequence = start_capture_sequence.saturating_sub(1);
+    let source = history
+        .iter()
+        .find(|candidate| candidate.sequence == source_sequence)
+        .context("stuck-value burst has no preceding nominal observation")?;
+    let index = controller
+        .action_joint_order
+        .iter()
+        .position(|name| name == joint)
+        .context("stuck-value joint is absent from the action order")?;
+    observation.status = JointFeedbackStatus::StuckValue;
+    observation.joint_position_rad[index] = source.joint_position_rad[index];
+    observation.joint_velocity_rad_s[index] = source.joint_velocity_rad_s[index];
+    Ok(observation)
+}
+
 fn additional_recovery_hold_decisions(controller: &ControllerSpec) -> u64 {
     match controller.measurement_fault_contract.as_ref() {
         Some(MeasurementFaultContract::JointFeedbackDropoutRecoveryHoldV1 {
@@ -2241,6 +2347,7 @@ fn coordinate(joint: &rne_data::JointFeedbackChannel) -> Result<(f64, f64)> {
 
 fn observation_frame(
     frame: Frame<JointFeedback>,
+    controller: &ControllerSpec,
     consumed_at_ticks: u64,
     sensor_sample_published: bool,
     state_hashes: &[u64],
@@ -2313,7 +2420,7 @@ fn observation_frame(
         available_time_ticks: frame.available_time.ticks(),
         consumed_at_ticks,
         observation_age_ticks: consumed_at_ticks.saturating_sub(frame.capture_time.ticks()),
-        sensor_status: frame.payload.status,
+        sensor_status: sensor_status_for_sequence(controller, frame.sequence),
         sensor_sample_published,
         controller_observation_sequence: decision.observation_sequence,
         controller_observation_age_ticks: decision.observation_age_ticks,

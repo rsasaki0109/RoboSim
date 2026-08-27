@@ -814,6 +814,27 @@ python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.p
   --output artifacts/openarm-sensor-saturation-robustness-lab/report
 ```
 
+## Sweep OpenArm joint-position stuck values
+
+The status-aware stuck-value dimension retains raw typed feedback but holds the
+joint-5 position and velocity consumed by the controller at the last nominal
+sample. It also marks each affected observation `stuck_value`, causing the
+controller to reject it, hold the previous target, freeze state, and recover on
+the first fresh nominal sample. The `[0, 1, 2, 3, 4]` consecutive-frame grid
+passes two frames and first fails three on Rapier, native MuJoCo, and Gazebo.
+The first failing Rapier decision is step 904, consuming sequence 902 from held
+source 899, and the report reconstructs the full relationship with zero
+realization delta.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_position_stuck_value \
+  --output artifacts/openarm-sensor-stuck-robustness-lab
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-stuck-robustness-lab \
+  --output artifacts/openarm-sensor-stuck-robustness-lab/report
+```
+
 ## Sweep the OpenArm actuator command-transport delay
 
 The fourth robustness dimension delays only right joint 5 after controller

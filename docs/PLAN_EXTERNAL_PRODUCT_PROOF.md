@@ -485,9 +485,11 @@ actuator-authority envelope. The next slices are:
    delta. The joint-5 saturation successor retains raw feedback, sweeps the
    descending `[0.08, 0.06, 0.05, 0.04, 0.03] rad` symmetric range, and proves
    a portable `0.05/0.04 rad` boundary at the first observable clamp on
-   controller step 941 with one real
-   clamp per backend and zero realization delta. The stuck-value envelope
-   remains;
+   controller step 941 with one real clamp per backend and zero realization
+   delta. The status-aware stuck-value successor retains raw feedback, sweeps
+   `[0, 1, 2, 3, 4]` held frames, and proves the portable two/three-frame
+   boundary at controller step 904 with safe target hold, frozen state,
+   one-decision recovery, and zero realization delta;
 5. turn the joint-5 plant lab into per-joint and coupled operating-region
    identification with uncertainty, coherence, residual, and held-out
    prediction evidence;
@@ -747,7 +749,13 @@ The boundary retains one age rejection, zero target and integral-state delta
  descending range grid passes `0.05 rad` and first fails `0.04 rad` at the
  first observable clamp on step 941
  on all three backends; the failing case contains one actual clamp per backend,
- zero realization delta, and green tracking gates. Physical parameter
+ zero realization delta, and green tracking gates. The status-aware stuck-value
+ successor then holds only the controller-visible joint-5 sample while retaining
+ raw typed feedback. All three backends pass two consecutive stuck frames and
+ first fail three; the Rapier failure occurs at step 904 while consuming
+ sequence 902 from held source 899. Every stuck decision safely holds the prior
+ target and freezes state, the first fresh sample recovers in one decision, and
+ independent reconstruction has zero realization delta. Physical parameter
 sweeps, actuator-authority degradation, command delay, command slew-rate limits,
 command deadband, viscous damping, and regularized Coulomb friction are recorded
 below; inertia and transmission-efficiency boundaries remain open.

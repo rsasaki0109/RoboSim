@@ -172,6 +172,18 @@
       "sensor_status": "nominal",
       "controller_visibility": "saturated_position_with_raw_sensor_retained",
       "application_order": "after_typed_feedback_availability_before_controller_law"
+    },
+    "joint_position_stuck_value": {
+      "kind": "joint_position_stuck_value_burst_v1",
+      "classification": "measurement_stuck_value",
+      "unit": "consecutive_frame_count",
+      "values": [0, 1, 2, 3, 4],
+      "joint": "openarm_right_joint5",
+      "start_capture_sequence": 900,
+      "hold_source": "last_nominal_position_before_burst_v1",
+      "sensor_status": "stuck_value",
+      "controller_visibility": "stuck_status_and_held_position_with_raw_source_retained",
+      "application_order": "after_typed_feedback_capture_before_controller_law"
     }
   },
   "evaluation": {
@@ -299,6 +311,18 @@
       "controller.sensor_saturation.maximum_controlled_joint_final_error_rad"
     ],
     "boundary_rule": "first_descending_grid_value_below_minimum_requirement",
+    "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
+  },
+  "stuck_value_evaluation": {
+    "requirement_ids": [
+      "controller.sensor.maximum_consecutive_stuck_value_frames",
+      "controller.sensor.maximum_stuck_value_realization_delta_rad",
+      "controller.sensor.maximum_fail_safe_target_delta_rad",
+      "controller.sensor.maximum_recovery_decisions",
+      "controller.sensor_stuck.maximum_controlled_joint_rmse_rad",
+      "controller.sensor_stuck.maximum_controlled_joint_final_error_rad"
+    ],
+    "boundary_rule": "smallest_grid_value_with_any_failed_requirement",
     "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
   }
 }

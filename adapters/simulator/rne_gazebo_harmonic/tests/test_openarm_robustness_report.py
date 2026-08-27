@@ -654,6 +654,91 @@ class OpenArmRobustnessReportTests(unittest.TestCase):
         self.assertEqual(violation["requirement_id"], "saturation")
         self.assertEqual(violation["step"], 4)
 
+    def test_stuck_value_metrics_verify_status_hold_freeze_and_recovery(self) -> None:
+        observations = []
+        for step in range(1, 9):
+            sequence = None if step <= 2 else step - 2
+            rejected = sequence in {3, 4, 5}
+            raw = step / 100.0
+            observations.append(
+                {
+                    "step": step,
+                    "sim_time_ticks": step * 10,
+                    "sensor_status": "stuck_value" if step in {3, 4, 5} else "nominal",
+                    "controller_observation_sequence": sequence,
+                    "controller_observation_age_ticks": None if sequence is None else 20,
+                    "controller_rejected": rejected,
+                    "controller_rejection_reason": (
+                        "required_sensor_status" if rejected else None
+                    ),
+                    "fail_safe_hold_active": rejected,
+                    "controller_state_frozen": rejected,
+                    "controller_recovered": step == 8,
+                    "joint_position_rad": [raw],
+                    "joint_reference_position_rad": [0.0],
+                    "joint_controller_observation_position_rad": (
+                        [] if sequence is None else [0.02 if rejected else sequence / 100.0]
+                    ),
+                    "joint_controller_target_rad": [0.1],
+                }
+            )
+        controller = {
+            "measurement_fault_contract": {
+                "kind": "joint_position_stuck_value_burst_v1",
+                "start_capture_sequence": 3,
+                "consecutive_stuck_frames": 3,
+            }
+        }
+        metrics = MODULE.stuck_value_metrics(controller, observations, 0)
+        self.assertIsNotNone(metrics)
+        self.assertTrue(metrics["status_realization_matches"])
+        self.assertEqual(metrics["captured_stuck_sequences"], [3, 4, 5])
+        self.assertEqual(metrics["consumed_stuck_decision_count"], 3)
+        self.assertEqual(metrics["rejected_decision_count"], 3)
+        self.assertEqual(metrics["maximum_realization_delta_rad"], 0.0)
+        self.assertAlmostEqual(metrics["maximum_raw_source_divergence_rad"], 0.03)
+        self.assertEqual(metrics["maximum_fail_safe_target_delta_rad"], 0.0)
+        self.assertEqual(metrics["recovery_decision_count"], 1)
+        self.assertEqual(metrics["recovered_step"], 8)
+        requirements = {
+            "controller.sensor.maximum_consecutive_stuck_value_frames": {
+                "id": "stuck",
+                "unit": "consecutive_frame_count",
+                "maximum": 2,
+            },
+            "controller.sensor.maximum_stuck_value_realization_delta_rad": {
+                "id": "realization",
+                "unit": "rad",
+                "maximum": 1e-12,
+            },
+            "controller.sensor.maximum_fail_safe_target_delta_rad": {
+                "id": "hold",
+                "unit": "rad",
+                "maximum": 1e-12,
+            },
+            "controller.sensor.maximum_recovery_decisions": {
+                "id": "recovery",
+                "unit": "controller_decision_count",
+                "maximum": 1,
+            },
+            "controller.sensor_stuck.maximum_controlled_joint_rmse_rad": {
+                "id": "rmse",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+            "controller.sensor_stuck.maximum_controlled_joint_final_error_rad": {
+                "id": "final",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+        }
+        violation = MODULE.first_stuck_value_violation(
+            metrics, observations, requirements
+        )
+        self.assertEqual(violation["requirement_id"], "stuck")
+        self.assertEqual(violation["step"], 7)
+        self.assertEqual(violation["controller_observation_sequence"], 5)
+
     def test_latency_metrics_preserve_capture_time_and_find_ingress_boundary(self) -> None:
         observations = []
         for step in range(1, 7):

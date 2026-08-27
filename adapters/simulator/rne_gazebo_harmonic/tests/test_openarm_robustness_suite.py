@@ -457,6 +457,56 @@ class OpenArmRobustnessSuiteTests(unittest.TestCase):
         self.assertEqual(visible[joint_index], 0.04)
         self.assertAlmostEqual(error[joint_index], -0.02)
 
+    def test_sensor_stuck_grid_holds_last_nominal_controller_value(self) -> None:
+        suite, controllers = MODULE.compile_robustness_suite(
+            COMPILER,
+            SCRIPT_DIR / "openarm_robustness_experiments.json",
+            ROOT / "docs/evidence/openarm-plant-lab/evidence/openarm-plant-lab-report.json",
+            SCRIPT_DIR / "openarm_plant_experiments.json",
+            SCRIPT_DIR / "openarm_right_pose_cycle.controller.json",
+            SCRIPT_DIR / "openarm_controller_requirements.json",
+            "joint_position_stuck_value",
+        )
+        self.assertEqual(suite["dimension_id"], "joint_position_stuck_value")
+        self.assertEqual(
+            [
+                controller["measurement_fault_contract"][
+                    "consecutive_stuck_frames"
+                ]
+                for controller in controllers.values()
+            ],
+            [0, 1, 2, 3, 4],
+        )
+        controller = controllers["sensor-stuck-003frames"]
+        RUNNER.validate_measurement_fault(controller, 3600)
+        width = len(controller["action_joint_order"])
+        joint_index = controller["action_joint_order"].index("openarm_right_joint5")
+        observations = []
+        for sequence in range(1, 901):
+            position = [0.0] * width
+            position[joint_index] = sequence / 1000.0
+            observations.append(
+                {
+                    "step": sequence,
+                    "sensor_status": RUNNER.sensor_status_for_sequence(
+                        controller, sequence
+                    ),
+                    "joint_position_rad": position,
+                    "joint_velocity_rad_s": [0.0] * width,
+                }
+            )
+        transformed = RUNNER.stuck_controller_observation(
+            controller, observations, observations[-1]
+        )
+        self.assertEqual(transformed["sensor_status"], "stuck_value")
+        self.assertEqual(transformed["step"], 900)
+        self.assertEqual(transformed["joint_position_rad"][joint_index], 0.899)
+        self.assertEqual(observations[-1]["joint_position_rad"][joint_index], 0.9)
+        self.assertEqual(
+            [RUNNER.sensor_status_for_sequence(controller, sequence) for sequence in range(899, 905)],
+            ["nominal", "stuck_value", "stuck_value", "stuck_value", "nominal", "nominal"],
+        )
+
     def test_command_rate_limit_uses_previous_applied_target_and_fixed_delta(self) -> None:
         suite, controllers = MODULE.compile_robustness_suite(
             COMPILER,
