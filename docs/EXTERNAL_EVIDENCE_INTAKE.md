@@ -41,8 +41,10 @@ For the installed flagship route, `xtask readiness-pack
 accept-installed-flagship` revalidates and atomically registers the six staged
 files after human independence review. `readiness-pack
 accept-external-simulator` does the same for the complete twelve-file simulator
-chain and its exact ordered arguments. The audit rehashes and parses the
-retained bytes; it does not trust issue text.
+chain and its exact ordered arguments. `readiness-pack accept-external-plugin`
+revalidates the complete eight-file controller-plugin chain before registering
+it. The audit rehashes and parses the retained bytes; it does not trust issue
+text.
 
 Compute digests with one of:
 

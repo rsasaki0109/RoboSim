@@ -6,6 +6,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Add `readiness-pack accept-external-plugin` for independently maintained
+  controller plugins. It revalidates eight distinct staged files and the typed
+  maintainer report before atomically adding the third-party plugin entry.
+
 - Add `readiness-pack accept-external-simulator` for independently maintained
   Gazebo and other simulator adapters. It revalidates twelve distinct staged
   files, exact ordered adapter arguments, typed conformance identity, and the

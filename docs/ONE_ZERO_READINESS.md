@@ -127,6 +127,33 @@ manifest, requires twelve distinct contained regular files, and rehashes every
 file again immediately before the atomic swap. It does not execute the
 untrusted adapter or infer external ownership.
 
+An accepted third-party controller plugin uses the corresponding eight-file
+operation after the maintainer has independently produced its submission
+report:
+
+```powershell
+cargo run --locked -p xtask -- readiness-pack accept-external-plugin `
+  --pack E:/RoboSim-readiness `
+  --id external-controller-a `
+  --owner external-owner `
+  --repository https://github.com/external-owner/controller-plugin `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --release-archive plugins/controller-a/rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz `
+  --library plugins/controller-a/libexternal_controller.so `
+  --manifest plugins/controller-a/rne-plugin.json `
+  --conformance-report plugins/controller-a/controller-report.json `
+  --submission-candidate plugins/controller-a/submission.json `
+  --stdout-log plugins/controller-a/stdout.txt `
+  --stderr-log plugins/controller-a/stderr.txt `
+  --submission-report plugins/controller-a/maintainer-report.json
+```
+
+The command requires eight distinct contained regular files, reruns the typed
+controller-plugin submission validator without loading the untrusted library,
+and rehashes every file again immediately before the atomic manifest swap.
+Ownership and independence remain human-reviewed facts rather than inferred
+claims.
+
 Independent projects and extension authors submit the complete metadata and
 artifact checklist through the fixed
 [external evidence intake](EXTERNAL_EVIDENCE_INTAKE.md). Its issue forms are a

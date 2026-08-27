@@ -1,6 +1,8 @@
 //! Safe authoring helpers for an external RNE 1.0 readiness evidence pack.
 
-use super::{external_simulator, release_artifacts, release_readiness, workspace_root};
+use super::{
+    external_plugin, external_simulator, release_artifacts, release_readiness, workspace_root,
+};
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -27,7 +29,7 @@ pub(crate) fn run(args: &mut impl Iterator<Item = String>) -> Result<()> {
     let command = args
         .next()
         .context(
-            "readiness-pack requires a command: init, stage, accept-installed-flagship, or accept-external-simulator; use readiness-pack --help",
+            "readiness-pack requires a command: init, stage, accept-installed-flagship, accept-external-plugin, or accept-external-simulator; use readiness-pack --help",
         )?;
     match command.as_str() {
         "init" => {
@@ -61,6 +63,16 @@ pub(crate) fn run(args: &mut impl Iterator<Item = String>) -> Result<()> {
             accept_external_simulator(&root, &options)?;
             println!(
                 "external simulator evidence accepted: id={} manifest={}",
+                options.id,
+                options.pack.join(MANIFEST_NAME).display()
+            );
+            Ok(())
+        }
+        "accept-external-plugin" => {
+            let options = parse_accept_external_plugin_options(args, &root)?;
+            accept_external_plugin(&root, &options)?;
+            println!(
+                "external controller plugin evidence accepted: id={} manifest={}",
                 options.id,
                 options.pack.join(MANIFEST_NAME).display()
             );
@@ -141,14 +153,46 @@ struct AcceptedExternalSimulatorEvidence {
     submission_report: StagedEvidence,
 }
 
+#[derive(Debug)]
+struct AcceptExternalPluginOptions {
+    pack: PathBuf,
+    id: String,
+    owner: String,
+    repository: String,
+    revision: String,
+    release_archive: String,
+    library: String,
+    manifest: String,
+    conformance_report: String,
+    submission_candidate: String,
+    stdout_log: String,
+    stderr_log: String,
+    submission_report: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct AcceptedExternalPluginEvidence {
+    release_archive: StagedEvidence,
+    library: StagedEvidence,
+    manifest: StagedEvidence,
+    conformance_report: StagedEvidence,
+    submission_candidate: StagedEvidence,
+    stdout_log: StagedEvidence,
+    stderr_log: StagedEvidence,
+    submission_report: StagedEvidence,
+}
+
 fn print_usage() {
     println!("readiness-pack init --output DIR");
     println!("readiness-pack stage --pack DIR --source FILE --path FORWARD/SLASH/PATH");
     println!(
-        "readiness-pack accept-installed-flagship --pack DIR --id ID --owner OWNER \\\n+         --repository URL --revision COMMIT --measured-on YYYY-MM-DD \\\n+         --release-archive PATH --proof-bundle PATH --submission-candidate PATH \\\n+         --stdout-log PATH --stderr-log PATH --report PATH"
+        "readiness-pack accept-installed-flagship --pack DIR --id ID --owner OWNER \\\n         --repository URL --revision COMMIT --measured-on YYYY-MM-DD \\\n         --release-archive PATH --proof-bundle PATH --submission-candidate PATH \\\n         --stdout-log PATH --stderr-log PATH --report PATH"
     );
     println!(
-        "readiness-pack accept-external-simulator --pack DIR --id ID --owner OWNER \\\n+         --repository URL --revision COMMIT --adapter PATH --task-spec PATH \\\n+         --runtime-manifest PATH --runtime-artifact PATH (three times) \\\n+         --adapter-argument VALUE (repeat as required) --conformance-report PATH \\\n+         --release-archive PATH --submission-candidate PATH --stdout-log PATH \\\n+         --stderr-log PATH --submission-report PATH"
+        "readiness-pack accept-external-simulator --pack DIR --id ID --owner OWNER \\\n         --repository URL --revision COMMIT --adapter PATH --task-spec PATH \\\n         --runtime-manifest PATH --runtime-artifact PATH (three times) \\\n         --adapter-argument VALUE (repeat as required) --conformance-report PATH \\\n         --release-archive PATH --submission-candidate PATH --stdout-log PATH \\\n         --stderr-log PATH --submission-report PATH"
+    );
+    println!(
+        "readiness-pack accept-external-plugin --pack DIR --id ID --owner OWNER \\\n         --repository URL --revision COMMIT --release-archive PATH --library PATH \\\n         --manifest PATH --conformance-report PATH --submission-candidate PATH \\\n         --stdout-log PATH --stderr-log PATH --submission-report PATH"
     );
 }
 
@@ -369,6 +413,88 @@ fn parse_accept_external_simulator_options(
         stderr_log: stderr_log.context("accept-external-simulator requires --stderr-log PATH")?,
         submission_report: submission_report
             .context("accept-external-simulator requires --submission-report PATH")?,
+    })
+}
+
+fn parse_accept_external_plugin_options(
+    args: &mut impl Iterator<Item = String>,
+    root: &Path,
+) -> Result<AcceptExternalPluginOptions> {
+    let mut pack = None;
+    let mut id = None;
+    let mut owner = None;
+    let mut repository = None;
+    let mut revision = None;
+    let mut release_archive = None;
+    let mut library = None;
+    let mut manifest = None;
+    let mut conformance_report = None;
+    let mut submission_candidate = None;
+    let mut stdout_log = None;
+    let mut stderr_log = None;
+    let mut submission_report = None;
+    while let Some(argument) = args.next() {
+        anyhow::ensure!(
+            matches!(
+                argument.as_str(),
+                "--pack"
+                    | "--id"
+                    | "--owner"
+                    | "--repository"
+                    | "--revision"
+                    | "--release-archive"
+                    | "--library"
+                    | "--manifest"
+                    | "--conformance-report"
+                    | "--submission-candidate"
+                    | "--stdout-log"
+                    | "--stderr-log"
+                    | "--submission-report"
+            ),
+            "unknown readiness-pack accept-external-plugin argument: {argument}"
+        );
+        let value = next_value(args, &argument)?;
+        match argument.as_str() {
+            "--pack" => set_once(&mut pack, absolute_from(root, value), "--pack")?,
+            "--id" => set_once(&mut id, value, "--id")?,
+            "--owner" => set_once(&mut owner, value, "--owner")?,
+            "--repository" => set_once(&mut repository, value, "--repository")?,
+            "--revision" => set_once(&mut revision, value, "--revision")?,
+            "--release-archive" => set_once(&mut release_archive, value, "--release-archive")?,
+            "--library" => set_once(&mut library, value, "--library")?,
+            "--manifest" => set_once(&mut manifest, value, "--manifest")?,
+            "--conformance-report" => {
+                set_once(&mut conformance_report, value, "--conformance-report")?
+            }
+            "--submission-candidate" => {
+                set_once(&mut submission_candidate, value, "--submission-candidate")?
+            }
+            "--stdout-log" => set_once(&mut stdout_log, value, "--stdout-log")?,
+            "--stderr-log" => set_once(&mut stderr_log, value, "--stderr-log")?,
+            "--submission-report" => {
+                set_once(&mut submission_report, value, "--submission-report")?
+            }
+            _ => unreachable!("accepted argument was matched above"),
+        }
+    }
+    Ok(AcceptExternalPluginOptions {
+        pack: pack.context("accept-external-plugin requires --pack DIR")?,
+        id: id.context("accept-external-plugin requires --id ID")?,
+        owner: owner.context("accept-external-plugin requires --owner OWNER")?,
+        repository: repository.context("accept-external-plugin requires --repository URL")?,
+        revision: revision.context("accept-external-plugin requires --revision COMMIT")?,
+        release_archive: release_archive
+            .context("accept-external-plugin requires --release-archive PATH")?,
+        library: library.context("accept-external-plugin requires --library PATH")?,
+        manifest: manifest.context("accept-external-plugin requires --manifest PATH")?,
+        conformance_report: conformance_report
+            .context("accept-external-plugin requires --conformance-report PATH")?,
+        submission_candidate: submission_candidate
+            .context("accept-external-plugin requires --submission-candidate PATH")?,
+        stdout_log: stdout_log.context("accept-external-plugin requires --stdout-log PATH")?,
+        stderr_log: stderr_log.context("accept-external-plugin requires --stderr-log PATH")?,
+        submission_report: submission_report
+            .context("accept-external-plugin requires --submission-report PATH")?,
     })
 }
 
@@ -740,6 +866,122 @@ fn manifest_with_external_simulator_entry(
     Ok(updated)
 }
 
+fn accept_external_plugin(root: &Path, options: &AcceptExternalPluginOptions) -> Result<()> {
+    let manifest_path = options.pack.join(MANIFEST_NAME);
+    release_readiness::validate_manifest_path(root, &manifest_path)?;
+    let evidence = verify_external_plugin_evidence(options)?;
+    let unique_paths = [
+        &evidence.release_archive.relative_path,
+        &evidence.library.relative_path,
+        &evidence.manifest.relative_path,
+        &evidence.conformance_report.relative_path,
+        &evidence.submission_candidate.relative_path,
+        &evidence.stdout_log.relative_path,
+        &evidence.stderr_log.relative_path,
+        &evidence.submission_report.relative_path,
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>();
+    anyhow::ensure!(
+        unique_paths.len() == 8,
+        "external controller plugin evidence roles must reference eight distinct files"
+    );
+
+    let staged_path = |reference: &StagedEvidence| options.pack.join(&reference.relative_path);
+    let submission_report_path = staged_path(&evidence.submission_report);
+    let report_bytes = fs::read(&submission_report_path).with_context(|| {
+        format!(
+            "read staged external controller plugin report {}",
+            submission_report_path.display()
+        )
+    })?;
+    external_plugin::validate_staged_submission_report(
+        &report_bytes,
+        external_plugin::StagedSubmission {
+            owner: &options.owner,
+            repository: &options.repository,
+            revision: &options.revision,
+            release_archive: &staged_path(&evidence.release_archive),
+            library: &staged_path(&evidence.library),
+            manifest: &staged_path(&evidence.manifest),
+            conformance_report: &staged_path(&evidence.conformance_report),
+            submission_candidate: &staged_path(&evidence.submission_candidate),
+            stdout_log: &staged_path(&evidence.stdout_log),
+            stderr_log: &staged_path(&evidence.stderr_log),
+        },
+    )?;
+
+    let current = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("read readiness manifest {}", manifest_path.display()))?;
+    let updated = manifest_with_external_plugin_entry(&current, options, &evidence)?;
+    atomically_replace_manifest(root, &options.pack, &current, &updated, || {
+        anyhow::ensure!(
+            verify_external_plugin_evidence(options)? == evidence,
+            "external controller plugin evidence changed during acceptance"
+        );
+        Ok(())
+    })
+}
+
+fn verify_external_plugin_evidence(
+    options: &AcceptExternalPluginOptions,
+) -> Result<AcceptedExternalPluginEvidence> {
+    Ok(AcceptedExternalPluginEvidence {
+        release_archive: verify_staged_file(&options.pack, &options.release_archive)?,
+        library: verify_staged_file(&options.pack, &options.library)?,
+        manifest: verify_staged_file(&options.pack, &options.manifest)?,
+        conformance_report: verify_staged_file(&options.pack, &options.conformance_report)?,
+        submission_candidate: verify_staged_file(&options.pack, &options.submission_candidate)?,
+        stdout_log: verify_staged_file(&options.pack, &options.stdout_log)?,
+        stderr_log: verify_staged_file(&options.pack, &options.stderr_log)?,
+        submission_report: verify_staged_file(&options.pack, &options.submission_report)?,
+    })
+}
+
+fn manifest_with_external_plugin_entry(
+    current: &str,
+    options: &AcceptExternalPluginOptions,
+    evidence: &AcceptedExternalPluginEvidence,
+) -> Result<String> {
+    anyhow::ensure!(
+        !current.contains('\r') || !current.replace("\r\n", "").contains('\r'),
+        "readiness manifest contains a non-canonical carriage return"
+    );
+    let mut updated = current.replace("\r\n", "\n");
+    if !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push('\n');
+    updated.push_str("[[third_party_plugin]]\n");
+    for (key, value) in [
+        ("id", options.id.as_str()),
+        ("owner", options.owner.as_str()),
+        ("repository", options.repository.as_str()),
+        ("revision", options.revision.as_str()),
+    ] {
+        updated.push_str(key);
+        updated.push_str(" = ");
+        updated.push_str(&toml_string(value));
+        updated.push('\n');
+    }
+    for (key, reference) in [
+        ("release_archive", &evidence.release_archive),
+        ("library", &evidence.library),
+        ("manifest", &evidence.manifest),
+        ("report", &evidence.conformance_report),
+        ("submission_candidate", &evidence.submission_candidate),
+        ("stdout_log", &evidence.stdout_log),
+        ("stderr_log", &evidence.stderr_log),
+        ("submission_report", &evidence.submission_report),
+    ] {
+        updated.push_str(key);
+        updated.push_str(" = ");
+        updated.push_str(&inline_reference(reference));
+        updated.push('\n');
+    }
+    Ok(updated)
+}
+
 fn verify_staged_file(pack: &Path, path: &str) -> Result<StagedEvidence> {
     let canonical_pack = fs::canonicalize(pack)
         .with_context(|| format!("resolve readiness pack {}", pack.display()))?;
@@ -1070,6 +1312,37 @@ mod tests {
         }
     }
 
+    fn external_plugin_options(pack: PathBuf) -> AcceptExternalPluginOptions {
+        AcceptExternalPluginOptions {
+            pack,
+            id: "external-controller".to_string(),
+            owner: "external-owner".to_string(),
+            repository: "https://github.com/external-owner/controller-plugin".to_string(),
+            revision: "c".repeat(40),
+            release_archive: "plugins/release.tar.gz".to_string(),
+            library: "plugins/libexternal_controller.so".to_string(),
+            manifest: "plugins/rne-plugin.json".to_string(),
+            conformance_report: "plugins/controller-report.json".to_string(),
+            submission_candidate: "plugins/submission.json".to_string(),
+            stdout_log: "plugins/stdout.txt".to_string(),
+            stderr_log: "plugins/stderr.txt".to_string(),
+            submission_report: "plugins/maintainer-report.json".to_string(),
+        }
+    }
+
+    fn external_plugin_evidence() -> AcceptedExternalPluginEvidence {
+        AcceptedExternalPluginEvidence {
+            release_archive: accepted_reference("plugins/release.tar.gz", 1),
+            library: accepted_reference("plugins/libexternal_controller.so", 2),
+            manifest: accepted_reference("plugins/rne-plugin.json", 3),
+            conformance_report: accepted_reference("plugins/controller-report.json", 4),
+            submission_candidate: accepted_reference("plugins/submission.json", 5),
+            stdout_log: accepted_reference("plugins/stdout.txt", 6),
+            stderr_log: accepted_reference("plugins/stderr.txt", 7),
+            submission_report: accepted_reference("plugins/maintainer-report.json", 8),
+        }
+    }
+
     #[test]
     fn initializes_an_external_pack_from_the_honest_baseline() {
         let root = workspace_root().unwrap();
@@ -1329,6 +1602,39 @@ mod tests {
     }
 
     #[test]
+    fn external_plugin_entry_is_complete_and_duplicate_safe() {
+        let root = workspace_root().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let pack = temp.path().join("readiness");
+        init_pack(&root, &pack).unwrap();
+        let manifest_path = pack.join(MANIFEST_NAME);
+        let current = fs::read_to_string(&manifest_path).unwrap();
+        let options = external_plugin_options(pack.clone());
+        let evidence = external_plugin_evidence();
+
+        let updated = manifest_with_external_plugin_entry(&current, &options, &evidence)
+            .expect("external plugin entry");
+        let value = updated.parse::<toml::Value>().expect("valid TOML");
+        let entries = value["third_party_plugin"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["id"].as_str(), Some("external-controller"));
+        assert_eq!(
+            entries[0]["library"]["path"].as_str(),
+            Some("plugins/libexternal_controller.so")
+        );
+        assert_eq!(
+            entries[0]["submission_report"]["path"].as_str(),
+            Some("plugins/maintainer-report.json")
+        );
+        fs::write(&manifest_path, &updated).unwrap();
+        release_readiness::validate_manifest_path(&root, &manifest_path).unwrap();
+
+        let duplicate = manifest_with_external_plugin_entry(&updated, &options, &evidence).unwrap();
+        fs::write(&manifest_path, duplicate).unwrap();
+        assert!(release_readiness::validate_manifest_path(&root, &manifest_path).is_err());
+    }
+
+    #[test]
     fn rejects_unsafe_destinations_and_oversized_sources() {
         let root = workspace_root().unwrap();
         let temp = tempfile::tempdir().unwrap();
@@ -1489,5 +1795,47 @@ mod tests {
         let parsed = parse_accept_external_simulator_options(&mut simulator, root).unwrap();
         assert_eq!(parsed.runtime_artifacts.len(), 3);
         assert_eq!(parsed.adapter_arguments, ["--runtime-manifest"]);
+
+        assert!(parse_accept_external_plugin_options(
+            &mut ["--pack", "pack", "--id", "only-partial"]
+                .map(str::to_string)
+                .into_iter(),
+            root
+        )
+        .is_err());
+        let mut plugin = [
+            "--pack",
+            "pack",
+            "--id",
+            "controller-a",
+            "--owner",
+            "external-owner",
+            "--repository",
+            "https://github.com/external-owner/controller-plugin",
+            "--revision",
+            "cccccccccccccccccccccccccccccccccccccccc",
+            "--release-archive",
+            "plugins/release.tar.gz",
+            "--library",
+            "plugins/libcontroller.so",
+            "--manifest",
+            "plugins/rne-plugin.json",
+            "--conformance-report",
+            "plugins/conformance.json",
+            "--submission-candidate",
+            "plugins/submission.json",
+            "--stdout-log",
+            "plugins/stdout.txt",
+            "--stderr-log",
+            "plugins/stderr.txt",
+            "--submission-report",
+            "plugins/maintainer.json",
+        ]
+        .map(str::to_string)
+        .into_iter();
+        let parsed = parse_accept_external_plugin_options(&mut plugin, root).unwrap();
+        assert_eq!(parsed.pack, root.join("pack"));
+        assert_eq!(parsed.id, "controller-a");
+        assert_eq!(parsed.library, "plugins/libcontroller.so");
     }
 }
