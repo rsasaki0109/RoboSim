@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Add a fail-closed `readiness-pack accept-installed-flagship` operation. It
+  rehashes and revalidates all six staged external-run artifacts before
+  atomically appending the schema-v9 readiness entry, eliminating manual digest
+  transcription at the final acceptance boundary.
+
 - Connect the public installed-flagship intake route to the 1.0 readiness
   tracker. Manifest schema v9 adds a fail-closed gate that rehashes the retained
   archive, proof bundle, candidate, logs, and maintainer report before one

@@ -429,14 +429,17 @@ to the preserved implementation bytes.
 
 The external-intake slice makes that contract practical without weakening it.
 `xtask readiness-pack init` creates a non-overwriting external-disk pack from
-the honest 2/9 baseline and its retained compatibility report.
+the honest 2/10 baseline and its retained compatibility report.
 `readiness-pack stage` enforces the gate's size, path-containment, non-symlink,
 and no-overwrite rules while copying and hashing one file, then emits its
 canonical TOML reference. It cannot add manifest claims, determine ownership,
-or turn staged bytes into a passing check.
-The companion external-intake registry fixes three public submission routes
-for task reproductions, controller plugins, and backend/hardware/accelerator
-systems. Readiness manifest v4 audits accelerator subjects, TaskSpecs,
+or turn staged bytes into a passing check. For a reviewed installed flagship
+run, `readiness-pack accept-installed-flagship` revalidates all six staged
+artifacts and atomically adds the schema-v9 entry without trusting copied
+digests.
+The companion external-intake registry fixes four public submission routes
+for the installed flagship, task reproductions, controller plugins, and
+backend/hardware/accelerator systems. Readiness manifest v4 audits accelerator subjects, TaskSpecs,
 manifests, runtime contracts, arguments, and process reports separately; these
 do not count as the external physics backend, simulator adapter, or hardware adapter required for
 1.0.
@@ -514,10 +517,10 @@ If the external-use gates are not met, the project remains at 0.x.
 
 These conditions now have a deterministic machine gate. `xtask
 release-readiness` consumes exact SHA-256-bound external evidence, requires an
-explicit assessment date, and emits nine fixed checks. The committed
+explicit assessment date, and emits ten fixed checks. The committed
 `release/one-zero-readiness.toml` remains intentionally incomplete; its
 retained 36-check historical compatibility replay and clean blocker registry
-report 2/9 and `eligible=false` for the 2026-08-16 baseline. See
+report 2/10 and `eligible=false` for the 2026-08-20 baseline. See
 [ONE_ZERO_READINESS.md](ONE_ZERO_READINESS.md). `--require-eligible` is used
 only for the eventual promotion and cannot turn missing evidence into a pass.
 The source metadata check, both platform bundle builders, and the aggregate

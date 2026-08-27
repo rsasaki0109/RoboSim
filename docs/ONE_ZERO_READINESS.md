@@ -44,7 +44,7 @@ cargo run --locked -p xtask -- readiness-pack init `
 The command validates the immutable candidate identity, then atomically
 publishes `one-zero-readiness.toml` and the retained compatibility report. It
 refuses an existing output directory. The new pack therefore begins at the same
-honest `2/9`, `eligible=false` state as the source tracker.
+honest `2/10`, `eligible=false` state as the source tracker.
 
 Stage each independently produced file before referencing it in the manifest:
 
@@ -68,9 +68,30 @@ existing destination fail closed. Bytes are copied through a private temporary
 name and hashed before the final name is published.
 
 This helper establishes file identity only. A human must still review external
-ownership and independence, add the appropriate typed entry shown below, and
-run `release-readiness`. Staging a file cannot change a readiness check by
-itself.
+ownership and independence. For an accepted installed flagship run, stage all
+six retained files and atomically register their already-staged paths:
+
+```powershell
+cargo run --locked -p xtask -- readiness-pack accept-installed-flagship `
+  --pack E:/RoboSim-readiness `
+  --id community-lab-a `
+  --owner external-owner `
+  --repository https://github.com/external-owner/rne-reproduction `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --measured-on 2026-08-27 `
+  --release-archive flagship/community-lab-a/rne-0.2.0-windows.zip `
+  --proof-bundle flagship/community-lab-a/proof.zip `
+  --submission-candidate flagship/community-lab-a/submission.json `
+  --stdout-log flagship/community-lab-a/stdout.txt `
+  --stderr-log flagship/community-lab-a/stderr.txt `
+  --report flagship/community-lab-a/maintainer-report.json
+```
+
+The command rehashes all six regular files, revalidates the report/candidate
+chain and independent identity, rejects reused roles, removes the canonical
+empty-array placeholder, validates the complete schema-v9 manifest, and then
+atomically replaces only the manifest. Other evidence types still use the
+typed entries shown below. Staging alone never changes a readiness check.
 
 Independent projects and extension authors submit the complete metadata and
 artifact checklist through the fixed
@@ -138,6 +159,20 @@ references before `[candidate]`; repeated entries use TOML arrays:
 ```toml
 reference_hardware = { path = "hardware/lekiwi-evidence.json", sha256 = "sha256:<64-lowercase-hex>" }
 compatibility_report = { path = "compatibility/report.json", sha256 = "sha256:<64-lowercase-hex>" }
+
+[[installed_flagship_reproduction]]
+id = "community-lab-a"
+owner = "external-owner"
+repository = "https://github.com/external-owner/rne-reproduction"
+revision = "<40-lowercase-hex-commit>"
+measured_on = "2026-08-27"
+author_assistance = false
+release_archive = { path = "flagship/community-lab-a/rne-0.2.0-windows.zip", sha256 = "sha256:<64-lowercase-hex>" }
+proof_bundle = { path = "flagship/community-lab-a/proof.zip", sha256 = "sha256:<64-lowercase-hex>" }
+submission_candidate = { path = "flagship/community-lab-a/submission.json", sha256 = "sha256:<64-lowercase-hex>" }
+stdout_log = { path = "flagship/community-lab-a/stdout.txt", sha256 = "sha256:<64-lowercase-hex>" }
+stderr_log = { path = "flagship/community-lab-a/stderr.txt", sha256 = "sha256:<64-lowercase-hex>" }
+report = { path = "flagship/community-lab-a/maintainer-report.json", sha256 = "sha256:<64-lowercase-hex>" }
 
 [[external_project]]
 id = "independent-project-a"
