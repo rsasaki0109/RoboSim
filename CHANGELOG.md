@@ -21,6 +21,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add a fail-closed `external-project-check` intake path that binds a clean
+  independent Git revision, official release archive, TaskSpec, complete
+  Failure Capsule, reproduction logs, and maintainer report before either
+  external-project readiness slot can count.
+
 - Add an acyclic external simulator-adapter submission contract and
   `external-simulator-check`. The maintainer checker binds a clean independent
   Git revision to the official release, adapter, TaskSpec, runtime manifest,

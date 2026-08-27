@@ -7,6 +7,7 @@ mod dataset;
 mod evidence;
 mod external_intake;
 mod external_plugin;
+mod external_project;
 mod external_simulator;
 mod external_submission;
 mod lekiwi_evidence;
@@ -168,6 +169,7 @@ fn run() -> anyhow::Result<()> {
         "release-bundle" => release_artifacts::release_bundle(&mut args),
         "release-install-smoke" => release_artifacts::release_install_smoke(&mut args),
         "external-flagship-check" => release_artifacts::external_flagship_check(&mut args),
+        "external-project-check" => external_project::run(&mut args),
         "external-plugin-check" => external_plugin::run(&mut args),
         "external-simulator-check" => external_simulator::run(&mut args),
         "release-exit" => release_exit::release_exit(&mut args),

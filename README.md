@@ -217,7 +217,9 @@ validates all required issue-form fields with `xtask external-intake-check`;
 submission never implies acceptance or 1.0 readiness. Native bundles expose
 `rne-asset failure-capsule create|verify`, so an independent project can retain
 its required replay evidence from the extracted release without cloning the
-RNE source tree.
+RNE source tree. Maintainers use `xtask external-project-check` to rebind the
+clean external Git revision, official release archive, TaskSpec, every Capsule
+member, and committed command logs before either adoption slot can count.
 
 ## Selected demos
 

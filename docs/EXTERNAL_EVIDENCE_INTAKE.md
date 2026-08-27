@@ -7,10 +7,10 @@ Stars, forks, self-authored reference implementations, screenshots, and copied
 JSON reports do not satisfy an external-use gate.
 
 The machine-readable route registry is
-`release/external-evidence-intake.toml`. Registry v7 binds the archive-only
-installed flagship quickstart and the acyclic candidate templates for both
-flagship and third-party controller-plugin submissions. It retains the
-content-addressed simulator-adapter route and
+`release/external-evidence-intake.toml`. Registry v9 binds the archive-only
+installed flagship quickstart and acyclic candidate templates for the
+flagship, external-project, third-party controller-plugin, and simulator
+adapter routes. It
 continues to distinguish qualifying systems from audited nonqualifying
 accelerator evidence. Validate the registry, guides, template, and all
 required issue-form fields before publishing a release:
@@ -113,9 +113,11 @@ Use
 uses RNE to define and reproduce its own task. Two distinct external
 repositories are required for 1.0.
 
-The submitted revision must retain a valid `TaskSpec` and a complete
-`Failure Capsule` whose declared failure verifies and reproduces from a clean
-checkout. Retain both exact files or a stable capsule archive. Record
+The submitted revision must retain a valid `TaskSpec`, every member of a
+complete `Failure Capsule`, the acyclic
+`release/external-project-submission-template.json` candidate, and complete
+stdout/stderr logs. The Capsule's `rne_task_spec` member must have the exact
+digest of the separately submitted TaskSpec. Record
 `first_used_on` and `last_verified_on` as explicit `YYYY-MM-DD` dates.
 
 This route uniquely requires `author_assistance=false`. Documentation,
@@ -142,6 +144,31 @@ The command is shipped in each native release bundle. Run it from the extracted
 release root (which retains the release lockfile), or from a locked Rust
 project root. It does not require the RNE source tree. The external project's
 immutable repository revision remains a separate mandatory submission field.
+
+Commit the TaskSpec, complete Capsule directory, candidate, and distinct logs
+to the external repository. Keep the containing 40-character Git revision out
+of the candidate so the candidate does not hash the commit that contains
+itself. After independently downloading the exact official release archive, a
+maintainer verifies and binds the submission without executing project code:
+
+```powershell
+cargo run --locked -p xtask -- external-project-check `
+  --release-archive path/to/rne-0.2.0-TARGET.zip `
+  --task path/to/clean-external-project/evidence/task.json `
+  --capsule-dir path/to/clean-external-project/evidence/failure-capsule `
+  --submission path/to/clean-external-project/external-project-submission.json `
+  --evidence-repo-dir path/to/clean-external-project `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --output external-project-maintainer-report.json
+```
+
+The checker requires a clean `HEAD`, matching public origin, committed bytes,
+three or more successful reproduction commands, no author assistance, valid
+usage dates, the exact official release archive name and digest, a typed
+TaskSpec, and a fully verified Failure Capsule. The readiness audit reparses
+the maintainer report and rehashes the release, TaskSpec, Capsule manifest and
+all Capsule members, candidate, and logs. A copied `capsule.json` or an issue
+claim therefore cannot satisfy either external-project slot.
 
 See [Trust evidence quickstart](EVIDENCE_QUICKSTART.md),
 [TaskSpec v1](task-spec-v1.md), and [Failure Capsule](FAILURE_CAPSULE.md).

@@ -1,7 +1,8 @@
-schema_version = 8
+schema_version = 9
 guide_path = "docs/EXTERNAL_EVIDENCE_INTAKE.md"
 installed_flagship_quickstart_path = "docs/EXTERNAL_FLAGSHIP_REPRODUCTION.md"
 installed_flagship_submission_template_path = "release/external-flagship-submission-template.json"
+external_project_submission_template_path = "release/external-project-submission-template.json"
 third_party_plugin_submission_template_path = "release/external-plugin-submission-template.json"
 external_simulator_submission_template_path = "release/external-simulator-submission-template.json"
 
@@ -28,8 +29,8 @@ author_assistance_allowed = false
 qualifying_kinds = []
 audited_nonqualifying_kinds = []
 required_metadata = ["owner", "repository", "revision", "first_used_on", "last_verified_on", "author_assistance"]
-required_artifacts = ["task_spec", "failure_capsule"]
-form_fields = ["independence", "repository", "revision", "rne_release", "first_used_on", "last_verified_on", "task_spec", "failure_capsule", "reproduction_command", "verification"]
+required_artifacts = ["release_archive", "task_spec", "failure_capsule", "submission_candidate", "stdout_log", "stderr_log", "maintainer_report"]
+form_fields = ["independence", "repository", "revision", "rne_release", "release_archive", "first_used_on", "last_verified_on", "task_spec", "failure_capsule", "submission_candidate", "stdout_log", "stderr_log", "reproduction_command", "verification"]
 
 [[route]]
 id = "third_party_plugin"

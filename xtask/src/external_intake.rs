@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const DEFAULT_REGISTRY: &str = "release/external-evidence-intake.toml";
-const REGISTRY_SCHEMA_VERSION: u32 = 8;
+const REGISTRY_SCHEMA_VERSION: u32 = 9;
 const MAX_INTAKE_FILE_BYTES: u64 = 128 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -18,6 +18,7 @@ struct IntakeRegistry {
     guide_path: String,
     installed_flagship_quickstart_path: String,
     installed_flagship_submission_template_path: String,
+    external_project_submission_template_path: String,
     third_party_plugin_submission_template_path: String,
     external_simulator_submission_template_path: String,
     route: Vec<IntakeRoute>,
@@ -115,17 +116,29 @@ const EXPECTED_ROUTES: [ExpectedRoute; 4] = [
             "last_verified_on",
             "author_assistance",
         ],
-        artifacts: &["task_spec", "failure_capsule"],
+        artifacts: &[
+            "release_archive",
+            "task_spec",
+            "failure_capsule",
+            "submission_candidate",
+            "stdout_log",
+            "stderr_log",
+            "maintainer_report",
+        ],
         conditional: &[],
         form_fields: &[
             "independence",
             "repository",
             "revision",
             "rne_release",
+            "release_archive",
             "first_used_on",
             "last_verified_on",
             "task_spec",
             "failure_capsule",
+            "submission_candidate",
+            "stdout_log",
+            "stderr_log",
             "reproduction_command",
             "verification",
         ],
@@ -293,6 +306,10 @@ fn validate_registry(root: &Path, path: &Path) -> Result<()> {
         root,
         &registry.installed_flagship_submission_template_path,
     )?)?;
+    validate_project_submission_template(&read_repository_file(
+        root,
+        &registry.external_project_submission_template_path,
+    )?)?;
     validate_plugin_submission_template(&read_repository_file(
         root,
         &registry.third_party_plugin_submission_template_path,
@@ -328,6 +345,44 @@ fn validate_registry(root: &Path, path: &Path) -> Result<()> {
             guide.contains(&route.issue_template),
             "external evidence intake guide does not link template {}",
             route.issue_template
+        );
+    }
+    Ok(())
+}
+
+fn validate_project_submission_template(text: &str) -> Result<()> {
+    let value: serde_json::Value =
+        serde_json::from_str(text).context("parse external-project submission template")?;
+    anyhow::ensure!(
+        value.get("kind").and_then(serde_json::Value::as_str)
+            == Some("rne_external_project_submission_candidate")
+            && value
+                .get("schema_version")
+                .and_then(serde_json::Value::as_u64)
+                == Some(1)
+            && value
+                .get("candidate_status")
+                .and_then(serde_json::Value::as_str)
+                == Some("not_accepted_pending_maintainer_verification")
+            && value
+                .get("author_assistance")
+                .and_then(serde_json::Value::as_bool)
+                == Some(false),
+        "external-project submission template identity or independence boundary drifted"
+    );
+    let repository = value
+        .get("evidence_repository")
+        .and_then(serde_json::Value::as_object)
+        .context("external-project submission template omitted evidence_repository")?;
+    anyhow::ensure!(
+        repository.keys().map(String::as_str).eq(["owner", "url"])
+            && repository.values().all(serde_json::Value::is_null),
+        "external-project submission template must keep Git revision outside the candidate"
+    );
+    for object in ["release", "platform", "usage", "project", "reproduction"] {
+        anyhow::ensure!(
+            value.get(object).is_some_and(serde_json::Value::is_object),
+            "external-project submission template omitted {object}"
         );
     }
     Ok(())

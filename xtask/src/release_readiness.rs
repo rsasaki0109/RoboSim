@@ -4,8 +4,8 @@
 //! evidence and emits a deterministic report for an explicitly supplied date.
 
 use super::{
-    failure_capsule, lekiwi_evidence, release_artifacts, release_exit, validate_blocker_registry,
-    workspace_root, RELEASE_VERSION,
+    external_project, failure_capsule, lekiwi_evidence, release_artifacts, release_exit,
+    validate_blocker_registry, workspace_root, RELEASE_VERSION,
 };
 use anyhow::{bail, Context};
 use rne_accelerator_contract::{
@@ -40,7 +40,7 @@ use rne_hardware_gateway::simulator::conformance::{
     SimulatorAdapterConformanceCheck, SimulatorAdapterConformanceSubject,
 };
 
-pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 7;
+pub(crate) const MANIFEST_SCHEMA_VERSION: u32 = 8;
 pub(crate) const REPORT_SCHEMA_VERSION: u32 = 1;
 const REPORT_KIND: &str = "rne_one_zero_readiness_report";
 const DEFAULT_MANIFEST: &str = "release/one-zero-readiness.toml";
@@ -134,8 +134,13 @@ struct ExternalProjectEvidence {
     first_used_on: String,
     last_verified_on: String,
     author_assistance: bool,
+    release_archive: EvidenceRef,
     task_spec: EvidenceRef,
     failure_capsule: EvidenceRef,
+    submission_candidate: EvidenceRef,
+    stdout_log: EvidenceRef,
+    stderr_log: EvidenceRef,
+    submission_report: EvidenceRef,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -936,6 +941,7 @@ fn verify_external_projects(
         first.days_until(last)?;
         last.days_until(as_of)?;
 
+        let release_archive = verify_evidence(evidence_root, &entry.release_archive)?;
         let task = verify_evidence(evidence_root, &entry.task_spec)?;
         let task_spec: TaskSpec = serde_json::from_slice(&task.bytes)
             .with_context(|| format!("parse external project {} TaskSpec", entry.id))?;
@@ -962,6 +968,27 @@ fn verify_external_projects(
                 .parent()
                 .context("Failure Capsule has no parent")?,
         )?;
+        let submission_candidate = verify_evidence(evidence_root, &entry.submission_candidate)?;
+        let stdout_log = verify_evidence(evidence_root, &entry.stdout_log)?;
+        let stderr_log = verify_evidence(evidence_root, &entry.stderr_log)?;
+        let submission_report = verify_evidence(evidence_root, &entry.submission_report)?;
+        external_project::validate_staged_submission_report(
+            &submission_report.bytes,
+            external_project::StagedSubmission {
+                owner: &entry.owner,
+                repository: &entry.repository,
+                revision: &entry.revision,
+                first_used_on: &entry.first_used_on,
+                last_verified_on: &entry.last_verified_on,
+                release_archive: &release_archive.path,
+                task_spec: &task.path,
+                failure_capsule: &capsule.path,
+                submission_candidate: &submission_candidate.path,
+                stdout_log: &stdout_log.path,
+                stderr_log: &stderr_log.path,
+            },
+        )
+        .with_context(|| format!("validate external project {} submission report", entry.id))?;
         anyhow::ensure!(
             capsules.insert(capsule.sha256.clone()),
             "external projects must retain distinct Failure Capsules"
@@ -969,7 +996,15 @@ fn verify_external_projects(
         projects.push(ProjectUse {
             first,
             last,
-            digests: vec![task.sha256, capsule.sha256],
+            digests: vec![
+                release_archive.sha256,
+                task.sha256,
+                capsule.sha256,
+                submission_candidate.sha256,
+                stdout_log.sha256,
+                stderr_log.sha256,
+                submission_report.sha256,
+            ],
         });
     }
     Ok(projects)
@@ -2406,7 +2441,7 @@ mod tests {
 
         let manifest_text = format!(
             r#"
-schema_version = 7
+schema_version = 8
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2587,7 +2622,7 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
 
         let manifest_text = format!(
             r#"
-schema_version = 7
+schema_version = 8
 release_version = "0.2.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2684,7 +2719,7 @@ submission_report = {{ path = "submission-report.json", sha256 = "{}" }}
         let digest = |name: &str| sha256_prefixed(&fs::read(temp.path().join(name)).unwrap());
         let manifest_text = format!(
             r#"
-schema_version = 7
+schema_version = 8
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
@@ -2971,7 +3006,7 @@ report = {{ path = "process-conformance-report-v1.json", sha256 = "{}" }}
     #[test]
     fn unknown_manifest_fields_are_rejected() {
         let manifest = r#"
-schema_version = 7
+schema_version = 8
 release_version = "0.1.0"
 project_owner = "owner"
 minimum_stability_days = 183
@@ -3000,7 +3035,7 @@ policy_url = ""
     #[test]
     fn platform_release_manifest_v5_requires_the_complete_archive_chain() {
         let manifest = r#"
-schema_version = 7
+schema_version = 8
 release_version = "0.1.0"
 project_owner = "owner"
 minimum_stability_days = 183
@@ -3055,7 +3090,7 @@ install_attestation_verification = { path = "release/install-receipt.json", sha2
     #[test]
     fn legacy_unbound_external_reports_cannot_be_relabelled_as_manifest_v5() {
         let manifest = r#"
-schema_version = 7
+schema_version = 8
 release_version = "0.1.0"
 project_owner = "project-owner"
 minimum_stability_days = 183

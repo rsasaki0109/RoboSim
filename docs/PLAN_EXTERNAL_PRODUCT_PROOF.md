@@ -238,6 +238,15 @@ leave a stale passing digest behind. This reference still does not count as
 independent adoption; it makes the kit presented to the external operator
 fresh and mechanically reproducible.
 
+The two external-project slots now use an equally strong submission boundary.
+`external-project-check` requires the official release archive, a clean
+independently owned Git revision, an acyclic candidate, committed command logs,
+the typed TaskSpec, and every verified Failure Capsule member. It additionally
+requires the Capsule's `rne_task_spec` digest to equal the submitted TaskSpec.
+Readiness manifest v8 rehashes the resulting seven-artifact chain and reparses
+the maintainer report. This is intake readiness, not external adoption; both
+slots remain empty until two unassisted external owners perform real tasks.
+
 ## Immediate implementation slices
 
 Work proceeds in this order, one mergeable slice at a time:

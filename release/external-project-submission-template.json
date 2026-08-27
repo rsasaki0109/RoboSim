@@ -1,0 +1,38 @@
+{
+  "kind": "rne_external_project_submission_candidate",
+  "schema_version": 1,
+  "candidate_status": "not_accepted_pending_maintainer_verification",
+  "author_assistance": false,
+  "evidence_repository": {
+    "owner": null,
+    "url": null
+  },
+  "release": {
+    "tag": "v0.2.0",
+    "target": null,
+    "archive": {
+      "url": null,
+      "file_name": null,
+      "size_bytes": null,
+      "sha256": null
+    }
+  },
+  "platform": {
+    "operating_system": null,
+    "architecture": "x86_64"
+  },
+  "usage": {
+    "first_used_on": null,
+    "last_verified_on": null
+  },
+  "project": {
+    "task_spec_path": null,
+    "failure_capsule_path": null
+  },
+  "reproduction": {
+    "commands": [],
+    "exit_statuses": [],
+    "stdout_log_path": "logs/reproduction.stdout.txt",
+    "stderr_log_path": "logs/reproduction.stderr.txt"
+  }
+}

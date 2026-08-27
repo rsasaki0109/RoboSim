@@ -100,7 +100,7 @@ const EXTERNAL_FLAGSHIP_REQUIRED_PROOF_PATHS: [&str; 5] = [
 const MAX_EXTERNAL_SUBMISSION_BYTES: u64 = 128 * 1024;
 const MAX_EXTERNAL_LOG_BYTES: u64 = 16 * 1024 * 1024;
 
-const BUNDLE_FILES: [(&str, &str); 90] = [
+const BUNDLE_FILES: [(&str, &str); 91] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -157,6 +157,10 @@ const BUNDLE_FILES: [(&str, &str); 90] = [
     (
         "release/external-flagship-submission-template.json",
         "release/external-flagship-submission-template.json",
+    ),
+    (
+        "release/external-project-submission-template.json",
+        "release/external-project-submission-template.json",
     ),
     (
         "release/external-plugin-submission-template.json",
@@ -4594,6 +4598,16 @@ mod tests {
             .unwrap(),
             fs::read(root.join("release/external-flagship-submission-template.json")).unwrap()
         );
+        for template in [
+            "external-project-submission-template.json",
+            "external-plugin-submission-template.json",
+            "external-simulator-submission-template.json",
+        ] {
+            assert_eq!(
+                fs::read(output.path().join("release").join(template)).unwrap(),
+                fs::read(root.join("release").join(template)).unwrap()
+            );
+        }
         for guide in [
             "EXTERNAL_EVIDENCE_INTAKE.md",
             "EXTERNAL_FLAGSHIP_REPRODUCTION.md",
