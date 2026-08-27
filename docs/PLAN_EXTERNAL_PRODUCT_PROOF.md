@@ -479,7 +479,10 @@ actuator-authority envelope. The next slices are:
    at step 3246. The repeated-burst successor fixes two two-frame gaps and
    sweeps interburst fresh frames `[4, 3, 2, 1, 0]`; one fresh frame passes and
    zero first fails the portable re-arm-spacing requirement at sequence 3242.
-   Quantization, saturation, and stuck-value envelopes remain;
+   The joint-5 position-quantization successor now retains raw typed feedback,
+   sweeps `[0, 0.001, 0.002, 0.004, 0.008] rad`, and proves a portable
+   `0.002/0.004 rad` boundary at controller step 3241 with zero realization
+   delta. Sensor saturation and stuck-value envelopes remain;
 5. turn the joint-5 plant lab into per-joint and coupled operating-region
    identification with uncertainty, coherence, residual, and held-out
    prediction evidence;
@@ -730,7 +733,11 @@ The boundary retains one age rejection, zero target and integral-state delta
  varies only their fresh separator over `[4, 3, 2, 1, 0]`. Rapier, native
  MuJoCo, and Gazebo pass one fresh frame and first fail zero at sequence 3242;
  the zero-separator case merges into four missing publications while RMSE and
- final-error gates stay green. Physical parameter
+ final-error gates stay green. The quantization successor then rounds only the
+ joint-5 controller-visible position over 60 decisions while retaining each raw
+ typed source. All three backends pass `0.002 rad` and first fail `0.004 rad` at
+ step 3241 with zero independently recomputed realization delta and green
+ performance gates. Physical parameter
 sweeps, actuator-authority degradation, command delay, command slew-rate limits,
 command deadband, viscous damping, and regularized Coulomb friction are recorded
 below; inertia and transmission-efficiency boundaries remain open.

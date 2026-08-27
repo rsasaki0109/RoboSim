@@ -145,6 +145,19 @@
       "maximum_age_ticks": 50000001,
       "stale_observation_policy": "hold_last_accepted_target_and_freeze_state",
       "recovery_policy": "resume_on_fresh_nominal_observation"
+    },
+    "joint_position_measurement_quantization": {
+      "kind": "joint_position_quantization_pulse_v1",
+      "classification": "measurement_resolution",
+      "unit": "rad",
+      "values": [0.0, 0.001, 0.002, 0.004, 0.008],
+      "joint": "openarm_right_joint5",
+      "start_controller_step": 3241,
+      "end_controller_step": 3300,
+      "quantization_rule": "nearest_multiple_ties_away_from_zero_v1",
+      "sensor_status": "nominal",
+      "controller_visibility": "quantized_position_with_raw_sensor_retained",
+      "application_order": "after_typed_feedback_availability_before_controller_law"
     }
   },
   "evaluation": {
@@ -252,6 +265,16 @@
       "controller.sensor_rearm.maximum_controlled_joint_final_error_rad"
     ],
     "boundary_rule": "first_descending_grid_value_below_minimum_requirement",
+    "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
+  },
+  "quantization_evaluation": {
+    "requirement_ids": [
+      "controller.sensor.maximum_position_quantization_step_rad",
+      "controller.sensor.maximum_quantization_realization_delta_rad",
+      "controller.sensor_quantization.maximum_controlled_joint_rmse_rad",
+      "controller.sensor_quantization.maximum_controlled_joint_final_error_rad"
+    ],
+    "boundary_rule": "smallest_grid_value_with_any_failed_requirement",
     "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
   }
 }

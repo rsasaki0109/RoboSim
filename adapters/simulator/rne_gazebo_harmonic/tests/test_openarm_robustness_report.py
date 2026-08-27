@@ -512,6 +512,78 @@ class OpenArmRobustnessReportTests(unittest.TestCase):
         self.assertEqual(violation["requirement_id"], "rearm")
         self.assertEqual(violation["step"], 4)
 
+    def test_quantization_metrics_recompute_visible_position(self) -> None:
+        raw_positions = [0.001, 0.003, 0.005, 0.007, 0.009]
+        observations = []
+        for step, raw in enumerate(raw_positions, start=1):
+            sequence = None if step == 1 else step - 1
+            source_raw = None if sequence is None else raw_positions[sequence - 1]
+            active = 3 <= step <= 4
+            visible = []
+            if source_raw is not None:
+                expected = (
+                    MODULE.math.copysign(
+                        MODULE.math.floor(abs(source_raw) / 0.004 + 0.5) * 0.004,
+                        source_raw,
+                    )
+                    if active
+                    else source_raw
+                )
+                visible = [expected]
+            observations.append(
+                {
+                    "step": step,
+                    "sim_time_ticks": step * 10,
+                    "controller_observation_sequence": sequence,
+                    "controller_observation_age_ticks": None if sequence is None else 10,
+                    "joint_position_rad": [raw],
+                    "joint_reference_position_rad": [0.0],
+                    "joint_controller_observation_position_rad": visible,
+                    "controller_rejected": False,
+                }
+            )
+        controller = {
+            "measurement_fault_contract": {
+                "kind": "joint_position_quantization_pulse_v1",
+                "start_controller_step": 3,
+                "end_controller_step": 4,
+                "quantization_step_rad": 0.004,
+            }
+        }
+        metrics = MODULE.quantization_metrics(controller, observations, 0)
+        self.assertIsNotNone(metrics)
+        self.assertEqual(metrics["active_decision_count"], 2)
+        self.assertAlmostEqual(metrics["maximum_quantization_error_rad"], 0.001)
+        self.assertEqual(metrics["maximum_realization_delta_rad"], 0.0)
+        self.assertIsNone(metrics["first_realization_mismatch"])
+        requirements = {
+            "controller.sensor.maximum_position_quantization_step_rad": {
+                "id": "quantization",
+                "unit": "rad",
+                "maximum": 0.002,
+            },
+            "controller.sensor.maximum_quantization_realization_delta_rad": {
+                "id": "realization",
+                "unit": "rad",
+                "maximum": 1e-12,
+            },
+            "controller.sensor_quantization.maximum_controlled_joint_rmse_rad": {
+                "id": "rmse",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+            "controller.sensor_quantization.maximum_controlled_joint_final_error_rad": {
+                "id": "final",
+                "unit": "rad",
+                "maximum": 1.0,
+            },
+        }
+        violation = MODULE.first_quantization_violation(
+            metrics, observations, requirements
+        )
+        self.assertEqual(violation["requirement_id"], "quantization")
+        self.assertEqual(violation["step"], 3)
+
     def test_latency_metrics_preserve_capture_time_and_find_ingress_boundary(self) -> None:
         observations = []
         for step in range(1, 7):

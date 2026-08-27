@@ -775,6 +775,25 @@ cargo run --locked -p showcase_captures \
   --output artifacts/openarm-sensor-rearm-robustness-lab/report/minimum-sensor-rearm-failure.rne-replay
 ```
 
+## Sweep OpenArm joint-position sensor quantization
+
+The quantization dimension retains raw typed feedback and changes only the
+joint-5 position visible to the controller for 60 decisions. The deterministic
+nearest-multiple, ties-away-from-zero rule is swept over
+`[0, 0.001, 0.002, 0.004, 0.008] rad`. Rapier, native MuJoCo, and Gazebo pass
+the fixed `0.002 rad` resolution limit and first fail `0.004 rad` at controller
+step 3241. The report independently reconstructs every visible value from its
+retained raw source sequence and observes zero realization delta.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_position_measurement_quantization \
+  --output artifacts/openarm-sensor-quantization-robustness-lab
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-quantization-robustness-lab \
+  --output artifacts/openarm-sensor-quantization-robustness-lab/report
+```
+
 ## Sweep the OpenArm actuator command-transport delay
 
 The fourth robustness dimension delays only right joint 5 after controller

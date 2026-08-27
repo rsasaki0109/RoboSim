@@ -18,6 +18,17 @@ HOST_KIND = "rne_simulator_host_frame"
 ADAPTER_KIND = "rne_simulator_adapter_frame"
 FIXED_DELTA_TICKS = 16_666_667
 RESPONSE_TIMEOUT_S = 30.0
+INITIALIZATION_RESPONSE_TIMEOUT_S = 120.0
+
+
+def response_timeout_s(exchange_count: int) -> float:
+    if exchange_count < 0:
+        raise ValueError("adapter exchange count must be non-negative")
+    return (
+        INITIALIZATION_RESPONSE_TIMEOUT_S
+        if exchange_count < 2
+        else RESPONSE_TIMEOUT_S
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -96,20 +107,23 @@ class AdapterProcess:
             raise RuntimeError("adapter process did not expose pipes")
         self.selector = selectors.DefaultSelector()
         self.selector.register(self.process.stdout, selectors.EVENT_READ)
+        self.exchange_count = 0
 
     def exchange(self, frame: dict[str, Any]) -> dict[str, Any]:
         assert self.process.stdin is not None
         assert self.process.stdout is not None
         self.process.stdin.write(json.dumps(frame, separators=(",", ":")) + "\n")
         self.process.stdin.flush()
-        if not self.selector.select(RESPONSE_TIMEOUT_S):
+        timeout_s = response_timeout_s(self.exchange_count)
+        if not self.selector.select(timeout_s):
             raise TimeoutError(
-                f"Gazebo adapter response exceeded {RESPONSE_TIMEOUT_S:g} seconds"
+                f"Gazebo adapter response exceeded {timeout_s:g} seconds"
             )
         line = self.process.stdout.readline()
         if not line:
             raise RuntimeError(f"Gazebo adapter exited with {self.process.poll()}")
         response = json.loads(line)
+        self.exchange_count += 1
         if (
             response.get("kind") != ADAPTER_KIND
             or response.get("schema_version") != 1
@@ -626,6 +640,45 @@ def validate_measurement_fault(controller: dict[str, Any], action_count: int) ->
         ):
             raise ValueError("invalid OpenArm repeated-dropout re-arm contract")
         return
+    if contract.get("kind") == "joint_position_quantization_pulse_v1":
+        expected_keys = {
+            "kind",
+            "classification",
+            "joint",
+            "start_controller_step",
+            "end_controller_step",
+            "quantization_rule",
+            "sensor_status",
+            "controller_visibility",
+            "application_order",
+            "quantization_step_rad",
+        }
+        start = contract.get("start_controller_step")
+        end = contract.get("end_controller_step")
+        step_rad = contract.get("quantization_step_rad")
+        if (
+            set(contract) != expected_keys
+            or contract.get("classification") != "measurement_resolution"
+            or contract.get("joint") not in controller["action_joint_order"]
+            or not isinstance(start, int)
+            or isinstance(start, bool)
+            or not isinstance(end, int)
+            or isinstance(end, bool)
+            or not 1 <= start <= end <= action_count
+            or not isinstance(step_rad, (int, float))
+            or isinstance(step_rad, bool)
+            or not math.isfinite(step_rad)
+            or step_rad < 0.0
+            or contract.get("quantization_rule")
+            != "nearest_multiple_ties_away_from_zero_v1"
+            or contract.get("sensor_status") != "nominal"
+            or contract.get("controller_visibility")
+            != "quantized_position_with_raw_sensor_retained"
+            or contract.get("application_order")
+            != "after_typed_feedback_availability_before_controller_law"
+        ):
+            raise ValueError("invalid OpenArm measurement-quantization contract")
+        return
     expected_keys = {
         "kind",
         "classification",
@@ -756,6 +809,24 @@ def apply_measurement_bias(
         "joint_feedback_dropout_recovery_hold_v1",
         "joint_feedback_repeated_dropout_bursts_v1",
     }:
+        return positions, bias
+    if contract.get("kind") == "joint_position_quantization_pulse_v1":
+        sample_period_ticks = controller["observation_contract"]["sample_period_ticks"]
+        if consumed_at_ticks % sample_period_ticks != 0:
+            raise RuntimeError("measurement-quantization consumption time is off the control grid")
+        controller_step = consumed_at_ticks // sample_period_ticks + 1
+        if contract["start_controller_step"] <= controller_step <= contract["end_controller_step"]:
+            index = controller["action_joint_order"].index(contract["joint"])
+            step_rad = contract["quantization_step_rad"]
+            if step_rad > 0.0:
+                raw = positions[index]
+                quantized = math.copysign(
+                    math.floor(abs(raw) / step_rad + 0.5) * step_rad, raw
+                )
+                positions[index] = quantized
+                bias[index] = quantized - raw
+        if not all(math.isfinite(value) for value in positions):
+            raise RuntimeError("measurement quantization produced a non-finite observation")
         return positions, bias
     expected_keys = {
         "kind",

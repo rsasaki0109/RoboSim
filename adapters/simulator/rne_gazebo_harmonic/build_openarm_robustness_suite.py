@@ -31,6 +31,7 @@ def parse_args() -> argparse.Namespace:
             "joint_feedback_controller_stale_age",
             "joint_feedback_dropout_recovery",
             "joint_feedback_repeated_dropout_rearm",
+            "joint_position_measurement_quantization",
         ),
         default="actuator_target_bias",
     )
@@ -123,6 +124,13 @@ def sensor_rearm_case_id(fresh_frames: int) -> str:
     return f"sensor-rearm-{fresh_frames:03d}fresh"
 
 
+def sensor_quantization_case_id(step_rad: float) -> str:
+    step_urad = round(step_rad * 1_000_000.0)
+    if abs(step_urad / 1_000_000.0 - step_rad) > 1e-12:
+        raise ValueError("sensor quantization grid must use whole microradians")
+    return f"sensor-quantization-{step_urad:05d}urad"
+
+
 def delay_case_id(delay_steps: int) -> str:
     return f"delay-{delay_steps:03d}steps"
 
@@ -177,6 +185,7 @@ def compile_robustness_suite(
         "joint_feedback_controller_stale_age",
         "joint_feedback_dropout_recovery",
         "joint_feedback_repeated_dropout_rearm",
+        "joint_position_measurement_quantization",
     }
     integer_dimension = dimension_id in {
         "actuator_command_delay",
@@ -277,6 +286,10 @@ def compile_robustness_suite(
             "joint_feedback_repeated_dropout_bursts_v1",
             "measurement_rearm_spacing",
         ),
+        "joint_position_measurement_quantization": (
+            "joint_position_quantization_pulse_v1",
+            "measurement_resolution",
+        ),
     }
     expected_kind, expected_classification = identities[dimension_id]
     if (
@@ -295,6 +308,7 @@ def compile_robustness_suite(
         "joint_feedback_controller_stale_age": "stale_age_evaluation",
         "joint_feedback_dropout_recovery": "recovery_evaluation",
         "joint_feedback_repeated_dropout_rearm": "rearm_evaluation",
+        "joint_position_measurement_quantization": "quantization_evaluation",
     }.get(dimension_id, "evaluation")
     evaluation = manifest[evaluation_key]
     if not set(evaluation["requirement_ids"]).issubset(requirement_ids):
@@ -327,6 +341,8 @@ def compile_robustness_suite(
             identifier = sensor_recovery_case_id(value)
         elif dimension_id == "joint_feedback_repeated_dropout_rearm":
             identifier = sensor_rearm_case_id(value)
+        elif dimension_id == "joint_position_measurement_quantization":
+            identifier = sensor_quantization_case_id(value)
         controller = copy.deepcopy(base)
         controller["controller_id"] = (
             f"rne.controller.openarm_right.plant_state_feedback_integral.{identifier}.v1"
@@ -574,7 +590,7 @@ def compile_robustness_suite(
                 "application_order",
                 "controller_visibility",
             )
-        else:
+        elif dimension_id == "joint_feedback_repeated_dropout_rearm":
             controller["disturbance_contract"]["offset_rad"] = 0.0
             contract = {
                 key: item
@@ -607,6 +623,26 @@ def compile_robustness_suite(
                 "burst_length_frames",
                 "burst_count",
                 "schedule",
+                "application_order",
+                "controller_visibility",
+            )
+        else:
+            controller["disturbance_contract"]["offset_rad"] = 0.0
+            contract = {
+                key: item
+                for key, item in dimension.items()
+                if key not in {"unit", "values"}
+            }
+            contract["quantization_step_rad"] = value
+            controller["measurement_fault_contract"] = contract
+            fields = (
+                "kind",
+                "classification",
+                "joint",
+                "start_controller_step",
+                "end_controller_step",
+                "quantization_rule",
+                "sensor_status",
                 "application_order",
                 "controller_visibility",
             )
@@ -686,6 +722,10 @@ def main() -> int:
             dimension_value = controller["measurement_fault_contract"][
                 "interburst_fresh_frames"
             ]
+        elif args.dimension == "joint_position_measurement_quantization":
+            dimension_value = controller["measurement_fault_contract"][
+                "quantization_step_rad"
+            ]
         else:
             dimension_value = controller["measurement_fault_contract"][
                 "additional_stale_frames"
@@ -709,6 +749,8 @@ def main() -> int:
             declaration["additional_recovery_hold_decisions"] = dimension_value
         elif args.dimension == "joint_feedback_repeated_dropout_rearm":
             declaration["interburst_fresh_frames"] = dimension_value
+        elif args.dimension == "joint_position_measurement_quantization":
+            declaration["quantization_step_rad"] = dimension_value
         elif args.dimension == "actuator_command_delay":
             declaration["delay_steps"] = dimension_value
         elif args.dimension == "actuator_command_rate_limit":

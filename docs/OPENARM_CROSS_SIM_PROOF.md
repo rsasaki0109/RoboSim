@@ -269,6 +269,20 @@ terminal tracking. The browser report and minimum replay are generated as
 `openarm-sensor-rearm-robustness-report.html` and
 `openarm-sensor-rearm-failure.rne-replay` in the retained Failure Capsule.
 
+## Joint-position quantization boundary
+
+The quantization successor keeps the raw typed joint feedback, capture
+timestamp, status, and availability unchanged. Only the joint-5 position
+visible to the controller is rounded to the nearest declared multiple, with
+ties away from zero, during controller steps 3241 through 3300. The fixed
+`[0, 0.001, 0.002, 0.004, 0.008] rad` grid passes `0.002 rad` and first fails
+the resolution contract at `0.004 rad` on Rapier, native MuJoCo, and Gazebo.
+
+All 60 active controller decisions are reconstructed from their retained raw
+source sequence with zero realization delta. Rapier joint-5 RMSE remains about
+`0.005315 rad`, so the first failure at step 3241 is the declared sensor
+resolution boundary rather than a closed-loop performance regression.
+
 ## Physical payload fixture (in progress)
 
 The payload compiler generates content-addressed URDF variants for

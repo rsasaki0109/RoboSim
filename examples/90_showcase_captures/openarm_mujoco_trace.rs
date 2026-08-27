@@ -184,6 +184,18 @@ enum MeasurementFaultContract {
         controller_visibility: String,
         application_order: String,
     },
+    #[serde(rename = "joint_position_quantization_pulse_v1")]
+    JointPositionQuantizationPulseV1 {
+        classification: String,
+        joint: String,
+        start_controller_step: u64,
+        end_controller_step: u64,
+        quantization_step_rad: f64,
+        quantization_rule: String,
+        sensor_status: JointFeedbackStatus,
+        controller_visibility: String,
+        application_order: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -972,6 +984,31 @@ fn validate(
                     && application_order == "after_typed_sensor_capture_before_controller_ingress",
                 "invalid OpenArm repeated-dropout re-arm contract"
             ),
+            MeasurementFaultContract::JointPositionQuantizationPulseV1 {
+                classification,
+                joint,
+                start_controller_step,
+                end_controller_step,
+                quantization_step_rad,
+                quantization_rule,
+                sensor_status,
+                controller_visibility,
+                application_order,
+            } => anyhow::ensure!(
+                classification == "measurement_resolution"
+                    && controller.action_joint_order.contains(joint)
+                    && *start_controller_step >= 1
+                    && start_controller_step <= end_controller_step
+                    && *end_controller_step <= final_step
+                    && quantization_step_rad.is_finite()
+                    && *quantization_step_rad >= 0.0
+                    && quantization_rule == "nearest_multiple_ties_away_from_zero_v1"
+                    && *sensor_status == JointFeedbackStatus::Nominal
+                    && controller_visibility == "quantized_position_with_raw_sensor_retained"
+                    && application_order
+                        == "after_typed_feedback_availability_before_controller_law",
+                "invalid OpenArm measurement-quantization contract"
+            ),
         }
     }
     match (&controller.observation_contract, &controller.feedback_law) {
@@ -1395,16 +1432,16 @@ fn apply_measurement_bias(
 ) -> Result<(Vec<f64>, Vec<f64>)> {
     let mut positions = observation.joint_position_rad.clone();
     let mut bias = vec![0.0; positions.len()];
-    let Some(MeasurementFaultContract::AdditiveJointPositionBiasPulseV1 {
-        joint,
-        start_controller_step,
-        end_controller_step,
-        offset_rad,
-        ..
-    }) = &controller.measurement_fault_contract
-    else {
+    let Some(contract) = &controller.measurement_fault_contract else {
         return Ok((positions, bias));
     };
+    if !matches!(
+        contract,
+        MeasurementFaultContract::AdditiveJointPositionBiasPulseV1 { .. }
+            | MeasurementFaultContract::JointPositionQuantizationPulseV1 { .. }
+    ) {
+        return Ok((positions, bias));
+    }
     let sample_period_ticks = controller
         .observation_contract
         .as_ref()
@@ -1415,14 +1452,42 @@ fn apply_measurement_bias(
         "measurement-bias consumption time is off the control grid"
     );
     let controller_step = consumed_at_ticks / sample_period_ticks + 1;
-    if (*start_controller_step..=*end_controller_step).contains(&controller_step) {
-        let index = controller
-            .action_joint_order
-            .iter()
-            .position(|name| name == joint)
-            .context("measurement-bias joint is absent from the action order")?;
-        bias[index] = *offset_rad;
-        positions[index] += *offset_rad;
+    match contract {
+        MeasurementFaultContract::AdditiveJointPositionBiasPulseV1 {
+            joint,
+            start_controller_step,
+            end_controller_step,
+            offset_rad,
+            ..
+        } if (*start_controller_step..=*end_controller_step).contains(&controller_step) => {
+            let index = controller
+                .action_joint_order
+                .iter()
+                .position(|name| name == joint)
+                .context("measurement-bias joint is absent from the action order")?;
+            bias[index] = *offset_rad;
+            positions[index] += *offset_rad;
+        }
+        MeasurementFaultContract::JointPositionQuantizationPulseV1 {
+            joint,
+            start_controller_step,
+            end_controller_step,
+            quantization_step_rad,
+            ..
+        } if *quantization_step_rad > 0.0
+            && (*start_controller_step..=*end_controller_step).contains(&controller_step) =>
+        {
+            let index = controller
+                .action_joint_order
+                .iter()
+                .position(|name| name == joint)
+                .context("measurement-quantization joint is absent from the action order")?;
+            let raw = positions[index];
+            let quantized = (raw / quantization_step_rad).round() * quantization_step_rad;
+            positions[index] = quantized;
+            bias[index] = quantized - raw;
+        }
+        _ => {}
     }
     anyhow::ensure!(
         positions.iter().all(|value| value.is_finite()),
