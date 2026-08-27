@@ -86,13 +86,24 @@ body:
     id: proof_bundle
     attributes:
       label: Proof bundle
-      description: Immutable archive containing the complete unmodified installed proof directory, completed candidate submission JSON, and reproduction log.
+      description: Immutable archive containing the complete unmodified installed proof directory and reproduction logs. Keep the candidate JSON outside this archive so it can bind the archive SHA-256 without self-reference.
       placeholder: |
         URL:
         file:
         size_bytes:
         sha256:
-        submission_json_path:
+    validations:
+      required: true
+  - type: textarea
+    id: submission_candidate
+    attributes:
+      label: Submission candidate
+      description: Immutable raw URL, repository-relative path, byte size, and lowercase SHA-256 of the completed schema-v2 candidate JSON committed at the evidence revision.
+      placeholder: |
+        URL:
+        path:
+        size_bytes:
+        sha256:
     validations:
       required: true
   - type: textarea

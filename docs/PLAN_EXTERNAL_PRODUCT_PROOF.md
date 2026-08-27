@@ -235,8 +235,12 @@ Work proceeds in this order, one mergeable slice at a time:
    reproduction quickstart and non-acceptance candidate JSON in every native
    bundle, bind the proof to its producer executable and clean tagged archive,
    reject CI/placeholder measurements, and expose a validated public issue
-   route. The independent operator no longer needs an RNE source checkout;
-   maintainers run the source-side acceptance checker only after submission.
+   route. Candidate schema v2 removes both impossible content-hash cycles: the
+   candidate stays outside the proof bundle, and its containing Git revision is
+   supplied separately. Maintainer verification rehashes the candidate, proof
+   bundle, logs, release archive, and installed proof into report schema v2.
+   The independent operator no longer needs an RNE source checkout; maintainers
+   run the source-side acceptance checker only after submission.
 8. Ask the first external operator to run the next tagged release without
    maintainer intervention and audit the retained report.
 

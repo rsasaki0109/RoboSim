@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const DEFAULT_REGISTRY: &str = "release/external-evidence-intake.toml";
-const REGISTRY_SCHEMA_VERSION: u32 = 5;
+const REGISTRY_SCHEMA_VERSION: u32 = 6;
 const MAX_INTAKE_FILE_BYTES: u64 = 128 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -72,6 +72,10 @@ const EXPECTED_ROUTES: [ExpectedRoute; 4] = [
         artifacts: &[
             "release_archive",
             "release_bundle",
+            "proof_bundle",
+            "submission_candidate",
+            "stdout_log",
+            "stderr_log",
             "installed_proof",
             "time_to_proof",
             "cross_backend_report",
@@ -88,6 +92,7 @@ const EXPECTED_ROUTES: [ExpectedRoute; 4] = [
             "measured_on",
             "release_archive",
             "proof_bundle",
+            "submission_candidate",
             "reproduction_command",
             "verification",
         ],
@@ -258,7 +263,9 @@ fn validate_registry(root: &Path, path: &Path) -> Result<()> {
     anyhow::ensure!(
         flagship_quickstart.contains(&registry.installed_flagship_submission_template_path)
             && flagship_quickstart.contains("candidate submission")
-            && flagship_quickstart.contains("not accepted evidence"),
+            && flagship_quickstart.contains("not accepted evidence")
+            && flagship_quickstart.contains("self-referential digest")
+            && flagship_quickstart.contains("has no Git"),
         "installed flagship quickstart must bind the candidate template and non-acceptance boundary"
     );
     validate_flagship_submission_template(&read_repository_file(
@@ -306,7 +313,7 @@ fn validate_flagship_submission_template(text: &str) -> Result<()> {
             && value
                 .get("schema_version")
                 .and_then(serde_json::Value::as_u64)
-                == Some(1)
+                == Some(2)
             && value
                 .get("candidate_status")
                 .and_then(serde_json::Value::as_str)
@@ -335,6 +342,15 @@ fn validate_flagship_submission_template(text: &str) -> Result<()> {
                 "flagship-proof/failure-capsule/capsule.json",
             ],
         "installed flagship submission template proof paths drifted"
+    );
+    let repository = value
+        .get("evidence_repository")
+        .and_then(serde_json::Value::as_object)
+        .context("installed flagship submission template omitted evidence_repository")?;
+    anyhow::ensure!(
+        repository.keys().map(String::as_str).eq(["owner", "url"])
+            && repository.values().all(serde_json::Value::is_null),
+        "installed flagship submission template must not embed its own Git revision"
     );
     for object in [
         "evidence_repository",
@@ -592,6 +608,13 @@ fn validate_issue_form(text: &str, route: &IntakeRoute) -> Result<()> {
         anyhow::ensure!(
             physics < hardware && hardware < simulator && simulator < accelerator,
             "external system kind options are not canonical"
+        );
+    }
+    if route.id == "installed_flagship_reproduction" {
+        anyhow::ensure!(
+            text.contains("Keep the candidate JSON outside this archive")
+                && !text.contains("completed candidate submission JSON"),
+            "installed flagship form must not create a self-referential proof bundle"
         );
     }
     Ok(())

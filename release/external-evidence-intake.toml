@@ -1,4 +1,4 @@
-schema_version = 5
+schema_version = 6
 guide_path = "docs/EXTERNAL_EVIDENCE_INTAKE.md"
 installed_flagship_quickstart_path = "docs/EXTERNAL_FLAGSHIP_REPRODUCTION.md"
 installed_flagship_submission_template_path = "release/external-flagship-submission-template.json"
@@ -13,8 +13,8 @@ author_assistance_allowed = false
 qualifying_kinds = []
 audited_nonqualifying_kinds = []
 required_metadata = ["owner", "repository", "revision", "measured_on", "author_assistance"]
-required_artifacts = ["release_archive", "release_bundle", "installed_proof", "time_to_proof", "cross_backend_report", "failure_capsule"]
-form_fields = ["independence", "repository", "revision", "rne_release", "platform", "machine", "measured_on", "release_archive", "proof_bundle", "reproduction_command", "verification"]
+required_artifacts = ["release_archive", "release_bundle", "proof_bundle", "submission_candidate", "stdout_log", "stderr_log", "installed_proof", "time_to_proof", "cross_backend_report", "failure_capsule"]
+form_fields = ["independence", "repository", "revision", "rne_release", "platform", "machine", "measured_on", "release_archive", "proof_bundle", "submission_candidate", "reproduction_command", "verification"]
 
 [[route]]
 id = "external_project"

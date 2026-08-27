@@ -30,7 +30,10 @@ pub(crate) const PYTHON_API_REPORT_SCHEMA_VERSION: u32 = 1;
 /// Bundled MuJoCo runtime provenance manifest schema.
 pub(crate) const MUJOCO_RUNTIME_MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// Independently produced installed flagship reproduction report schema.
-pub(crate) const EXTERNAL_FLAGSHIP_REPRODUCTION_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const EXTERNAL_FLAGSHIP_REPRODUCTION_REPORT_SCHEMA_VERSION: u32 = 2;
+const EXTERNAL_FLAGSHIP_SUBMISSION_SCHEMA_VERSION: u32 = 2;
+const EXTERNAL_FLAGSHIP_SUBMISSION_KIND: &str = "rne_external_flagship_submission_candidate";
+const EXTERNAL_FLAGSHIP_CANDIDATE_STATUS: &str = "not_accepted_pending_maintainer_verification";
 
 const RELEASE_BINARY_PACKAGES: [(&str, &str); 11] = [
     ("rne_asset_cli", "rne-asset"),
@@ -87,6 +90,15 @@ const INSTALL_CHECK_IDS: [&str; 12] = [
     "python_wheel",
     "python_api",
 ];
+const EXTERNAL_FLAGSHIP_REQUIRED_PROOF_PATHS: [&str; 5] = [
+    "flagship-proof/installed-proof-report.json",
+    "flagship-proof/time-to-proof-report.json",
+    "flagship-proof/cross-backend-report.json",
+    "flagship-proof/recorded-shadow-proof.json",
+    "flagship-proof/failure-capsule/capsule.json",
+];
+const MAX_EXTERNAL_SUBMISSION_BYTES: u64 = 128 * 1024;
+const MAX_EXTERNAL_LOG_BYTES: u64 = 16 * 1024 * 1024;
 
 const BUNDLE_FILES: [(&str, &str); 88] = [
     ("README.md", "README.md"),
@@ -422,11 +434,63 @@ struct ExternalFlagshipOptions {
     archive: PathBuf,
     bundle_dir: PathBuf,
     proof_dir: PathBuf,
-    owner: String,
-    repository: String,
+    proof_bundle: PathBuf,
+    submission: PathBuf,
+    evidence_repo_dir: PathBuf,
     revision: String,
-    measured_on: String,
     output: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ExternalFlagshipSubmissionCandidate {
+    kind: String,
+    schema_version: u32,
+    candidate_status: String,
+    author_assistance: bool,
+    evidence_repository: SubmissionRepository,
+    measurement: SubmissionMeasurement,
+    release_archive: SubmissionArtifact,
+    proof_bundle: SubmissionArtifact,
+    required_proof_paths: Vec<String>,
+    reproduction: SubmissionReproduction,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SubmissionRepository {
+    owner: String,
+    url: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SubmissionMeasurement {
+    measured_on: String,
+    machine_label: String,
+    operating_system: String,
+    architecture: String,
+    release_target: String,
+    elapsed_ms: u64,
+    target_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SubmissionArtifact {
+    url: String,
+    file_name: String,
+    size_bytes: u64,
+    sha256: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SubmissionReproduction {
+    commands: Vec<String>,
+    exit_statuses: Vec<i32>,
+    stdout_log_path: String,
+    stderr_log_path: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -585,6 +649,10 @@ struct ExternalFlagshipReproductionReport {
     first_violation_step: u64,
     first_violation_sim_time_ticks: u64,
     archive: MemberDigest,
+    proof_bundle: MemberDigest,
+    submission_candidate: MemberDigest,
+    stdout_log: MemberDigest,
+    stderr_log: MemberDigest,
     release_report: MemberDigest,
     checksum_manifest: MemberDigest,
     producer_executable: MemberDigest,
@@ -1148,12 +1216,33 @@ pub(crate) fn external_flagship_check(
     let archive = absolute_from(&root, &options.archive);
     let bundle_dir = absolute_from(&root, &options.bundle_dir);
     let proof_dir = absolute_from(&root, &options.proof_dir);
+    let proof_bundle_path = absolute_from(&root, &options.proof_bundle);
+    let submission_path = absolute_from(&root, &options.submission);
+    let evidence_repo_dir = absolute_from(&root, &options.evidence_repo_dir);
     let output = absolute_from(&root, &options.output);
+    let submission_bytes = read_external_regular_file(
+        &submission_path,
+        "external flagship submission candidate",
+        MAX_EXTERNAL_SUBMISSION_BYTES,
+    )?;
+    let submission: ExternalFlagshipSubmissionCandidate = serde_json::from_slice(&submission_bytes)
+        .context("parse completed external flagship submission candidate")?;
+    validate_external_submission_candidate(&submission)?;
     validate_external_operator(
-        &options.owner,
-        &options.repository,
+        &submission.evidence_repository.owner,
+        &submission.evidence_repository.url,
         &options.revision,
-        &options.measured_on,
+        &submission.measurement.measured_on,
+    )?;
+    validate_external_repository_checkout(
+        &evidence_repo_dir,
+        &submission.evidence_repository.url,
+        &options.revision,
+    )?;
+    let submission_relative_path = validate_committed_external_file(
+        &evidence_repo_dir,
+        &submission_path,
+        "submission candidate",
     )?;
     anyhow::ensure!(
         !output.exists(),
@@ -1215,6 +1304,28 @@ pub(crate) fn external_flagship_check(
         &archive_subject.sha256,
         &release.target,
     )?;
+    validate_submission_artifact(&submission.release_archive, &archive, "release archive")?;
+    let proof_bundle = digest_external_file(&proof_bundle_path, "proof bundle")?;
+    validate_submission_artifact(&submission.proof_bundle, &proof_bundle_path, "proof bundle")?;
+
+    let stdout_path = resolve_submission_member(
+        &evidence_repo_dir,
+        &submission.reproduction.stdout_log_path,
+        "stdout log",
+    )?;
+    let stderr_path = resolve_submission_member(
+        &evidence_repo_dir,
+        &submission.reproduction.stderr_log_path,
+        "stderr log",
+    )?;
+    let mut stdout_log =
+        digest_external_bounded_file(&stdout_path, "stdout log", MAX_EXTERNAL_LOG_BYTES)?;
+    stdout_log.path = submission.reproduction.stdout_log_path.clone();
+    let mut stderr_log =
+        digest_external_bounded_file(&stderr_path, "stderr log", MAX_EXTERNAL_LOG_BYTES)?;
+    stderr_log.path = submission.reproduction.stderr_log_path.clone();
+    validate_committed_external_file(&evidence_repo_dir, &stdout_path, "stdout log")?;
+    validate_committed_external_file(&evidence_repo_dir, &stderr_path, "stderr log")?;
 
     let producer = bundle_dir
         .join("bin")
@@ -1225,6 +1336,7 @@ pub(crate) fn external_flagship_check(
     validate_external_machine_label(&timing.machine_label)?;
     validate_time_to_proof_report(&proof_dir, &timing.machine_label)?;
     validate_timing_platform(&timing, &release.target)?;
+    validate_submission_measurement(&submission.measurement, &timing, &release.target)?;
     rne_asset_cli::failure_capsule::verify_directory(&proof_dir.join("failure-capsule"))?;
     let (first_violation_step, first_violation_sim_time_ticks) =
         validate_external_cross_backend_report(&proof_dir.join("cross-backend-report.json"))?;
@@ -1233,10 +1345,10 @@ pub(crate) fn external_flagship_check(
         kind: "rne_external_flagship_reproduction_report".to_string(),
         schema_version: EXTERNAL_FLAGSHIP_REPRODUCTION_REPORT_SCHEMA_VERSION,
         status: "passed".to_string(),
-        owner: options.owner,
-        repository: options.repository,
+        owner: submission.evidence_repository.owner,
+        repository: submission.evidence_repository.url,
         revision: options.revision,
-        measured_on: options.measured_on,
+        measured_on: submission.measurement.measured_on,
         author_assistance: false,
         release_version: release.release_version,
         release_revision: release.git_commit,
@@ -1255,6 +1367,13 @@ pub(crate) fn external_flagship_check(
             size_bytes: archive_metadata.len(),
             sha256: archive_sha256,
         },
+        proof_bundle,
+        submission_candidate: member_digest_from_bytes(
+            &submission_relative_path,
+            &submission_bytes,
+        ),
+        stdout_log,
+        stderr_log,
         release_report: member_digest_from_bytes(RELEASE_REPORT, &release_bytes),
         checksum_manifest: digest_member(&bundle_dir, SHA256_MANIFEST)?,
         producer_executable: proof.producer_executable,
@@ -1283,6 +1402,251 @@ fn member_digest_from_bytes(path: &str, bytes: &[u8]) -> MemberDigest {
         size_bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
         sha256: sha256_hex(bytes),
     }
+}
+
+fn validate_external_submission_candidate(
+    submission: &ExternalFlagshipSubmissionCandidate,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        submission.kind == EXTERNAL_FLAGSHIP_SUBMISSION_KIND
+            && submission.schema_version == EXTERNAL_FLAGSHIP_SUBMISSION_SCHEMA_VERSION
+            && submission.candidate_status == EXTERNAL_FLAGSHIP_CANDIDATE_STATUS
+            && !submission.author_assistance,
+        "external flagship submission identity or non-acceptance boundary drifted"
+    );
+    anyhow::ensure!(
+        submission.required_proof_paths
+            == EXTERNAL_FLAGSHIP_REQUIRED_PROOF_PATHS.map(str::to_string),
+        "external flagship submission required proof paths drifted"
+    );
+    validate_submission_artifact_shape(&submission.release_archive, "release archive")?;
+    validate_submission_artifact_shape(&submission.proof_bundle, "proof bundle")?;
+    anyhow::ensure!(
+        submission.reproduction.commands.len() >= 3
+            && submission.reproduction.commands.len()
+                == submission.reproduction.exit_statuses.len()
+            && submission
+                .reproduction
+                .commands
+                .iter()
+                .all(|command| !command.trim().is_empty() && command.len() <= 4096)
+            && submission
+                .reproduction
+                .exit_statuses
+                .iter()
+                .all(|status| *status == 0),
+        "external flagship reproduction must retain at least three successful commands and matching zero exit statuses"
+    );
+    anyhow::ensure!(
+        submission.reproduction.stdout_log_path != submission.reproduction.stderr_log_path,
+        "external flagship stdout and stderr logs must be distinct files"
+    );
+    validate_relative_member(Path::new(&submission.reproduction.stdout_log_path))?;
+    validate_relative_member(Path::new(&submission.reproduction.stderr_log_path))?;
+    validate_external_machine_label(&submission.measurement.machine_label)?;
+    validate_release_target(&submission.measurement.release_target)?;
+    anyhow::ensure!(
+        matches!(
+            submission.measurement.operating_system.as_str(),
+            "windows" | "linux"
+        ) && submission.measurement.architecture == "x86_64"
+            && submission.measurement.target_ms == 15 * 60 * 1_000
+            && submission.measurement.elapsed_ms <= submission.measurement.target_ms,
+        "external flagship submitted timing platform or 15-minute verdict is invalid"
+    );
+    Ok(())
+}
+
+fn validate_submission_artifact_shape(
+    artifact: &SubmissionArtifact,
+    label: &str,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        artifact.url.starts_with("https://")
+            && artifact.url.is_ascii()
+            && artifact.url.len() <= 2048
+            && !artifact.url.contains('#')
+            && !artifact.url.contains('?')
+            && artifact.file_name.len() <= 255
+            && !artifact.file_name.is_empty()
+            && Path::new(&artifact.file_name).file_name() == Some(OsStr::new(&artifact.file_name))
+            && artifact.url.ends_with(&format!("/{}", artifact.file_name))
+            && artifact.size_bytes > 0
+            && is_lower_sha256(&artifact.sha256),
+        "external flagship {label} identity is invalid"
+    );
+    Ok(())
+}
+
+fn is_lower_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn validate_submission_artifact(
+    submitted: &SubmissionArtifact,
+    path: &Path,
+    label: &str,
+) -> anyhow::Result<()> {
+    let actual = digest_external_file(path, label)?;
+    anyhow::ensure!(
+        submitted.file_name == actual.path
+            && submitted.size_bytes == actual.size_bytes
+            && submitted.sha256 == actual.sha256,
+        "external flagship {label} bytes differ from the completed submission candidate"
+    );
+    Ok(())
+}
+
+fn read_external_regular_file(path: &Path, label: &str, maximum: u64) -> anyhow::Result<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("inspect external flagship {label} {}", path.display()))?;
+    anyhow::ensure!(
+        metadata.file_type().is_file()
+            && !metadata.file_type().is_symlink()
+            && metadata.len() > 0
+            && metadata.len() <= maximum,
+        "external flagship {label} must be a non-empty regular non-symlink file no larger than {maximum} bytes"
+    );
+    fs::read(path).with_context(|| format!("read external flagship {label} {}", path.display()))
+}
+
+fn digest_external_bounded_file(
+    path: &Path,
+    label: &str,
+    maximum: u64,
+) -> anyhow::Result<MemberDigest> {
+    let bytes = read_external_regular_file(path, label, maximum)?;
+    let name = path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .with_context(|| format!("external flagship {label} name is not valid Unicode"))?;
+    Ok(member_digest_from_bytes(name, &bytes))
+}
+
+fn digest_external_file(path: &Path, label: &str) -> anyhow::Result<MemberDigest> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("inspect external flagship {label} {}", path.display()))?;
+    anyhow::ensure!(
+        metadata.file_type().is_file() && !metadata.file_type().is_symlink() && metadata.len() > 0,
+        "external flagship {label} must be a non-empty regular non-symlink file"
+    );
+    let name = path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .with_context(|| format!("external flagship {label} name is not valid Unicode"))?;
+    Ok(MemberDigest {
+        path: name.to_string(),
+        size_bytes: metadata.len(),
+        sha256: sha256_file_hex(path)?,
+    })
+}
+
+fn resolve_submission_member(root: &Path, relative: &str, label: &str) -> anyhow::Result<PathBuf> {
+    let relative_path = Path::new(relative);
+    validate_relative_member(relative_path)?;
+    let canonical_root = fs::canonicalize(root).with_context(|| {
+        format!(
+            "resolve external flagship submission root {}",
+            root.display()
+        )
+    })?;
+    let path = root.join(relative_path);
+    let metadata = fs::symlink_metadata(&path)
+        .with_context(|| format!("inspect external flagship {label} {}", path.display()))?;
+    anyhow::ensure!(
+        metadata.file_type().is_file() && !metadata.file_type().is_symlink(),
+        "external flagship {label} must be a regular non-symlink file"
+    );
+    let canonical = fs::canonicalize(&path)
+        .with_context(|| format!("resolve external flagship {label} {}", path.display()))?;
+    anyhow::ensure!(
+        canonical.starts_with(&canonical_root),
+        "external flagship {label} escapes the submission repository"
+    );
+    Ok(canonical)
+}
+
+fn validate_external_repository_checkout(
+    root: &Path,
+    expected_url: &str,
+    expected_revision: &str,
+) -> anyhow::Result<()> {
+    let metadata = fs::symlink_metadata(root)
+        .with_context(|| format!("inspect external evidence repository {}", root.display()))?;
+    anyhow::ensure!(
+        metadata.file_type().is_dir() && !metadata.file_type().is_symlink(),
+        "external evidence repository must be a real non-symlink directory"
+    );
+    anyhow::ensure!(
+        git_output(root, &["rev-parse", "HEAD"])? == expected_revision,
+        "external evidence repository HEAD differs from the submitted revision"
+    );
+    anyhow::ensure!(
+        git_output(root, &["status", "--porcelain", "--untracked-files=all"])?.is_empty(),
+        "external evidence repository must be clean including untracked files"
+    );
+    let origin = git_output(root, &["remote", "get-url", "origin"])?;
+    let normalized_origin = origin.strip_suffix(".git").unwrap_or(&origin);
+    let normalized_expected = expected_url.strip_suffix(".git").unwrap_or(expected_url);
+    anyhow::ensure!(
+        normalized_origin == normalized_expected,
+        "external evidence repository origin differs from the completed submission candidate"
+    );
+    Ok(())
+}
+
+fn validate_committed_external_file(
+    root: &Path,
+    path: &Path,
+    label: &str,
+) -> anyhow::Result<String> {
+    let canonical_root = fs::canonicalize(root)
+        .with_context(|| format!("resolve external evidence repository {}", root.display()))?;
+    let canonical_path = fs::canonicalize(path)
+        .with_context(|| format!("resolve committed external {label} {}", path.display()))?;
+    let relative = canonical_path
+        .strip_prefix(&canonical_root)
+        .with_context(|| format!("external {label} is outside the evidence repository"))?;
+    validate_relative_member(relative)?;
+    let git_relative = relative.to_string_lossy().replace('\\', "/");
+    let object = format!("HEAD:{git_relative}");
+    let output = Command::new("git")
+        .current_dir(&canonical_root)
+        .args(["show", "--no-textconv", &object])
+        .output()
+        .with_context(|| format!("read committed external {label} {object}"))?;
+    anyhow::ensure!(
+        output.status.success(),
+        "external {label} is not committed at the submitted revision: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    let working_bytes = fs::read(&canonical_path)
+        .with_context(|| format!("read external {label} {}", canonical_path.display()))?;
+    anyhow::ensure!(
+        output.stdout == working_bytes,
+        "external {label} working bytes differ from the submitted revision"
+    );
+    Ok(git_relative)
+}
+
+fn validate_submission_measurement(
+    submitted: &SubmissionMeasurement,
+    timing: &TimeToProofReport,
+    release_target: &str,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        submitted.machine_label == timing.machine_label
+            && submitted.operating_system == timing.operating_system
+            && submitted.architecture == timing.architecture
+            && submitted.release_target == release_target
+            && submitted.elapsed_ms == timing.elapsed_ms
+            && submitted.target_ms == timing.target_ms,
+        "external flagship measurement differs from the proof timing report or release target"
+    );
+    Ok(())
 }
 
 fn validate_external_operator(
@@ -1695,10 +2059,10 @@ fn parse_external_flagship_options(
     let mut archive = None;
     let mut bundle_dir = None;
     let mut proof_dir = None;
-    let mut owner = None;
-    let mut repository = None;
+    let mut proof_bundle = None;
+    let mut submission = None;
+    let mut evidence_repo_dir = None;
     let mut revision = None;
-    let mut measured_on = None;
     let mut output = None;
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -1709,10 +2073,16 @@ fn parse_external_flagship_options(
             "--proof-dir" => {
                 proof_dir = Some(PathBuf::from(required_arg(args, "--proof-dir")?));
             }
-            "--owner" => owner = Some(required_arg(args, "--owner")?),
-            "--repository" => repository = Some(required_arg(args, "--repository")?),
+            "--proof-bundle" => {
+                proof_bundle = Some(PathBuf::from(required_arg(args, "--proof-bundle")?));
+            }
+            "--submission" => {
+                submission = Some(PathBuf::from(required_arg(args, "--submission")?));
+            }
+            "--evidence-repo-dir" => {
+                evidence_repo_dir = Some(PathBuf::from(required_arg(args, "--evidence-repo-dir")?));
+            }
             "--revision" => revision = Some(required_arg(args, "--revision")?),
-            "--measured-on" => measured_on = Some(required_arg(args, "--measured-on")?),
             "--output" => output = Some(PathBuf::from(required_arg(args, "--output")?)),
             other => bail!("unknown external-flagship-check argument: {other}"),
         }
@@ -1721,10 +2091,12 @@ fn parse_external_flagship_options(
         archive: archive.context("external-flagship-check requires --archive PATH")?,
         bundle_dir: bundle_dir.context("external-flagship-check requires --bundle-dir PATH")?,
         proof_dir: proof_dir.context("external-flagship-check requires --proof-dir PATH")?,
-        owner: owner.context("external-flagship-check requires --owner OWNER")?,
-        repository: repository.context("external-flagship-check requires --repository URL")?,
+        proof_bundle: proof_bundle
+            .context("external-flagship-check requires --proof-bundle PATH")?,
+        submission: submission.context("external-flagship-check requires --submission PATH")?,
+        evidence_repo_dir: evidence_repo_dir
+            .context("external-flagship-check requires --evidence-repo-dir PATH")?,
         revision: revision.context("external-flagship-check requires --revision SHA")?,
-        measured_on: measured_on.context("external-flagship-check requires --measured-on DATE")?,
         output: output.context("external-flagship-check requires --output PATH")?,
     })
 }
@@ -3426,6 +3798,53 @@ fn write_pretty_json(path: &Path, value: &impl Serialize) -> anyhow::Result<()> 
 mod tests {
     use super::*;
 
+    fn valid_external_submission_candidate() -> ExternalFlagshipSubmissionCandidate {
+        ExternalFlagshipSubmissionCandidate {
+            kind: EXTERNAL_FLAGSHIP_SUBMISSION_KIND.to_string(),
+            schema_version: EXTERNAL_FLAGSHIP_SUBMISSION_SCHEMA_VERSION,
+            candidate_status: EXTERNAL_FLAGSHIP_CANDIDATE_STATUS.to_string(),
+            author_assistance: false,
+            evidence_repository: SubmissionRepository {
+                owner: "external-owner".to_string(),
+                url: "https://github.com/external-owner/rne-reproduction".to_string(),
+            },
+            measurement: SubmissionMeasurement {
+                measured_on: "2026-08-27".to_string(),
+                machine_label: "community-lab-desktop-a".to_string(),
+                operating_system: "windows".to_string(),
+                architecture: "x86_64".to_string(),
+                release_target: "x86_64-pc-windows-msvc".to_string(),
+                elapsed_ms: 21_921,
+                target_ms: 15 * 60 * 1_000,
+            },
+            release_archive: SubmissionArtifact {
+                url: "https://example.invalid/rne-0.2.0-windows.zip".to_string(),
+                file_name: "rne-0.2.0-windows.zip".to_string(),
+                size_bytes: 7,
+                sha256: sha256_hex(b"archive"),
+            },
+            proof_bundle: SubmissionArtifact {
+                url: "https://example.invalid/proof.zip".to_string(),
+                file_name: "proof.zip".to_string(),
+                size_bytes: 5,
+                sha256: sha256_hex(b"proof"),
+            },
+            required_proof_paths: EXTERNAL_FLAGSHIP_REQUIRED_PROOF_PATHS
+                .map(str::to_string)
+                .to_vec(),
+            reproduction: SubmissionReproduction {
+                commands: vec![
+                    "verify archive".to_string(),
+                    "extract archive".to_string(),
+                    "run proof".to_string(),
+                ],
+                exit_statuses: vec![0, 0, 0],
+                stdout_log_path: "logs/stdout.txt".to_string(),
+                stderr_log_path: "logs/stderr.txt".to_string(),
+            },
+        }
+    }
+
     #[test]
     fn release_target_is_bounded_and_cannot_escape() {
         assert!(validate_release_target("x86_64-unknown-linux-gnu").is_ok());
@@ -3783,6 +4202,172 @@ mod tests {
         ] {
             assert!(validate_external_machine_label(label).is_err());
         }
+    }
+
+    #[test]
+    fn completed_external_submission_is_acyclic_and_fail_closed() {
+        let candidate = valid_external_submission_candidate();
+        validate_external_submission_candidate(&candidate).expect("valid completed candidate");
+
+        let mut embedded_revision = serde_json::to_value(&candidate).expect("candidate JSON");
+        embedded_revision["evidence_repository"]["revision"] = serde_json::json!("0".repeat(40));
+        assert!(
+            serde_json::from_value::<ExternalFlagshipSubmissionCandidate>(embedded_revision)
+                .is_err()
+        );
+
+        let mut nonzero = candidate.clone();
+        nonzero.reproduction.exit_statuses[1] = 1;
+        assert!(validate_external_submission_candidate(&nonzero).is_err());
+
+        let mut self_referential_path = candidate;
+        self_referential_path.reproduction.stdout_log_path = "../candidate.json".to_string();
+        assert!(validate_external_submission_candidate(&self_referential_path).is_err());
+    }
+
+    #[test]
+    fn external_submission_checker_requires_separate_revision_and_artifacts() {
+        let revision = "0123456789abcdef0123456789abcdef01234567";
+        let mut arguments = vec![
+            "--archive",
+            "release.zip",
+            "--bundle-dir",
+            "bundle",
+            "--proof-dir",
+            "flagship-proof",
+            "--proof-bundle",
+            "proof.zip",
+            "--submission",
+            "candidate.json",
+            "--evidence-repo-dir",
+            "external-repo",
+            "--revision",
+            revision,
+            "--output",
+            "accepted.json",
+        ]
+        .into_iter()
+        .map(str::to_string);
+        let options = parse_external_flagship_options(&mut arguments).expect("complete options");
+        assert_eq!(options.revision, revision);
+        assert_eq!(options.proof_bundle, PathBuf::from("proof.zip"));
+        assert_eq!(options.submission, PathBuf::from("candidate.json"));
+        assert_eq!(options.evidence_repo_dir, PathBuf::from("external-repo"));
+
+        let mut legacy = vec!["--owner".to_string(), "external-owner".to_string()].into_iter();
+        assert!(parse_external_flagship_options(&mut legacy).is_err());
+    }
+
+    #[test]
+    fn external_submission_files_must_be_exact_committed_repository_bytes() {
+        let directory = tempfile::tempdir().expect("temporary external repository");
+        let root = directory.path();
+        let run_git = |args: &[&str]| {
+            let output = Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .output()
+                .expect("run git");
+            assert!(
+                output.status.success(),
+                "git {:?}: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        run_git(&["init"]);
+        run_git(&["config", "user.name", "External Operator"]);
+        run_git(&["config", "user.email", "external@example.invalid"]);
+        run_git(&[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/external-owner/rne-reproduction.git",
+        ]);
+        fs::write(root.join("candidate.json"), b"candidate\n").expect("candidate");
+        fs::create_dir(root.join("logs")).expect("logs");
+        fs::write(root.join("logs/stdout.txt"), b"stdout\n").expect("stdout");
+        fs::write(root.join("logs/stderr.txt"), b"stderr\n").expect("stderr");
+        run_git(&["add", "."]);
+        run_git(&["commit", "-m", "retain independent reproduction"]);
+        let revision = git_output(root, &["rev-parse", "HEAD"]).expect("revision");
+        validate_external_repository_checkout(
+            root,
+            "https://github.com/external-owner/rne-reproduction",
+            &revision,
+        )
+        .expect("exact repository checkout");
+        validate_committed_external_file(
+            root,
+            &root.join("candidate.json"),
+            "submission candidate",
+        )
+        .expect("exact candidate bytes");
+
+        fs::write(root.join("candidate.json"), b"tampered\n").expect("tamper candidate");
+        assert!(validate_external_repository_checkout(
+            root,
+            "https://github.com/external-owner/rne-reproduction",
+            &revision
+        )
+        .is_err());
+        assert!(validate_committed_external_file(
+            root,
+            &root.join("candidate.json"),
+            "submission candidate"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn submission_artifact_and_measurement_must_match_downloaded_bytes() {
+        let directory = tempfile::tempdir().expect("temporary submission");
+        let proof_bundle = directory.path().join("proof.zip");
+        fs::write(&proof_bundle, b"proof").expect("proof bundle");
+        let candidate = valid_external_submission_candidate();
+        validate_submission_artifact(&candidate.proof_bundle, &proof_bundle, "proof bundle")
+            .expect("matching proof bundle");
+
+        let mut wrong_digest = candidate.proof_bundle.clone();
+        wrong_digest.sha256 = "0".repeat(64);
+        assert!(
+            validate_submission_artifact(&wrong_digest, &proof_bundle, "proof bundle").is_err()
+        );
+
+        let timing = TimeToProofReport {
+            kind: rne_asset_cli::TIME_TO_PROOF_REPORT_KIND.to_string(),
+            schema_version: rne_asset_cli::TIME_TO_PROOF_REPORT_SCHEMA_VERSION,
+            status: "passed".to_string(),
+            task_id: "rne.flagship.mobile_lift_shared_aisle.v1".to_string(),
+            machine_label: candidate.measurement.machine_label.clone(),
+            operating_system: candidate.measurement.operating_system.clone(),
+            architecture: candidate.measurement.architecture.clone(),
+            measurement_scope: "proof_process_start_to_verified_capsule_and_bound_report"
+                .to_string(),
+            elapsed_ms: candidate.measurement.elapsed_ms,
+            target_ms: candidate.measurement.target_ms,
+            within_target: true,
+            installed_proof_report: MemberDigest {
+                path: "installed-proof-report.json".to_string(),
+                size_bytes: 1,
+                sha256: "0".repeat(64),
+            },
+            failure_capsule_manifest: MemberDigest {
+                path: "failure-capsule/capsule.json".to_string(),
+                size_bytes: 1,
+                sha256: "0".repeat(64),
+            },
+        };
+        validate_submission_measurement(&candidate.measurement, &timing, "x86_64-pc-windows-msvc")
+            .expect("matching measurement");
+        let mut wrong_timing = timing;
+        wrong_timing.elapsed_ms += 1;
+        assert!(validate_submission_measurement(
+            &candidate.measurement,
+            &wrong_timing,
+            "x86_64-pc-windows-msvc"
+        )
+        .is_err());
     }
 
     #[test]

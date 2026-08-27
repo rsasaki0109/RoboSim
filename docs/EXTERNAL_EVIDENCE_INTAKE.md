@@ -80,23 +80,28 @@ report (PowerShell line continuations are shown):
 cargo run --locked -p xtask -- external-flagship-check `
   --archive path/to/rne-RELEASE-TARGET.zip `
   --bundle-dir path/to/rne-RELEASE-TARGET `
-  --proof-dir path/to/rne-RELEASE-TARGET/flagship-proof `
-  --owner external-github-owner `
-  --repository https://github.com/external-github-owner/rne-reproduction `
+  --proof-dir path/to/extracted-proof-bundle/flagship-proof `
+  --proof-bundle path/to/independent-proof-bundle.zip `
+  --evidence-repo-dir path/to/clean-external-evidence-repository `
+  --submission path/to/external-flagship-submission.json `
   --revision 0123456789abcdef0123456789abcdef01234567 `
-  --measured-on YYYY-MM-DD `
   --output external-flagship-reproduction.json
 ```
 
 The operator never needs an RNE source checkout, and maintainer verification
 does not retroactively provide author assistance to the independent run. The
 checker fails closed unless the release is clean, tagged, reproducible,
-and internally checksum-consistent. It records the release source revision and
-rehashes the archive, checksum manifest, and packaged producer executable,
+and internally checksum-consistent. Candidate schema v2 keeps the repository
+revision outside the committed JSON and the candidate outside the proof
+bundle, avoiding both content-hash cycles. The checker records the separately
+supplied evidence revision and rehashes the candidate, proof bundle, release
+archive, logs, checksum manifest, and packaged producer executable,
+requires the evidence checkout's clean `HEAD`, origin URL, and committed
+candidate/log bytes to match that revision,
 verifies the proof report and Failure Capsule, requires
 Rapier and bundled MuJoCo success plus intentional failure, checks all named SI
 tolerances and the exact first violation, matches the timing platform to the
-archive, and enforces the 15-minute limit. The emitted schema-v1 report binds
+archive, and enforces the 15-minute limit. The emitted schema-v2 report binds
 the independently owned repository revision and all qualifying artifacts.
 `author_assistance=false` is mandatory.
 

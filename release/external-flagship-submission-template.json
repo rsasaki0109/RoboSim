@@ -1,12 +1,11 @@
 {
   "kind": "rne_external_flagship_submission_candidate",
-  "schema_version": 1,
+  "schema_version": 2,
   "candidate_status": "not_accepted_pending_maintainer_verification",
   "author_assistance": false,
   "evidence_repository": {
     "owner": null,
-    "url": null,
-    "revision": null
+    "url": null
   },
   "measurement": {
     "measured_on": null,
