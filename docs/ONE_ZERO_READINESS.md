@@ -265,6 +265,9 @@ workflows. `install_report` is the strict
 `rne_archive_install_rehearsal` schema-v2 wrapper: it fixes the archive file,
 size, digest, extracted bundle root, release report, checksum manifest,
 hardware-named time-to-proof report, and schema-v7 twelve-check rehearsal.
+The installed proof must also retain schema-v1 full-bundle verification inside
+its schema-v4 proof and schema-v2 timing chain; a process-only timing artifact
+does not satisfy the current gate.
 `attestation` is the exact JSON Sigstore bundle
 emitted by `actions/attest@v4`; both verification fields are strict
 `rne_github_attestation_verification` schema-v1 receipts, not raw CLI output.

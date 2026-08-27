@@ -6,6 +6,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Make the installed flagship a genuinely one-command verified path. The
+  packaged runner now rejects any missing, extra, modified, duplicate,
+  escaping, or symlinked bundle member before proof execution and binds the
+  fresh bundle-verification report into installed proof schema v4,
+  time-to-proof schema v2, and the Failure Capsule.
+
 - Publish platform-specific attestation bundles and archive-install rehearsal
   reports as durable tagged-release assets, together with a release-level
   `SHA256SUMS`, so independent reproduction evidence survives Actions artifact

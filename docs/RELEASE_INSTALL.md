@@ -98,7 +98,7 @@ provenance or artifact identities.
 
 ```bash
 ./bin/rne-flagship-proof flagship-proof --cross-backend \
-  --measure-on "lab-workstation-a"
+  --measure-on "lab-workstation-a" --verify-installed-bundle .
 ./bin/rne-asset run assets/runs/mesh_diff_drive.rne.run.toml \
   --replay-out robot.rne-replay
 ./bin/rne-asset replay robot.rne-replay
@@ -165,8 +165,12 @@ provenance or artifact identities.
 ./bin/rne-compatibility --root . --output compatibility-fixture-report.json
 ```
 
-The flagship command writes `flagship-proof/installed-proof-report.json`. Its
-schema-v3 report requires both packaged physics paths, binds the exact packaged
+The flagship command first verifies the exact internal `SHA256SUMS` member
+graph, rejecting missing, extra, modified, duplicate, escaping, or symlinked
+entries before creating output. It writes that result as
+`flagship-proof/installed-bundle-verification.json` and binds it into the
+Failure Capsule. Its `installed-proof-report.json` schema-v4 report requires
+both packaged physics paths, binds the exact packaged
 producer executable, and indexes the generated TaskSpec, Rapier/MuJoCo success
 and failure reports, both verified failure replays, unit-bearing cross-backend
 comparison, browser inspector, workflow report, and verified capsule manifest
@@ -177,10 +181,10 @@ comparison, and a sequence-128 transport disconnect. Inspect
 `recorded-shadow-proof.json`; its sessions, reports, controller, calibration,
 requirements, and trace hashes are part of the verified Failure Capsule.
 When `--measure-on MACHINE` is present, the same command also writes
-`time-to-proof-report.json`. This timing-only schema-v1 artifact records the
+`time-to-proof-report.json`. This timing-only schema-v2 artifact records the
 operator-supplied machine label, OS, architecture, elapsed milliseconds from
-process start through the verified capsule and bound proof report, the fixed
-900,000 ms target, and SHA-256 identities for the two proof roots. Use a stable,
+full installed-bundle verification through the verified capsule and bound proof report, the fixed
+900,000 ms target, and SHA-256 identities for the verification plus two proof roots. Use a stable,
 specific inventory label; CI labels are rehearsal diagnostics and do not count
 as independent external-user measurements.
 

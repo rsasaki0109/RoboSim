@@ -263,9 +263,10 @@ Work proceeds in this order, one mergeable slice at a time:
    trigger now matches release `0.2.0`, and both packaging entry points reject
    future workflow/version drift before building an archive.
 5. **Measurement path delivered; independent run pending:** use
-   `rne-flagship-proof OUTPUT --cross-backend --measure-on MACHINE` to retain a
-   schema-v1, proof-bound timing artifact, then collect it on a named external
-   reference machine.
+   `rne-flagship-proof OUTPUT --cross-backend --measure-on MACHINE
+   --verify-installed-bundle .` to retain a schema-v2 timing artifact covering
+   exact installed-payload verification through the bound proof, then collect
+   it on a named external reference machine.
 6. **Delivered:** ship the MuJoCo-enabled proof runner and pinned runtime in
    both native archives and require the cross-backend result in extracted
    release rehearsal.
@@ -290,6 +291,14 @@ release exit gate rejects removal, publication before checksumming, or an
 eight-file partial set. This makes the next `v0.2.0` tag durable enough for the
 independent operator and the later 183-day readiness audit; it does not create
 the tag or claim an external run occurred.
+
+The installed runner now closes the remaining one-command ambiguity. Before it
+creates output, it verifies the internal `SHA256SUMS` against the exact regular-
+file graph and rejects extra files, symlinks, path escapes, duplicates, missing
+members, and digest drift. The resulting schema-v1 verification report is bound
+into installed-proof schema v4, time-to-proof schema v2, and the Failure Capsule;
+the 15-minute interval therefore includes verification instead of beginning
+after an unmeasured platform-specific checksum step.
 
 Each slice includes tests and a short documentation update. No unrelated demo
 or subsystem expansion enters these slices.

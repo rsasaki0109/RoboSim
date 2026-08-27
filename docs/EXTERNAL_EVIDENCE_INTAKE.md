@@ -63,7 +63,7 @@ it, and run from the extracted bundle root:
 
 ```bash
 ./bin/rne-flagship-proof flagship-proof --cross-backend \
-  --measure-on "community-lab-desktop-a"
+  --measure-on "community-lab-desktop-a" --verify-installed-bundle .
 ```
 
 On Windows use `bin\\rne-flagship-proof.exe`. The complete archive-only operator

@@ -44,6 +44,11 @@ trajectory divergence from another 512 samples, injects a sequence-128
 disconnect, suppresses every action, and rejects any actuator write. These
 artifacts are semantically replayed when the bundled Failure Capsule is
 verified; they are not counted as physical-device evidence.
+Before that proof starts, the packaged runner independently verifies the exact
+internal `SHA256SUMS` regular-file graph. Its schema-v1 verification report is
+freshly recomputed by the rehearsal and bound into installed-proof schema v4,
+time-to-proof schema v2, and the Failure Capsule; the measured interval includes
+this verification.
 The robot-replay check also uses the installed `rne-asset` binary to create and
 verify a content-addressed Failure Capsule from a retained failed behavior
 replay and TaskSpec. This proves the external-project evidence authoring path

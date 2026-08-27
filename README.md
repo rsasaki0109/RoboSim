@@ -192,7 +192,7 @@ The native release archive includes a one-command installed product proof:
 
 ```bash
 ./bin/rne-flagship-proof flagship-proof --cross-backend \
-  --measure-on "lab-workstation-a"
+  --measure-on "lab-workstation-a" --verify-installed-bundle .
 ```
 
 It runs the unchanged indoor mobile-manipulation TaskSpec and controller through
@@ -201,12 +201,15 @@ deterministic perception blackout. It compares named SI-unit tolerances and the
 first violation, verifies both replays and the Failure Capsule, and writes a
 self-contained browser inspector plus a SHA-256-bound
 `installed-proof-report.json`. The report also binds the exact packaged
-`rne-flagship-proof` executable that produced it. No source checkout, renderer,
+`rne-flagship-proof` executable that produced it. Before creating output, the
+same command verifies the exact regular-file graph declared by the extracted
+bundle's `SHA256SUMS` and binds that result into the proof and Failure Capsule.
+No source checkout, renderer,
 ROS 2, separate MuJoCo installation, or network connection is required after
 extraction.
 The explicit hardware label also writes a separate
-`time-to-proof-report.json`; it measures command start through verified capsule
-and bound proof report against the 15-minute target without contaminating
+`time-to-proof-report.json`; it measures full installed-bundle verification
+through verified capsule and bound proof report against the 15-minute target without contaminating
 deterministic correctness evidence.
 An independent operator can bind those outputs to the exact clean tagged
 archive with `xtask external-flagship-check`; CI and placeholder machine labels

@@ -472,6 +472,12 @@ semantically through Failure Capsule verification. Schema v2 remains valid for
 its original simulation-only installed proof but cannot qualify for the current
 recorded/shadow gate.
 
+Installed flagship proof report schema v4 additionally requires a full
+extracted-bundle verification report. That report binds the canonical internal
+`SHA256SUMS` and `release-report.json` after rejecting missing, extra, modified,
+duplicate, escaping, or symlinked members. A fresh maintainer check recomputes
+the complete member graph rather than trusting the retained `passed` value.
+
 The installed flagship report remains the timing-free index emitted by that
 runner. It fixes the task and outcome identities, binds the exact packaged
 producer executable, and binds the TaskSpec,
@@ -482,13 +488,14 @@ artifact. Schema v1 remains evidence for its original artifact set but cannot
 qualify as archive-bound external reproduction because it does not identify the
 executable that produced it.
 
-Time-to-proof report schema v1 is that separate artifact. It records a bounded
-operator-supplied machine label, OS and architecture, command elapsed
-milliseconds, the 900,000 ms acceptance target, and content identities for the
-installed proof report and verified capsule manifest. The report is deliberately
+Time-to-proof report schema v2 is that separate artifact. It records a bounded
+operator-supplied machine label, OS and architecture, elapsed milliseconds from
+full bundle verification, the 900,000 ms acceptance target, and content identities for the
+bundle verification, installed proof report, and verified capsule manifest. The report is deliberately
 excluded from deterministic hashes. CI-generated measurements prove the
 packaged measurement path only; independent acceptance still requires an
-external user and named reference hardware.
+external user and named reference hardware. Schema v1 remains historical
+process-only timing evidence and cannot satisfy the current full installed path.
 
 External flagship reproduction report schema v1 binds one independently owned
 public repository revision to the exact clean tagged release archive, source

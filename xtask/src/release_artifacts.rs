@@ -553,6 +553,8 @@ struct InstalledFlagshipProofReport {
     capsule_verified: bool,
     recorded_shadow_status: Option<String>,
     recorded_shadow_case_count: usize,
+    installed_bundle_verified: bool,
+    bundle_verification_report: Option<MemberDigest>,
     producer_executable: MemberDigest,
     artifacts: Vec<MemberDigest>,
 }
@@ -612,6 +614,7 @@ struct TimeToProofReport {
     elapsed_ms: u64,
     target_ms: u64,
     within_target: bool,
+    installed_bundle_verification: MemberDigest,
     installed_proof_report: MemberDigest,
     failure_capsule_manifest: MemberDigest,
 }
@@ -2582,6 +2585,8 @@ fn run_install_rehearsal(
             OsString::from("--cross-backend"),
             OsString::from("--measure-on"),
             OsString::from(&flagship_machine_label),
+            OsString::from("--verify-installed-bundle"),
+            bundle_dir.to_path_buf().into_os_string(),
         ],
         &[],
     ) && validate_installed_flagship_proof(&flagship_output, &flagship_proof)
@@ -3185,7 +3190,9 @@ fn validate_installed_flagship_proof(
             && report.first_violation_step > 0
             && report.capsule_verified
             && report.recorded_shadow_status.as_deref() == Some("passed")
-            && report.recorded_shadow_case_count == 3,
+            && report.recorded_shadow_case_count == 3
+            && report.installed_bundle_verified
+            && report.bundle_verification_report.is_some(),
         "installed flagship proof omitted required success/failure evidence"
     );
     let producer_name = producer
@@ -3212,6 +3219,7 @@ fn validate_installed_flagship_proof(
         "failure-minimized.rne-replay",
         "failure.behavior-report.json",
         "flagship.task.json",
+        "installed-bundle-verification.json",
         "mujoco-failure.behavior-report.json",
         "mujoco-failure.rne-replay",
         "mujoco-success.behavior-report.json",
@@ -3243,8 +3251,42 @@ fn validate_installed_flagship_proof(
     for artifact in &report.artifacts {
         validate_proof_member(root, artifact, &artifact.path)?;
     }
+    let bundle_verification = report
+        .bundle_verification_report
+        .as_ref()
+        .context("installed flagship proof omitted bundle verification identity")?;
+    let retained = report
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.path == "installed-bundle-verification.json")
+        .context("installed flagship proof omitted bundle verification artifact")?;
+    anyhow::ensure!(
+        bundle_verification == retained,
+        "installed flagship proof bundle-verification identities differ"
+    );
+    validate_installed_bundle_verification(root, producer)?;
     validate_installed_recorded_shadow_proof(root)?;
     Ok(report)
+}
+
+fn validate_installed_bundle_verification(root: &Path, producer: &Path) -> anyhow::Result<()> {
+    let report_path = root.join("installed-bundle-verification.json");
+    let retained: rne_asset_cli::installed_bundle::InstalledBundleVerificationReport =
+        serde_json::from_slice(
+            &fs::read(&report_path).with_context(|| format!("read {}", report_path.display()))?,
+        )
+        .with_context(|| format!("parse {}", report_path.display()))?;
+    let bundle_root = producer
+        .parent()
+        .and_then(Path::parent)
+        .context("installed flagship producer is not inside a bundle bin directory")?;
+    let fresh = rne_asset_cli::installed_bundle::verify(bundle_root)
+        .context("reverify installed release bundle from retained proof")?;
+    anyhow::ensure!(
+        retained == fresh,
+        "retained installed-bundle verification differs from a fresh full verification"
+    );
+    Ok(())
 }
 
 fn validate_installed_recorded_shadow_proof(root: &Path) -> anyhow::Result<()> {
@@ -3344,9 +3386,14 @@ fn validate_time_to_proof_report(root: &Path, expected_machine: &str) -> anyhow:
             && !report.operating_system.is_empty()
             && !report.architecture.is_empty()
             && report.measurement_scope
-                == "proof_process_start_to_verified_capsule_and_bound_report",
+                == "verified_installed_bundle_to_verified_capsule_and_bound_report",
         "time-to-proof measurement identity does not match the installed rehearsal"
     );
+    validate_proof_member(
+        root,
+        &report.installed_bundle_verification,
+        "installed-bundle-verification.json",
+    )?;
     validate_proof_member(
         root,
         &report.installed_proof_report,
@@ -3994,12 +4041,30 @@ mod tests {
     #[test]
     fn installed_flagship_proof_rehashes_every_declared_artifact() {
         let directory = tempfile::tempdir().expect("temporary proof");
+        let bundle_root = directory.path().join("rne-0.2.0-test-target");
+        fs::create_dir_all(bundle_root.join("bin")).expect("bundle bin");
+        fs::write(bundle_root.join("release-report.json"), b"release\n").expect("release report");
+        let producer = bundle_root.join("bin").join(if cfg!(windows) {
+            "rne-flagship-proof.exe"
+        } else {
+            "rne-flagship-proof"
+        });
+        fs::write(&producer, b"producer").expect("producer");
+        write_sha256_manifest(&bundle_root).expect("bundle manifest");
+        let verification = rne_asset_cli::installed_bundle::verify(&bundle_root)
+            .expect("installed bundle verification");
+        write_pretty_json(
+            &directory.path().join("installed-bundle-verification.json"),
+            &verification,
+        )
+        .expect("bundle verification report");
         let paths = [
             "cross-backend-report.json",
             "failure-capsule/capsule.json",
             "failure-minimized.rne-replay",
             "failure.behavior-report.json",
             "flagship.task.json",
+            "installed-bundle-verification.json",
             "mujoco-failure.behavior-report.json",
             "mujoco-failure.rne-replay",
             "mujoco-success.behavior-report.json",
@@ -4020,12 +4085,14 @@ mod tests {
             "success.behavior-report.json",
             "workflow-report.json",
         ];
-        let artifacts = paths
+        let artifacts: Vec<MemberDigest> = paths
             .into_iter()
             .map(|relative| {
                 let path = directory.path().join(relative);
                 fs::create_dir_all(path.parent().unwrap()).expect("artifact parent");
-                let bytes = if relative == "recorded-shadow-proof.json" {
+                let bytes = if relative == "installed-bundle-verification.json" {
+                    fs::read(&path).expect("bundle verification report")
+                } else if relative == "recorded-shadow-proof.json" {
                     serde_json::to_vec(&serde_json::json!({
                         "kind": "rne_installed_recorded_shadow_proof",
                         "schema_version": 1,
@@ -4088,6 +4155,11 @@ mod tests {
             capsule_verified: true,
             recorded_shadow_status: Some("passed".to_string()),
             recorded_shadow_case_count: 3,
+            installed_bundle_verified: true,
+            bundle_verification_report: artifacts
+                .iter()
+                .find(|artifact| artifact.path == "installed-bundle-verification.json")
+                .cloned(),
             producer_executable: MemberDigest {
                 path: if cfg!(windows) {
                     "bin/rne-flagship-proof.exe"
@@ -4100,12 +4172,6 @@ mod tests {
             },
             artifacts,
         };
-        let producer = directory.path().join(if cfg!(windows) {
-            "rne-flagship-proof.exe"
-        } else {
-            "rne-flagship-proof"
-        });
-        fs::write(&producer, b"producer").expect("producer");
         write_pretty_json(
             &directory.path().join("installed-proof-report.json"),
             &report,
@@ -4138,11 +4204,12 @@ mod tests {
             machine_label: "test-machine".to_string(),
             operating_system: "test-os".to_string(),
             architecture: "test-arch".to_string(),
-            measurement_scope: "proof_process_start_to_verified_capsule_and_bound_report"
+            measurement_scope: "verified_installed_bundle_to_verified_capsule_and_bound_report"
                 .to_string(),
             elapsed_ms: 12_345,
             target_ms: 15 * 60 * 1_000,
             within_target: true,
+            installed_bundle_verification: bound_member("installed-bundle-verification.json"),
             installed_proof_report: bound_member("installed-proof-report.json"),
             failure_capsule_manifest: bound_member("failure-capsule/capsule.json"),
         };
@@ -4354,11 +4421,16 @@ mod tests {
             machine_label: candidate.measurement.machine_label.clone(),
             operating_system: candidate.measurement.operating_system.clone(),
             architecture: candidate.measurement.architecture.clone(),
-            measurement_scope: "proof_process_start_to_verified_capsule_and_bound_report"
+            measurement_scope: "verified_installed_bundle_to_verified_capsule_and_bound_report"
                 .to_string(),
             elapsed_ms: candidate.measurement.elapsed_ms,
             target_ms: candidate.measurement.target_ms,
             within_target: true,
+            installed_bundle_verification: MemberDigest {
+                path: "installed-bundle-verification.json".to_string(),
+                size_bytes: 1,
+                sha256: "0".repeat(64),
+            },
             installed_proof_report: MemberDigest {
                 path: "installed-proof-report.json".to_string(),
                 size_bytes: 1,

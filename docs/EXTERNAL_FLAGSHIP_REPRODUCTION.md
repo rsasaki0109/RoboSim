@@ -34,20 +34,18 @@ Extract without flattening the top-level directory and change into that
 directory. On Linux:
 
 ```bash
-sha256sum --check SHA256SUMS
 ./bin/rne-flagship-proof flagship-proof --cross-backend \
-  --measure-on "community-lab-desktop-a"
+  --measure-on "community-lab-desktop-a" --verify-installed-bundle .
 test -f flagship-proof/installed-proof-report.json
 test -f flagship-proof/time-to-proof-report.json
 test -f flagship-proof/failure-capsule/capsule.json
 ```
 
-On Windows, verify every `SHA256SUMS` entry with
-`Get-FileHash -Algorithm SHA256`, then run:
+On Windows, run the same fail-closed bundle verification and proof path:
 
 ```powershell
 .\bin\rne-flagship-proof.exe flagship-proof --cross-backend `
-  --measure-on "community-lab-desktop-a"
+  --measure-on "community-lab-desktop-a" --verify-installed-bundle .
 Test-Path flagship-proof\installed-proof-report.json
 Test-Path flagship-proof\time-to-proof-report.json
 Test-Path flagship-proof\failure-capsule\capsule.json
@@ -56,6 +54,13 @@ Test-Path flagship-proof\failure-capsule\capsule.json
 All commands must exit successfully. Preserve stdout, stderr, every exact
 command, its exit status, and elapsed output in files under the evidence
 repository. Do not edit anything under `flagship-proof`.
+
+`--verify-installed-bundle .` runs before output creation. It rejects missing,
+extra, modified, duplicate, escaping, or symlinked members against the internal
+`SHA256SUMS`, writes `installed-bundle-verification.json`, and includes that
+report in both the installed proof and Failure Capsule. The 15-minute timer now
+covers this complete verification rather than starting after a separate manual
+checksum command.
 
 ## 3. Retain and submit exact bytes
 

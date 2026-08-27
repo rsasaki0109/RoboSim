@@ -21,7 +21,7 @@ use rne_ai::{
     TerminationSpec,
 };
 use rne_asset_cli::{
-    failure_capsule, INSTALLED_FLAGSHIP_PROOF_REPORT_KIND,
+    failure_capsule, installed_bundle, INSTALLED_FLAGSHIP_PROOF_REPORT_KIND,
     INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION, TIME_TO_PROOF_REPORT_KIND,
     TIME_TO_PROOF_REPORT_SCHEMA_VERSION,
 };
@@ -701,6 +701,7 @@ struct Cli {
     output: PathBuf,
     cross_backend: bool,
     machine_label: Option<String>,
+    installed_bundle_root: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -723,6 +724,8 @@ struct InstalledFlagshipProofReport {
     capsule_verified: bool,
     recorded_shadow_status: Option<&'static str>,
     recorded_shadow_case_count: usize,
+    installed_bundle_verified: bool,
+    bundle_verification_report: Option<InstalledProofArtifact>,
     producer_executable: InstalledProofArtifact,
     artifacts: Vec<InstalledProofArtifact>,
 }
@@ -740,6 +743,7 @@ struct TimeToProofReport {
     elapsed_ms: u64,
     target_ms: u64,
     within_target: bool,
+    installed_bundle_verification: InstalledProofArtifact,
     installed_proof_report: InstalledProofArtifact,
     failure_capsule_manifest: InstalledProofArtifact,
 }
@@ -754,6 +758,12 @@ fn main() {
 
 fn run(started: Instant) -> Result<()> {
     let cli = parse_cli()?;
+    let bundle_verification = cli
+        .installed_bundle_root
+        .as_deref()
+        .map(installed_bundle::verify)
+        .transpose()
+        .context("installed release bundle verification failed")?;
     let output = cli.output;
     if output.exists() {
         bail!(
@@ -763,6 +773,9 @@ fn run(started: Instant) -> Result<()> {
     }
     fs::create_dir_all(&output)
         .with_context(|| format!("could not create {}", output.display()))?;
+    if let Some(report) = &bundle_verification {
+        write_pretty_json(&output.join("installed-bundle-verification.json"), report)?;
+    }
 
     let (clean_run, success_trace, rapier_recorded_trace) =
         run_clean_flagship(FlagshipPhysicsBackend::Rapier)?;
@@ -1003,8 +1016,8 @@ fn run(started: Instant) -> Result<()> {
             .map(|_| "cross-backend-report.json".to_string()),
     };
     write_pretty_json(&summary_path, &report)?;
-    create_and_verify_failure_capsule(&output, cli.cross_backend)?;
-    write_installed_proof_report(&output, &report)?;
+    create_and_verify_failure_capsule(&output, cli.cross_backend, bundle_verification.is_some())?;
+    write_installed_proof_report(&output, &report, bundle_verification.is_some())?;
     if let Some(machine_label) = cli.machine_label {
         write_time_to_proof_report(&output, machine_label, started.elapsed())?;
     }
@@ -1053,7 +1066,11 @@ fn installed_proof_producer() -> Result<InstalledProofArtifact> {
     })
 }
 
-fn write_installed_proof_report(output: &Path, workflow: &FlagshipWorkflowReport) -> Result<()> {
+fn write_installed_proof_report(
+    output: &Path,
+    workflow: &FlagshipWorkflowReport,
+    installed_bundle_verified: bool,
+) -> Result<()> {
     let mut paths = vec![
         "failure-capsule/capsule.json",
         "failure-minimized.rne-replay",
@@ -1074,6 +1091,9 @@ fn write_installed_proof_report(output: &Path, workflow: &FlagshipWorkflowReport
         #[cfg(feature = "mujoco")]
         paths.extend(recorded_proof::PROOF_ARTIFACTS);
     }
+    if installed_bundle_verified {
+        paths.push("installed-bundle-verification.json");
+    }
     paths.sort_unstable();
     let artifacts = paths
         .into_iter()
@@ -1091,6 +1111,10 @@ fn write_installed_proof_report(output: &Path, workflow: &FlagshipWorkflowReport
         capsule_verified: true,
         recorded_shadow_status: workflow.cross_backend_report.as_ref().map(|_| "passed"),
         recorded_shadow_case_count: usize::from(workflow.cross_backend_report.is_some()) * 3,
+        installed_bundle_verified,
+        bundle_verification_report: installed_bundle_verified
+            .then(|| installed_proof_artifact(output, "installed-bundle-verification.json"))
+            .transpose()?,
         producer_executable: installed_proof_producer()?,
         artifacts,
     };
@@ -1112,10 +1136,14 @@ fn write_time_to_proof_report(
         machine_label,
         operating_system: std::env::consts::OS,
         architecture: std::env::consts::ARCH,
-        measurement_scope: "proof_process_start_to_verified_capsule_and_bound_report",
+        measurement_scope: "verified_installed_bundle_to_verified_capsule_and_bound_report",
         elapsed_ms,
         target_ms: TIME_TO_PROOF_TARGET_MS,
         within_target,
+        installed_bundle_verification: installed_proof_artifact(
+            output,
+            "installed-bundle-verification.json",
+        )?,
         installed_proof_report: installed_proof_artifact(output, "installed-proof-report.json")?,
         failure_capsule_manifest: installed_proof_artifact(output, "failure-capsule/capsule.json")?,
     };
@@ -1127,7 +1155,11 @@ fn write_time_to_proof_report(
     Ok(())
 }
 
-fn create_and_verify_failure_capsule(output: &Path, cross_backend: bool) -> Result<()> {
+fn create_and_verify_failure_capsule(
+    output: &Path,
+    cross_backend: bool,
+    installed_bundle_verified: bool,
+) -> Result<()> {
     let mut create_args = vec![
         "create".to_string(),
         "--replay".to_string(),
@@ -1146,6 +1178,15 @@ fn create_and_verify_failure_capsule(output: &Path, cross_backend: bool) -> Resu
         create_args.extend([
             "--evidence".to_string(),
             output.join(evidence).display().to_string(),
+        ]);
+    }
+    if installed_bundle_verified {
+        create_args.extend([
+            "--evidence".to_string(),
+            output
+                .join("installed-bundle-verification.json")
+                .display()
+                .to_string(),
         ]);
     }
     if cross_backend {
@@ -1191,6 +1232,7 @@ fn parse_cli_args(mut arguments: impl Iterator<Item = String>) -> Result<Cli> {
     let mut output = None;
     let mut cross_backend = false;
     let mut machine_label = None;
+    let mut installed_bundle_root = None;
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--cross-backend" => cross_backend = true,
@@ -1207,6 +1249,15 @@ fn parse_cli_args(mut arguments: impl Iterator<Item = String>) -> Result<Cli> {
                     "--measure-on may be specified only once"
                 );
             }
+            "--verify-installed-bundle" => {
+                let root = arguments
+                    .next()
+                    .context("--verify-installed-bundle requires a bundle root")?;
+                anyhow::ensure!(
+                    installed_bundle_root.replace(PathBuf::from(root)).is_none(),
+                    "--verify-installed-bundle may be specified only once"
+                );
+            }
             other if other.starts_with('-') => {
                 bail!("unknown flagship argument `{other}`");
             }
@@ -1217,10 +1268,15 @@ fn parse_cli_args(mut arguments: impl Iterator<Item = String>) -> Result<Cli> {
             }
         }
     }
+    anyhow::ensure!(
+        machine_label.is_none() || installed_bundle_root.is_some(),
+        "--measure-on requires --verify-installed-bundle so the 15-minute measurement includes exact release-payload verification"
+    );
     Ok(Cli {
         output: output.unwrap_or_else(|| PathBuf::from("artifacts/flagship-validation")),
         cross_backend,
         machine_label,
+        installed_bundle_root,
     })
 }
 
@@ -1924,12 +1980,20 @@ mod tests {
                 "proof".to_string(),
                 "--measure-on".to_string(),
                 "lab-workstation-a".to_string(),
+                "--verify-installed-bundle".to_string(),
+                ".".to_string(),
             ]
             .into_iter(),
         )
         .expect("measurement CLI");
         assert_eq!(cli.output, PathBuf::from("proof"));
         assert_eq!(cli.machine_label.as_deref(), Some("lab-workstation-a"));
+        assert_eq!(cli.installed_bundle_root.as_deref(), Some(Path::new(".")));
+
+        assert!(parse_cli_args(
+            ["--measure-on".to_string(), "lab-workstation-a".to_string(),].into_iter(),
+        )
+        .is_err());
 
         assert!(parse_cli_args(["--measure-on".to_string()].into_iter()).is_err());
         assert!(parse_cli_args(["--measure-on".to_string(), " ".to_string()].into_iter()).is_err());
