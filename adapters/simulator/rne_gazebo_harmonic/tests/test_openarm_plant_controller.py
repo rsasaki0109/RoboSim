@@ -19,6 +19,10 @@ MANIFEST = (
     ROOT
     / "adapters/simulator/rne_gazebo_harmonic/openarm_plant_experiments.json"
 )
+MULTIJOINT_MANIFEST = (
+    ROOT
+    / "adapters/simulator/rne_gazebo_harmonic/openarm_multijoint_identification_experiments.json"
+)
 
 
 class OpenArmPlantControllerTests(unittest.TestCase):
@@ -74,6 +78,43 @@ class OpenArmPlantControllerTests(unittest.TestCase):
             all(
                 math.isclose(self.target(step)[self.joint5], 0.0, abs_tol=1e-15)
                 for step in range(3001, 3601)
+            )
+        )
+
+    def test_multijoint_fixture_excites_each_arm_joint_then_all_together(self) -> None:
+        manifest = MODULE.load_manifest(MULTIJOINT_MANIFEST)
+        controller = MODULE.compile_controller(manifest)
+        identified = manifest["analysis"]["identified_joint_order"]
+        order = manifest["action_joint_order"]
+        operating = manifest["operating_point_rad"]
+        self.assertEqual(controller["keyframes"][-1]["step"], 4380)
+        self.assertEqual(len(manifest["analysis"]["training_segments"]), 7)
+        for segment_id, joint in zip(
+            manifest["analysis"]["training_segments"], identified
+        ):
+            segment = next(
+                item for item in manifest["segments"] if item["id"] == segment_id
+            )
+            midpoint = (segment["start_step"] + segment["end_step"]) // 2
+            active = controller["keyframes"][midpoint]["joint_position_target_rad"]
+            changed = [
+                order[index]
+                for index, (value, center) in enumerate(zip(active, operating))
+                if not math.isclose(value, center, abs_tol=1e-12)
+            ]
+            self.assertEqual(changed, [joint])
+        validation = next(
+            item
+            for item in manifest["segments"]
+            if item["id"] == manifest["analysis"]["validation_segment"]
+        )
+        sample = controller["keyframes"][validation["start_step"] + 37][
+            "joint_position_target_rad"
+        ]
+        self.assertTrue(
+            all(
+                not math.isclose(sample[order.index(joint)], operating[order.index(joint)], abs_tol=1e-12)
+                for joint in identified
             )
         )
 

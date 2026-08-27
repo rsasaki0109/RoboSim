@@ -151,6 +151,19 @@ def segment_target(
                 + source["phase_rad"]
             )
         return target
+    if kind == "coupled_multisine":
+        for source in segment["sources"]:
+            index = order.index(source["joint"])
+            target[index] += sum(
+                amplitude
+                * math.sin(2.0 * math.pi * frequency * elapsed_s + phase)
+                for frequency, amplitude, phase in zip(
+                    source["frequencies_hz"],
+                    source["amplitudes_rad"],
+                    source["phases_rad"],
+                )
+            )
+        return target
     raise ValueError(f"unsupported plant experiment segment kind {kind!r}")
 
 

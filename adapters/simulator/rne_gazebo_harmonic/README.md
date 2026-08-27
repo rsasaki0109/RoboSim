@@ -465,6 +465,35 @@ cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-plant-lab
 ```
 
+## Identify all seven OpenArm joints in a held-out coupled mode
+
+The multijoint successor keeps the same TaskSpec, model, actuation contract,
+and three runners. It excites each arm joint in a separate 480-step multisine
+training region, then applies a 720-step simultaneous seven-input multisine that
+is never used for fitting. The report fits 21 full-rank models from typed
+position, velocity, and action data only; no model reads solver-private state.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_plant_controller.py \
+  --manifest adapters/simulator/rne_gazebo_harmonic/openarm_multijoint_identification_experiments.json \
+  --output artifacts/openarm-multijoint-identification/controller.json
+# Run the Rapier, MuJoCo, and Gazebo commands above with this controller and one
+# shared controller-actions.json, then build the held-out report:
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_multijoint_identification_report.py \
+  --trace-root artifacts/openarm-multijoint-identification \
+  --controller artifacts/openarm-multijoint-identification/controller.json \
+  --output artifacts/openarm-multijoint-identification
+```
+
+The fixed 149-check report passes on Rapier, native MuJoCo, and Gazebo. Every
+training design has rank `22/22`; minimum diagonal coherence is `0.99485`; the
+largest held-out one-step RMSE and cross-backend RMSE delta are approximately
+`0.0002073 rad`. Residual autocorrelation is gated directly unless residual
+RMSE is below the separately fixed `1e-8 rad` numerical-exactness floor. This
+preserves Gazebo's raw autocorrelation diagnostic instead of treating a
+`~1e-11 rad` residual as stochastic noise. All three intentional action-width
+failures remain localized at step 307.
+
 ## Compare PID and state-space control
 
 The controller lab consumes the retained Rapier ARX model without refitting,

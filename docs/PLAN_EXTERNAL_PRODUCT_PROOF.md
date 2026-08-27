@@ -490,13 +490,18 @@ actuator-authority envelope. The next slices are:
    `[0, 1, 2, 3, 4]` held frames, and proves the portable two/three-frame
    boundary at controller step 904 with safe target hold, frozen state,
    one-decision recovery, and zero realization delta;
-5. turn the joint-5 plant lab into per-joint and coupled operating-region
-   identification with uncertainty, coherence, residual, and held-out
-   prediction evidence;
-6. compare constrained PID and justified state-space control using identical
-   typed observations, limits, references, and perturbations;
-7. then advance camera/depth and metric 3DGS calibration, followed by lidar
-   only when a retained navigation task consumes it.
+5. **Complete:** the seven-joint successor uses isolated multisine training
+   regions and one simultaneous held-out coupled region on Rapier, MuJoCo, and
+   Gazebo. Its 21 typed position/velocity/action models are full rank and retain
+   uncertainty, coherence, residual diagnostics, coupled gain matrices, and
+   fixed 149-check evidence without validation refit;
+6. **Complete:** constrained PID and justified state-space control use identical
+   typed observations, limits, references, and perturbations in the retained
+   controller lab;
+7. use the new coupled operating region for the physically sourced,
+   dynamically sensitive inertia experiment, then advance camera/depth and
+   metric 3DGS calibration. Add lidar only when a retained navigation task
+   consumes it.
 
 Sensor dropout/recovery at the typed controller boundary, actuator realization
 diagnostics, payload robustness, and actuator-authority degradation are already
@@ -678,6 +683,18 @@ inside the fixed `0.005 rad` band in `0.20-0.233 s`, and holds IAE to
 report independently reproduces controller output, disturbance, and applied
 plant target for all 21,600 decisions with no realization mismatch.
 
+The multijoint identification successor now closes the next control-dynamics
+slice. Seven isolated 480-step multisine regions train 21 backend/output models;
+one simultaneous 720-step region is held out without refit. Rapier, native
+MuJoCo, and Gazebo all produce full-rank `22/22` typed position/velocity/action
+designs. Minimum diagonal coherence is `0.99485`, maximum validation RMSE and
+cross-backend RMSE delta are approximately `0.0002073 rad`, and the largest 95%
+prediction half-width is below `0.000562 rad`. The report retains raw residual
+autocorrelation and permits its numerical-exactness path only below the fixed
+`1e-8 rad` residual-RMSE floor. All 149 checks pass, and the three intentional
+action-width failures agree at step 307. The coupled region is now the required
+excitation basis for the next physically sourced inertia experiment.
+
 Slice 7 now has its first measured dimension. A fixed
 `[0.00, 0.03, 0.06, 0.09, 0.12] rad` actuator-target bias grid holds the
 state-feedback controller and every other contract constant. Rapier identifies
@@ -758,7 +775,7 @@ The boundary retains one age rejection, zero target and integral-state delta
  independent reconstruction has zero realization delta. Physical parameter
 sweeps, actuator-authority degradation, command delay, command slew-rate limits,
 command deadband, viscous damping, and regularized Coulomb friction are recorded
-below; inertia and transmission-efficiency boundaries remain open.
+below; a physically sourced, coupled-mode inertia boundary remains open.
 
 The first physical joint-loss dimension now separates URDF plant damping from
 actuator servo damping. Its predeclared `[0, 2.5, 5, 10, 20] N*m*s/rad` joint-5
@@ -790,8 +807,8 @@ the unchanged RMSE gate at the 2 N*m out-of-envelope point (`0.023701` and
 actuator-effort row stays within the 7 N*m limit. The browser report is
 `passed`; a step-3600 Rapier replay retains the first performance failure, and
 a verified 30-artifact Failure Capsule binds the three focused traces, inputs,
-hashes, diagnostics, and runner/report sources. Inertia and
-transmission-efficiency remain next.
+hashes, diagnostics, and runner/report sources. The transmission-efficiency
+boundary is complete; coupled-mode physical inertia remains next.
 
 The earlier exact-tick substep sweep is retained as negative evidence.
 `[1, 2, 5, 10]` Rapier physics steps per 16,666,667-tick control period produce

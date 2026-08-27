@@ -124,6 +124,26 @@ cargo run --locked -p xtask -- failure-capsule verify \
   docs/evidence/openarm-plant-lab
 ```
 
+## Seven-joint held-out MIMO identification
+
+The plant successor expands the isolated joint-5 proof into seven individual
+480-step multisine training regions and one 720-step simultaneous seven-input
+validation region. The shared 4,380-step controller and action trace run
+unchanged through Rapier, native MuJoCo, and Gazebo. Validation is held out:
+coefficients and uncertainty are computed only from the isolated regions.
+
+Each of the 21 typed position/velocity/action state regressions has full rank
+`22/22`. Minimum diagonal coherence is `0.99485`; maximum held-out one-step
+RMSE is `0.0002073 rad`; the largest cross-backend RMSE delta is also
+`0.0002073 rad`; and the largest 95% prediction half-width is below
+`0.000562 rad`. Rapier and MuJoCo satisfy the fixed residual-autocorrelation
+bound directly. Six Gazebo outputs use the separately fixed numerical-exactness
+path because their held-out residual RMSE is below `1e-8 rad`; their raw
+autocorrelation values remain serialized rather than being hidden. The browser
+report contains all fixed checks, per-joint residual evidence, uncertainty,
+and three seven-by-seven coupled-mode gain matrices. All backends reproduce the
+same intentional `action_width_mismatch` at step 307.
+
 ## PID versus state-space controller proof
 
 The controller successor uses the retained Rapier ARX(2,2) model as its nominal
