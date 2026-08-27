@@ -794,6 +794,26 @@ python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.p
   --output artifacts/openarm-sensor-quantization-robustness-lab/report
 ```
 
+## Sweep OpenArm joint-position sensor saturation
+
+The saturation successor retains the raw typed feedback and symmetrically
+clamps only the joint-5 position visible to the controller during steps 882
+through 941. The descending `[0.08, 0.06, 0.05, 0.04, 0.03] rad` range grid
+passes the fixed `0.05 rad` minimum and first fails at `0.04 rad` on Rapier,
+native MuJoCo, and Gazebo. The first failing case performs one real clamp at
+step 941 on
+each backend while all 60 controller decisions and every raw source remain
+available for independent reconstruction with zero realization delta.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_position_measurement_saturation \
+  --output artifacts/openarm-sensor-saturation-robustness-lab
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-saturation-robustness-lab \
+  --output artifacts/openarm-sensor-saturation-robustness-lab/report
+```
+
 ## Sweep the OpenArm actuator command-transport delay
 
 The fourth robustness dimension delays only right joint 5 after controller

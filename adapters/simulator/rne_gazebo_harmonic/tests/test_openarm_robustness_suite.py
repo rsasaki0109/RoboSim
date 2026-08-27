@@ -417,6 +417,46 @@ class OpenArmRobustnessSuiteTests(unittest.TestCase):
         self.assertEqual(visible[joint_index], -0.004)
         self.assertAlmostEqual(error[joint_index], -0.001)
 
+    def test_sensor_saturation_grid_clamps_controller_visible_position(self) -> None:
+        suite, controllers = MODULE.compile_robustness_suite(
+            COMPILER,
+            SCRIPT_DIR / "openarm_robustness_experiments.json",
+            ROOT / "docs/evidence/openarm-plant-lab/evidence/openarm-plant-lab-report.json",
+            SCRIPT_DIR / "openarm_plant_experiments.json",
+            SCRIPT_DIR / "openarm_right_pose_cycle.controller.json",
+            SCRIPT_DIR / "openarm_controller_requirements.json",
+            "joint_position_measurement_saturation",
+        )
+        self.assertEqual(
+            suite["dimension_id"], "joint_position_measurement_saturation"
+        )
+        self.assertEqual(
+            [
+                controller["measurement_fault_contract"][
+                    "saturation_limit_abs_rad"
+                ]
+                for controller in controllers.values()
+            ],
+            [0.08, 0.06, 0.05, 0.04, 0.03],
+        )
+        controller = controllers["sensor-saturation-040mrad"]
+        RUNNER.validate_measurement_fault(controller, 3600)
+        width = len(controller["action_joint_order"])
+        joint_index = controller["action_joint_order"].index("openarm_right_joint5")
+        raw = [0.0] * width
+        raw[joint_index] = 0.06
+        observation = {"joint_position_rad": raw.copy()}
+        contract = controller["measurement_fault_contract"]
+        sample_ticks = controller["observation_contract"]["sample_period_ticks"]
+        visible, error = RUNNER.apply_measurement_bias(
+            controller,
+            observation,
+            (contract["start_controller_step"] - 1) * sample_ticks,
+        )
+        self.assertEqual(observation["joint_position_rad"][joint_index], 0.06)
+        self.assertEqual(visible[joint_index], 0.04)
+        self.assertAlmostEqual(error[joint_index], -0.02)
+
     def test_command_rate_limit_uses_previous_applied_target_and_fixed_delta(self) -> None:
         suite, controllers = MODULE.compile_robustness_suite(
             COMPILER,

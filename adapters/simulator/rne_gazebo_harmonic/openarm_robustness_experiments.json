@@ -158,6 +158,20 @@
       "sensor_status": "nominal",
       "controller_visibility": "quantized_position_with_raw_sensor_retained",
       "application_order": "after_typed_feedback_availability_before_controller_law"
+    },
+    "joint_position_measurement_saturation": {
+      "kind": "joint_position_saturation_pulse_v1",
+      "classification": "measurement_range",
+      "unit": "rad",
+      "values": [0.08, 0.06, 0.05, 0.04, 0.03],
+      "severity_order": "descending_saturation_limit_abs_rad",
+      "joint": "openarm_right_joint5",
+      "start_controller_step": 882,
+      "end_controller_step": 941,
+      "saturation_rule": "symmetric_clamp_v1",
+      "sensor_status": "nominal",
+      "controller_visibility": "saturated_position_with_raw_sensor_retained",
+      "application_order": "after_typed_feedback_availability_before_controller_law"
     }
   },
   "evaluation": {
@@ -275,6 +289,16 @@
       "controller.sensor_quantization.maximum_controlled_joint_final_error_rad"
     ],
     "boundary_rule": "smallest_grid_value_with_any_failed_requirement",
+    "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
+  },
+  "saturation_evaluation": {
+    "requirement_ids": [
+      "controller.sensor.minimum_position_saturation_limit_abs_rad",
+      "controller.sensor.maximum_saturation_realization_delta_rad",
+      "controller.sensor_saturation.maximum_controlled_joint_rmse_rad",
+      "controller.sensor_saturation.maximum_controlled_joint_final_error_rad"
+    ],
+    "boundary_rule": "first_descending_grid_value_below_minimum_requirement",
     "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
   }
 }

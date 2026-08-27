@@ -679,6 +679,44 @@ def validate_measurement_fault(controller: dict[str, Any], action_count: int) ->
         ):
             raise ValueError("invalid OpenArm measurement-quantization contract")
         return
+    if contract.get("kind") == "joint_position_saturation_pulse_v1":
+        expected_keys = {
+            "kind",
+            "classification",
+            "joint",
+            "start_controller_step",
+            "end_controller_step",
+            "saturation_rule",
+            "sensor_status",
+            "controller_visibility",
+            "application_order",
+            "saturation_limit_abs_rad",
+        }
+        start = contract.get("start_controller_step")
+        end = contract.get("end_controller_step")
+        limit_rad = contract.get("saturation_limit_abs_rad")
+        if (
+            set(contract) != expected_keys
+            or contract.get("classification") != "measurement_range"
+            or contract.get("joint") not in controller["action_joint_order"]
+            or not isinstance(start, int)
+            or isinstance(start, bool)
+            or not isinstance(end, int)
+            or isinstance(end, bool)
+            or not 1 <= start <= end <= action_count
+            or not isinstance(limit_rad, (int, float))
+            or isinstance(limit_rad, bool)
+            or not math.isfinite(limit_rad)
+            or limit_rad <= 0.0
+            or contract.get("saturation_rule") != "symmetric_clamp_v1"
+            or contract.get("sensor_status") != "nominal"
+            or contract.get("controller_visibility")
+            != "saturated_position_with_raw_sensor_retained"
+            or contract.get("application_order")
+            != "after_typed_feedback_availability_before_controller_law"
+        ):
+            raise ValueError("invalid OpenArm measurement-saturation contract")
+        return
     expected_keys = {
         "kind",
         "classification",
@@ -827,6 +865,21 @@ def apply_measurement_bias(
                 bias[index] = quantized - raw
         if not all(math.isfinite(value) for value in positions):
             raise RuntimeError("measurement quantization produced a non-finite observation")
+        return positions, bias
+    if contract.get("kind") == "joint_position_saturation_pulse_v1":
+        sample_period_ticks = controller["observation_contract"]["sample_period_ticks"]
+        if consumed_at_ticks % sample_period_ticks != 0:
+            raise RuntimeError("measurement-saturation consumption time is off the control grid")
+        controller_step = consumed_at_ticks // sample_period_ticks + 1
+        if contract["start_controller_step"] <= controller_step <= contract["end_controller_step"]:
+            index = controller["action_joint_order"].index(contract["joint"])
+            raw = positions[index]
+            limit_rad = contract["saturation_limit_abs_rad"]
+            saturated = max(-limit_rad, min(limit_rad, raw))
+            positions[index] = saturated
+            bias[index] = saturated - raw
+        if not all(math.isfinite(value) for value in positions):
+            raise RuntimeError("measurement saturation produced a non-finite observation")
         return positions, bias
     expected_keys = {
         "kind",

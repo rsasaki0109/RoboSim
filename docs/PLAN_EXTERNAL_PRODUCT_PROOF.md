@@ -482,7 +482,12 @@ actuator-authority envelope. The next slices are:
    The joint-5 position-quantization successor now retains raw typed feedback,
    sweeps `[0, 0.001, 0.002, 0.004, 0.008] rad`, and proves a portable
    `0.002/0.004 rad` boundary at controller step 3241 with zero realization
-   delta. Sensor saturation and stuck-value envelopes remain;
+   delta. The joint-5 saturation successor retains raw feedback, sweeps the
+   descending `[0.08, 0.06, 0.05, 0.04, 0.03] rad` symmetric range, and proves
+   a portable `0.05/0.04 rad` boundary at the first observable clamp on
+   controller step 941 with one real
+   clamp per backend and zero realization delta. The stuck-value envelope
+   remains;
 5. turn the joint-5 plant lab into per-joint and coupled operating-region
    identification with uncertainty, coherence, residual, and held-out
    prediction evidence;
@@ -737,7 +742,12 @@ The boundary retains one age rejection, zero target and integral-state delta
  joint-5 controller-visible position over 60 decisions while retaining each raw
  typed source. All three backends pass `0.002 rad` and first fail `0.004 rad` at
  step 3241 with zero independently recomputed realization delta and green
- performance gates. Physical parameter
+ performance gates. The saturation successor then clamps only the same raw-
+ source-derived controller-visible joint-5 position over steps 882--941. Its
+ descending range grid passes `0.05 rad` and first fails `0.04 rad` at the
+ first observable clamp on step 941
+ on all three backends; the failing case contains one actual clamp per backend,
+ zero realization delta, and green tracking gates. Physical parameter
 sweeps, actuator-authority degradation, command delay, command slew-rate limits,
 command deadband, viscous damping, and regularized Coulomb friction are recorded
 below; inertia and transmission-efficiency boundaries remain open.

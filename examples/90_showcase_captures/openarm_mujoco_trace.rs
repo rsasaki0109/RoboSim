@@ -196,6 +196,18 @@ enum MeasurementFaultContract {
         controller_visibility: String,
         application_order: String,
     },
+    #[serde(rename = "joint_position_saturation_pulse_v1")]
+    JointPositionSaturationPulseV1 {
+        classification: String,
+        joint: String,
+        start_controller_step: u64,
+        end_controller_step: u64,
+        saturation_limit_abs_rad: f64,
+        saturation_rule: String,
+        sensor_status: JointFeedbackStatus,
+        controller_visibility: String,
+        application_order: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -1009,6 +1021,31 @@ fn validate(
                         == "after_typed_feedback_availability_before_controller_law",
                 "invalid OpenArm measurement-quantization contract"
             ),
+            MeasurementFaultContract::JointPositionSaturationPulseV1 {
+                classification,
+                joint,
+                start_controller_step,
+                end_controller_step,
+                saturation_limit_abs_rad,
+                saturation_rule,
+                sensor_status,
+                controller_visibility,
+                application_order,
+            } => anyhow::ensure!(
+                classification == "measurement_range"
+                    && controller.action_joint_order.contains(joint)
+                    && *start_controller_step >= 1
+                    && start_controller_step <= end_controller_step
+                    && *end_controller_step <= final_step
+                    && saturation_limit_abs_rad.is_finite()
+                    && *saturation_limit_abs_rad > 0.0
+                    && saturation_rule == "symmetric_clamp_v1"
+                    && *sensor_status == JointFeedbackStatus::Nominal
+                    && controller_visibility == "saturated_position_with_raw_sensor_retained"
+                    && application_order
+                        == "after_typed_feedback_availability_before_controller_law",
+                "invalid OpenArm measurement-saturation contract"
+            ),
         }
     }
     match (&controller.observation_contract, &controller.feedback_law) {
@@ -1439,6 +1476,7 @@ fn apply_measurement_bias(
         contract,
         MeasurementFaultContract::AdditiveJointPositionBiasPulseV1 { .. }
             | MeasurementFaultContract::JointPositionQuantizationPulseV1 { .. }
+            | MeasurementFaultContract::JointPositionSaturationPulseV1 { .. }
     ) {
         return Ok((positions, bias));
     }
@@ -1486,6 +1524,23 @@ fn apply_measurement_bias(
             let quantized = (raw / quantization_step_rad).round() * quantization_step_rad;
             positions[index] = quantized;
             bias[index] = quantized - raw;
+        }
+        MeasurementFaultContract::JointPositionSaturationPulseV1 {
+            joint,
+            start_controller_step,
+            end_controller_step,
+            saturation_limit_abs_rad,
+            ..
+        } if (*start_controller_step..=*end_controller_step).contains(&controller_step) => {
+            let index = controller
+                .action_joint_order
+                .iter()
+                .position(|name| name == joint)
+                .context("measurement-saturation joint is absent from the action order")?;
+            let raw = positions[index];
+            let saturated = raw.clamp(-saturation_limit_abs_rad, *saturation_limit_abs_rad);
+            positions[index] = saturated;
+            bias[index] = saturated - raw;
         }
         _ => {}
     }

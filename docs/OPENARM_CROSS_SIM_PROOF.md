@@ -283,6 +283,22 @@ source sequence with zero realization delta. Rapier joint-5 RMSE remains about
 `0.005315 rad`, so the first failure at step 3241 is the declared sensor
 resolution boundary rather than a closed-loop performance regression.
 
+## Joint-position saturation boundary
+
+The next measurement-range slice keeps the typed raw joint feedback intact and
+symmetrically clamps only the joint-5 value consumed by the controller during
+steps 882 through 941. Its descending
+`[0.08, 0.06, 0.05, 0.04, 0.03] rad` grid passes the fixed `0.05 rad` minimum
+range and first fails at `0.04 rad` on Rapier, native MuJoCo, and Gazebo.
+
+The `0.04 rad` case produces one actual saturated decision on every backend;
+the report reconstructs that clamp from the retained source sequence with zero
+realization delta. Joint-5 RMSE remains below `0.00532 rad` and final error
+below `4e-6 rad`, so the first observable clamp at step 941 names the range contract rather than a tracking
+failure. The browser report and minimum replay are emitted as
+`openarm-sensor-saturation-robustness-report.html` and
+`openarm-sensor-saturation-failure.rne-replay`.
+
 ## Physical payload fixture (in progress)
 
 The payload compiler generates content-addressed URDF variants for
