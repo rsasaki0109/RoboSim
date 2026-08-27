@@ -110,6 +110,10 @@ Use target `x86_64-pc-windows-msvc` on Windows. A tag build also passes
 `--expected-tag v0.2.0`; the bundle reports `reproducible = true` only when the
 worktree is clean and that exact tag identifies `HEAD`. `--allow-dirty` exists
 for local development only and is never used by release CI.
+Both `release-check` and `release-bundle` fail before packaging when the
+workflow's declared release version or tag-series trigger differs from the
+Rust release version. Missing pinned audit tools are reported by executable
+name and required version.
 
 After creating and extracting the deterministic archive, rerun:
 

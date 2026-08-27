@@ -220,8 +220,10 @@ Work proceeds in this order, one mergeable slice at a time:
    and capsule.
 3. **Delivered:** stage the minimum flagship assets and runner in the native
    release bundle.
-4. **Delivered in the rehearsal contract; tagged evidence pending:** add
-   Windows and Linux archive-install rehearsals for the proof command.
+4. **Delivered and version-guarded; tagged evidence pending:** add Windows and
+   Linux archive-install rehearsals for the proof command. The `v0.2.*` tag
+   trigger now matches release `0.2.0`, and both packaging entry points reject
+   future workflow/version drift before building an archive.
 5. **Measurement path delivered; independent run pending:** use
    `rne-flagship-proof OUTPUT --cross-backend --measure-on MACHINE` to retain a
    schema-v1, proof-bound timing artifact, then collect it on a named external

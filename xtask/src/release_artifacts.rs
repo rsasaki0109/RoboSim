@@ -937,6 +937,7 @@ pub(crate) fn release_bundle(args: &mut impl Iterator<Item = String>) -> anyhow:
     let root = workspace_root()?;
     let options = parse_bundle_options(args)?;
     release_readiness::enforce_release_promotion(&root)?;
+    validate_release_workflow_contract(&root)?;
     validate_release_target(&options.target)?;
     ensure_native_target(&root, &options.target)?;
 
@@ -3080,9 +3081,52 @@ fn ensure_success(label: &str, output: &Output) -> anyhow::Result<()> {
 }
 
 fn program_version(program: &str) -> anyhow::Result<String> {
-    let output = Command::new(program).arg("--version").output()?;
+    let output = Command::new(program)
+        .arg("--version")
+        .output()
+        .with_context(|| format!("run required release program {program} --version"))?;
     ensure_success(&format!("{program} --version"), &output)?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Ensures a release tag for the current version actually starts the release workflow.
+pub(crate) fn validate_release_workflow_contract(root: &Path) -> anyhow::Result<()> {
+    let path = root.join(".github/workflows/release.yml");
+    let text = fs::read_to_string(&path)
+        .with_context(|| format!("read release workflow {}", path.display()))?;
+    validate_release_workflow_text(&text)
+        .with_context(|| format!("validate release workflow {}", path.display()))
+}
+
+fn validate_release_workflow_text(text: &str) -> anyhow::Result<()> {
+    let parts = RELEASE_VERSION.split('.').collect::<Vec<_>>();
+    anyhow::ensure!(
+        parts.len() == 3 && parts.iter().all(|part| !part.is_empty()),
+        "release version must have exactly three non-empty components"
+    );
+
+    let expected_tag_trigger = format!("tags: [\"v{}.{}.*\"]", parts[0], parts[1]);
+    let tag_triggers = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("tags:"))
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        tag_triggers == [expected_tag_trigger.as_str()],
+        "release workflow tag trigger must be exactly `{expected_tag_trigger}`, found {tag_triggers:?}"
+    );
+
+    let expected_version = format!("RELEASE_VERSION: \"{RELEASE_VERSION}\"");
+    let declared_versions = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("RELEASE_VERSION:"))
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        declared_versions == [expected_version.as_str()],
+        "release workflow version must be exactly `{expected_version}`, found {declared_versions:?}"
+    );
+    Ok(())
 }
 
 fn git_worktree_is_clean(root: &Path) -> anyhow::Result<bool> {
@@ -4096,5 +4140,35 @@ mod tests {
         write_pretty_json(&install_path, &archive_install).unwrap();
         fs::write(&checksum_path, b"0").unwrap();
         assert!(validate(tag).is_err());
+    }
+
+    #[test]
+    fn release_workflow_accepts_the_current_release_series() {
+        let workflow = format!(
+            "on:\n  push:\n    tags: [\"v0.2.*\"]\nenv:\n  RELEASE_VERSION: \"{RELEASE_VERSION}\"\n"
+        );
+        validate_release_workflow_text(&workflow).unwrap();
+    }
+
+    #[test]
+    fn committed_release_workflow_matches_current_release() {
+        let root = workspace_root().expect("workspace root");
+        validate_release_workflow_contract(&root).unwrap();
+    }
+
+    #[test]
+    fn release_workflow_rejects_a_stale_tag_series() {
+        let workflow = format!(
+            "on:\n  push:\n    tags: [\"v0.1.*\"]\nenv:\n  RELEASE_VERSION: \"{RELEASE_VERSION}\"\n"
+        );
+        let error = validate_release_workflow_text(&workflow).unwrap_err();
+        assert!(error.to_string().contains("v0.2.*"));
+    }
+
+    #[test]
+    fn release_workflow_rejects_a_stale_declared_version() {
+        let workflow = "on:\n  push:\n    tags: [\"v0.2.*\"]\nenv:\n  RELEASE_VERSION: \"0.1.0\"\n";
+        let error = validate_release_workflow_text(workflow).unwrap_err();
+        assert!(error.to_string().contains(RELEASE_VERSION));
     }
 }

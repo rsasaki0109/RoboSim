@@ -223,6 +223,7 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
     );
     rne_compatibility_suite::verify_historical_source_history(&root)?;
     release_exit::validate_exit_matrix(&root)?;
+    release_artifacts::validate_release_workflow_contract(&root)?;
     external_intake::validate_committed(&root)?;
     release_readiness::validate_committed_manifest(&root)?;
     release_readiness::enforce_release_promotion(&root)?;
@@ -834,7 +835,14 @@ fn validate_deny_exceptions(
 }
 
 fn verify_tool_version(program: &str, expected: &str) -> anyhow::Result<()> {
-    let output = Command::new(program).arg("--version").output()?;
+    let output = Command::new(program)
+        .arg("--version")
+        .output()
+        .with_context(|| {
+            format!(
+                "run required release tool {program} --version (install pinned version {expected})"
+            )
+        })?;
     anyhow::ensure!(output.status.success(), "{program} --version failed");
     let version = format!(
         "{}{}",
@@ -854,7 +862,8 @@ fn run_supply_tool(root: &Path, program: &str, args: &[&str]) -> anyhow::Result<
     let status = Command::new(program)
         .current_dir(root)
         .args(args)
-        .status()?;
+        .status()
+        .with_context(|| format!("run required release tool {program}"))?;
     anyhow::ensure!(status.success(), "{program} failed with status {status}");
     Ok(())
 }
@@ -4167,8 +4176,8 @@ mod tests {
         frame_delta_ratio, hero_contact_sheet_filter, parse_seed_range, parse_smoke_partition,
         parse_utc_date_days, validate_blocker_registry, validate_contract_registry,
         validate_rust_api_baseline, validate_showcase_media_manifest,
-        validate_supply_chain_registry, RustApiBaselineRegistry, ShowcaseMediaEntry,
-        ShowcaseMediaManifest, SmokePartition, SupplyChainExceptionRegistry,
+        validate_supply_chain_registry, verify_tool_version, RustApiBaselineRegistry,
+        ShowcaseMediaEntry, ShowcaseMediaManifest, SmokePartition, SupplyChainExceptionRegistry,
         SUPPLY_CHAIN_POLICY_DATE,
     };
 
@@ -4182,6 +4191,15 @@ mod tests {
     #[test]
     fn default_behavior_ci_covers_ten_seeds() {
         assert_eq!(default_behavior_seeds(), (0_u64..10).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn missing_release_tool_error_names_the_program_and_version() {
+        let program = "rne-definitely-missing-release-tool";
+        let error = verify_tool_version(program, "9.8.7").unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains(program));
+        assert!(message.contains("9.8.7"));
     }
 
     #[test]
