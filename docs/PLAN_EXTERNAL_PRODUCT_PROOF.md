@@ -230,6 +230,14 @@ without executing the untrusted adapter. Readiness v7 requires that complete
 12-digest chain. This makes the next concrete adoption action an independent
 Gazebo adapter submission rather than another in-repository simulator demo.
 
+The in-repository Gazebo reference now also runs its ten-check process
+conformance in dedicated Ubuntu 22.04 CI against pinned Gazebo Harmonic 8.15.0
+packages. CI byte-compares the freshly generated report with the committed
+report, closing the earlier gap where a semantically changed adapter could
+leave a stale passing digest behind. This reference still does not count as
+independent adoption; it makes the kit presented to the external operator
+fresh and mechanically reproducible.
+
 ## Immediate implementation slices
 
 Work proceeds in this order, one mergeable slice at a time:

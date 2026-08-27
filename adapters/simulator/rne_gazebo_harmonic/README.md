@@ -19,7 +19,8 @@ payload unchanged.
 ## Requirements
 
 - Ubuntu 22.04 amd64
-- Gazebo Harmonic (`gz-sim8`)
+- Gazebo Harmonic (`gz-sim8-cli`, `libgz-sim8`, and
+  `libgz-sim8-plugins`)
 - `python3-gz-sim8`
 - a release build containing `rne-simulator-conformance`
 
@@ -308,6 +309,15 @@ target/debug/rne-simulator-conformance \
   --adapter-arg --task \
   --adapter-arg adapters/simulator/rne_gazebo_harmonic/openarm_right_joint_tracking.task.json
 ```
+
+`.github/workflows/gazebo.yml` runs this same command on Ubuntu 22.04 with
+the exact `gz-sim8-cli`, `libgz-sim8`, `libgz-sim8-plugins`, and
+`python3-gz-sim8` 8.15.0 Jammy packages. It requires the
+fresh report to be byte-identical to `conformance.report.json`; changing the
+adapter, TaskSpec, runtime manifest, world, robot model, adapter config, launch
+arguments, handshake, or any canonical verdict therefore fails CI until real
+Gazebo conformance is rerun and reviewed. The workflow uploads its freshly
+generated report even on failure.
 
 Gazebo Harmonic's DART backend currently reports that it cannot create the
 URDF gripper's mimic constraint. The adapter therefore commands and observes

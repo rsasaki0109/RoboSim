@@ -6,6 +6,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Requalify the OpenArm Gazebo adapter after its transmitted-effort change and
+  add dedicated Ubuntu 22.04 / Gazebo Harmonic 8.15.0 CI. The job reruns all
+  ten fixed-step simulator checks, byte-compares fresh and committed reports,
+  and uploads the generated evidence so adapter/report drift cannot remain
+  hidden behind an old passing verdict.
+
 - Prepare the `0.2.0` product-proof minor release. All workspace packages and
   exact internal dependency requirements now use `0.2.0`; release metadata,
   native archive/wheel names, provenance identities, Python API checks, and
