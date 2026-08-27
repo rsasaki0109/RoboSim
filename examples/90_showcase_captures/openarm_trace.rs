@@ -807,8 +807,8 @@ fn validate(
     );
     let width = controller.action_joint_order.len();
     anyhow::ensure!(
-        width == 9,
-        "OpenArm right-arm controller must expose nine joints"
+        valid_openarm_joint_scope(controller),
+        "OpenArm right-arm controller must expose the official seven arm joints with optional two-finger gripper"
     );
     match (&controller.observation_contract, &controller.feedback_law) {
         (None, None) => {}
@@ -1191,6 +1191,46 @@ fn validate(
         "RNE actuation configuration has invalid gains, effort, velocity, or transmission efficiency"
     );
     Ok(())
+}
+
+fn valid_openarm_joint_scope(controller: &ControllerSpec) -> bool {
+    const ARM_JOINTS: [&str; 7] = [
+        "openarm_right_joint1",
+        "openarm_right_joint2",
+        "openarm_right_joint3",
+        "openarm_right_joint4",
+        "openarm_right_joint5",
+        "openarm_right_joint6",
+        "openarm_right_joint7",
+    ];
+    const ARM_LINKS: [&str; 7] = [
+        "openarm_right_link1",
+        "openarm_right_link2",
+        "openarm_right_link3",
+        "openarm_right_link4",
+        "openarm_right_link5",
+        "openarm_right_link6",
+        "openarm_right_ee_base_link",
+    ];
+    let width = controller.action_joint_order.len();
+    (width == 7 || width == 9)
+        && controller
+            .action_joint_order
+            .iter()
+            .take(7)
+            .map(String::as_str)
+            .eq(ARM_JOINTS)
+        && controller
+            .rne_actuator_link_order
+            .iter()
+            .take(7)
+            .map(String::as_str)
+            .eq(ARM_LINKS)
+        && (width == 7
+            || (controller.action_joint_order[7..]
+                == ["openarm_right_finger_joint1", "openarm_right_finger_joint2"]
+                && controller.rne_actuator_link_order[7..]
+                    == ["openarm_right_ee_link1", "openarm_right_ee_link2"]))
 }
 
 fn validate_pid_law(law: &FeedbackLaw, width: usize) -> Result<()> {
@@ -3314,6 +3354,46 @@ mod tests {
                 .joint_position_target_rad
         );
         assert_eq!(controller.intentional_failure.inject_at_step, 307);
+    }
+
+    #[test]
+    fn official_arm_only_seven_joint_contract_is_accepted() {
+        let mut controller: ControllerSpec = serde_json::from_slice(
+            &fs::read(fixture(
+                "adapters/simulator/rne_gazebo_harmonic/openarm_right_pose_cycle.controller.json",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut task: TaskSpec = serde_json::from_slice(
+            &fs::read(fixture(
+                "adapters/simulator/rne_gazebo_harmonic/openarm_right_joint_tracking.task.json",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut actuation_config: ActuationConfig = serde_json::from_slice(
+            &fs::read(fixture(
+                "adapters/simulator/rne_gazebo_harmonic/openarm_right.rne_actuation.json",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        controller.action_joint_order.truncate(7);
+        controller.rne_actuator_link_order.truncate(7);
+        controller.observation_contract = None;
+        controller.feedback_law = None;
+        for keyframe in &mut controller.keyframes {
+            keyframe.joint_position_target_rad.truncate(7);
+        }
+        task.action.tensors[0].shape = vec![7];
+        task.observation.tensors[0].shape = vec![7];
+        task.observation.tensors[1].shape = vec![7];
+        actuation_config.joints.truncate(7);
+        validate(&controller, &task, &actuation_config).unwrap();
+
+        controller.action_joint_order[6] = "arbitrary_joint".to_string();
+        assert!(validate(&controller, &task, &actuation_config).is_err());
     }
 
     #[test]

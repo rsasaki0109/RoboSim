@@ -10,6 +10,13 @@ corresponding official collision meshes from
 - Upstream license: Apache-2.0 (`LICENSE.openarm_description`)
 - Source URDF: `assets/robot/openarm_v2.0/urdf/example/v2.urdf`
 
+The exact upstream `right_arm.yaml` and
+`right_arm_with_pinch_gripper.yaml` product presets are retained under
+`upstream/`. They define a physically realizable configuration pair: the same
+seven-axis nominal arm without an end effector, and that arm with the official
+pinch gripper enabled. RNE uses this pair for coupled-mode inertia evidence;
+it does not manufacture a link-inertia multiplier.
+
 RNE's checked-in derivative removes the ROS 2 control-only XML blocks and
 splits the common-pedestal bimanual tree into left and right reduced-coordinate
 articulations. The fixed pedestal is reassembled by the RNE scene at the exact

@@ -144,6 +144,32 @@ report contains all fixed checks, per-joint residual evidence, uncertainty,
 and three seven-by-seven coupled-mode gain matrices. All backends reproduce the
 same intentional `action_width_mismatch` at step 307.
 
+## Official arm-only versus pinch-gripper inertia evidence
+
+The physical-configuration successor replaces the rejected arbitrary link-5
+inertia multiplier with two actual OpenArm product presets from upstream commit
+`1fba2cbc05001f05b4514120b70130b4ac06f409`: `right_arm.yaml` and
+`right_arm_with_pinch_gripper.yaml`. Their exact bytes and SHA-256 values are
+vendored beside the model. The compiler produces one seven-axis arm with no end
+effector and one with the complete official pinch gripper. The added articulated
+mass is exactly `0.239699047367 kg`; every retained link mass, centre of mass,
+and full inertia tensor is independently parsed and checked for positive
+definiteness and rigid-body triangle inequalities.
+
+Both configurations consume the same seven-axis TaskSpec, controller, actuation
+contract, and byte-identical 4,380-step action trace. Rapier, native MuJoCo, and
+Gazebo each replay both configurations exactly and reproduce the intentional
+`action_width_mismatch` at step 307. In the held-out simultaneous seven-input
+region, the configuration response RMS delta is `0.0108432 rad` on Rapier,
+`0.0104996 rad` on MuJoCo, and `6.02431e-6 rad` on Gazebo. The corresponding
+seven-by-seven gain-matrix Frobenius deltas are `0.0544213`, `0.0541451`, and
+`2.71880e-5`. Gazebo's velocity-control boundary is much less inertia-sensitive,
+but it still clears the separately fixed `1e-6 rad` and `1e-5` detection gates;
+the report does not normalize that difference away. All 30 fixed checks pass.
+Two clean report builds reproduce JSON SHA-256
+`354802f77cfc63743b1f1d7bc5fcb43dd9bba8f1253d4403fc0bcad9d5f48f4a` and HTML
+SHA-256 `89bd7f17c43a37081e7ca3601c303bbc731bc391ac0e3f7a5ab1a0a4889d2175`.
+
 ## PID versus state-space controller proof
 
 The controller successor uses the retained Rapier ARX(2,2) model as its nominal

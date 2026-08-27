@@ -673,7 +673,7 @@ fn run() -> Result<()> {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut controller_path = repo_root
         .join("adapters/simulator/rne_gazebo_harmonic/openarm_right_pose_cycle.controller.json");
-    let task_path = repo_root
+    let mut task_path = repo_root
         .join("adapters/simulator/rne_gazebo_harmonic/openarm_right_joint_tracking.task.json");
     let mut actuation_path =
         repo_root.join("adapters/simulator/rne_gazebo_harmonic/openarm_right.rne_actuation.json");
@@ -689,6 +689,7 @@ fn run() -> Result<()> {
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--controller" => controller_path = required_path(&mut args, "--controller")?,
+            "--task" => task_path = required_path(&mut args, "--task")?,
             "--actions" => actions_path = required_path(&mut args, "--actions")?,
             "--actuation-config" => {
                 actuation_path = required_path(&mut args, "--actuation-config")?
@@ -859,7 +860,7 @@ fn validate(
     );
     anyhow::ensure!(
         controller.task_id == task.task_id
-            && width == 9
+            && valid_openarm_joint_scope(controller)
             && controller.rne_actuator_link_order.len() == width,
         "controller TaskSpec or joint order mismatch"
     );
@@ -1193,6 +1194,46 @@ fn validate(
         );
     }
     Ok(())
+}
+
+fn valid_openarm_joint_scope(controller: &ControllerSpec) -> bool {
+    const ARM_JOINTS: [&str; 7] = [
+        "openarm_right_joint1",
+        "openarm_right_joint2",
+        "openarm_right_joint3",
+        "openarm_right_joint4",
+        "openarm_right_joint5",
+        "openarm_right_joint6",
+        "openarm_right_joint7",
+    ];
+    const ARM_LINKS: [&str; 7] = [
+        "openarm_right_link1",
+        "openarm_right_link2",
+        "openarm_right_link3",
+        "openarm_right_link4",
+        "openarm_right_link5",
+        "openarm_right_link6",
+        "openarm_right_ee_base_link",
+    ];
+    let width = controller.action_joint_order.len();
+    (width == 7 || width == 9)
+        && controller
+            .action_joint_order
+            .iter()
+            .take(7)
+            .map(String::as_str)
+            .eq(ARM_JOINTS)
+        && controller
+            .rne_actuator_link_order
+            .iter()
+            .take(7)
+            .map(String::as_str)
+            .eq(ARM_LINKS)
+        && (width == 7
+            || (controller.action_joint_order[7..]
+                == ["openarm_right_finger_joint1", "openarm_right_finger_joint2"]
+                && controller.rne_actuator_link_order[7..]
+                    == ["openarm_right_ee_link1", "openarm_right_ee_link2"]))
 }
 
 fn validate_pid_law(law: &FeedbackLaw, width: usize) -> Result<()> {

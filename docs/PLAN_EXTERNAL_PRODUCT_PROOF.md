@@ -462,10 +462,10 @@ actuator-authority envelope. The next slices are:
    as the first predeclared-RMSE boundary failure, and emits exact replay, a
    browser report, and a verified Failure Capsule. A link-5-only inertia-tensor
    multiplier pilot over `[1, 2, 4, 8, 16]` remained performance-green and
-   showed weak sensitivity on this trajectory; do not manufacture a boundary
-   with nonphysical multipliers. The next inertia experiment must excite a
-   dynamically sensitive joint/coupled mode or vary a physically sourced
-   payload/link inertia with positive-definite tensor checks;
+   showed weak sensitivity on this trajectory; no boundary was manufactured
+   with nonphysical multipliers. The successor now excites the seven-joint
+   coupled mode across the official arm-only and pinch-gripper product presets,
+   with source hashes and positive-definite tensor checks;
 4. **Latency, jitter, stale-age selection, bounded recovery, and repeated re-arm complete:**
    controller-ingress latency has a fixed `[0, 1, 2, 3, 4]`-period sweep with
    original capture timestamps and a portable zero/one-period boundary.
@@ -498,10 +498,10 @@ actuator-authority envelope. The next slices are:
 6. **Complete:** constrained PID and justified state-space control use identical
    typed observations, limits, references, and perturbations in the retained
    controller lab;
-7. use the new coupled operating region for the physically sourced,
-   dynamically sensitive inertia experiment, then advance camera/depth and
-   metric 3DGS calibration. Add lidar only when a retained navigation task
-   consumes it.
+7. **Complete:** use the coupled operating region for the physically sourced,
+   dynamically sensitive official arm-only versus pinch-gripper inertia
+   experiment. Advance camera/depth and metric 3DGS calibration next. Add lidar
+   only when a retained navigation task consumes it.
 
 Sensor dropout/recovery at the typed controller boundary, actuator realization
 diagnostics, payload robustness, and actuator-authority degradation are already
@@ -692,8 +692,20 @@ cross-backend RMSE delta are approximately `0.0002073 rad`, and the largest 95%
 prediction half-width is below `0.000562 rad`. The report retains raw residual
 autocorrelation and permits its numerical-exactness path only below the fixed
 `1e-8 rad` residual-RMSE floor. All 149 checks pass, and the three intentional
-action-width failures agree at step 307. The coupled region is now the required
-excitation basis for the next physically sourced inertia experiment.
+action-width failures agree at step 307. The coupled region is the excitation
+basis for the completed physically sourced configuration experiment.
+
+The physical-configuration successor uses exact upstream `right_arm` and
+`right_arm_with_pinch_gripper` presets at commit
+`1fba2cbc05001f05b4514120b70130b4ac06f409`, not an arbitrary tensor scale. The
+official gripper adds `0.239699047367 kg`; every model link passes independent
+positive-definite and rigid-body inertia checks. The same seven-axis TaskSpec,
+controller, actuation, and byte-identical actions run both configurations on
+Rapier, MuJoCo, and Gazebo with exact replay. Held-out response RMS deltas are
+`0.0108432`, `0.0104996`, and `6.02431e-6 rad`; coupled-gain matrix Frobenius
+deltas are `0.0544213`, `0.0541451`, and `2.71880e-5`. All 30 fixed checks pass,
+and all six intentional failures remain at step 307. This closes the local
+coupled-mode physical inertia gate without hiding Gazebo's lower sensitivity.
 
 Slice 7 now has its first measured dimension. A fixed
 `[0.00, 0.03, 0.06, 0.09, 0.12] rad` actuator-target bias grid holds the
@@ -775,7 +787,7 @@ The boundary retains one age rejection, zero target and integral-state delta
  independent reconstruction has zero realization delta. Physical parameter
 sweeps, actuator-authority degradation, command delay, command slew-rate limits,
 command deadband, viscous damping, and regularized Coulomb friction are recorded
-below; a physically sourced, coupled-mode inertia boundary remains open.
+below; the physically sourced, coupled-mode configuration boundary is complete.
 
 The first physical joint-loss dimension now separates URDF plant damping from
 actuator servo damping. Its predeclared `[0, 2.5, 5, 10, 20] N*m*s/rad` joint-5
@@ -807,8 +819,8 @@ the unchanged RMSE gate at the 2 N*m out-of-envelope point (`0.023701` and
 actuator-effort row stays within the 7 N*m limit. The browser report is
 `passed`; a step-3600 Rapier replay retains the first performance failure, and
 a verified 30-artifact Failure Capsule binds the three focused traces, inputs,
-hashes, diagnostics, and runner/report sources. The transmission-efficiency
-boundary is complete; coupled-mode physical inertia remains next.
+hashes, diagnostics, and runner/report sources. The transmission-efficiency and
+coupled-mode physical-configuration boundaries are complete.
 
 The earlier exact-tick substep sweep is retained as negative evidence.
 `[1, 2, 5, 10]` Rapier physics steps per 16,666,667-tick control period produce

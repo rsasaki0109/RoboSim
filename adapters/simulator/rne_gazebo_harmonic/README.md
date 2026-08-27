@@ -494,6 +494,33 @@ preserves Gazebo's raw autocorrelation diagnostic instead of treating a
 `~1e-11 rad` residual as stochastic noise. All three intentional action-width
 failures remain localized at step 307.
 
+## Compare the official arm-only and pinch-gripper configurations
+
+This experiment uses the upstream OpenArm `right_arm` and
+`right_arm_with_pinch_gripper` product presets at the pinned source commit. It
+does not scale a tensor. The generated models share one seven-axis TaskSpec,
+controller, actuation contract, and action trace; only the official end-effector
+component changes.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_physical_configuration_suite.py \
+  --output artifacts/openarm-physical-configuration
+# Run rne-openarm-rapier-trace and rne-openarm-mujoco-trace for both generated
+# case directories with their --task, --actuation-config, --robot-asset,
+# --model-urdf, and --scene files. Run this adapter with each runtime.json.
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_physical_configuration_report.py \
+  --trace-root artifacts/openarm-physical-configuration \
+  --output artifacts/openarm-physical-configuration
+```
+
+All 30 fixed checks pass. The official gripper adds `0.239699047367 kg` of
+articulated mass with positive-definite, physically realizable source tensors.
+Held-out configuration response RMS deltas are `0.0108432 rad` on Rapier,
+`0.0104996 rad` on native MuJoCo, and `6.02431e-6 rad` on Gazebo. The
+seven-by-seven coupling-matrix Frobenius deltas are `0.0544213`, `0.0541451`,
+and `2.71880e-5`, respectively. All six runs are exact same-runtime replays and
+all intentional action-width failures occur at step 307.
+
 ## Compare PID and state-space control
 
 The controller lab consumes the retained Rapier ARX model without refitting,

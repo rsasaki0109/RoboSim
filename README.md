@@ -340,7 +340,7 @@ ROS 2 is optional and isolated under [adapters/ros2](adapters/ros2). See the
 - [External physics backend conformance](docs/EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md)
 - [External hardware adapter conformance](docs/HARDWARE_ADAPTER_CONFORMANCE.md)
 - [External simulator adapter conformance](docs/EXTERNAL_SIMULATOR_ADAPTER_CONFORMANCE.md)
-- [OpenArm Rapier / native MuJoCo / Gazebo proof](docs/OPENARM_CROSS_SIM_PROOF.md), including seven-joint held-out MIMO identification and typed-sensor dropout, stale-age, recovery, repeated-burst re-arm, position-quantization, position-saturation, and stuck-value boundaries
+- [OpenArm Rapier / native MuJoCo / Gazebo proof](docs/OPENARM_CROSS_SIM_PROOF.md), including official arm-only versus pinch-gripper coupled-inertia evidence, seven-joint held-out MIMO identification, and typed-sensor dropout, stale-age, recovery, repeated-burst re-arm, position-quantization, position-saturation, and stuck-value boundaries
 - [Compatibility fixture corpus](docs/COMPATIBILITY_CORPUS.md)
 - [Support policy and 1.0 commitment](docs/SUPPORT.md)
 - [Evidence-backed 1.0 readiness](docs/ONE_ZERO_READINESS.md)
