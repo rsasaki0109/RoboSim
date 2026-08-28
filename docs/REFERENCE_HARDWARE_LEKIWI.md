@@ -7,9 +7,9 @@ evidence has not yet been captured.
 This base-only profile is the safety prerequisite for the bounded physical
 flagship, not the flagship proof itself. It runs
 `rne.lekiwi_so101.base_shadow.v1`, whereas the release flagship runs
-`rne.flagship.mobile_lift_shared_aisle.v1` with
-`rne.ai.ik_mobile_lift_pick_place_policy.v1`. The rate, observation, and action
-spaces differ. Gate 4 therefore additionally requires the explicit full-task
+`rne.flagship.mobile_lift_shared_aisle.v2` with
+`rne.ai.portable_ik_mobile_lift_pick_place_controller.v2`. The rate,
+observation, and action spaces differ. Gate 4 therefore additionally requires the explicit full-task
 projection, elevated parent-controller shadow, bounded live success/failure,
 and complete artifact closure defined in the
 [external product proof plan](PLAN_EXTERNAL_PRODUCT_PROOF.md#gate-4-bounded-physical-proof).

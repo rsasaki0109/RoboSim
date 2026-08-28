@@ -1,8 +1,8 @@
 //! Installed recorded-playback and shadow proof for the flagship task.
 
-use super::{write_pretty_json, FlagshipObservation, FlagshipRecordedStep, CONTROLLER_ID, TASK_ID};
+use super::{write_pretty_json, FlagshipRecordedStep, CONTROLLER_ID, TASK_ID};
 use anyhow::{Context, Result};
-use rne_ai::TaskSpec;
+use rne_ai::{FlagshipMobileLiftControllerContract, FlagshipMobileLiftControllerV2, TaskSpec};
 use rne_hardware_gateway::recorded::{
     evaluate_recorded_shadow_session, CalibrationBinding, RecordedArtifactBinding,
     RecordedShadowFrame, RecordedShadowReport, RecordedShadowSession, RecordedStreamContract,
@@ -16,8 +16,8 @@ use std::fs;
 use std::path::Path;
 
 const PROOF_KIND: &str = "rne_installed_recorded_shadow_proof";
-const PROOF_SCHEMA_VERSION: u32 = 1;
-const EXPERIMENT_ID: &str = "rne.flagship.mobile_lift.recorded_shadow.v1";
+const PROOF_SCHEMA_VERSION: u32 = 2;
+const EXPERIMENT_ID: &str = "rne.flagship.mobile_lift.recorded_shadow.v2";
 const MAX_RECORDED_SAMPLES: usize = 512;
 const DISCONNECT_SEQUENCE: u64 = 128;
 
@@ -88,28 +88,19 @@ pub(super) fn write_recorded_shadow_proof(
     );
     let rapier = &rapier[..sample_count];
     let mujoco = &mujoco[..sample_count];
+    validate_controller_trace("rapier_native", rapier)?;
+    validate_controller_trace("mujoco_native", mujoco)?;
 
     let task_sha256 = sha256_file(&output.join("flagship.task.json"))?;
     write_pretty_json(
         &output.join("recorded-shadow-controller.json"),
-        &serde_json::json!({
-            "kind": "rne_controller_contract",
-            "schema_version": 1,
-            "controller_id": CONTROLLER_ID,
-            "policy": "IkMobileLiftPickPlacePolicy",
-            "normalization": "missing_joint_targets_hold_pre_step_observation_v1",
-            "action_order": [
-                "left_wheel_velocity_rad_s", "right_wheel_velocity_rad_s",
-                "shoulder_target_rad", "elbow_target_rad", "wrist_yaw_target_rad",
-                "lift_target_m", "gripper_velocity_m_s"
-            ]
-        }),
+        &FlagshipMobileLiftControllerContract::built_in(),
     )?;
     write_pretty_json(
         &output.join("recorded-shadow-calibration.json"),
         &serde_json::json!({
             "kind": "rne_identity_si_calibration",
-            "schema_version": 1,
+            "schema_version": 2,
             "task_id": TASK_ID,
             "timestamp_behavior": "capture_and_availability_ticks_retained",
             "latency_behavior": "one_fixed_control_period",
@@ -122,7 +113,7 @@ pub(super) fn write_recorded_shadow_proof(
         &output.join("recorded-shadow-requirements.json"),
         &serde_json::json!({
             "kind": "rne_recorded_shadow_requirements",
-            "schema_version": 1,
+            "schema_version": 2,
             "experiment_id": EXPERIMENT_ID,
             "sample_count": sample_count,
             "disconnect_sequence": DISCONNECT_SEQUENCE,
@@ -133,14 +124,14 @@ pub(super) fn write_recorded_shadow_proof(
                 "maximum_actuator_writes": 0,
                 "maximum_dropped_observations": 0
             },
-            "comparison": "absolute_per_tensor_v1"
+            "comparison": "absolute_per_tensor_v2"
         }),
     )?;
     write_pretty_json(
         &output.join("recorded-shadow-rapier.trace.json"),
         &RetainedTrace {
             kind: "rne_flagship_recorded_trace",
-            schema_version: 1,
+            schema_version: 2,
             task_id: TASK_ID,
             controller_id: CONTROLLER_ID,
             backend: "rapier_native",
@@ -151,7 +142,7 @@ pub(super) fn write_recorded_shadow_proof(
         &output.join("recorded-shadow-mujoco.trace.json"),
         &RetainedTrace {
             kind: "rne_flagship_recorded_trace",
-            schema_version: 1,
+            schema_version: 2,
             task_id: TASK_ID,
             controller_id: CONTROLLER_ID,
             backend: "mujoco_native",
@@ -255,6 +246,20 @@ pub(super) fn write_recorded_shadow_proof(
     write_pretty_json(&output.join("recorded-shadow-proof.json"), &proof)
 }
 
+fn validate_controller_trace(backend: &str, trace: &[FlagshipRecordedStep]) -> Result<()> {
+    let mut controller = FlagshipMobileLiftControllerV2::new();
+    for (index, sample) in trace.iter().enumerate() {
+        let action = controller
+            .next_action(&sample.controller_observation_values)
+            .with_context(|| format!("{backend} controller rejected recorded sample {index}"))?;
+        anyhow::ensure!(
+            action == sample.action_values,
+            "{backend} recorded action differs from portable controller at sample {index}"
+        );
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_case(
     output: &Path,
@@ -288,8 +293,8 @@ fn run_case(
                 available_at_ticks: captured_at_ticks.saturating_add(fixed_delta_ticks),
                 simulation_step: sequence,
                 simulation_time_ticks: captured_at_ticks,
-                recorded_values: flatten_observation(&recorded.observation),
-                simulation_values: flatten_observation(&simulation.observation),
+                recorded_values: recorded.controller_observation_values.clone(),
+                simulation_values: simulation.controller_observation_values.clone(),
                 action_sequence: sequence,
                 action_submitted_at_ticks: captured_at_ticks.saturating_add(fixed_delta_ticks),
                 action_values: recorded.action_values.clone(),
@@ -390,34 +395,6 @@ fn case(
     }
 }
 
-fn flatten_observation(observation: &FlagshipObservation) -> Vec<f64> {
-    vec![
-        observation.base_x_m,
-        observation.base_z_m,
-        observation.shoulder_position_rad,
-        observation.elbow_position_rad,
-        observation.wrist_yaw_position_rad,
-        observation.lift_position_m,
-        observation.gripper_position_m,
-        observation.payload_x_m,
-        observation.payload_y_m,
-        observation.payload_z_m,
-        observation.wrist_camera_pixels as f64,
-        observation.wrist_depth_min_m,
-        observation.traffic_actor_x_m,
-        observation.traffic_actor_y_m,
-        observation.traffic_actor_z_m,
-        if observation.traffic_signal_green {
-            1.0
-        } else {
-            0.0
-        },
-        if observation.traffic_clear { 1.0 } else { 0.0 },
-        if observation.grasped_once { 1.0 } else { 0.0 },
-        f64::from(observation.policy_phase_index),
-    ]
-}
-
 fn tolerances(task: &TaskSpec) -> Vec<ShadowTensorTolerance> {
     task.observation
         .tensors
@@ -426,9 +403,10 @@ fn tolerances(task: &TaskSpec) -> Vec<ShadowTensorTolerance> {
             tensor_name: tensor.name.clone(),
             absolute_tolerance: match tensor.name.as_str() {
                 "base_position_m" => 0.40,
+                "base_yaw_rad" => 0.20,
                 "arm_joint_position_rad" => 0.20,
                 "lift_position_m" | "gripper_position_m" => 0.04,
-                "payload_position_m" => 0.07,
+                "payload_position_m" | "place_target_position_m" => 0.07,
                 "wrist_depth_min_m" => 0.02,
                 _ => 0.0,
             },

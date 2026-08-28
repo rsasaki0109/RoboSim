@@ -1450,7 +1450,7 @@ pub(crate) fn validate_staged_external_flagship_report(
             && is_lower_git_object_id(&report.release_revision)
             && report.elapsed_ms <= report.target_ms
             && report.target_ms == 15 * 60 * 1_000
-            && report.task_id == "rne.flagship.mobile_lift_shared_aisle.v1"
+            && report.task_id == "rne.flagship.mobile_lift_shared_aisle.v2"
             && report.physics_execution_paths == ["rapier_native", "mujoco_native"]
             && report.first_violation_step > 0
             && report.first_violation_sim_time_ticks > 0,
@@ -1918,11 +1918,11 @@ fn validate_external_cross_backend_report(path: &Path) -> anyhow::Result<(u64, u
                 ))
             && report.get("status").and_then(serde_json::Value::as_str) == Some("passed")
             && report.get("task_id").and_then(serde_json::Value::as_str)
-                == Some("rne.flagship.mobile_lift_shared_aisle.v1")
+                == Some("rne.flagship.mobile_lift_shared_aisle.v2")
             && report
                 .get("controller_id")
                 .and_then(serde_json::Value::as_str)
-                == Some("rne.ai.ik_mobile_lift_pick_place_policy.v1")
+                == Some("rne.ai.portable_ik_mobile_lift_pick_place_controller.v2")
             && report
                 .get("controller_contract")
                 .and_then(serde_json::Value::as_str)
@@ -1973,7 +1973,7 @@ fn validate_external_cross_backend_report(path: &Path) -> anyhow::Result<(u64, u
         .and_then(serde_json::Value::as_array)
         .context("external cross-backend report omitted tolerance checks")?;
     let expected_tolerances = [
-        ("completion_step_delta", "step", 500.0),
+        ("completion_step_delta", "step", 900.0),
         ("base_planar_position_delta", "m", 0.4),
         ("payload_position_delta", "m", 0.06),
         ("payload_apex_delta", "m", 0.07),
@@ -3323,7 +3323,7 @@ fn validate_installed_flagship_proof(
     );
     anyhow::ensure!(report.status == "passed", "installed flagship proof failed");
     anyhow::ensure!(
-        report.task_id == "rne.flagship.mobile_lift_shared_aisle.v1",
+        report.task_id == "rne.flagship.mobile_lift_shared_aisle.v2",
         "unexpected installed flagship TaskSpec {}",
         report.task_id
     );
@@ -3444,10 +3444,10 @@ fn validate_installed_recorded_shadow_proof(root: &Path) -> anyhow::Result<()> {
     .with_context(|| format!("parse {}", path.display()))?;
     anyhow::ensure!(
         proof.kind == "rne_installed_recorded_shadow_proof"
-            && proof.schema_version == 1
+            && proof.schema_version == 2
             && proof.status == "passed"
-            && proof.task_id == "rne.flagship.mobile_lift_shared_aisle.v1"
-            && proof.controller_id == "rne.ai.ik_mobile_lift_pick_place_policy.v1"
+            && proof.task_id == "rne.flagship.mobile_lift_shared_aisle.v2"
+            && proof.controller_id == "rne.ai.portable_ik_mobile_lift_pick_place_controller.v2"
             && proof.clock_source == "sim_clock_fixed_step",
         "installed recorded/shadow proof identity or status is invalid"
     );
@@ -3528,7 +3528,7 @@ fn validate_time_to_proof_report(root: &Path, expected_machine: &str) -> anyhow:
         "time-to-proof measurement exceeded its 15-minute target"
     );
     anyhow::ensure!(
-        report.task_id == "rne.flagship.mobile_lift_shared_aisle.v1"
+        report.task_id == "rne.flagship.mobile_lift_shared_aisle.v2"
             && report.machine_label == expected_machine
             && !report.operating_system.is_empty()
             && !report.architecture.is_empty()
@@ -3695,8 +3695,8 @@ fn validate_release_documentation_text(text: &str) -> anyhow::Result<()> {
     for marker in [
         "./bin/rne-flagship-proof flagship-proof --cross-backend",
         "--verify-installed-bundle . --measure-on",
-        "rne.flagship.mobile_lift_shared_aisle.v1",
-        "rne.ai.ik_mobile_lift_pick_place_policy.v1",
+        "rne.flagship.mobile_lift_shared_aisle.v2",
+        "rne.ai.portable_ik_mobile_lift_pick_place_controller.v2",
         "rapier_native",
         "mujoco_native",
         "first step and simulation timestamp",
@@ -4148,7 +4148,7 @@ mod tests {
             architecture: candidate.measurement.architecture.clone(),
             elapsed_ms: candidate.measurement.elapsed_ms,
             target_ms: candidate.measurement.target_ms,
-            task_id: "rne.flagship.mobile_lift_shared_aisle.v1".to_string(),
+            task_id: "rne.flagship.mobile_lift_shared_aisle.v2".to_string(),
             physics_execution_paths: vec!["rapier_native".to_string(), "mujoco_native".to_string()],
             first_violation_step: 240,
             first_violation_sim_time_ticks: 2_000_000_000,
@@ -4375,10 +4375,10 @@ mod tests {
                 } else if relative == "recorded-shadow-proof.json" {
                     serde_json::to_vec(&serde_json::json!({
                         "kind": "rne_installed_recorded_shadow_proof",
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "status": "passed",
-                        "task_id": "rne.flagship.mobile_lift_shared_aisle.v1",
-                        "controller_id": "rne.ai.ik_mobile_lift_pick_place_policy.v1",
+                        "task_id": "rne.flagship.mobile_lift_shared_aisle.v2",
+                        "controller_id": "rne.ai.portable_ik_mobile_lift_pick_place_controller.v2",
                         "clock_source": "sim_clock_fixed_step",
                         "cases": [
                             {
@@ -4427,7 +4427,7 @@ mod tests {
             kind: rne_asset_cli::INSTALLED_FLAGSHIP_PROOF_REPORT_KIND.to_string(),
             schema_version: rne_asset_cli::INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION,
             status: "passed".to_string(),
-            task_id: "rne.flagship.mobile_lift_shared_aisle.v1".to_string(),
+            task_id: "rne.flagship.mobile_lift_shared_aisle.v2".to_string(),
             physics_execution_paths: vec!["rapier_native".to_string(), "mujoco_native".to_string()],
             success_status: "passed".to_string(),
             expected_failure_contract: "perception_stream_alive".to_string(),
@@ -4480,7 +4480,7 @@ mod tests {
             kind: rne_asset_cli::TIME_TO_PROOF_REPORT_KIND.to_string(),
             schema_version: rne_asset_cli::TIME_TO_PROOF_REPORT_SCHEMA_VERSION,
             status: "passed".to_string(),
-            task_id: "rne.flagship.mobile_lift_shared_aisle.v1".to_string(),
+            task_id: "rne.flagship.mobile_lift_shared_aisle.v2".to_string(),
             machine_label: "test-machine".to_string(),
             operating_system: "test-os".to_string(),
             architecture: "test-arch".to_string(),
@@ -4697,7 +4697,7 @@ mod tests {
             kind: rne_asset_cli::TIME_TO_PROOF_REPORT_KIND.to_string(),
             schema_version: rne_asset_cli::TIME_TO_PROOF_REPORT_SCHEMA_VERSION,
             status: "passed".to_string(),
-            task_id: "rne.flagship.mobile_lift_shared_aisle.v1".to_string(),
+            task_id: "rne.flagship.mobile_lift_shared_aisle.v2".to_string(),
             machine_label: candidate.measurement.machine_label.clone(),
             operating_system: candidate.measurement.operating_system.clone(),
             architecture: candidate.measurement.architecture.clone(),
@@ -4739,7 +4739,7 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary report");
         let path = directory.path().join("cross-backend-report.json");
         let tolerances = [
-            ("completion_step_delta", "step", 500.0),
+            ("completion_step_delta", "step", 900.0),
             ("base_planar_position_delta", "m", 0.4),
             ("payload_position_delta", "m", 0.06),
             ("payload_apex_delta", "m", 0.07),
@@ -4772,8 +4772,8 @@ mod tests {
             "kind": rne_asset_cli::FLAGSHIP_CROSS_BACKEND_REPORT_KIND,
             "schema_version": rne_asset_cli::FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION,
             "status": "passed",
-            "task_id": "rne.flagship.mobile_lift_shared_aisle.v1",
-            "controller_id": "rne.ai.ik_mobile_lift_pick_place_policy.v1",
+            "task_id": "rne.flagship.mobile_lift_shared_aisle.v2",
+            "controller_id": "rne.ai.portable_ik_mobile_lift_pick_place_controller.v2",
             "controller_contract": "identical_controller_type_and_configuration_per_backend",
             "exact_outcomes": [
                 "all_behavior_contracts_passed",

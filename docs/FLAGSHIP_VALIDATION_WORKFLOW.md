@@ -103,18 +103,18 @@ shows robot, payload, traffic, signal, perception, interlock, grasp, and task
 state.
 
 The installed cross-backend proof runs the same
-`rne.flagship.mobile_lift_shared_aisle.v1` TaskSpec and
-`rne.ai.ik_mobile_lift_pick_place_policy.v1` controller configuration on
-Rapier and native MuJoCo. Both backends must pass the nominal task, reproduce
-the intentional failure at the exact first step and simulation timestamp, and
-pass the registered tolerances with explicit units. The Failure Capsule binds
+`rne.flagship.mobile_lift_shared_aisle.v2` TaskSpec and
+`rne.ai.portable_ik_mobile_lift_pick_place_controller.v2` controller
+configuration on Rapier and native MuJoCo. Both backends must pass the nominal
+task, reproduce the intentional failure at the exact first step and simulation
+timestamp, and pass the registered tolerances with explicit units. The Failure Capsule binds
 the task, model, configuration, reports, replay, browser inspector, producer,
 and installed-bundle verification by size and SHA-256.
 
 The backend-neutral source of that exact contract is
-`rne_ai::flagship_mobile_lift_task_spec`; the stable TaskSpec/controller IDs are
-exported beside it. Release, recorded/shadow, simulator-adapter, and bounded
-hardware paths must call that generator rather than copy its tensor schema.
+`rne_ai::flagship_mobile_lift_task_spec_v2`; the stable TaskSpec/controller IDs
+are exported beside it. Release, recorded/shadow, simulator-adapter, and
+bounded hardware paths must call that generator rather than copy its tensor schema.
 
 The recorded proof exercises the same typed contract as bounded playback and
 non-actuating shadow traffic, plus an expected process-disconnect case. It is

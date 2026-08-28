@@ -194,16 +194,14 @@ Acceptance criteria:
   inspectable;
 - no claim extends beyond the measured robot, adapter, and environment.
 
-This gate is currently open for a semantic reason, not only because physical
-bytes have not yet been captured. The existing LeKiwi reference runner is bound
-to `rne.lekiwi_so101.base_shadow.v1` at 30 Hz, while the installed flagship is
-bound to `rne.flagship.mobile_lift_shared_aisle.v1` and its unchanged
-`rne.ai.ik_mobile_lift_pick_place_policy.v1` controller at the simulation
-control period. The former uses base velocity actions in `m/s` and `rad/s`; the
-latter emits wheel velocity in `rad/s` plus arm, lift, and gripper actions. A
-passing base-only LeKiwi physical-evidence manifest is therefore necessary
-reference-device safety evidence, but it is not the same-contract Gate 4 proof
-and must never be relabelled as such.
+This gate is currently open because physical bytes have not yet been captured.
+The installed runner, recorded/shadow proof, and LeKiwi projection now share
+`rne.flagship.mobile_lift_shared_aisle.v2` and
+`rne.ai.portable_ik_mobile_lift_pick_place_controller.v2`. The projection
+retains all seven parent actions, realizes the bounded base command, and records
+the suppressed arm/lift/gripper actions. This closes the earlier semantic gap,
+but it does not authorize actuation or substitute for a separately authorized
+bounded physical success and forced-abort capture.
 
 Gate 4 proceeds through these ordered implementation slices:
 
@@ -284,11 +282,12 @@ consumes only those flattened values, derives geometric features from the bound
 model, holds without state advance on red/uncleared traffic, and rejects missing
 RGB-D or phase disagreement without state advance.
 
-The remaining Gate 4 implementation work is to migrate the installed
-Rapier/MuJoCo runner and recorded path to this v2 identity before any elevated
-capture. Only then may an elevated physical shadow, separately authorized
-bounded live success, and intentional safety-stop run count. No actuation is
-authorized by either manifest version.
+The installed Rapier/MuJoCo runner and recorded path now use this v2 identity.
+The same controller completes the nominal free-body friction task on both
+backends, and the minimized camera blackout reproduces at the exact first
+violation step. The remaining Gate 4 work is an elevated physical shadow,
+separately authorized bounded live success, and intentional safety-stop run.
+No actuation is authorized by either manifest version.
 
 The typed LeKiwi boundary portion of that migration is now implemented as
 `FlagshipLeKiwiObservationFuserV2`. It preserves the five independently

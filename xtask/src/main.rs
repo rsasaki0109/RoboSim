@@ -2415,11 +2415,11 @@ fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
                 && cross_report
                     .get("task_id")
                     .and_then(serde_json::Value::as_str)
-                    == Some("rne.flagship.mobile_lift_shared_aisle.v1")
+                    == Some("rne.flagship.mobile_lift_shared_aisle.v2")
                 && cross_report
                     .get("controller_id")
                     .and_then(serde_json::Value::as_str)
-                    == Some("rne.ai.ik_mobile_lift_pick_place_policy.v1")
+                    == Some("rne.ai.portable_ik_mobile_lift_pick_place_controller.v2")
                 && cross_report
                     .get("controller_contract")
                     .and_then(serde_json::Value::as_str)

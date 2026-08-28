@@ -1817,7 +1817,7 @@ mod tests {
                 "architecture": "x86_64",
                 "elapsed_ms": 21_921,
                 "target_ms": 900_000,
-                "task_id": "rne.flagship.mobile_lift_shared_aisle.v1",
+                "task_id": "rne.flagship.mobile_lift_shared_aisle.v2",
                 "physics_execution_paths": ["rapier_native", "mujoco_native"],
                 "first_violation_step": 240,
                 "first_violation_sim_time_ticks": 2_000_000_000_u64,

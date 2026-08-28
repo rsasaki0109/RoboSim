@@ -793,10 +793,10 @@ const MOBILE_LIFT_FRICTION_GRASP_RIGHT_LIMIT_M: f64 = 0.055;
 /// object's pose settles) without either treating a real slip-and-fall as
 /// instantaneous or holding on to an object that has plainly departed the gripper.
 const FRICTION_GRASP_LOST_CONTACT_STEPS: u32 = 5;
-/// Linear pads may pass through a solver skin-width while a supported payload
-/// is being pulled clear of the rail; keep the logical grasp alive long enough
-/// for the bounded friction impulse to re-establish both contacts.
-const MOBILE_LIFT_LINEAR_GRASP_LOST_CONTACT_STEPS: u32 = 900;
+/// Linear pads may pass through a solver skin-width while the payload settles.
+/// A half-second debounce absorbs that transient without allowing the bounded
+/// carry aid to tow a contactless payload for a material part of the episode.
+const MOBILE_LIFT_LINEAR_GRASP_LOST_CONTACT_STEPS: u32 = 30;
 /// Minimum per-contact normal impulse (N*s, see `ContactEvent::impulse`) for a
 /// finger/object contact to count as load-bearing in [`GraspMode::Friction`]
 /// rather than a bare graze. Set well below the steady-state impulse a held
@@ -1976,11 +1976,22 @@ impl MobileManipulatorSim {
         if self.finger_links.is_empty() {
             return false;
         }
+        // A reduced-coordinate prismatic motor may hold a pad stationary against
+        // a payload without producing a fresh accumulated normal impulse on every
+        // tick. Acquisition already uses the geometric two-pad gate for this
+        // gripper for the same reason. Keep the maintenance contract consistent:
+        // both pad manifolds must still exist, while revolute fingers retain the
+        // stricter load-bearing impulse threshold.
+        let minimum_impulse = if self.has_linear_gripper() {
+            0.0
+        } else {
+            FRICTION_GRASP_MIN_IMPULSE_NS
+        };
         self.finger_links.iter().all(|finger| {
             self.last_contacts().iter().any(|contact| {
                 let is_pair = (contact.entity_a == *finger && contact.entity_b == object)
                     || (contact.entity_a == object && contact.entity_b == *finger);
-                is_pair && contact.impulse >= FRICTION_GRASP_MIN_IMPULSE_NS
+                is_pair && contact.impulse >= minimum_impulse
             })
         })
     }

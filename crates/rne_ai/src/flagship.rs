@@ -74,6 +74,9 @@ pub const FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS: u64 = 16_666_667;
 /// Maximum controller decisions in one flagship episode.
 pub const FLAGSHIP_MOBILE_LIFT_MAX_WORKFLOW_STEPS: u64 = 8_000;
 
+/// Maximum controller decisions in one v2 flagship episode.
+pub const FLAGSHIP_MOBILE_LIFT_MAX_WORKFLOW_STEPS_V2: u64 = 10_000;
+
 /// Domain-randomization identity for traffic departure delay.
 pub const FLAGSHIP_TRAFFIC_DEPARTURE_DIMENSION: &str = "traffic_departure_delay_s";
 
@@ -207,7 +210,7 @@ pub fn flagship_mobile_lift_task_spec_v2(fixed_delta_ticks: u64) -> TaskSpec {
                 ),
                 TerminationConditionSpec::new("perception_stream_lost", TerminationKind::Failure),
             ],
-            Some(FLAGSHIP_MOBILE_LIFT_MAX_WORKFLOW_STEPS),
+            Some(FLAGSHIP_MOBILE_LIFT_MAX_WORKFLOW_STEPS_V2),
         ),
         ResetSpec::splitmix64(false),
     )
@@ -631,6 +634,7 @@ mod tests {
         let task = flagship_mobile_lift_task_spec_v2(FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS);
         task.validate().unwrap();
         assert_eq!(task.task_id, FLAGSHIP_MOBILE_LIFT_TASK_ID_V2);
+        assert_eq!(task.termination.max_episode_steps, Some(10_000));
         assert_eq!(task.observation.tensors.len(), 14);
         let observation_width = task
             .observation

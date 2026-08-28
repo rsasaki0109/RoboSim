@@ -9,17 +9,17 @@ use bevy_ecs::prelude::{Entity, World};
 #[cfg(feature = "mujoco")]
 use rne_ai::MobileManipulatorPhysicsFactory;
 #[cfg(feature = "mujoco")]
-use rne_ai::FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID;
+use rne_ai::FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2;
 use rne_ai::{
-    flagship_mobile_lift_task_spec as flagship_task_spec, minimize_behavior_failure,
+    flagship_mobile_lift_task_spec_v2 as flagship_task_spec, minimize_behavior_failure,
     run_behavior_scenarios_with_replays, stable_behavior_digest, verify_behavior_replay,
     BehaviorContract, BehaviorContractError, BehaviorDimension, BehaviorDimensionValue,
     BehaviorFailureCase, BehaviorReplayArtifact, BehaviorReport, BehaviorRun, BehaviorScenario,
-    BehaviorScenarioStep, Episode, GraspMode, IkMobileLiftPickPlacePolicy, MobileLiftFailureClass,
-    MobileLiftPickPlacePhase, MobileManipulatorAction, MobileManipulatorEpisode,
-    MobileManipulatorEpisodeConfig, MobileManipulatorObservation, Policy,
-    FLAGSHIP_MOBILE_LIFT_MAX_WORKFLOW_STEPS, FLAGSHIP_MOBILE_LIFT_TASK_ID,
-    FLAGSHIP_TRAFFIC_DEPARTURE_DIMENSION, FLAGSHIP_TRAFFIC_SPEED_DIMENSION,
+    BehaviorScenarioStep, Episode, FlagshipMobileLiftControllerV2, GraspMode, MmLiftJointTarget,
+    MobileManipulatorAction, MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
+    MobileManipulatorObservation, FLAGSHIP_MOBILE_LIFT_MAX_WORKFLOW_STEPS_V2,
+    FLAGSHIP_MOBILE_LIFT_TASK_ID_V2, FLAGSHIP_TRAFFIC_DEPARTURE_DIMENSION,
+    FLAGSHIP_TRAFFIC_SPEED_DIMENSION,
 };
 use rne_asset_cli::{
     failure_capsule, installed_bundle, INSTALLED_FLAGSHIP_PROOF_REPORT_KIND,
@@ -56,24 +56,27 @@ mod recorded_proof;
 const SCENARIO: &str = "mobile_lift_shared_aisle_inspection_pick_place";
 const REPORT_KIND: &str = "rne_flagship_workflow_report";
 const REPORT_SCHEMA_VERSION: u32 = 1;
-const TASK_ID: &str = FLAGSHIP_MOBILE_LIFT_TASK_ID;
+const TASK_ID: &str = FLAGSHIP_MOBILE_LIFT_TASK_ID_V2;
 const SEED: u64 = 7;
 const SIGNAL_RELEASE_STEP: u64 = 60;
 const REQUIRED_INSPECTION_FRAMES: u32 = 3;
-const MAX_WORKFLOW_STEPS: u64 = FLAGSHIP_MOBILE_LIFT_MAX_WORKFLOW_STEPS;
+const MAX_WORKFLOW_STEPS: u64 = FLAGSHIP_MOBILE_LIFT_MAX_WORKFLOW_STEPS_V2;
 const BLACKOUT_DIMENSION: &str = "perception_blackout";
 const DEPARTURE_DIMENSION: &str = FLAGSHIP_TRAFFIC_DEPARTURE_DIMENSION;
 const SPEED_DIMENSION: &str = FLAGSHIP_TRAFFIC_SPEED_DIMENSION;
 const EXPECTED_FAILURE_CONTRACT: &str = "perception_stream_alive";
 #[cfg(feature = "mujoco")]
-const CONTROLLER_ID: &str = FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID;
+const CONTROLLER_ID: &str = FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2;
 const TIME_TO_PROOF_TARGET_MS: u64 = 15 * 60 * 1_000;
 const ROBOT_NAME: &str = "mm_mobile_lift";
 const PAYLOAD_NAME: &str = "mobile_lift_cube";
 const TRAFFIC_NAME: &str = "aisle_vehicle_1";
 const SIGNAL_NAME: &str = "aisle_signal";
 #[cfg(feature = "mujoco")]
-const COMPLETION_STEP_DELTA_MAX: f64 = 500.0;
+// v2 closes the loop on a free friction-held payload for up to 3,200 transport
+// decisions. Allow at most 28.125% of that backend-sensitive convergence window
+// while retaining exact semantic outcomes and the tighter SI-state tolerances.
+const COMPLETION_STEP_DELTA_MAX: f64 = 900.0;
 #[cfg(feature = "mujoco")]
 const BASE_PLANAR_DELTA_MAX_M: f64 = 0.40;
 #[cfg(feature = "mujoco")]
@@ -143,7 +146,9 @@ struct FlagshipObservation {
     deterministic_event_count: u32,
     motion_commanded: bool,
     base_x_m: f64,
+    base_y_m: f64,
     base_z_m: f64,
+    base_yaw_rad: f64,
     shoulder_position_rad: f64,
     elbow_position_rad: f64,
     wrist_yaw_position_rad: f64,
@@ -152,8 +157,12 @@ struct FlagshipObservation {
     payload_x_m: f64,
     payload_y_m: f64,
     payload_z_m: f64,
+    place_target_x_m: f64,
+    place_target_y_m: f64,
+    place_target_z_m: f64,
     maximum_payload_y_m: f64,
     grasped_once: bool,
+    currently_grasping: bool,
     total_reward: f64,
     task_completed: bool,
     robot_terminated: bool,
@@ -166,6 +175,7 @@ struct FlagshipObservation {
 #[serde(deny_unknown_fields)]
 struct FlagshipRecordedStep {
     observation: FlagshipObservation,
+    controller_observation_values: Vec<f64>,
     action_values: Vec<f64>,
 }
 
@@ -179,7 +189,10 @@ struct ScenarioOverrides {
 struct FlagshipScenario {
     episode: MobileManipulatorEpisode,
     physics_backend: FlagshipPhysicsBackend,
-    policy: IkMobileLiftPickPlacePolicy,
+    controller: FlagshipMobileLiftControllerV2,
+    controller_started: bool,
+    controller_failure: Option<String>,
+    place_target_position_m: [f64; 3],
     robot_observation: MobileManipulatorObservation,
     robot_terminated: bool,
     robot_truncated: bool,
@@ -256,7 +269,10 @@ impl FlagshipScenario {
         Ok(Self {
             episode,
             physics_backend,
-            policy: IkMobileLiftPickPlacePolicy::new(),
+            controller: FlagshipMobileLiftControllerV2::new(),
+            controller_started: false,
+            controller_failure: None,
+            place_target_position_m: [0.0, 0.035, 0.0],
             robot_observation: initial.observation,
             robot_terminated: initial.terminated,
             robot_truncated: initial.truncated,
@@ -328,9 +344,12 @@ impl FlagshipScenario {
         let traffic_pose = self.traffic_actor_pose();
         FlagshipObservation {
             workflow_step: self.workflow_step,
-            policy_phase: phase_name(self.policy.phase()).to_string(),
-            policy_phase_index: phase_index(self.policy.phase()),
-            policy_failure: failure_name(self.policy.failure_class(&self.robot_observation))
+            policy_phase: phase_name(self.controller.expected_policy_phase()).to_string(),
+            policy_phase_index: self.controller.expected_policy_phase(),
+            policy_failure: self
+                .controller_failure
+                .as_deref()
+                .unwrap_or("none")
                 .to_string(),
             inspection_complete: self.inspection_complete,
             perception_valid,
@@ -355,7 +374,9 @@ impl FlagshipScenario {
             deterministic_event_count: self.deterministic_event_count,
             motion_commanded,
             base_x_m: self.robot_observation.base_x_m,
+            base_y_m: self.robot_observation.base_y_m,
             base_z_m: self.robot_observation.base_z_m,
+            base_yaw_rad: self.robot_observation.base_yaw_rad,
             shoulder_position_rad: self.robot_observation.shoulder_position_rad,
             elbow_position_rad: self.robot_observation.elbow_position_rad,
             wrist_yaw_position_rad: self.robot_observation.wrist_yaw_position_rad,
@@ -364,8 +385,12 @@ impl FlagshipScenario {
             payload_x_m: payload.0,
             payload_y_m: payload.1,
             payload_z_m: payload.2,
+            place_target_x_m: self.place_target_position_m[0],
+            place_target_y_m: self.place_target_position_m[1],
+            place_target_z_m: self.place_target_position_m[2],
             maximum_payload_y_m: self.maximum_payload_y_m,
             grasped_once: self.grasped_once,
+            currently_grasping: self.episode.simulation().is_grasping(),
             total_reward: self.episode.total_reward(),
             task_completed: self.task_completed,
             robot_terminated: self.robot_terminated,
@@ -387,13 +412,64 @@ impl FlagshipScenario {
         }
     }
 
-    fn record_control_step(&self, observation: &FlagshipObservation, action_values: Vec<f64>) {
+    fn controller_observation_values(&self) -> Vec<f64> {
+        let payload = self
+            .episode
+            .simulation()
+            .named_translation_m(PAYLOAD_NAME)
+            .expect("flagship payload keeps its stable name");
+        let traffic = self.traffic_actor_pose();
+        let perception_valid =
+            !self.fault_injected && Self::perception_valid(&self.robot_observation);
+        vec![
+            self.robot_observation.base_x_m,
+            self.robot_observation.base_y_m,
+            self.robot_observation.base_z_m,
+            self.robot_observation.base_yaw_rad,
+            self.robot_observation.shoulder_position_rad,
+            self.robot_observation.elbow_position_rad,
+            self.robot_observation.wrist_yaw_position_rad,
+            self.robot_observation.lift_position_m,
+            self.robot_observation.gripper_position_m,
+            payload.0,
+            payload.1,
+            payload.2,
+            self.place_target_position_m[0],
+            self.place_target_position_m[1],
+            self.place_target_position_m[2],
+            if perception_valid {
+                self.robot_observation.wrist_camera_pixels as f64
+            } else {
+                0.0
+            },
+            if perception_valid {
+                self.robot_observation.wrist_depth_min_m
+            } else {
+                0.0
+            },
+            traffic.position_m[0],
+            traffic.position_m[1],
+            traffic.position_m[2],
+            bool_value(self.traffic_signal_green),
+            bool_value(self.inspection_complete && self.traffic_clear),
+            bool_value(self.robot_observation.is_grasping),
+            f64::from(self.controller.expected_policy_phase()),
+        ]
+    }
+
+    fn record_control_step(
+        &self,
+        observation: &FlagshipObservation,
+        controller_observation_values: Vec<f64>,
+        action_values: Vec<f64>,
+    ) {
         if let Some(trace) = &self.recorded_trace {
             trace
                 .lock()
                 .expect("flagship recorded trace mutex is not poisoned")
                 .push(FlagshipRecordedStep {
                     observation: observation.clone(),
+                    controller_observation_values,
                     action_values,
                 });
         }
@@ -414,7 +490,7 @@ impl BehaviorScenario for FlagshipScenario {
     }
 
     fn state_digest(&self, observation: &Self::Observation) -> u64 {
-        let mut bytes = b"rne_flagship_workflow_state_v1".to_vec();
+        let mut bytes = b"rne_flagship_workflow_state_v2".to_vec();
         bytes.extend_from_slice(
             &hash_physics_state(self.episode.simulation().world()).to_le_bytes(),
         );
@@ -426,7 +502,7 @@ impl BehaviorScenario for FlagshipScenario {
     }
 
     fn scenario_digest(&self) -> u64 {
-        let mut bytes = b"rne_flagship_workflow_inputs_v1".to_vec();
+        let mut bytes = b"rne_flagship_workflow_inputs_v2".to_vec();
         bytes.extend_from_slice(&self.scene_input_digest.to_le_bytes());
         bytes.extend_from_slice(&self.fixed_delta.ticks().to_le_bytes());
         bytes.extend_from_slice(&SIGNAL_RELEASE_STEP.to_le_bytes());
@@ -525,21 +601,28 @@ impl BehaviorScenario for FlagshipScenario {
         let blackout_enabled = dimension_boolean(&self.dimensions, BLACKOUT_DIMENSION);
         if blackout_enabled && self.workflow_step == self.fault_step {
             self.fault_injected = true;
-            self.fail_closed_abort = true;
             self.deterministic_event_count += 1;
         }
 
-        let permitted = self.inspection_complete
-            && self.traffic_clear
-            && raw_perception_valid
-            && !self.fail_closed_abort;
-        let action = if permitted {
-            self.policy.act(&self.robot_observation)
-        } else {
-            MobileManipulatorAction::default()
-        };
-        let motion_commanded = action_commands_motion(&action);
-        let normalized_action_values = flatten_action(action, &self.observation(motion_commanded));
+        let controller_observation_values = self.controller_observation_values();
+        let perception_available = !self.fault_injected && raw_perception_valid;
+        let (action_values, controller_action_valid) =
+            if !self.controller_started && !perception_available {
+                (hold_action_values(&self.robot_observation), false)
+            } else {
+                self.controller_started = true;
+                match self.controller.next_action(&controller_observation_values) {
+                    Ok(values) => (values, true),
+                    Err(error) => {
+                        self.fail_closed_abort = true;
+                        self.controller_failure = Some(error.to_string());
+                        (hold_action_values(&self.robot_observation), false)
+                    }
+                }
+            };
+        let motion_commanded =
+            action_values_command_motion(&action_values, &self.robot_observation);
+        let action = unflatten_action(&action_values);
         let robot_step = self.episode.step(action);
         self.robot_observation = robot_step.observation;
         self.robot_terminated = robot_step.terminated;
@@ -558,7 +641,9 @@ impl BehaviorScenario for FlagshipScenario {
 
         let observation = self.observation(motion_commanded);
         self.record_trace(&observation);
-        self.record_control_step(&observation, normalized_action_values);
+        if controller_action_valid {
+            self.record_control_step(&observation, controller_observation_values, action_values);
+        }
         BehaviorScenarioStep {
             observation,
             done: self.fail_closed_abort || robot_step.is_done(),
@@ -1297,26 +1382,77 @@ fn run_clean_flagship(
             scenario.with_traces(Arc::clone(&captured), Arc::clone(&recorded_captured))
         })
     })?;
-    if !run.report.passed() || !run.failure_replays.is_empty() {
-        bail!(
-            "{} clean flagship run did not satisfy every behavior contract",
-            physics_backend.as_str()
-        );
-    }
     let trace = trace
         .lock()
         .expect("flagship trace mutex is not poisoned")
         .clone();
+    let recorded_trace = recorded_trace
+        .lock()
+        .expect("flagship recorded trace mutex is not poisoned")
+        .clone();
+    if !run.report.passed() || !run.failure_replays.is_empty() {
+        let first_grasp = trace
+            .iter()
+            .find(|frame| frame.currently_grasping)
+            .map(|frame| {
+                (
+                    frame.workflow_step,
+                    frame.policy_phase.as_str(),
+                    [frame.payload_x_m, frame.payload_y_m, frame.payload_z_m],
+                )
+            });
+        let first_transport = trace
+            .iter()
+            .find(|frame| frame.policy_phase == "transport")
+            .map(|frame| {
+                (
+                    frame.workflow_step,
+                    frame.currently_grasping,
+                    [frame.payload_x_m, frame.payload_y_m, frame.payload_z_m],
+                    [frame.base_x_m, frame.base_y_m, frame.base_z_m],
+                )
+            });
+        let first_grasp_loss = trace.windows(2).find_map(|frames| {
+            let previous = &frames[0];
+            let current = &frames[1];
+            (previous.currently_grasping && !current.currently_grasping).then_some((
+                previous.workflow_step,
+                previous.policy_phase.as_str(),
+                [
+                    previous.payload_x_m,
+                    previous.payload_y_m,
+                    previous.payload_z_m,
+                ],
+                [previous.base_x_m, previous.base_y_m, previous.base_z_m],
+                current.workflow_step,
+                current.policy_phase.as_str(),
+                [
+                    current.payload_x_m,
+                    current.payload_y_m,
+                    current.payload_z_m,
+                ],
+                [current.base_x_m, current.base_y_m, current.base_z_m],
+            ))
+        });
+        let grasp_loss_action = first_grasp_loss.as_ref().and_then(|loss| {
+            recorded_trace
+                .iter()
+                .find(|frame| frame.observation.workflow_step == loss.4)
+                .map(|frame| frame.action_values.as_slice())
+        });
+        bail!(
+            "{} clean flagship run did not satisfy every behavior contract; first_grasp={first_grasp:#?}; first_transport={first_transport:#?}; first_grasp_loss={first_grasp_loss:#?}; grasp_loss_action={grasp_loss_action:#?}; final={:#?}; report={:#?}",
+            physics_backend.as_str(),
+            trace.last(),
+            run.report,
+        );
+    }
     if !trace.last().is_some_and(semantic_outcome_passed) {
         bail!(
             "{} clean flagship trace did not end in the required semantic outcome",
             physics_backend.as_str()
         );
     }
-    let recorded_trace = recorded_trace
-        .lock()
-        .expect("flagship recorded trace mutex is not poisoned")
-        .clone();
     anyhow::ensure!(
         !recorded_trace.is_empty(),
         "{} clean flagship run emitted no controller trace",
@@ -1711,37 +1847,54 @@ fn build_traffic(
     Ok((world, actor, routes, controls))
 }
 
-fn action_commands_motion(action: &MobileManipulatorAction) -> bool {
-    action.left_wheel_velocity_rad_s != 0.0
-        || action.right_wheel_velocity_rad_s != 0.0
-        || action.shoulder_velocity_rad_s != 0.0
-        || action.elbow_velocity_rad_s != 0.0
-        || action.gripper_velocity_rad_s != 0.0
-        || action.gripper_velocity_m_s != 0.0
-        || action.lift_velocity_m_s != 0.0
-        || action.lift_joint_target.is_some()
-        || action.wrist_yaw_target_rad.is_some()
+fn action_values_command_motion(
+    values: &[f64],
+    observation: &MobileManipulatorObservation,
+) -> bool {
+    const EPSILON: f64 = 1.0e-12;
+    values[0].abs() > EPSILON
+        || values[1].abs() > EPSILON
+        || (values[2] - observation.shoulder_position_rad).abs() > EPSILON
+        || (values[3] - observation.elbow_position_rad).abs() > EPSILON
+        || (values[4] - observation.wrist_yaw_position_rad).abs() > EPSILON
+        || (values[5] - observation.lift_position_m).abs() > EPSILON
+        || values[6].abs() > EPSILON
 }
 
-fn flatten_action(action: MobileManipulatorAction, observation: &FlagshipObservation) -> Vec<f64> {
-    let target = action.lift_joint_target;
+fn hold_action_values(observation: &MobileManipulatorObservation) -> Vec<f64> {
     vec![
-        action.left_wheel_velocity_rad_s,
-        action.right_wheel_velocity_rad_s,
-        target
-            .map(|value| value.shoulder_rad)
-            .unwrap_or(observation.shoulder_position_rad),
-        target
-            .map(|value| value.elbow_rad)
-            .unwrap_or(observation.elbow_position_rad),
-        action
-            .wrist_yaw_target_rad
-            .unwrap_or(observation.wrist_yaw_position_rad),
-        target
-            .map(|value| value.lift_m)
-            .unwrap_or(observation.lift_position_m),
-        action.gripper_velocity_m_s,
+        0.0,
+        0.0,
+        observation.shoulder_position_rad,
+        observation.elbow_position_rad,
+        observation.wrist_yaw_position_rad,
+        observation.lift_position_m,
+        0.0,
     ]
+}
+
+fn unflatten_action(values: &[f64]) -> MobileManipulatorAction {
+    assert_eq!(values.len(), 7, "portable flagship action width");
+    MobileManipulatorAction {
+        left_wheel_velocity_rad_s: values[0],
+        right_wheel_velocity_rad_s: values[1],
+        gripper_velocity_m_s: values[6],
+        lift_joint_target: Some(MmLiftJointTarget {
+            shoulder_rad: values[2],
+            elbow_rad: values[3],
+            lift_m: values[5],
+        }),
+        wrist_yaw_target_rad: Some(values[4]),
+        ..MobileManipulatorAction::default()
+    }
+}
+
+fn bool_value(value: bool) -> f64 {
+    if value {
+        1.0
+    } else {
+        0.0
+    }
 }
 
 fn observation_is_finite(observation: &FlagshipObservation) -> bool {
@@ -1751,7 +1904,9 @@ fn observation_is_finite(observation: &FlagshipObservation) -> bool {
         observation.traffic_actor_y_m,
         observation.traffic_actor_z_m,
         observation.base_x_m,
+        observation.base_y_m,
         observation.base_z_m,
+        observation.base_yaw_rad,
         observation.shoulder_position_rad,
         observation.elbow_position_rad,
         observation.wrist_yaw_position_rad,
@@ -1760,6 +1915,9 @@ fn observation_is_finite(observation: &FlagshipObservation) -> bool {
         observation.payload_x_m,
         observation.payload_y_m,
         observation.payload_z_m,
+        observation.place_target_x_m,
+        observation.place_target_y_m,
+        observation.place_target_z_m,
         observation.maximum_payload_y_m,
         observation.total_reward,
     ]
@@ -1778,48 +1936,19 @@ fn dimension_boolean(dimensions: &[BehaviorDimension], name: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn phase_name(phase: MobileLiftPickPlacePhase) -> &'static str {
+fn phase_name(phase: i32) -> &'static str {
     match phase {
-        MobileLiftPickPlacePhase::Settle => "settle",
-        MobileLiftPickPlacePhase::Navigate => "navigate",
-        MobileLiftPickPlacePhase::Approach => "approach",
-        MobileLiftPickPlacePhase::LowerToPick => "lower_to_pick",
-        MobileLiftPickPlacePhase::Grasp => "grasp",
-        MobileLiftPickPlacePhase::Lift => "lift",
-        MobileLiftPickPlacePhase::Transport => "transport",
-        MobileLiftPickPlacePhase::Lower => "lower",
-        MobileLiftPickPlacePhase::Release => "release",
-        MobileLiftPickPlacePhase::Done => "done",
-    }
-}
-
-fn phase_index(phase: MobileLiftPickPlacePhase) -> i32 {
-    match phase {
-        MobileLiftPickPlacePhase::Settle => 0,
-        MobileLiftPickPlacePhase::Navigate => 1,
-        MobileLiftPickPlacePhase::Approach => 2,
-        MobileLiftPickPlacePhase::LowerToPick => 3,
-        MobileLiftPickPlacePhase::Grasp => 4,
-        MobileLiftPickPlacePhase::Lift => 5,
-        MobileLiftPickPlacePhase::Transport => 6,
-        MobileLiftPickPlacePhase::Lower => 7,
-        MobileLiftPickPlacePhase::Release => 8,
-        MobileLiftPickPlacePhase::Done => 9,
-    }
-}
-
-fn failure_name(failure: MobileLiftFailureClass) -> &'static str {
-    match failure {
-        MobileLiftFailureClass::None => "none",
-        MobileLiftFailureClass::NavigateTimeout => "navigate_timeout",
-        MobileLiftFailureClass::ApproachTimeout => "approach_timeout",
-        MobileLiftFailureClass::PickupAlignmentTimeout => "pickup_alignment_timeout",
-        MobileLiftFailureClass::GraspTimeout => "grasp_timeout",
-        MobileLiftFailureClass::GraspSlip => "grasp_slip",
-        MobileLiftFailureClass::LiftClearanceTimeout => "lift_clearance_timeout",
-        MobileLiftFailureClass::TransportTimeout => "transport_timeout",
-        MobileLiftFailureClass::LowerTimeout => "lower_timeout",
-        MobileLiftFailureClass::ReleaseTimeout => "release_timeout",
+        0 => "settle",
+        1 => "navigate",
+        2 => "approach",
+        3 => "lower_to_pick",
+        4 => "grasp",
+        5 => "lift",
+        6 => "transport",
+        7 => "lower",
+        8 => "release",
+        9 => "done",
+        _ => "invalid",
     }
 }
 
@@ -1962,7 +2091,7 @@ mod tests {
         let task = flagship_task_spec(16_666_666);
         task.validate().expect("flagship TaskSpec");
         assert_eq!(task.task_id, TASK_ID);
-        assert_eq!(task.observation.tensors.len(), 12);
+        assert_eq!(task.observation.tensors.len(), 14);
         assert_eq!(task.action.tensors.len(), 4);
         assert_eq!(task.termination.conditions.len(), 2);
     }
