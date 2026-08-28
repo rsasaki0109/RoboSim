@@ -1,10 +1,10 @@
 # Flagship validation workflow
 
-The v0.7 flagship is one fixed-step workflow, not a launcher for disconnected
-demos. A lift-capable mobile manipulator loads the committed scene, robot
-manifest, and URDF, validates wrist RGB-D observations, yields at a red signal
-while a traffic actor clears a shared aisle, then navigates, friction-grasps,
-lifts, transports, and places the payload.
+The v0.2.0 release flagship is one fixed-step workflow, not a launcher for
+disconnected demos. A lift-capable mobile manipulator loads the committed
+scene, robot manifest, and URDF, validates wrist RGB-D observations, yields at
+a red signal while a traffic actor clears a shared aisle, then navigates,
+friction-grasps, lifts, transports, and places the payload.
 
 Run the complete clean-checkout gate on Windows or Linux:
 
@@ -18,6 +18,23 @@ fail-closed `perception_stream_alive` violation, minimizes three active
 dimensions to the one required blackout dimension, creates a Failure Capsule
 from the minimized replay, and verifies every capsule digest and replay
 invariant.
+
+The source-tree command above is the native Rapier development gate. The
+release archive additionally ships a pinned MuJoCo runtime and the
+`rne-flagship-proof` executable. From the extracted archive, an external user
+can run the complete installed proof without Cargo, ROS 2, a separate MuJoCo
+installation, or network access:
+
+```bash
+./bin/rne-flagship-proof flagship-proof --cross-backend \
+  --verify-installed-bundle . --measure-on "lab-machine-a"
+```
+
+On Windows use `bin\rne-flagship-proof.exe` with the same arguments. The
+explicit, non-placeholder machine label writes `time-to-proof-report.json` and
+measures bundle verification through the verified proof against the 15-minute
+target. See [external flagship reproduction](EXTERNAL_FLAGSHIP_REPRODUCTION.md)
+for extraction, checksum, submission, and maintainer-verification steps.
 
 Large generated evidence can live outside the source checkout. Set
 `RNE_ARTIFACTS_DIR` to an absolute path; `flagship`, `ci-headless`, and `ci`
@@ -73,6 +90,11 @@ The output directory contains:
 | `failure-minimized.behavior-case.json` | Small standalone failure input |
 | `replay-inspector.html` | Self-contained success/failure timeline and top-down browser view |
 | `failure-capsule/` | Portable capsule containing the minimized replay, reports, and browser inspector |
+| `cross-backend-report.json` | With `--cross-backend`: same TaskSpec and controller on `rapier_native` and `mujoco_native`, with exact outcomes and SI-unit tolerances |
+| `mujoco-failure.rne-replay` | With `--cross-backend`: MuJoCo reproduction of the same intentional first violation |
+| `recorded-shadow-proof.json` | With `--cross-backend`: bound recorded playback, non-actuating shadow, and expected-disconnect cases |
+| `installed-proof-report.json` | Installed producer, bundle verification, execution paths, artifact hashes, and aggregate verdict |
+| `time-to-proof-report.json` | With `--measure-on`: named-machine elapsed measurement and 15-minute verdict |
 
 Open `replay-inspector.html` directly in a browser; it embeds its data and does
 not require a server or network access. The run selector switches between the
@@ -80,7 +102,18 @@ complete successful trace and the minimized failure, and the frame slider
 shows robot, payload, traffic, signal, perception, interlock, grasp, and task
 state.
 
-This is the native Rapier execution path for the v0.7 workflow. The remaining
-v0.7 portability gate is to run the same versioned flagship task through a
-second production physics path and register cross-backend outcome tolerances;
-the report names only `rapier_native` until that evidence exists.
+The installed cross-backend proof runs the same
+`rne.flagship.mobile_lift_shared_aisle.v1` TaskSpec and
+`rne.ai.ik_mobile_lift_pick_place_policy.v1` controller configuration on
+Rapier and native MuJoCo. Both backends must pass the nominal task, reproduce
+the intentional failure at the exact first step and simulation timestamp, and
+pass the registered tolerances with explicit units. The Failure Capsule binds
+the task, model, configuration, reports, replay, browser inspector, producer,
+and installed-bundle verification by size and SHA-256.
+
+The recorded proof exercises the same typed contract as bounded playback and
+non-actuating shadow traffic, plus an expected process-disconnect case. It is
+not evidence of physical actuation. Gazebo qualification remains a separate
+process-isolated external simulator-adapter submission, and bounded physical
+execution remains a separate hardware-evidence gate; neither is relabelled as
+having passed by this release-archive proof.

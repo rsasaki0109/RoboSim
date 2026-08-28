@@ -1,4 +1,4 @@
-// One headless v0.7 workflow: inspect, yield to traffic, navigate, and place.
+// One headless release flagship: inspect, yield to traffic, navigate, and place.
 //
 // The workflow intentionally keeps orchestration at the example boundary. The
 // robot episode and traffic runtime remain independently testable, while typed

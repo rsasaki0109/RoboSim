@@ -2235,7 +2235,7 @@ fn behavior_replay(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()
     Ok(())
 }
 
-/// Reproduces the v0.7 shared-aisle flagship success, minimized failure, and capsule.
+/// Reproduces the release flagship success, minimized failure, and capsule.
 fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let mut cross_backend = false;
     for argument in args {
@@ -2485,7 +2485,7 @@ fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
         "flagship browser inspector is incomplete"
     );
     println!(
-        "v0.7 flagship evidence verified (cross_backend={}): {}",
+        "release flagship evidence verified (cross_backend={}): {}",
         cross_backend,
         output.display()
     );
