@@ -27,7 +27,7 @@ observation state.
 
 | Showcase | GIF / poster | GIF bytes | poster bytes | poster size |
 | --- | --- | ---: | ---: | ---: |
-| Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 523,360 | 808,064 | 960 x 540 |
+| Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 414,735 | 749,240 | 960 x 540 |
 | OpenArm v2 bimanual control | `showcase-openarm.gif` / `.png` | 2,471,937 | 26,918 | 960 x 540 |
 | Factory inspection | `showcase-factory.gif` / `.png` | 1,830,619 | 52,228 | 960 x 540 |
 | Office AGV delivery | `showcase-office.gif` / `.png` | 1,935,863 | 18,240 | 960 x 540 |
