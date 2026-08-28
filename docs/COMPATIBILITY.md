@@ -266,6 +266,13 @@ physical write stream. Every source action is projection-validated, including
 explicitly suppressed odd sequences. Sequence gaps, duplicates, reordering,
 overflow, or invalid projections fail without advancing scheduler state.
 
+Action-projection and rate-decision schema v2 preserve the exact transform,
+physical envelope, suppression record, and phase-zero 60-to-30 Hz policy while
+binding the portable TaskSpec/controller v2 identities. The v2 controller's
+declared speed limits make its normal base output projectable without adapter
+clamping; the projection still independently fails closed at the physical
+TaskSpec bounds. Historical schema-v1 decisions retain only v1 identities.
+
 Flagship-to-LeKiwi observation-fusion schema v1 requires five independently
 identified, content-labelled, simulation-tick sources plus an explicit
 three-channel morphology calibration. It emits exactly 19 values in the 12
@@ -274,6 +281,15 @@ and hashes the result. It never fills unavailable task state with defaults.
 Future/stale samples, source mutation under a reused sequence, identity changes,
 sequence/tick regressions, invalid calibration, missing camera/depth, and
 nonfinite values fail without advancing fuser state.
+
+Observation-fusion schema v2 retains the same five-source freshness and
+continuity rules while migrating to the complete flagship TaskSpec v2. Its
+localization payload carries XYZ position plus yaw, task state carries the
+world-frame place target, and the output is exactly 24 values in 14 tensors.
+The v2 fuser's output is accepted directly by
+`FlagshipMobileLiftControllerV2`; no simulator-private pose or goal field is
+consulted. Reusing a source sequence with changed yaw or place target fails
+without advancing state. Schema v1 remains readable transition evidence only.
 
 Flagship LeKiwi shadow-manifest schema v1 binds twelve content-addressed files:
 the parent TaskSpec/controller, physical profile, morphology calibration, four
@@ -284,6 +300,15 @@ rehashes the complete tree, replays every decision, checks exact 60-to-30 Hz
 sample holding, rejects any actuator write, and keeps mock distinct from
 physical-shadow evidence. `xtask flagship-lekiwi-shadow seal` creates the
 self-digested index and `verify` performs the full semantic replay.
+
+Shadow-manifest schema v2 binds the portable TaskSpec/controller v2 contract
+and v2 action, rate, and observation streams. Its observation records retain
+the exact controller action, so replay covers fusion, controller execution,
+physical projection, and rate scheduling rather than merely proving that the
+controller accepts the observation width. The typed validators retain schema
+v1 readability. The filesystem capture/seal/verify command still emits and
+verifies v1 bundles until its v2 migration is completed; schema v2 must not yet
+be presented as captured physical evidence.
 
 LeKiwi physical-evidence manifest schema v1 indexes every required v0.6 exit
 artifact by explicit kind/schema, a unique canonical relative path, and a

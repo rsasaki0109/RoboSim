@@ -1623,28 +1623,28 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "hardware",
             "flagship_lekiwi_action_projection",
             u64::from(
-                rne_hardware_lekiwi::flagship_projection::FLAGSHIP_LEKIWI_ACTION_PROJECTION_SCHEMA_VERSION,
+                rne_hardware_lekiwi::flagship_projection::FLAGSHIP_LEKIWI_ACTION_PROJECTION_CURRENT_SCHEMA_VERSION,
             ),
         ),
         (
             "hardware",
             "flagship_lekiwi_rate_decision",
             u64::from(
-                rne_hardware_lekiwi::flagship_rate::FLAGSHIP_LEKIWI_RATE_DECISION_SCHEMA_VERSION,
+                rne_hardware_lekiwi::flagship_rate::FLAGSHIP_LEKIWI_RATE_DECISION_CURRENT_SCHEMA_VERSION,
             ),
         ),
         (
             "hardware",
             "flagship_lekiwi_observation_fusion",
             u64::from(
-                rne_hardware_lekiwi::flagship_observation::FLAGSHIP_LEKIWI_OBSERVATION_FUSION_SCHEMA_VERSION,
+                rne_hardware_lekiwi::flagship_observation::FLAGSHIP_LEKIWI_OBSERVATION_FUSION_CURRENT_SCHEMA_VERSION,
             ),
         ),
         (
             "hardware",
             "flagship_lekiwi_shadow_manifest",
             u64::from(
-                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_LEKIWI_SHADOW_MANIFEST_SCHEMA_VERSION,
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_LEKIWI_SHADOW_MANIFEST_CURRENT_SCHEMA_VERSION,
             ),
         ),
         (
@@ -1665,21 +1665,21 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "hardware",
             "flagship_action_projection_stream",
             u64::from(
-                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_ACTION_PROJECTION_STREAM_SCHEMA_VERSION,
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_ACTION_PROJECTION_STREAM_CURRENT_SCHEMA_VERSION,
             ),
         ),
         (
             "hardware",
             "flagship_rate_decision_stream",
             u64::from(
-                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_RATE_DECISION_STREAM_SCHEMA_VERSION,
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_RATE_DECISION_STREAM_CURRENT_SCHEMA_VERSION,
             ),
         ),
         (
             "hardware",
             "flagship_observation_fusion_stream",
             u64::from(
-                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_OBSERVATION_FUSION_STREAM_SCHEMA_VERSION,
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_OBSERVATION_FUSION_STREAM_CURRENT_SCHEMA_VERSION,
             ),
         ),
         (

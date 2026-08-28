@@ -7,8 +7,8 @@
 //! conversion.
 
 use crate::flagship_projection::{
-    project_flagship_action_to_lekiwi, FlagshipLeKiwiActionProjection,
-    FlagshipLeKiwiProjectionError,
+    project_flagship_action_to_lekiwi, project_flagship_action_to_lekiwi_v2,
+    FlagshipLeKiwiActionProjection, FlagshipLeKiwiProjectionError,
 };
 use rne_ai::FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS;
 use serde::{Deserialize, Serialize};
@@ -26,6 +26,9 @@ const _: () = assert!(FLAGSHIP_LEKIWI_WRITE_PERIOD_TICKS >= 1_000_000_000 / 30);
 
 /// Schema version for one flagship-to-LeKiwi rate decision.
 pub const FLAGSHIP_LEKIWI_RATE_DECISION_SCHEMA_VERSION: u32 = 1;
+
+/// Current rate-decision schema version for portable v2 projections.
+pub const FLAGSHIP_LEKIWI_RATE_DECISION_CURRENT_SCHEMA_VERSION: u32 = 2;
 
 /// Stable discriminator for [`FlagshipLeKiwiRateDecision`].
 pub const FLAGSHIP_LEKIWI_RATE_DECISION_KIND: &str = "rne_flagship_lekiwi_rate_decision";
@@ -123,6 +126,63 @@ impl FlagshipLeKiwiRateScheduler {
     }
 }
 
+/// Stateful exact-sequence scheduler for portable v2 controller actions.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FlagshipLeKiwiRateSchedulerV2 {
+    expected_parent_sequence: u64,
+}
+
+impl FlagshipLeKiwiRateSchedulerV2 {
+    /// Creates a v2 scheduler synchronized to parent sequence and physical phase zero.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns the only parent sequence currently accepted by [`Self::ingest`].
+    pub fn expected_parent_sequence(&self) -> u64 {
+        self.expected_parent_sequence
+    }
+
+    /// Validates, projects, and schedules one portable v2 action.
+    ///
+    /// Any error leaves scheduler state unchanged.
+    pub fn ingest(
+        &mut self,
+        parent_sequence: u64,
+        parent_action: &[f64],
+    ) -> Result<FlagshipLeKiwiRateDecision, FlagshipLeKiwiRateError> {
+        if parent_sequence != self.expected_parent_sequence {
+            return Err(FlagshipLeKiwiRateError::UnexpectedParentSequence {
+                expected: self.expected_parent_sequence,
+                actual: parent_sequence,
+            });
+        }
+        let next_parent_sequence = parent_sequence
+            .checked_add(1)
+            .ok_or(FlagshipLeKiwiRateError::SequenceOverflow)?;
+        let projection = project_flagship_action_to_lekiwi_v2(parent_action)?;
+        let physical_slot = parent_sequence / FLAGSHIP_LEKIWI_DECIMATION;
+        let emitted = parent_sequence.is_multiple_of(FLAGSHIP_LEKIWI_DECIMATION);
+        let decision = FlagshipLeKiwiRateDecision {
+            kind: FLAGSHIP_LEKIWI_RATE_DECISION_KIND.to_string(),
+            schema_version: FLAGSHIP_LEKIWI_RATE_DECISION_CURRENT_SCHEMA_VERSION,
+            parent_sequence,
+            parent_period_ticks: FLAGSHIP_CONTROLLER_PERIOD_TICKS,
+            physical_period_ticks: FLAGSHIP_LEKIWI_WRITE_PERIOD_TICKS,
+            physical_slot,
+            physical_sequence: emitted.then_some(physical_slot),
+            disposition: if emitted {
+                FlagshipLeKiwiRateDisposition::Emit
+            } else {
+                FlagshipLeKiwiRateDisposition::SuppressBetweenPhysicalTicks
+            },
+            projection,
+        };
+        self.expected_parent_sequence = next_parent_sequence;
+        Ok(decision)
+    }
+}
+
 /// Failure at the deterministic flagship-to-LeKiwi rate boundary.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum FlagshipLeKiwiRateError {
@@ -167,6 +227,20 @@ mod tests {
         assert_eq!(one.physical_sequence, None);
         assert_eq!(two.physical_sequence, Some(1));
         assert_eq!(scheduler.expected_parent_sequence(), 3);
+    }
+
+    #[test]
+    fn v2_scheduler_retains_v2_projection_identity() {
+        let mut scheduler = FlagshipLeKiwiRateSchedulerV2::new();
+        let decision = scheduler.ingest(0, &action(1.0)).unwrap();
+        assert_eq!(decision.schema_version, 2);
+        assert_eq!(decision.projection.schema_version, 2);
+        assert_eq!(
+            decision.projection.parent_task_id,
+            rne_ai::FLAGSHIP_MOBILE_LIFT_TASK_ID_V2
+        );
+        assert_eq!(decision.disposition, FlagshipLeKiwiRateDisposition::Emit);
+        assert_eq!(scheduler.expected_parent_sequence(), 1);
     }
 
     #[test]

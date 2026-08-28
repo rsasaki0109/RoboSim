@@ -7,15 +7,20 @@
 
 use crate::{lekiwi_base_task_spec, LEKIWI_BASE_TASK_ID, LEKIWI_REFERENCE_PROFILE_ID};
 use rne_ai::{
-    flagship_mobile_lift_task_spec, mm_mobile_wheel_velocities_to_twist, TaskSpec, TensorBounds,
-    TensorSpec, FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID, FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS,
-    FLAGSHIP_MOBILE_LIFT_TASK_ID,
+    flagship_mobile_lift_task_spec, flagship_mobile_lift_task_spec_v2,
+    mm_mobile_wheel_velocities_to_twist, TaskSpec, TensorBounds, TensorSpec,
+    FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID, FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2,
+    FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS, FLAGSHIP_MOBILE_LIFT_TASK_ID,
+    FLAGSHIP_MOBILE_LIFT_TASK_ID_V2,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// Schema version for the flagship-to-LeKiwi action projection evidence.
 pub const FLAGSHIP_LEKIWI_ACTION_PROJECTION_SCHEMA_VERSION: u32 = 1;
+
+/// Current projection schema version for the portable v2 parent contract.
+pub const FLAGSHIP_LEKIWI_ACTION_PROJECTION_CURRENT_SCHEMA_VERSION: u32 = 2;
 
 /// Stable discriminator for [`FlagshipLeKiwiActionProjection`].
 pub const FLAGSHIP_LEKIWI_ACTION_PROJECTION_KIND: &str = "rne_flagship_lekiwi_action_projection";
@@ -89,7 +94,37 @@ pub fn project_flagship_action_to_lekiwi(
     parent_action: &[f64],
 ) -> Result<FlagshipLeKiwiActionProjection, FlagshipLeKiwiProjectionError> {
     let parent_task = flagship_mobile_lift_task_spec(FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS);
-    validate_action(&parent_task, parent_action, true)?;
+    project_action(
+        parent_action,
+        &parent_task,
+        FLAGSHIP_MOBILE_LIFT_TASK_ID,
+        FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID,
+        FLAGSHIP_LEKIWI_ACTION_PROJECTION_SCHEMA_VERSION,
+    )
+}
+
+/// Projects one complete portable v2 controller action into bounded LeKiwi base action.
+pub fn project_flagship_action_to_lekiwi_v2(
+    parent_action: &[f64],
+) -> Result<FlagshipLeKiwiActionProjection, FlagshipLeKiwiProjectionError> {
+    let parent_task = flagship_mobile_lift_task_spec_v2(FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS);
+    project_action(
+        parent_action,
+        &parent_task,
+        FLAGSHIP_MOBILE_LIFT_TASK_ID_V2,
+        FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2,
+        FLAGSHIP_LEKIWI_ACTION_PROJECTION_CURRENT_SCHEMA_VERSION,
+    )
+}
+
+fn project_action(
+    parent_action: &[f64],
+    parent_task: &TaskSpec,
+    parent_task_id: &str,
+    parent_controller_id: &str,
+    schema_version: u32,
+) -> Result<FlagshipLeKiwiActionProjection, FlagshipLeKiwiProjectionError> {
+    validate_action(parent_task, parent_action, true)?;
 
     let (linear_x_m_s, angular_z_rad_s) =
         mm_mobile_wheel_velocities_to_twist(parent_action[0], parent_action[1]);
@@ -117,9 +152,9 @@ pub fn project_flagship_action_to_lekiwi(
 
     Ok(FlagshipLeKiwiActionProjection {
         kind: FLAGSHIP_LEKIWI_ACTION_PROJECTION_KIND.to_string(),
-        schema_version: FLAGSHIP_LEKIWI_ACTION_PROJECTION_SCHEMA_VERSION,
-        parent_task_id: FLAGSHIP_MOBILE_LIFT_TASK_ID.to_string(),
-        parent_controller_id: FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID.to_string(),
+        schema_version,
+        parent_task_id: parent_task_id.to_string(),
+        parent_controller_id: parent_controller_id.to_string(),
         physical_task_id: LEKIWI_BASE_TASK_ID.to_string(),
         physical_profile_id: LEKIWI_REFERENCE_PROFILE_ID.to_string(),
         parent_action_sha256: action_sha256(parent_action),
@@ -282,6 +317,18 @@ mod tests {
         assert_eq!(report.suppressed_actions[0].value, 0.1);
         assert_eq!(report.parent_action_sha256.len(), 64);
         assert_eq!(report.status, "passed");
+    }
+
+    #[test]
+    fn v2_projection_binds_portable_task_and_controller() {
+        let report = project_flagship_action_to_lekiwi_v2(&action(1.0, 1.0)).unwrap();
+        assert_eq!(report.schema_version, 2);
+        assert_eq!(report.parent_task_id, FLAGSHIP_MOBILE_LIFT_TASK_ID_V2);
+        assert_eq!(
+            report.parent_controller_id,
+            FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2
+        );
+        assert_eq!(report.physical_action_values, [0.1, 0.0, 0.0]);
     }
 
     #[test]

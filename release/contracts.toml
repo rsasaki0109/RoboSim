@@ -91,15 +91,15 @@ lekiwi_reference_session = 1
 lekiwi_physical_evidence = 1
 lekiwi_power_isolation_diagnostic = 1
 lekiwi_host_termination_diagnostic = 1
-flagship_lekiwi_action_projection = 1
-flagship_lekiwi_rate_decision = 1
-flagship_lekiwi_observation_fusion = 1
-flagship_lekiwi_shadow_manifest = 1
+flagship_lekiwi_action_projection = 2
+flagship_lekiwi_rate_decision = 2
+flagship_lekiwi_observation_fusion = 2
+flagship_lekiwi_shadow_manifest = 2
 flagship_lekiwi_arm_calibration = 1
 flagship_observation_source_contract = 1
-flagship_action_projection_stream = 1
-flagship_rate_decision_stream = 1
-flagship_observation_fusion_stream = 1
+flagship_action_projection_stream = 2
+flagship_rate_decision_stream = 2
+flagship_observation_fusion_stream = 2
 
 [simulators]
 runtime_manifest = 1

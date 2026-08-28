@@ -8,13 +8,20 @@
 //! is emitted.
 
 use crate::{flagship_rate::FLAGSHIP_CONTROLLER_PERIOD_TICKS, lekiwi_base_task_spec};
-use rne_ai::{flagship_mobile_lift_task_spec, FLAGSHIP_MOBILE_LIFT_TASK_ID};
+use rne_ai::{
+    flagship_mobile_lift_task_spec, flagship_mobile_lift_task_spec_v2,
+    FLAGSHIP_MOBILE_LIFT_OBSERVATION_WIDTH_V2, FLAGSHIP_MOBILE_LIFT_TASK_ID,
+    FLAGSHIP_MOBILE_LIFT_TASK_ID_V2,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
 /// Schema version for flagship-to-LeKiwi observation-fusion evidence.
 pub const FLAGSHIP_LEKIWI_OBSERVATION_FUSION_SCHEMA_VERSION: u32 = 1;
+
+/// Current schema version for hidden-state-free flagship observation fusion.
+pub const FLAGSHIP_LEKIWI_OBSERVATION_FUSION_CURRENT_SCHEMA_VERSION: u32 = 2;
 
 /// Stable discriminator for [`FlagshipLeKiwiObservationFusion`].
 pub const FLAGSHIP_LEKIWI_OBSERVATION_FUSION_KIND: &str = "rne_flagship_lekiwi_observation_fusion";
@@ -58,6 +65,16 @@ pub struct FlagshipLocalizationObservation {
     pub base_position_m: [f64; 2],
 }
 
+/// Complete metric base pose required by the portable v2 controller.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FlagshipLocalizationObservationV2 {
+    /// Flagship base x/y/z position in metres.
+    pub base_position_m: [f64; 3],
+    /// Base yaw about the world Y axis in radians.
+    pub base_yaw_rad: f64,
+}
+
 /// Metric payload and wrist-camera observation supplied by perception.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -96,6 +113,20 @@ pub struct FlagshipTaskStateObservation {
     pub policy_phase: i32,
 }
 
+/// Task state required by the portable v2 controller.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FlagshipTaskStateObservationV2 {
+    /// Lift displacement in metres in the flagship model convention.
+    pub lift_position_m: f64,
+    /// Gripper displacement in metres in the flagship model convention.
+    pub gripper_position_m: f64,
+    /// World-frame place target supplied by the exact task configuration.
+    pub place_target_position_m: [f64; 3],
+    /// Stable flagship policy phase index in `0..=9`.
+    pub policy_phase: i32,
+}
+
 /// Complete source set required for one parent-order observation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -110,6 +141,22 @@ pub struct FlagshipLeKiwiObservationInputs {
     pub traffic: FlagshipTimedObservation<FlagshipTrafficObservation>,
     /// Flagship task/controller state source.
     pub task_state: FlagshipTimedObservation<FlagshipTaskStateObservation>,
+}
+
+/// Complete source set for one hidden-state-free v2 controller observation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FlagshipLeKiwiObservationInputsV2 {
+    /// Physical LeKiwi observation source.
+    pub physical: FlagshipTimedObservation<FlagshipLeKiwiPhysicalObservation>,
+    /// Full metric localization source.
+    pub localization: FlagshipTimedObservation<FlagshipLocalizationObservationV2>,
+    /// Metric perception source.
+    pub perception: FlagshipTimedObservation<FlagshipPerceptionObservation>,
+    /// Traffic-contract source.
+    pub traffic: FlagshipTimedObservation<FlagshipTrafficObservation>,
+    /// Complete task/controller-state source.
+    pub task_state: FlagshipTimedObservation<FlagshipTaskStateObservationV2>,
 }
 
 /// Affine projection from one LeKiwi arm-position element to one flagship joint.
@@ -200,6 +247,34 @@ pub struct FlagshipLeKiwiObservationFusion {
     /// Ordered source and freshness evidence.
     pub sources: Vec<FlagshipObservationSourceEvidence>,
     /// Exact flattened observation in flagship TaskSpec tensor order.
+    pub observation_values: Vec<f64>,
+    /// SHA-256 of length-prefixed little-endian observation values.
+    pub observation_sha256: String,
+    /// Physical values deliberately denied influence over the parent controller.
+    pub unused_physical_observations: Vec<UnusedLeKiwiObservation>,
+    /// Stable success verdict for this fusion boundary only.
+    pub status: String,
+}
+
+/// Evidence-bearing v2 fusion consumed directly by the portable controller.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FlagshipLeKiwiObservationFusionV2 {
+    /// Stable artifact discriminator shared across fusion schema versions.
+    pub kind: String,
+    /// Observation-fusion schema version; exactly two.
+    pub schema_version: u32,
+    /// Exact v2 parent TaskSpec identity.
+    pub parent_task_id: String,
+    /// Exact zero-based parent controller sequence.
+    pub parent_sequence: u64,
+    /// Integer nanosecond simulation tick for this controller decision.
+    pub parent_tick: u64,
+    /// Digest of the exact arm-channel calibration values.
+    pub arm_calibration_sha256: String,
+    /// Ordered source and freshness evidence.
+    pub sources: Vec<FlagshipObservationSourceEvidence>,
+    /// Exact 24-value flattened v2 observation.
     pub observation_values: Vec<f64>,
     /// SHA-256 of length-prefixed little-endian observation values.
     pub observation_sha256: String,
@@ -339,6 +414,121 @@ impl FlagshipLeKiwiObservationFuser {
     }
 }
 
+/// Stateful continuity checker for the complete portable v2 observation.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FlagshipLeKiwiObservationFuserV2 {
+    expected_parent_sequence: u64,
+    previous_inputs: Option<FlagshipLeKiwiObservationInputsV2>,
+    arm_calibration_sha256: Option<String>,
+}
+
+impl FlagshipLeKiwiObservationFuserV2 {
+    /// Creates a v2 fuser synchronized to parent sequence and tick zero.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns the only parent sequence currently accepted by [`Self::fuse`].
+    pub fn expected_parent_sequence(&self) -> u64 {
+        self.expected_parent_sequence
+    }
+
+    /// Fuses one complete source set into exact v2 TaskSpec order.
+    ///
+    /// Any error leaves sequence, continuity, and calibration state unchanged.
+    pub fn fuse(
+        &mut self,
+        parent_sequence: u64,
+        inputs: &FlagshipLeKiwiObservationInputsV2,
+        arm_calibration: &FlagshipLeKiwiArmCalibration,
+    ) -> Result<FlagshipLeKiwiObservationFusionV2, FlagshipLeKiwiObservationError> {
+        if parent_sequence != self.expected_parent_sequence {
+            return Err(FlagshipLeKiwiObservationError::UnexpectedParentSequence {
+                expected: self.expected_parent_sequence,
+                actual: parent_sequence,
+            });
+        }
+        let next_parent_sequence = parent_sequence
+            .checked_add(1)
+            .ok_or(FlagshipLeKiwiObservationError::SequenceOverflow)?;
+        let parent_tick = parent_sequence
+            .checked_mul(FLAGSHIP_CONTROLLER_PERIOD_TICKS)
+            .ok_or(FlagshipLeKiwiObservationError::TickOverflow)?;
+        validate_calibration(arm_calibration)?;
+        let calibration_sha256 = arm_calibration_sha256(arm_calibration);
+        if self
+            .arm_calibration_sha256
+            .as_ref()
+            .is_some_and(|previous| previous != &calibration_sha256)
+        {
+            return Err(FlagshipLeKiwiObservationError::ArmCalibrationChanged);
+        }
+        validate_source_set_v2(parent_tick, inputs)?;
+        validate_physical(&inputs.physical.value.values)?;
+        validate_auxiliary_v2(inputs)?;
+        if let Some(previous) = &self.previous_inputs {
+            validate_source_continuity_v2(previous, inputs)?;
+        }
+
+        let physical = &inputs.physical.value.values;
+        let arm = arm_calibration.channels.each_ref().map(|channel| {
+            physical[channel.physical_element].mul_add(channel.scale, channel.offset_rad)
+        });
+        if let Some((element, _)) = arm.iter().enumerate().find(|(_, value)| !value.is_finite()) {
+            return Err(FlagshipLeKiwiObservationError::NonFiniteFusedArm { element });
+        }
+        let localization = &inputs.localization.value;
+        let perception = &inputs.perception.value;
+        let traffic = &inputs.traffic.value;
+        let task_state = &inputs.task_state.value;
+        let observation_values = vec![
+            localization.base_position_m[0],
+            localization.base_position_m[1],
+            localization.base_position_m[2],
+            localization.base_yaw_rad,
+            arm[0],
+            arm[1],
+            arm[2],
+            task_state.lift_position_m,
+            task_state.gripper_position_m,
+            perception.payload_position_m[0],
+            perception.payload_position_m[1],
+            perception.payload_position_m[2],
+            task_state.place_target_position_m[0],
+            task_state.place_target_position_m[1],
+            task_state.place_target_position_m[2],
+            perception.wrist_camera_pixel_count as f64,
+            perception.wrist_depth_min_m,
+            traffic.actor_position_m[0],
+            traffic.actor_position_m[1],
+            traffic.actor_position_m[2],
+            bool_to_f64(traffic.signal_green),
+            bool_to_f64(traffic.clear),
+            bool_to_f64(perception.grasped),
+            f64::from(task_state.policy_phase),
+        ];
+        validate_parent_observation_v2(&observation_values)?;
+
+        let fusion = FlagshipLeKiwiObservationFusionV2 {
+            kind: FLAGSHIP_LEKIWI_OBSERVATION_FUSION_KIND.to_string(),
+            schema_version: FLAGSHIP_LEKIWI_OBSERVATION_FUSION_CURRENT_SCHEMA_VERSION,
+            parent_task_id: FLAGSHIP_MOBILE_LIFT_TASK_ID_V2.to_string(),
+            parent_sequence,
+            parent_tick,
+            arm_calibration_sha256: calibration_sha256.clone(),
+            sources: source_evidence_v2(parent_tick, inputs),
+            observation_sha256: values_sha256(&observation_values),
+            observation_values,
+            unused_physical_observations: unused_physical_observations(physical, arm_calibration),
+            status: "passed".to_string(),
+        };
+        self.expected_parent_sequence = next_parent_sequence;
+        self.previous_inputs = Some(inputs.clone());
+        self.arm_calibration_sha256 = Some(calibration_sha256);
+        Ok(fusion)
+    }
+}
+
 fn validate_calibration(
     calibration: &FlagshipLeKiwiArmCalibration,
 ) -> Result<(), FlagshipLeKiwiObservationError> {
@@ -368,6 +558,18 @@ fn validate_calibration(
 fn validate_source_set(
     parent_tick: u64,
     inputs: &FlagshipLeKiwiObservationInputs,
+) -> Result<(), FlagshipLeKiwiObservationError> {
+    validate_source("physical", parent_tick, &inputs.physical)?;
+    validate_source("localization", parent_tick, &inputs.localization)?;
+    validate_source("perception", parent_tick, &inputs.perception)?;
+    validate_source("traffic", parent_tick, &inputs.traffic)?;
+    validate_source("task_state", parent_tick, &inputs.task_state)?;
+    Ok(())
+}
+
+fn validate_source_set_v2(
+    parent_tick: u64,
+    inputs: &FlagshipLeKiwiObservationInputsV2,
 ) -> Result<(), FlagshipLeKiwiObservationError> {
     validate_source("physical", parent_tick, &inputs.physical)?;
     validate_source("localization", parent_tick, &inputs.localization)?;
@@ -408,6 +610,22 @@ fn validate_source<T>(
 fn validate_source_continuity(
     previous: &FlagshipLeKiwiObservationInputs,
     current: &FlagshipLeKiwiObservationInputs,
+) -> Result<(), FlagshipLeKiwiObservationError> {
+    validate_one_continuity("physical", &previous.physical, &current.physical)?;
+    validate_one_continuity(
+        "localization",
+        &previous.localization,
+        &current.localization,
+    )?;
+    validate_one_continuity("perception", &previous.perception, &current.perception)?;
+    validate_one_continuity("traffic", &previous.traffic, &current.traffic)?;
+    validate_one_continuity("task_state", &previous.task_state, &current.task_state)?;
+    Ok(())
+}
+
+fn validate_source_continuity_v2(
+    previous: &FlagshipLeKiwiObservationInputsV2,
+    current: &FlagshipLeKiwiObservationInputsV2,
 ) -> Result<(), FlagshipLeKiwiObservationError> {
     validate_one_continuity("physical", &previous.physical, &current.physical)?;
     validate_one_continuity(
@@ -545,6 +763,45 @@ fn validate_auxiliary(
     Ok(())
 }
 
+fn validate_auxiliary_v2(
+    inputs: &FlagshipLeKiwiObservationInputsV2,
+) -> Result<(), FlagshipLeKiwiObservationError> {
+    let localization = &inputs.localization.value;
+    let perception = &inputs.perception.value;
+    let traffic = &inputs.traffic.value;
+    let task = &inputs.task_state.value;
+    let scalars = localization
+        .base_position_m
+        .into_iter()
+        .chain([localization.base_yaw_rad])
+        .chain(perception.payload_position_m)
+        .chain(task.place_target_position_m)
+        .chain([perception.wrist_depth_min_m])
+        .chain(traffic.actor_position_m)
+        .chain([task.lift_position_m, task.gripper_position_m]);
+    if let Some((element, _)) = scalars.enumerate().find(|(_, value)| !value.is_finite()) {
+        return Err(FlagshipLeKiwiObservationError::NonFiniteAuxiliary { element });
+    }
+    if perception.wrist_camera_pixel_count <= 0
+        || perception.wrist_camera_pixel_count > MAX_EXACT_F64_INTEGER
+    {
+        return Err(FlagshipLeKiwiObservationError::CameraPixelCount {
+            value: perception.wrist_camera_pixel_count,
+        });
+    }
+    if perception.wrist_depth_min_m <= 0.0 {
+        return Err(FlagshipLeKiwiObservationError::WristDepth {
+            value: perception.wrist_depth_min_m,
+        });
+    }
+    if !(0..=9).contains(&task.policy_phase) {
+        return Err(FlagshipLeKiwiObservationError::PolicyPhase {
+            value: task.policy_phase,
+        });
+    }
+    Ok(())
+}
+
 fn validate_parent_observation(values: &[f64]) -> Result<(), FlagshipLeKiwiObservationError> {
     let task = flagship_mobile_lift_task_spec(FLAGSHIP_CONTROLLER_PERIOD_TICKS);
     let expected = [
@@ -586,6 +843,49 @@ fn validate_parent_observation(values: &[f64]) -> Result<(), FlagshipLeKiwiObser
     Ok(())
 }
 
+fn validate_parent_observation_v2(values: &[f64]) -> Result<(), FlagshipLeKiwiObservationError> {
+    let task = flagship_mobile_lift_task_spec_v2(FLAGSHIP_CONTROLLER_PERIOD_TICKS);
+    let expected = [
+        ("base_position_m", 3),
+        ("base_yaw_rad", 1),
+        ("arm_joint_position_rad", 3),
+        ("lift_position_m", 1),
+        ("gripper_position_m", 1),
+        ("payload_position_m", 3),
+        ("place_target_position_m", 3),
+        ("wrist_camera_pixel_count", 1),
+        ("wrist_depth_min_m", 1),
+        ("traffic_actor_position_m", 3),
+        ("traffic_signal_green", 1),
+        ("traffic_clear", 1),
+        ("grasped", 1),
+        ("policy_phase", 1),
+    ];
+    if task.observation.tensors.len() != expected.len()
+        || !task
+            .observation
+            .tensors
+            .iter()
+            .zip(expected)
+            .all(|(tensor, (name, elements))| {
+                tensor.name == name && tensor_elements(&tensor.shape) == elements
+            })
+        || values.len() != FLAGSHIP_MOBILE_LIFT_OBSERVATION_WIDTH_V2
+    {
+        return Err(FlagshipLeKiwiObservationError::ParentV2ContractDrift);
+    }
+    if values.iter().any(|value| !value.is_finite())
+        || !values[20..=22]
+            .iter()
+            .all(|value| *value == 0.0 || *value == 1.0)
+        || values[23].fract() != 0.0
+        || !(0.0..=9.0).contains(&values[23])
+    {
+        return Err(FlagshipLeKiwiObservationError::InvalidParentObservation);
+    }
+    Ok(())
+}
+
 fn tensor_elements(shape: &[usize]) -> usize {
     shape.iter().copied().product::<usize>().max(1)
 }
@@ -601,6 +901,19 @@ fn bool_to_f64(value: bool) -> f64 {
 fn source_evidence(
     parent_tick: u64,
     inputs: &FlagshipLeKiwiObservationInputs,
+) -> Vec<FlagshipObservationSourceEvidence> {
+    vec![
+        evidence("physical", parent_tick, &inputs.physical),
+        evidence("localization", parent_tick, &inputs.localization),
+        evidence("perception", parent_tick, &inputs.perception),
+        evidence("traffic", parent_tick, &inputs.traffic),
+        evidence("task_state", parent_tick, &inputs.task_state),
+    ]
+}
+
+fn source_evidence_v2(
+    parent_tick: u64,
+    inputs: &FlagshipLeKiwiObservationInputsV2,
 ) -> Vec<FlagshipObservationSourceEvidence> {
     vec![
         evidence("physical", parent_tick, &inputs.physical),
@@ -639,6 +952,33 @@ fn unused_value(
         unit: unit.to_string(),
         value,
     }
+}
+
+fn unused_physical_observations(
+    physical: &[f64],
+    arm_calibration: &FlagshipLeKiwiArmCalibration,
+) -> Vec<UnusedLeKiwiObservation> {
+    let used_arm_elements = arm_calibration
+        .channels
+        .iter()
+        .map(|channel| channel.physical_element)
+        .collect::<BTreeSet<_>>();
+    let mut unused = (0..LEKIWI_ARM_WIDTH)
+        .filter(|element| !used_arm_elements.contains(element))
+        .map(|element| UnusedLeKiwiObservation {
+            tensor_name: "arm_joint_position_rad".to_string(),
+            tensor_element: element,
+            unit: "rad".to_string(),
+            value: physical[element],
+        })
+        .collect::<Vec<_>>();
+    unused.extend([
+        unused_value("gripper_position_pct", 0, "pct", physical[5]),
+        unused_value("base_linear_velocity_m_s", 0, "m/s", physical[6]),
+        unused_value("base_linear_velocity_m_s", 1, "m/s", physical[7]),
+        unused_value("base_angular_velocity_rad_s", 0, "rad/s", physical[8]),
+    ]);
+    unused
 }
 
 fn arm_calibration_sha256(calibration: &FlagshipLeKiwiArmCalibration) -> String {
@@ -856,6 +1196,9 @@ pub enum FlagshipLeKiwiObservationError {
     /// Compiled parent observation shape no longer matches this v1 fusion.
     #[error("compiled flagship observation contract drifted from fusion schema v1")]
     ParentContractDrift,
+    /// Compiled parent observation shape no longer matches portable fusion v2.
+    #[error("compiled flagship observation contract drifted from fusion schema v2")]
+    ParentV2ContractDrift,
     /// Final parent observation violated dtype or numeric invariants.
     #[error("fused flagship observation violates its dtype or numeric contract")]
     InvalidParentObservation,
@@ -922,6 +1265,50 @@ mod tests {
         }
     }
 
+    fn inputs_v2() -> FlagshipLeKiwiObservationInputsV2 {
+        FlagshipLeKiwiObservationInputsV2 {
+            physical: timed(
+                "lekiwi",
+                FlagshipLeKiwiPhysicalObservation {
+                    values: vec![0.1, 0.2, 0.3, 0.4, 0.5, 25.0, 0.01, 0.02, 0.03],
+                },
+            ),
+            localization: timed(
+                "localization",
+                FlagshipLocalizationObservationV2 {
+                    base_position_m: [1.0, 0.25, 2.0],
+                    base_yaw_rad: 0.3,
+                },
+            ),
+            perception: timed(
+                "perception",
+                FlagshipPerceptionObservation {
+                    payload_position_m: [3.0, 0.45, 5.0],
+                    wrist_camera_pixel_count: 640 * 480,
+                    wrist_depth_min_m: 0.4,
+                    grasped: false,
+                },
+            ),
+            traffic: timed(
+                "traffic",
+                FlagshipTrafficObservation {
+                    actor_position_m: [6.0, 0.0, 8.0],
+                    signal_green: true,
+                    clear: true,
+                },
+            ),
+            task_state: timed(
+                "task-state",
+                FlagshipTaskStateObservationV2 {
+                    lift_position_m: 0.1,
+                    gripper_position_m: 0.02,
+                    place_target_position_m: [7.0, 0.02, 9.0],
+                    policy_phase: 0,
+                },
+            ),
+        }
+    }
+
     fn calibration() -> FlagshipLeKiwiArmCalibration {
         FlagshipLeKiwiArmCalibration {
             calibration_id: "robot-1-to-flagship-v1".to_string(),
@@ -960,6 +1347,59 @@ mod tests {
         assert_eq!(report.sources.len(), 5);
         assert_eq!(report.unused_physical_observations.len(), 6);
         assert_eq!(report.observation_sha256.len(), 64);
+        assert_eq!(fuser.expected_parent_sequence(), 1);
+    }
+
+    #[test]
+    fn v2_fusion_is_complete_and_executes_the_portable_controller() {
+        let mut fuser = FlagshipLeKiwiObservationFuserV2::new();
+        let report = fuser.fuse(0, &inputs_v2(), &calibration()).unwrap();
+        assert_eq!(report.schema_version, 2);
+        assert_eq!(report.parent_task_id, FLAGSHIP_MOBILE_LIFT_TASK_ID_V2);
+        assert_eq!(report.observation_values.len(), 24);
+        assert_eq!(&report.observation_values[0..4], &[1.0, 0.25, 2.0, 0.3]);
+        assert_eq!(&report.observation_values[9..12], &[3.0, 0.45, 5.0]);
+        assert_eq!(&report.observation_values[12..15], &[7.0, 0.02, 9.0]);
+        assert_eq!(&report.observation_values[20..24], &[1.0, 1.0, 0.0, 0.0]);
+        assert_eq!(report.sources.len(), 5);
+        assert_eq!(report.unused_physical_observations.len(), 6);
+
+        let mut controller = rne_ai::FlagshipMobileLiftControllerV2::new();
+        let action = controller.next_action(&report.observation_values).unwrap();
+        assert_eq!(action.len(), rne_ai::FLAGSHIP_MOBILE_LIFT_ACTION_WIDTH_V2);
+        assert!(action.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn v2_continuity_covers_yaw_and_place_target_without_advancing_on_error() {
+        let mut fuser = FlagshipLeKiwiObservationFuserV2::new();
+        let first = inputs_v2();
+        fuser.fuse(0, &first, &calibration()).unwrap();
+
+        let mut changed_yaw = first.clone();
+        changed_yaw.localization.value.base_yaw_rad += 0.1;
+        assert!(matches!(
+            fuser.fuse(1, &changed_yaw, &calibration()),
+            Err(
+                FlagshipLeKiwiObservationError::SourceSequenceReusedWithDifferentSample {
+                    role: "localization",
+                    ..
+                }
+            )
+        ));
+        assert_eq!(fuser.expected_parent_sequence(), 1);
+
+        let mut changed_target = first;
+        changed_target.task_state.value.place_target_position_m[0] += 0.1;
+        assert!(matches!(
+            fuser.fuse(1, &changed_target, &calibration()),
+            Err(
+                FlagshipLeKiwiObservationError::SourceSequenceReusedWithDifferentSample {
+                    role: "task_state",
+                    ..
+                }
+            )
+        ));
         assert_eq!(fuser.expected_parent_sequence(), 1);
     }
 

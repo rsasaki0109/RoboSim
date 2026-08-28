@@ -6,14 +6,17 @@
 
 use crate::flagship_observation::{
     FlagshipLeKiwiArmCalibration, FlagshipLeKiwiObservationError, FlagshipLeKiwiObservationFuser,
-    FlagshipLeKiwiObservationFusion, FlagshipLeKiwiObservationInputs,
+    FlagshipLeKiwiObservationFuserV2, FlagshipLeKiwiObservationFusion,
+    FlagshipLeKiwiObservationFusionV2, FlagshipLeKiwiObservationInputs,
+    FlagshipLeKiwiObservationInputsV2,
 };
 use crate::flagship_projection::{
-    project_flagship_action_to_lekiwi, FlagshipLeKiwiActionProjection,
-    FlagshipLeKiwiProjectionError,
+    project_flagship_action_to_lekiwi, project_flagship_action_to_lekiwi_v2,
+    FlagshipLeKiwiActionProjection, FlagshipLeKiwiProjectionError,
 };
 use crate::flagship_rate::{
     FlagshipLeKiwiRateDecision, FlagshipLeKiwiRateError, FlagshipLeKiwiRateScheduler,
+    FlagshipLeKiwiRateSchedulerV2,
 };
 use crate::physical_evidence::EvidenceFileRef;
 use crate::session::{LEKIWI_REFERENCE_SESSION_KIND, LEKIWI_REFERENCE_SESSION_SCHEMA_VERSION};
@@ -22,8 +25,10 @@ use crate::{
     LEKIWI_REFERENCE_PROFILE_SCHEMA_VERSION,
 };
 use rne_ai::{
-    FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID, FLAGSHIP_MOBILE_LIFT_TASK_ID, TASK_SPEC_KIND,
-    TASK_SPEC_SCHEMA_VERSION,
+    FLAGSHIP_MOBILE_LIFT_CONTROLLER_CONTRACT_KIND,
+    FLAGSHIP_MOBILE_LIFT_CONTROLLER_CONTRACT_SCHEMA_VERSION, FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID,
+    FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2, FLAGSHIP_MOBILE_LIFT_TASK_ID,
+    FLAGSHIP_MOBILE_LIFT_TASK_ID_V2, TASK_SPEC_KIND, TASK_SPEC_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -31,6 +36,9 @@ use std::collections::BTreeSet;
 
 /// Schema version for the complete flagship LeKiwi shadow manifest.
 pub const FLAGSHIP_LEKIWI_SHADOW_MANIFEST_SCHEMA_VERSION: u32 = 1;
+
+/// Current shadow-manifest schema version for portable v2 controller evidence.
+pub const FLAGSHIP_LEKIWI_SHADOW_MANIFEST_CURRENT_SCHEMA_VERSION: u32 = 2;
 
 /// Stable discriminator for [`FlagshipLeKiwiShadowManifest`].
 pub const FLAGSHIP_LEKIWI_SHADOW_MANIFEST_KIND: &str = "rne_flagship_lekiwi_shadow_manifest";
@@ -57,6 +65,9 @@ pub const FLAGSHIP_OBSERVATION_SOURCE_CONTRACT_KIND: &str =
 /// Schema version for a replayable action-projection stream.
 pub const FLAGSHIP_ACTION_PROJECTION_STREAM_SCHEMA_VERSION: u32 = 1;
 
+/// Current action-stream schema version for portable v2 identities.
+pub const FLAGSHIP_ACTION_PROJECTION_STREAM_CURRENT_SCHEMA_VERSION: u32 = 2;
+
 /// Stable discriminator for [`FlagshipActionProjectionStream`].
 pub const FLAGSHIP_ACTION_PROJECTION_STREAM_KIND: &str =
     "rne_flagship_lekiwi_action_projection_stream";
@@ -64,11 +75,17 @@ pub const FLAGSHIP_ACTION_PROJECTION_STREAM_KIND: &str =
 /// Schema version for a replayable rate-decision stream.
 pub const FLAGSHIP_RATE_DECISION_STREAM_SCHEMA_VERSION: u32 = 1;
 
+/// Current rate-stream schema version for portable v2 identities.
+pub const FLAGSHIP_RATE_DECISION_STREAM_CURRENT_SCHEMA_VERSION: u32 = 2;
+
 /// Stable discriminator for [`FlagshipRateDecisionStream`].
 pub const FLAGSHIP_RATE_DECISION_STREAM_KIND: &str = "rne_flagship_lekiwi_rate_decision_stream";
 
 /// Schema version for a replayable observation-fusion stream.
 pub const FLAGSHIP_OBSERVATION_FUSION_STREAM_SCHEMA_VERSION: u32 = 1;
+
+/// Current observation-stream schema version for portable v2 inputs and fusion.
+pub const FLAGSHIP_OBSERVATION_FUSION_STREAM_CURRENT_SCHEMA_VERSION: u32 = 2;
 
 /// Stable discriminator for [`FlagshipObservationFusionStream`].
 pub const FLAGSHIP_OBSERVATION_FUSION_STREAM_KIND: &str =
@@ -245,17 +262,24 @@ pub struct FlagshipActionProjectionStream {
 impl FlagshipActionProjectionStream {
     /// Replays every action projection and rejects any mismatch.
     pub fn validate(&self) -> Result<(), FlagshipLeKiwiShadowError> {
+        let (task_id, controller_id) = stream_parent_identity(self.schema_version)?;
         validate_stream_header(
             &self.kind,
             self.schema_version,
             FLAGSHIP_ACTION_PROJECTION_STREAM_KIND,
-            FLAGSHIP_ACTION_PROJECTION_STREAM_SCHEMA_VERSION,
+            self.schema_version,
             &self.task_id,
             &self.controller_id,
+            (task_id, controller_id),
         )?;
         ensure_records(&self.records)?;
         for (index, record) in self.records.iter().enumerate() {
-            let actual = project_flagship_action_to_lekiwi(&record.parent_action)?;
+            let actual = if self.schema_version == FLAGSHIP_ACTION_PROJECTION_STREAM_SCHEMA_VERSION
+            {
+                project_flagship_action_to_lekiwi(&record.parent_action)?
+            } else {
+                project_flagship_action_to_lekiwi_v2(&record.parent_action)?
+            };
             if actual != record.projection {
                 return Err(FlagshipLeKiwiShadowError::ReplayMismatch {
                     stream: "action_projection",
@@ -296,25 +320,42 @@ pub struct FlagshipRateDecisionStream {
 impl FlagshipRateDecisionStream {
     /// Replays every stateful rate decision and rejects any mismatch.
     pub fn validate(&self) -> Result<(), FlagshipLeKiwiShadowError> {
+        let (task_id, controller_id) = stream_parent_identity(self.schema_version)?;
         validate_stream_header(
             &self.kind,
             self.schema_version,
             FLAGSHIP_RATE_DECISION_STREAM_KIND,
-            FLAGSHIP_RATE_DECISION_STREAM_SCHEMA_VERSION,
+            self.schema_version,
             &self.task_id,
             &self.controller_id,
+            (task_id, controller_id),
         )?;
         ensure_records(&self.records)?;
-        let mut scheduler = FlagshipLeKiwiRateScheduler::new();
-        for (index, record) in self.records.iter().enumerate() {
-            let sequence = u64::try_from(index)
-                .map_err(|_| invalid("rate_stream.records", "record index exceeds u64"))?;
-            let actual = scheduler.ingest(sequence, &record.parent_action)?;
-            if actual != record.decision {
-                return Err(FlagshipLeKiwiShadowError::ReplayMismatch {
-                    stream: "rate_decision",
-                    index,
-                });
+        if self.schema_version == FLAGSHIP_RATE_DECISION_STREAM_SCHEMA_VERSION {
+            let mut scheduler = FlagshipLeKiwiRateScheduler::new();
+            for (index, record) in self.records.iter().enumerate() {
+                let sequence = u64::try_from(index)
+                    .map_err(|_| invalid("rate_stream.records", "record index exceeds u64"))?;
+                let actual = scheduler.ingest(sequence, &record.parent_action)?;
+                if actual != record.decision {
+                    return Err(FlagshipLeKiwiShadowError::ReplayMismatch {
+                        stream: "rate_decision",
+                        index,
+                    });
+                }
+            }
+        } else {
+            let mut scheduler = FlagshipLeKiwiRateSchedulerV2::new();
+            for (index, record) in self.records.iter().enumerate() {
+                let sequence = u64::try_from(index)
+                    .map_err(|_| invalid("rate_stream.records", "record index exceeds u64"))?;
+                let actual = scheduler.ingest(sequence, &record.parent_action)?;
+                if actual != record.decision {
+                    return Err(FlagshipLeKiwiShadowError::ReplayMismatch {
+                        stream: "rate_decision",
+                        index,
+                    });
+                }
             }
         }
         Ok(())
@@ -360,6 +401,10 @@ impl FlagshipObservationFusionStream {
             FLAGSHIP_OBSERVATION_FUSION_STREAM_SCHEMA_VERSION,
             &self.task_id,
             &self.controller_id,
+            (
+                FLAGSHIP_MOBILE_LIFT_TASK_ID,
+                FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID,
+            ),
         )?;
         ensure_records(&self.records)?;
         calibration
@@ -373,6 +418,80 @@ impl FlagshipObservationFusionStream {
             if actual != record.fusion {
                 return Err(FlagshipLeKiwiShadowError::ReplayMismatch {
                     stream: "observation_fusion",
+                    index,
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// One complete v2 source set and its expected fusion output.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FlagshipObservationFusionRecordV2 {
+    /// Exact typed v2 source set consumed by the fuser.
+    pub inputs: FlagshipLeKiwiObservationInputsV2,
+    /// Expected deterministic v2 fusion result.
+    pub fusion: FlagshipLeKiwiObservationFusionV2,
+    /// Exact portable-controller action produced from `fusion.observation_values`.
+    pub controller_action: Vec<f64>,
+}
+
+/// Replayable ordered v2 observation-fusion evidence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FlagshipObservationFusionStreamV2 {
+    /// Stable artifact discriminator.
+    pub kind: String,
+    /// Stream schema version; exactly two.
+    pub schema_version: u32,
+    /// Exact portable v2 TaskSpec identity.
+    pub task_id: String,
+    /// Exact portable v2 controller identity.
+    pub controller_id: String,
+    /// Non-empty contiguous records beginning at parent sequence zero.
+    pub records: Vec<FlagshipObservationFusionRecordV2>,
+}
+
+impl FlagshipObservationFusionStreamV2 {
+    /// Replays every v2 fusion and proves the portable controller accepts it.
+    pub fn validate(
+        &self,
+        calibration: &FlagshipLeKiwiArmCalibration,
+    ) -> Result<(), FlagshipLeKiwiShadowError> {
+        validate_stream_header(
+            &self.kind,
+            self.schema_version,
+            FLAGSHIP_OBSERVATION_FUSION_STREAM_KIND,
+            FLAGSHIP_OBSERVATION_FUSION_STREAM_CURRENT_SCHEMA_VERSION,
+            &self.task_id,
+            &self.controller_id,
+            (
+                FLAGSHIP_MOBILE_LIFT_TASK_ID_V2,
+                FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2,
+            ),
+        )?;
+        ensure_records(&self.records)?;
+        calibration
+            .validate()
+            .map_err(FlagshipLeKiwiShadowError::Observation)?;
+        let mut fuser = FlagshipLeKiwiObservationFuserV2::new();
+        let mut controller = rne_ai::FlagshipMobileLiftControllerV2::new();
+        for (index, record) in self.records.iter().enumerate() {
+            let sequence = u64::try_from(index)
+                .map_err(|_| invalid("observation_stream.records", "record index exceeds u64"))?;
+            let actual = fuser.fuse(sequence, &record.inputs, calibration)?;
+            if actual != record.fusion {
+                return Err(FlagshipLeKiwiShadowError::ReplayMismatch {
+                    stream: "observation_fusion_v2",
+                    index,
+                });
+            }
+            let actual_action = controller.next_action(&actual.observation_values)?;
+            if actual_action != record.controller_action {
+                return Err(FlagshipLeKiwiShadowError::ReplayMismatch {
+                    stream: "controller_action_v2",
                     index,
                 });
             }
@@ -517,15 +636,14 @@ impl FlagshipLeKiwiShadowManifest {
     /// Validates schema, identities, fixed roles, unique paths, and digest.
     pub fn validate(&self) -> Result<(), FlagshipLeKiwiShadowError> {
         if self.kind != FLAGSHIP_LEKIWI_SHADOW_MANIFEST_KIND
-            || self.schema_version != FLAGSHIP_LEKIWI_SHADOW_MANIFEST_SCHEMA_VERSION
+            || !matches!(self.schema_version, 1 | 2)
         {
             return Err(invalid("manifest", "unsupported kind or schema"));
         }
         validate_identifier("run_id", &self.run_id)?;
         validate_git_revision(&self.rne_commit)?;
-        if self.task_id != FLAGSHIP_MOBILE_LIFT_TASK_ID
-            || self.controller_id != FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID
-        {
+        let (task_id, controller_id) = stream_parent_identity(self.schema_version)?;
+        if self.task_id != task_id || self.controller_id != controller_id {
             return Err(invalid(
                 "manifest",
                 "wrong parent task or controller identity",
@@ -559,13 +677,23 @@ impl FlagshipLeKiwiShadowManifest {
             _ => {}
         }
 
+        let (controller_kind, controller_schema, stream_schema) =
+            if self.schema_version == FLAGSHIP_LEKIWI_SHADOW_MANIFEST_SCHEMA_VERSION {
+                (
+                    FLAGSHIP_CONTROLLER_CONTRACT_KIND,
+                    FLAGSHIP_CONTROLLER_CONTRACT_SCHEMA_VERSION,
+                    1,
+                )
+            } else {
+                (
+                    FLAGSHIP_MOBILE_LIFT_CONTROLLER_CONTRACT_KIND,
+                    FLAGSHIP_MOBILE_LIFT_CONTROLLER_CONTRACT_SCHEMA_VERSION,
+                    2,
+                )
+            };
         let expected = [
             ("task_spec", TASK_SPEC_KIND, TASK_SPEC_SCHEMA_VERSION),
-            (
-                "controller_contract",
-                FLAGSHIP_CONTROLLER_CONTRACT_KIND,
-                FLAGSHIP_CONTROLLER_CONTRACT_SCHEMA_VERSION,
-            ),
+            ("controller_contract", controller_kind, controller_schema),
             (
                 "reference_profile",
                 LEKIWI_REFERENCE_PROFILE_KIND,
@@ -604,17 +732,17 @@ impl FlagshipLeKiwiShadowManifest {
             (
                 "action_projection_stream",
                 FLAGSHIP_ACTION_PROJECTION_STREAM_KIND,
-                FLAGSHIP_ACTION_PROJECTION_STREAM_SCHEMA_VERSION,
+                stream_schema,
             ),
             (
                 "rate_decision_stream",
                 FLAGSHIP_RATE_DECISION_STREAM_KIND,
-                FLAGSHIP_RATE_DECISION_STREAM_SCHEMA_VERSION,
+                stream_schema,
             ),
             (
                 "observation_fusion_stream",
                 FLAGSHIP_OBSERVATION_FUSION_STREAM_KIND,
-                FLAGSHIP_OBSERVATION_FUSION_STREAM_SCHEMA_VERSION,
+                stream_schema,
             ),
         ];
         let mut paths = BTreeSet::new();
@@ -655,19 +783,34 @@ fn validate_stream_header(
     expected_schema_version: u32,
     task_id: &str,
     controller_id: &str,
+    expected_parent: (&str, &str),
 ) -> Result<(), FlagshipLeKiwiShadowError> {
     if kind != expected_kind || schema_version != expected_schema_version {
         return Err(invalid("stream", "unsupported kind or schema"));
     }
-    if task_id != FLAGSHIP_MOBILE_LIFT_TASK_ID
-        || controller_id != FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID
-    {
+    if task_id != expected_parent.0 || controller_id != expected_parent.1 {
         return Err(invalid(
             "stream",
             "wrong parent task or controller identity",
         ));
     }
     Ok(())
+}
+
+fn stream_parent_identity(
+    schema_version: u32,
+) -> Result<(&'static str, &'static str), FlagshipLeKiwiShadowError> {
+    match schema_version {
+        1 => Ok((
+            FLAGSHIP_MOBILE_LIFT_TASK_ID,
+            FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID,
+        )),
+        2 => Ok((
+            FLAGSHIP_MOBILE_LIFT_TASK_ID_V2,
+            FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2,
+        )),
+        _ => Err(invalid("stream", "unsupported schema version")),
+    }
 }
 
 fn ensure_records<T>(records: &[T]) -> Result<(), FlagshipLeKiwiShadowError> {
@@ -762,6 +905,9 @@ pub enum FlagshipLeKiwiShadowError {
     /// Observation fusion failed closed during replay.
     #[error(transparent)]
     Observation(#[from] FlagshipLeKiwiObservationError),
+    /// Portable v2 controller rejected a fused TaskSpec observation.
+    #[error(transparent)]
+    Controller(#[from] rne_ai::FlagshipMobileLiftControllerError),
 }
 
 #[cfg(test)]
@@ -769,8 +915,9 @@ mod tests {
     use super::*;
     use crate::flagship_observation::{
         FlagshipArmChannelCalibration, FlagshipLeKiwiPhysicalObservation,
-        FlagshipLocalizationObservation, FlagshipPerceptionObservation,
-        FlagshipTaskStateObservation, FlagshipTimedObservation, FlagshipTrafficObservation,
+        FlagshipLocalizationObservation, FlagshipLocalizationObservationV2,
+        FlagshipPerceptionObservation, FlagshipTaskStateObservation,
+        FlagshipTaskStateObservationV2, FlagshipTimedObservation, FlagshipTrafficObservation,
     };
     use crate::flagship_rate::FLAGSHIP_CONTROLLER_PERIOD_TICKS;
 
@@ -850,6 +997,55 @@ mod tests {
                     lift_position_m: 0.0,
                     gripper_position_m: 0.02,
                     policy_phase: 1,
+                },
+            ),
+        }
+    }
+
+    fn inputs_v2(sequence: u64) -> FlagshipLeKiwiObservationInputsV2 {
+        FlagshipLeKiwiObservationInputsV2 {
+            physical: timed(
+                "physical",
+                sequence,
+                FlagshipLeKiwiPhysicalObservation {
+                    values: vec![0.1, 0.2, 0.3, 0.4, 0.5, 25.0, 0.0, 0.0, 0.0],
+                },
+            ),
+            localization: timed(
+                "localization",
+                sequence,
+                FlagshipLocalizationObservationV2 {
+                    base_position_m: [0.0, 0.0, 0.0],
+                    base_yaw_rad: 0.0,
+                },
+            ),
+            perception: timed(
+                "perception",
+                sequence,
+                FlagshipPerceptionObservation {
+                    payload_position_m: [0.5, 0.2, -0.4],
+                    wrist_camera_pixel_count: 640 * 480,
+                    wrist_depth_min_m: 0.4,
+                    grasped: false,
+                },
+            ),
+            traffic: timed(
+                "traffic",
+                sequence,
+                FlagshipTrafficObservation {
+                    actor_position_m: [1.0, 0.0, 0.0],
+                    signal_green: true,
+                    clear: true,
+                },
+            ),
+            task_state: timed(
+                "task-state",
+                sequence,
+                FlagshipTaskStateObservationV2 {
+                    lift_position_m: 0.0,
+                    gripper_position_m: 0.02,
+                    place_target_position_m: [0.8, 0.02, 0.0],
+                    policy_phase: 0,
                 },
             ),
         }
@@ -949,6 +1145,26 @@ mod tests {
         manifest
     }
 
+    fn manifest_v2() -> FlagshipLeKiwiShadowManifest {
+        let mut manifest = manifest();
+        manifest.schema_version = FLAGSHIP_LEKIWI_SHADOW_MANIFEST_CURRENT_SCHEMA_VERSION;
+        manifest.task_id = FLAGSHIP_MOBILE_LIFT_TASK_ID_V2.to_string();
+        manifest.controller_id = FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2.to_string();
+        manifest.artifacts.controller_contract = artifact(
+            FLAGSHIP_MOBILE_LIFT_CONTROLLER_CONTRACT_KIND,
+            FLAGSHIP_MOBILE_LIFT_CONTROLLER_CONTRACT_SCHEMA_VERSION,
+            "controller.json",
+        );
+        manifest.artifacts.action_projection_stream.schema_version =
+            FLAGSHIP_ACTION_PROJECTION_STREAM_CURRENT_SCHEMA_VERSION;
+        manifest.artifacts.rate_decision_stream.schema_version =
+            FLAGSHIP_RATE_DECISION_STREAM_CURRENT_SCHEMA_VERSION;
+        manifest.artifacts.observation_fusion_stream.schema_version =
+            FLAGSHIP_OBSERVATION_FUSION_STREAM_CURRENT_SCHEMA_VERSION;
+        manifest.seal().unwrap();
+        manifest
+    }
+
     #[test]
     fn all_three_streams_replay_and_detect_tampering() {
         let mut scheduler = FlagshipLeKiwiRateScheduler::new();
@@ -1004,6 +1220,63 @@ mod tests {
         assert!(matches!(
             tampered.validate(),
             Err(FlagshipLeKiwiShadowError::ReplayMismatch { index: 1, .. })
+        ));
+    }
+
+    #[test]
+    fn v2_streams_replay_the_complete_observation_controller_projection_chain() {
+        let mut fuser = FlagshipLeKiwiObservationFuserV2::new();
+        let mut controller = rne_ai::FlagshipMobileLiftControllerV2::new();
+        let mut scheduler = FlagshipLeKiwiRateSchedulerV2::new();
+        let source = inputs_v2(0);
+        let fusion = fuser.fuse(0, &source, &calibration()).unwrap();
+        let controller_action = controller.next_action(&fusion.observation_values).unwrap();
+
+        let action_stream = FlagshipActionProjectionStream {
+            kind: FLAGSHIP_ACTION_PROJECTION_STREAM_KIND.to_string(),
+            schema_version: FLAGSHIP_ACTION_PROJECTION_STREAM_CURRENT_SCHEMA_VERSION,
+            task_id: FLAGSHIP_MOBILE_LIFT_TASK_ID_V2.to_string(),
+            controller_id: FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2.to_string(),
+            records: vec![FlagshipActionProjectionRecord {
+                projection: project_flagship_action_to_lekiwi_v2(&controller_action).unwrap(),
+                parent_action: controller_action.clone(),
+            }],
+        };
+        let rate_stream = FlagshipRateDecisionStream {
+            kind: FLAGSHIP_RATE_DECISION_STREAM_KIND.to_string(),
+            schema_version: FLAGSHIP_RATE_DECISION_STREAM_CURRENT_SCHEMA_VERSION,
+            task_id: FLAGSHIP_MOBILE_LIFT_TASK_ID_V2.to_string(),
+            controller_id: FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2.to_string(),
+            records: vec![FlagshipRateDecisionRecord {
+                decision: scheduler.ingest(0, &controller_action).unwrap(),
+                parent_action: controller_action.clone(),
+            }],
+        };
+        let observation_stream = FlagshipObservationFusionStreamV2 {
+            kind: FLAGSHIP_OBSERVATION_FUSION_STREAM_KIND.to_string(),
+            schema_version: FLAGSHIP_OBSERVATION_FUSION_STREAM_CURRENT_SCHEMA_VERSION,
+            task_id: FLAGSHIP_MOBILE_LIFT_TASK_ID_V2.to_string(),
+            controller_id: FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2.to_string(),
+            records: vec![FlagshipObservationFusionRecordV2 {
+                inputs: source,
+                fusion,
+                controller_action,
+            }],
+        };
+
+        action_stream.validate().unwrap();
+        rate_stream.validate().unwrap();
+        observation_stream.validate(&calibration()).unwrap();
+        manifest_v2().validate().unwrap();
+
+        let mut tampered = observation_stream;
+        tampered.records[0].controller_action[0] += 0.01;
+        assert!(matches!(
+            tampered.validate(&calibration()),
+            Err(FlagshipLeKiwiShadowError::ReplayMismatch {
+                stream: "controller_action_v2",
+                index: 0,
+            })
         ));
     }
 
