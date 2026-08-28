@@ -6,6 +6,8 @@ body:
     attributes:
       value: |
         Follow the backend, simulator, hardware, or accelerator guide linked from docs/EXTERNAL_EVIDENCE_INTAKE.md.
+        Current campaign: v0.2.0 — https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0
+        Do not submit before these assets are published.
         A submitted issue is not acceptance evidence. The readiness gate rebinds every report to its exact implementation subject.
   - type: checkboxes
     id: independence
@@ -50,8 +52,8 @@ body:
     id: rne_release
     attributes:
       label: RNE release
-      description: Exact RNE release or crate version and immutable checksum or lockfile identity.
-      placeholder: v0.x.y, sha256:...
+      description: Exact RNE release or crate version and immutable checksum or lockfile identity. Only v0.2.0 qualifies for this campaign.
+      placeholder: v0.2.0, sha256:...
     validations:
       required: true
   - type: dropdown

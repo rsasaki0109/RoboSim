@@ -1,4 +1,6 @@
-schema_version = 9
+schema_version = 10
+qualifying_release_tag = "v0.2.0"
+qualifying_release_url = "https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0"
 guide_path = "docs/EXTERNAL_EVIDENCE_INTAKE.md"
 installed_flagship_quickstart_path = "docs/EXTERNAL_FLAGSHIP_REPRODUCTION.md"
 installed_flagship_submission_template_path = "release/external-flagship-submission-template.json"

@@ -6,6 +6,8 @@ body:
     attributes:
       value: |
         Use the exact checklist in docs/EXTERNAL_EVIDENCE_INTAKE.md.
+        Current campaign: v0.2.0 — https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0
+        Do not submit before these assets are published.
         A submitted issue is not acceptance evidence. Maintainers re-download, hash, and replay every retained artifact.
   - type: checkboxes
     id: independence
@@ -40,8 +42,8 @@ body:
     id: rne_release
     attributes:
       label: RNE release
-      description: Exact RNE release tag and archive checksum used for the run.
-      placeholder: v0.x.y, sha256:...
+      description: Exact RNE release tag and archive checksum used for the run. Only v0.2.0 qualifies for this campaign.
+      placeholder: v0.2.0, sha256:...
     validations:
       required: true
   - type: textarea

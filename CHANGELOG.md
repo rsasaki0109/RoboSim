@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Freeze the external-validation campaign to the exact `v0.2.0` release URL
+  across the registry, README, intake guide, and all four issue forms. Forms
+  now reject generic release placeholders and warn contributors not to submit
+  before the official archives and `SHA256SUMS` are public.
+
 - Add `readiness-pack accept-external-project` for independently owned project
   reproductions. It revalidates seven distinct retained files and the complete
   Failure Capsule artifact closure before atomically adding the project entry.

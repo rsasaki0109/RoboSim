@@ -6,8 +6,15 @@ it is never itself evidence, and opening one cannot change a readiness result.
 Stars, forks, self-authored reference implementations, screenshots, and copied
 JSON reports do not satisfy an external-use gate.
 
+The current campaign accepts only [v0.2.0 official
+assets](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0). Until that
+page contains the native archives and release-level `SHA256SUMS`, prepare the
+external repository and candidate files but do not open an evidence issue.
+The published v0.1.0 prerelease is not qualifying input.
+
 The machine-readable route registry is
-`release/external-evidence-intake.toml`. Registry v9 binds the archive-only
+`release/external-evidence-intake.toml`. Registry v10 binds the qualifying
+release identity, archive-only
 installed flagship quickstart and acyclic candidate templates for the
 flagship, external-project, third-party controller-plugin, and simulator
 adapter routes. It

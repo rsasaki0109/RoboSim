@@ -6,6 +6,8 @@ body:
     attributes:
       value: |
         Run the archive-only workflow in docs/EXTERNAL_FLAGSHIP_REPRODUCTION.md without maintainer assistance.
+        Current campaign: v0.2.0 — https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0
+        Do not submit before these assets are published.
         A submitted issue is not acceptance evidence. Maintainers re-download and verify every byte with external-flagship-check.
   - type: checkboxes
     id: independence
@@ -42,8 +44,8 @@ body:
     id: rne_release
     attributes:
       label: RNE release
-      description: Exact clean tagged RNE release and archive checksum used.
-      placeholder: v0.x.y, sha256:...
+      description: Exact clean tagged RNE release and archive checksum used. Only v0.2.0 qualifies for this campaign.
+      placeholder: v0.2.0, sha256:...
     validations:
       required: true
   - type: input

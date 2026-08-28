@@ -1,6 +1,6 @@
 //! Validates the public intake routes for independent RNE evidence.
 
-use super::workspace_root;
+use super::{workspace_root, RELEASE_VERSION};
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::collections::BTreeSet;
@@ -8,13 +8,16 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 const DEFAULT_REGISTRY: &str = "release/external-evidence-intake.toml";
-const REGISTRY_SCHEMA_VERSION: u32 = 9;
+const REGISTRY_SCHEMA_VERSION: u32 = 10;
 const MAX_INTAKE_FILE_BYTES: u64 = 128 * 1024;
+const RELEASE_URL_PREFIX: &str = "https://github.com/rsasaki0109/RoboSim/releases/tag/";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct IntakeRegistry {
     schema_version: u32,
+    qualifying_release_tag: String,
+    qualifying_release_url: String,
     guide_path: String,
     installed_flagship_quickstart_path: String,
     installed_flagship_submission_template_path: String,
@@ -278,6 +281,13 @@ fn validate_registry(root: &Path, path: &Path) -> Result<()> {
         registry.schema_version == REGISTRY_SCHEMA_VERSION,
         "external evidence intake registry schema must be {REGISTRY_SCHEMA_VERSION}"
     );
+    let qualifying_release_tag = format!("v{RELEASE_VERSION}");
+    let qualifying_release_url = format!("{RELEASE_URL_PREFIX}{qualifying_release_tag}");
+    anyhow::ensure!(
+        registry.qualifying_release_tag == qualifying_release_tag
+            && registry.qualifying_release_url == qualifying_release_url,
+        "external evidence intake campaign must name the current immutable release"
+    );
     anyhow::ensure!(
         registry.route.len() == EXPECTED_ROUTES.len(),
         "external evidence intake registry must contain exactly {} routes",
@@ -287,6 +297,12 @@ fn validate_registry(root: &Path, path: &Path) -> Result<()> {
     anyhow::ensure!(
         guide.starts_with("# External evidence intake\n"),
         "external evidence intake guide title drifted"
+    );
+    anyhow::ensure!(
+        guide.contains(&registry.qualifying_release_tag)
+            && guide.contains(&registry.qualifying_release_url)
+            && guide.contains("do not open an evidence issue"),
+        "external intake guide must expose the qualifying release and pre-publication boundary"
     );
     let flagship_quickstart =
         read_repository_file(root, &registry.installed_flagship_quickstart_path)?;
@@ -536,6 +552,12 @@ fn validate_readme_discovery(readme: &str, registry: &IntakeRegistry) -> Result<
         readme.contains("docs/EXTERNAL_EVIDENCE_INTAKE.md"),
         "README independent-validation section must link the intake guide"
     );
+    anyhow::ensure!(
+        readme.contains(&registry.qualifying_release_tag)
+            && readme.contains(&registry.qualifying_release_url)
+            && readme.contains("do not open an evidence issue"),
+        "README must expose the qualifying release and pre-publication boundary"
+    );
     for route in &registry.route {
         let template = route
             .issue_template
@@ -694,6 +716,14 @@ fn validate_relative_path(path: &str) -> Result<()> {
 }
 
 fn validate_issue_form(text: &str, route: &IntakeRoute) -> Result<()> {
+    let qualifying_release_tag = format!("v{RELEASE_VERSION}");
+    let qualifying_release_url = format!("{RELEASE_URL_PREFIX}{qualifying_release_tag}");
+    anyhow::ensure!(
+        text.contains(&qualifying_release_tag)
+            && text.contains(&qualifying_release_url)
+            && text.contains("Do not submit before these assets are published."),
+        "external intake issue form must expose the qualifying release and publication boundary"
+    );
     anyhow::ensure!(
         text.starts_with("name: "),
         "issue form must start with name"
@@ -827,6 +857,7 @@ mod tests {
             &registry
         )
         .is_err());
+        assert!(validate_readme_discovery(&readme.replace("v0.2.0", "v0.1.0"), &registry).is_err());
     }
 
     #[test]
@@ -845,7 +876,7 @@ mod tests {
             conditional_requirements: Vec::new(),
             form_fields: vec!["one".to_string(), "two".to_string()],
         };
-        let valid = "name: Test\ndescription: Test\ntitle: Test\nbody:\n  - type: input\n    id: one\n    validations:\n      required: true\n  - type: input\n    id: two\n    validations:\n      required: true\n# A submitted issue is not acceptance evidence\n";
+        let valid = "name: Test\ndescription: Test\ntitle: Test\nbody:\n  - type: input\n    id: one\n    validations:\n      required: true\n  - type: input\n    id: two\n    validations:\n      required: true\n# Current campaign: v0.2.0 — https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0\n# Do not submit before these assets are published.\n# A submitted issue is not acceptance evidence\n";
         validate_issue_form(valid, &route).unwrap();
         assert!(
             validate_issue_form(&valid.replace("required: true", "required: false"), &route)
