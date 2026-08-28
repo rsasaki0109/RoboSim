@@ -74,7 +74,7 @@ encoded into the bounded numeric process wire.
 
 ## Flagship action projection
 
-`rne_hardware_lekiwi::flagship_projection` schema v1 is the first executable
+`rne_hardware_lekiwi::flagship_projection` schema v2 is the first executable
 same-contract boundary. It validates the complete seven-element flagship
 controller action, converts its left/right wheel velocities from `rad/s` to a
 body-x velocity in `m/s` and yaw rate in `rad/s`, and independently validates
@@ -84,13 +84,13 @@ flagship model's canonical `0.1 m` wheel radius and `0.45 m` track width.
 The projection never clamps an unsafe command. It fails closed when either
 TaskSpec envelope is exceeded and records the five arm/lift/gripper elements
 as explicitly suppressed values with a deterministic parent-action hash.
-Registration as `hardware.flagship_lekiwi_action_projection = 1` freezes this
+Registration as `hardware.flagship_lekiwi_action_projection = 2` freezes this
 artifact shape; it does not make the bridge live-ready. Full-file content
 bindings and parent-order observation fusion remain required before elevated
 flagship shadow or actuation; the deterministic rate boundary is defined below.
 
 The next executable boundary is
-`rne_hardware_lekiwi::flagship_rate::FlagshipLeKiwiRateScheduler`. It accepts
+`rne_hardware_lekiwi::flagship_rate::FlagshipLeKiwiRateSchedulerV2`. It accepts
 exactly ordered zero-based controller sequences, validates every action through
 the projection above, emits phase-zero even sequences, and records intervening
 odd sequences as explicitly suppressed. Its `33,333,334 ns` write period is
@@ -99,7 +99,7 @@ exactly two `16,666,667 ns` simulation ticks and therefore never exceeds the
 inputs fail without advancing state. This wall-clock-free rate proof still does
 not supply the parent-order observation required to execute the controller.
 
-`rne_hardware_lekiwi::flagship_observation` schema v1 supplies that parent-order
+`rne_hardware_lekiwi::flagship_observation` schema v2 supplies that parent-order
 boundary without pretending LeKiwi observes the whole task. A stateful fuser
 requires five explicit sources: normalized LeKiwi feedback, metric base
 localization, calibrated payload/wrist perception, task-level traffic state,
@@ -113,16 +113,19 @@ state.
 The three flagship arm elements require a named affine morphology calibration;
 the fuser does not assume that SO-101 and the simulation model share joints.
 Unmapped arm positions, physical gripper percentage, and base velocities remain
-explicitly unused evidence. The output is exactly the 19 flattened values and
-12 tensors of the release TaskSpec, with a deterministic observation digest.
+explicitly unused evidence. The output is exactly the 24 flattened values and
+14 tensors of the portable v2 TaskSpec, including full base pose and the
+world-frame place target, with a deterministic observation digest.
 The full-content shadow manifest closes that binding slice without adding
 authority. It hashes twelve fixed artifacts: parent TaskSpec, controller
 contract, LeKiwi profile, arm calibration, four observation-source contracts,
 the non-actuating hardware session, and replayable action-projection,
-rate-decision, and observation-fusion streams. Verification rehashes every file,
-replays all three streams, and cross-checks the 60 Hz parent decisions against
-the held 30 Hz physical samples. Mock and physical-shadow execution classes are
-distinct and cannot be relabelled.
+rate-decision, and observation-fusion streams. Each v2 observation record also
+freezes the portable controller action. Verification rehashes every file,
+replays fusion and controller execution, cross-links that action to projection
+and rate scheduling, and checks the 60 Hz parent decisions against the held
+30 Hz physical samples. Historical v1 manifests remain readable; mock and
+physical-shadow execution classes are distinct and cannot be relabelled.
 
 Create a draft containing those twelve relative artifact references, then seal
 and verify it with:

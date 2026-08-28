@@ -1,7 +1,10 @@
 //! Seal and verify full-content flagship LeKiwi shadow evidence.
 
 use anyhow::{Context, Result};
-use rne_ai::{flagship_mobile_lift_task_spec, TaskSpec, FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS};
+use rne_ai::{
+    flagship_mobile_lift_task_spec, flagship_mobile_lift_task_spec_v2,
+    FlagshipMobileLiftControllerContract, TaskSpec, FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS,
+};
 use rne_hardware_gateway::wire::{
     DeviceWirePayload, HardwareWireTraceEntry, HardwareWireTraceOutcome, HostWirePayload,
 };
@@ -12,7 +15,8 @@ use rne_hardware_lekiwi::flagship_shadow::{
     FlagshipActionProjectionStream, FlagshipControllerContract,
     FlagshipLeKiwiArmCalibrationArtifact, FlagshipLeKiwiShadowExecutionClass,
     FlagshipLeKiwiShadowManifest, FlagshipObservationFusionStream,
-    FlagshipObservationSourceContract, FlagshipObservationSourceRole, FlagshipRateDecisionStream,
+    FlagshipObservationFusionStreamV2, FlagshipObservationSourceContract,
+    FlagshipObservationSourceRole, FlagshipRateDecisionStream,
 };
 use rne_hardware_lekiwi::physical_evidence::EvidenceFileRef;
 use rne_hardware_lekiwi::session::LeKiwiReferenceSessionEvidence;
@@ -141,20 +145,37 @@ fn verify_contents(
     )?;
     task.validate()
         .map_err(|error| anyhow::anyhow!("invalid flagship TaskSpec: {error}"))?;
+    let expected_task = if manifest.schema_version == 1 {
+        flagship_mobile_lift_task_spec(FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS)
+    } else {
+        flagship_mobile_lift_task_spec_v2(FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS)
+    };
     anyhow::ensure!(
-        task == flagship_mobile_lift_task_spec(FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS),
+        task == expected_task,
         "shadow TaskSpec differs from the canonical release flagship contract"
     );
 
-    let controller: FlagshipControllerContract = read_ref_json(
-        canonical_root,
-        root,
-        "controller_contract",
-        &manifest.artifacts.controller_contract,
-    )?;
-    controller
-        .validate()
-        .map_err(|error| anyhow::anyhow!("invalid controller contract: {error}"))?;
+    if manifest.schema_version == 1 {
+        let controller: FlagshipControllerContract = read_ref_json(
+            canonical_root,
+            root,
+            "controller_contract",
+            &manifest.artifacts.controller_contract,
+        )?;
+        controller
+            .validate()
+            .map_err(|error| anyhow::anyhow!("invalid controller contract: {error}"))?;
+    } else {
+        let controller: FlagshipMobileLiftControllerContract = read_ref_json(
+            canonical_root,
+            root,
+            "controller_contract",
+            &manifest.artifacts.controller_contract,
+        )?;
+        controller
+            .validate()
+            .map_err(|error| anyhow::anyhow!("invalid v2 controller contract: {error}"))?;
+    }
 
     let profile: LeKiwiReferenceProfile = read_ref_json(
         canonical_root,
@@ -206,24 +227,43 @@ fn verify_contents(
     rates
         .validate()
         .map_err(|error| anyhow::anyhow!("invalid rate decision stream: {error}"))?;
-    let observations: FlagshipObservationFusionStream = read_ref_json(
-        canonical_root,
-        root,
-        "observation_fusion_stream",
-        &manifest.artifacts.observation_fusion_stream,
-    )?;
-    observations
-        .validate(&arm.calibration)
-        .map_err(|error| anyhow::anyhow!("invalid observation fusion stream: {error}"))?;
-
-    validate_stream_links(
-        manifest,
-        &session,
-        &sources,
-        &actions,
-        &rates,
-        &observations,
-    )
+    if manifest.schema_version == 1 {
+        let observations: FlagshipObservationFusionStream = read_ref_json(
+            canonical_root,
+            root,
+            "observation_fusion_stream",
+            &manifest.artifacts.observation_fusion_stream,
+        )?;
+        observations
+            .validate(&arm.calibration)
+            .map_err(|error| anyhow::anyhow!("invalid observation fusion stream: {error}"))?;
+        validate_stream_links_v1(
+            manifest,
+            &session,
+            &sources,
+            &actions,
+            &rates,
+            &observations,
+        )
+    } else {
+        let observations: FlagshipObservationFusionStreamV2 = read_ref_json(
+            canonical_root,
+            root,
+            "observation_fusion_stream",
+            &manifest.artifacts.observation_fusion_stream,
+        )?;
+        observations
+            .validate(&arm.calibration)
+            .map_err(|error| anyhow::anyhow!("invalid v2 observation fusion stream: {error}"))?;
+        validate_stream_links_v2(
+            manifest,
+            &session,
+            &sources,
+            &actions,
+            &rates,
+            &observations,
+        )
+    }
 }
 
 fn read_source_contracts(
@@ -315,7 +355,7 @@ fn validate_shadow_session(
     Ok(())
 }
 
-fn validate_stream_links(
+fn validate_stream_links_v1(
     manifest: &FlagshipLeKiwiShadowManifest,
     session: &LeKiwiReferenceSessionEvidence,
     sources: &[FlagshipObservationSourceContract; 4],
@@ -344,6 +384,92 @@ fn validate_stream_links(
             action.parent_action == rate.parent_action
                 && action.projection == rate.decision.projection,
             "action and rate streams diverge at parent sequence {index}"
+        );
+        let expected_sequence = u64::try_from(index)?;
+        anyhow::ensure!(
+            rate.decision.parent_sequence == expected_sequence
+                && observation.fusion.parent_sequence == expected_sequence,
+            "boundary stream parent sequence mismatch at index {index}"
+        );
+
+        let physical_slot = index / 2;
+        let (device_sequence, device_values) = &physical[physical_slot];
+        let sample = &observation.inputs.physical;
+        anyhow::ensure!(
+            sample.source_id == manifest.device_id
+                && sample.source_sequence == *device_sequence
+                && sample.sample_tick
+                    == u64::try_from(physical_slot)? * FLAGSHIP_LEKIWI_WRITE_PERIOD_TICKS
+                && sample.max_age_ticks == FLAGSHIP_LEKIWI_WRITE_PERIOD_TICKS
+                && sample.source_contract_sha256 == manifest.artifacts.reference_profile.sha256
+                && sample.value.values == *device_values,
+            "physical source/session mismatch at parent sequence {index}"
+        );
+        if index % 2 == 1 {
+            anyhow::ensure!(
+                observation.inputs.physical == observations.records[index - 1].inputs.physical,
+                "odd parent sequence {index} must hold the preceding 30 Hz physical sample"
+            );
+        }
+
+        validate_aux_source(
+            "localization",
+            &observation.inputs.localization,
+            &sources[0],
+            &manifest.artifacts.localization_source.sha256,
+        )?;
+        validate_aux_source(
+            "perception",
+            &observation.inputs.perception,
+            &sources[1],
+            &manifest.artifacts.perception_source.sha256,
+        )?;
+        validate_aux_source(
+            "traffic",
+            &observation.inputs.traffic,
+            &sources[2],
+            &manifest.artifacts.traffic_source.sha256,
+        )?;
+        validate_aux_source(
+            "task_state",
+            &observation.inputs.task_state,
+            &sources[3],
+            &manifest.artifacts.task_state_source.sha256,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_stream_links_v2(
+    manifest: &FlagshipLeKiwiShadowManifest,
+    session: &LeKiwiReferenceSessionEvidence,
+    sources: &[FlagshipObservationSourceContract; 4],
+    actions: &FlagshipActionProjectionStream,
+    rates: &FlagshipRateDecisionStream,
+    observations: &FlagshipObservationFusionStreamV2,
+) -> Result<()> {
+    anyhow::ensure!(
+        actions.records.len() == manifest.sample_count
+            && rates.records.len() == manifest.sample_count
+            && observations.records.len() == manifest.sample_count,
+        "all three boundary streams must equal manifest sample_count"
+    );
+    let physical = session_observations(session);
+    let required_physical = manifest.sample_count.div_ceil(2);
+    anyhow::ensure!(
+        physical.len() == required_physical,
+        "LeKiwi session must contain exactly {required_physical} physical observations"
+    );
+
+    for index in 0..manifest.sample_count {
+        let action = &actions.records[index];
+        let rate = &rates.records[index];
+        let observation = &observations.records[index];
+        anyhow::ensure!(
+            action.parent_action == rate.parent_action
+                && action.parent_action == observation.controller_action
+                && action.projection == rate.decision.projection,
+            "controller, action, and rate streams diverge at parent sequence {index}"
         );
         let expected_sequence = u64::try_from(index)?;
         anyhow::ensure!(
@@ -525,29 +651,32 @@ fn write_new_json(path: &Path, value: &impl serde::Serialize) -> Result<()> {
 mod tests {
     use super::*;
     use rne_ai::{
-        FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID, FLAGSHIP_MOBILE_LIFT_TASK_ID, TASK_SPEC_KIND,
+        FlagshipMobileLiftControllerV2, FLAGSHIP_MOBILE_LIFT_CONTROLLER_CONTRACT_KIND,
+        FLAGSHIP_MOBILE_LIFT_CONTROLLER_CONTRACT_SCHEMA_VERSION,
+        FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2, FLAGSHIP_MOBILE_LIFT_TASK_ID_V2, TASK_SPEC_KIND,
         TASK_SPEC_SCHEMA_VERSION,
     };
     use rne_hardware_gateway::wire::{DeviceWireFrame, HostWireFrame};
     use rne_hardware_lekiwi::flagship_observation::{
         FlagshipArmChannelCalibration, FlagshipLeKiwiArmCalibration,
-        FlagshipLeKiwiObservationFuser, FlagshipLeKiwiObservationInputs,
-        FlagshipLeKiwiPhysicalObservation, FlagshipLocalizationObservation,
-        FlagshipPerceptionObservation, FlagshipTaskStateObservation, FlagshipTrafficObservation,
+        FlagshipLeKiwiObservationFuserV2, FlagshipLeKiwiObservationInputsV2,
+        FlagshipLeKiwiPhysicalObservation, FlagshipLocalizationObservationV2,
+        FlagshipPerceptionObservation, FlagshipTaskStateObservationV2, FlagshipTrafficObservation,
     };
-    use rne_hardware_lekiwi::flagship_projection::project_flagship_action_to_lekiwi;
-    use rne_hardware_lekiwi::flagship_rate::FlagshipLeKiwiRateScheduler;
+    use rne_hardware_lekiwi::flagship_projection::project_flagship_action_to_lekiwi_v2;
+    use rne_hardware_lekiwi::flagship_rate::FlagshipLeKiwiRateSchedulerV2;
     use rne_hardware_lekiwi::flagship_shadow::{
         FlagshipActionProjectionRecord, FlagshipLeKiwiShadowArtifacts,
-        FlagshipObservationFusionRecord, FlagshipRateDecisionRecord,
-        FLAGSHIP_ACTION_PROJECTION_STREAM_KIND, FLAGSHIP_ACTION_PROJECTION_STREAM_SCHEMA_VERSION,
-        FLAGSHIP_CONTROLLER_CONTRACT_KIND, FLAGSHIP_CONTROLLER_CONTRACT_SCHEMA_VERSION,
-        FLAGSHIP_LEKIWI_ARM_CALIBRATION_KIND, FLAGSHIP_LEKIWI_ARM_CALIBRATION_SCHEMA_VERSION,
-        FLAGSHIP_LEKIWI_SHADOW_MANIFEST_KIND, FLAGSHIP_LEKIWI_SHADOW_MANIFEST_SCHEMA_VERSION,
-        FLAGSHIP_OBSERVATION_FUSION_STREAM_KIND, FLAGSHIP_OBSERVATION_FUSION_STREAM_SCHEMA_VERSION,
-        FLAGSHIP_OBSERVATION_SOURCE_CONTRACT_KIND,
-        FLAGSHIP_OBSERVATION_SOURCE_CONTRACT_SCHEMA_VERSION, FLAGSHIP_RATE_DECISION_STREAM_KIND,
-        FLAGSHIP_RATE_DECISION_STREAM_SCHEMA_VERSION,
+        FlagshipObservationFusionRecordV2, FlagshipRateDecisionRecord,
+        FLAGSHIP_ACTION_PROJECTION_STREAM_CURRENT_SCHEMA_VERSION,
+        FLAGSHIP_ACTION_PROJECTION_STREAM_KIND, FLAGSHIP_LEKIWI_ARM_CALIBRATION_KIND,
+        FLAGSHIP_LEKIWI_ARM_CALIBRATION_SCHEMA_VERSION,
+        FLAGSHIP_LEKIWI_SHADOW_MANIFEST_CURRENT_SCHEMA_VERSION,
+        FLAGSHIP_LEKIWI_SHADOW_MANIFEST_KIND,
+        FLAGSHIP_OBSERVATION_FUSION_STREAM_CURRENT_SCHEMA_VERSION,
+        FLAGSHIP_OBSERVATION_FUSION_STREAM_KIND, FLAGSHIP_OBSERVATION_SOURCE_CONTRACT_KIND,
+        FLAGSHIP_OBSERVATION_SOURCE_CONTRACT_SCHEMA_VERSION,
+        FLAGSHIP_RATE_DECISION_STREAM_CURRENT_SCHEMA_VERSION, FLAGSHIP_RATE_DECISION_STREAM_KIND,
     };
     use rne_hardware_lekiwi::session::{
         LeKiwiMonotonicClock, LeKiwiReferenceSampleOutcome, LeKiwiReferenceSessionConfig,
@@ -690,17 +819,17 @@ mod tests {
     }
 
     #[test]
-    fn complete_mock_shadow_seals_verifies_and_rejects_tampering() {
+    fn complete_v2_mock_shadow_seals_verifies_and_rejects_tampering() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
 
         write_json(
             &root.join("task.json"),
-            &flagship_mobile_lift_task_spec(FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS),
+            &flagship_mobile_lift_task_spec_v2(FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS),
         );
         write_json(
             &root.join("controller.json"),
-            &FlagshipControllerContract::built_in(),
+            &FlagshipMobileLiftControllerContract::built_in(),
         );
         write_json(&root.join("profile.json"), &lekiwi_reference_profile_v1());
         let profile_sha256 = digest_file(&root.join("profile.json"));
@@ -772,27 +901,17 @@ mod tests {
         let session = runner.close().unwrap();
         write_json(&root.join("session.json"), &session);
 
-        let mut scheduler = FlagshipLeKiwiRateScheduler::new();
-        let mut fuser = FlagshipLeKiwiObservationFuser::new();
+        let mut scheduler = FlagshipLeKiwiRateSchedulerV2::new();
+        let mut fuser = FlagshipLeKiwiObservationFuserV2::new();
+        let mut controller = FlagshipMobileLiftControllerV2::new();
         let mut action_records = Vec::new();
         let mut rate_records = Vec::new();
         let mut observation_records = Vec::new();
         for index in 0..3_usize {
             let sequence = index as u64;
-            let wheel = sequence as f64 * 0.01;
-            let parent_action = vec![wheel, wheel, 0.0, 0.0, 0.0, 0.0, 0.0];
-            action_records.push(FlagshipActionProjectionRecord {
-                parent_action: parent_action.clone(),
-                projection: project_flagship_action_to_lekiwi(&parent_action).unwrap(),
-            });
-            rate_records.push(FlagshipRateDecisionRecord {
-                parent_action: parent_action.clone(),
-                decision: scheduler.ingest(sequence, &parent_action).unwrap(),
-            });
-
             let physical_slot = index / 2;
             let physical_sequence = physical_slot as u64 + 1;
-            let inputs = FlagshipLeKiwiObservationInputs {
+            let inputs = FlagshipLeKiwiObservationInputsV2 {
                 physical: FlagshipTimedObservation {
                     source_id: LEKIWI_MOCK_DEVICE_ID.to_string(),
                     source_sequence: physical_sequence,
@@ -807,8 +926,9 @@ mod tests {
                     &localization,
                     &localization_sha256,
                     sequence,
-                    FlagshipLocalizationObservation {
-                        base_position_m: [sequence as f64 * 0.01, 0.0],
+                    FlagshipLocalizationObservationV2 {
+                        base_position_m: [sequence as f64 * 0.01, 0.0, 0.0],
+                        base_yaw_rad: 0.0,
                     },
                 ),
                 perception: timed(
@@ -836,25 +956,37 @@ mod tests {
                     &task_state,
                     &task_state_sha256,
                     sequence,
-                    FlagshipTaskStateObservation {
+                    FlagshipTaskStateObservationV2 {
                         lift_position_m: 0.0,
                         gripper_position_m: 0.02,
-                        policy_phase: 1,
+                        place_target_position_m: [0.8, 0.02, 0.0],
+                        policy_phase: controller.expected_policy_phase(),
                     },
                 ),
             };
-            observation_records.push(FlagshipObservationFusionRecord {
-                fusion: fuser.fuse(sequence, &inputs, &calibration).unwrap(),
+            let fusion = fuser.fuse(sequence, &inputs, &calibration).unwrap();
+            let parent_action = controller.next_action(&fusion.observation_values).unwrap();
+            action_records.push(FlagshipActionProjectionRecord {
+                parent_action: parent_action.clone(),
+                projection: project_flagship_action_to_lekiwi_v2(&parent_action).unwrap(),
+            });
+            rate_records.push(FlagshipRateDecisionRecord {
+                parent_action: parent_action.clone(),
+                decision: scheduler.ingest(sequence, &parent_action).unwrap(),
+            });
+            observation_records.push(FlagshipObservationFusionRecordV2 {
+                fusion,
                 inputs,
+                controller_action: parent_action,
             });
         }
         write_json(
             &root.join("actions.json"),
             &FlagshipActionProjectionStream {
                 kind: FLAGSHIP_ACTION_PROJECTION_STREAM_KIND.to_string(),
-                schema_version: FLAGSHIP_ACTION_PROJECTION_STREAM_SCHEMA_VERSION,
-                task_id: FLAGSHIP_MOBILE_LIFT_TASK_ID.to_string(),
-                controller_id: FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID.to_string(),
+                schema_version: FLAGSHIP_ACTION_PROJECTION_STREAM_CURRENT_SCHEMA_VERSION,
+                task_id: FLAGSHIP_MOBILE_LIFT_TASK_ID_V2.to_string(),
+                controller_id: FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2.to_string(),
                 records: action_records,
             },
         );
@@ -862,21 +994,21 @@ mod tests {
             &root.join("rates.json"),
             &FlagshipRateDecisionStream {
                 kind: FLAGSHIP_RATE_DECISION_STREAM_KIND.to_string(),
-                schema_version: FLAGSHIP_RATE_DECISION_STREAM_SCHEMA_VERSION,
-                task_id: FLAGSHIP_MOBILE_LIFT_TASK_ID.to_string(),
-                controller_id: FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID.to_string(),
+                schema_version: FLAGSHIP_RATE_DECISION_STREAM_CURRENT_SCHEMA_VERSION,
+                task_id: FLAGSHIP_MOBILE_LIFT_TASK_ID_V2.to_string(),
+                controller_id: FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2.to_string(),
                 records: rate_records,
             },
         );
-        let observation_stream = FlagshipObservationFusionStream {
+        let observation_stream = FlagshipObservationFusionStreamV2 {
             kind: FLAGSHIP_OBSERVATION_FUSION_STREAM_KIND.to_string(),
-            schema_version: FLAGSHIP_OBSERVATION_FUSION_STREAM_SCHEMA_VERSION,
-            task_id: FLAGSHIP_MOBILE_LIFT_TASK_ID.to_string(),
-            controller_id: FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID.to_string(),
+            schema_version: FLAGSHIP_OBSERVATION_FUSION_STREAM_CURRENT_SCHEMA_VERSION,
+            task_id: FLAGSHIP_MOBILE_LIFT_TASK_ID_V2.to_string(),
+            controller_id: FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2.to_string(),
             records: observation_records,
         };
         write_json(&root.join("observations.json"), &observation_stream);
-        let round_tripped: FlagshipObservationFusionStream =
+        let round_tripped: FlagshipObservationFusionStreamV2 =
             serde_json::from_slice(&fs::read(root.join("observations.json")).unwrap()).unwrap();
         assert_eq!(
             observation_stream.records[0]
@@ -892,27 +1024,27 @@ mod tests {
                 .map(|value| value.to_bits())
                 .collect::<Vec<_>>()
         );
-        let replayed = FlagshipLeKiwiObservationFuser::new()
+        let replayed = FlagshipLeKiwiObservationFuserV2::new()
             .fuse(0, &round_tripped.records[0].inputs, &calibration)
             .unwrap();
         assert_eq!(replayed, round_tripped.records[0].fusion);
 
         let draft = FlagshipLeKiwiShadowManifest {
             kind: FLAGSHIP_LEKIWI_SHADOW_MANIFEST_KIND.to_string(),
-            schema_version: FLAGSHIP_LEKIWI_SHADOW_MANIFEST_SCHEMA_VERSION,
+            schema_version: FLAGSHIP_LEKIWI_SHADOW_MANIFEST_CURRENT_SCHEMA_VERSION,
             run_id: "mock-shadow-full-content-001".to_string(),
             rne_commit: "a".repeat(40),
             execution_class: FlagshipLeKiwiShadowExecutionClass::Mock,
             device_id: LEKIWI_MOCK_DEVICE_ID.to_string(),
-            task_id: FLAGSHIP_MOBILE_LIFT_TASK_ID.to_string(),
-            controller_id: FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID.to_string(),
+            task_id: FLAGSHIP_MOBILE_LIFT_TASK_ID_V2.to_string(),
+            controller_id: FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2.to_string(),
             sample_count: 3,
             actuator_writes_emitted: false,
             artifacts: FlagshipLeKiwiShadowArtifacts {
                 task_spec: reference(TASK_SPEC_KIND, TASK_SPEC_SCHEMA_VERSION, "task.json"),
                 controller_contract: reference(
-                    FLAGSHIP_CONTROLLER_CONTRACT_KIND,
-                    FLAGSHIP_CONTROLLER_CONTRACT_SCHEMA_VERSION,
+                    FLAGSHIP_MOBILE_LIFT_CONTROLLER_CONTRACT_KIND,
+                    FLAGSHIP_MOBILE_LIFT_CONTROLLER_CONTRACT_SCHEMA_VERSION,
                     "controller.json",
                 ),
                 reference_profile: reference(
@@ -952,17 +1084,17 @@ mod tests {
                 ),
                 action_projection_stream: reference(
                     FLAGSHIP_ACTION_PROJECTION_STREAM_KIND,
-                    FLAGSHIP_ACTION_PROJECTION_STREAM_SCHEMA_VERSION,
+                    FLAGSHIP_ACTION_PROJECTION_STREAM_CURRENT_SCHEMA_VERSION,
                     "actions.json",
                 ),
                 rate_decision_stream: reference(
                     FLAGSHIP_RATE_DECISION_STREAM_KIND,
-                    FLAGSHIP_RATE_DECISION_STREAM_SCHEMA_VERSION,
+                    FLAGSHIP_RATE_DECISION_STREAM_CURRENT_SCHEMA_VERSION,
                     "rates.json",
                 ),
                 observation_fusion_stream: reference(
                     FLAGSHIP_OBSERVATION_FUSION_STREAM_KIND,
-                    FLAGSHIP_OBSERVATION_FUSION_STREAM_SCHEMA_VERSION,
+                    FLAGSHIP_OBSERVATION_FUSION_STREAM_CURRENT_SCHEMA_VERSION,
                     "observations.json",
                 ),
             },
@@ -973,6 +1105,40 @@ mod tests {
         write_json(&draft_path, &draft);
         seal(&draft_path, &manifest_path).unwrap();
         verify_manifest(&manifest_path).unwrap();
+
+        let mut divergent_actions: FlagshipActionProjectionStream =
+            serde_json::from_slice(&fs::read(root.join("actions.json")).unwrap()).unwrap();
+        divergent_actions.records[0].parent_action[2] += 0.01;
+        divergent_actions.records[0].projection =
+            project_flagship_action_to_lekiwi_v2(&divergent_actions.records[0].parent_action)
+                .unwrap();
+        let mut divergent_scheduler = FlagshipLeKiwiRateSchedulerV2::new();
+        let divergent_rates = FlagshipRateDecisionStream {
+            kind: FLAGSHIP_RATE_DECISION_STREAM_KIND.to_string(),
+            schema_version: FLAGSHIP_RATE_DECISION_STREAM_CURRENT_SCHEMA_VERSION,
+            task_id: FLAGSHIP_MOBILE_LIFT_TASK_ID_V2.to_string(),
+            controller_id: FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2.to_string(),
+            records: divergent_actions
+                .records
+                .iter()
+                .enumerate()
+                .map(|(index, record)| FlagshipRateDecisionRecord {
+                    parent_action: record.parent_action.clone(),
+                    decision: divergent_scheduler
+                        .ingest(index as u64, &record.parent_action)
+                        .unwrap(),
+                })
+                .collect(),
+        };
+        write_json(&root.join("actions.json"), &divergent_actions);
+        write_json(&root.join("rates.json"), &divergent_rates);
+        let divergent_draft_path = root.join("cross-link-draft.json");
+        write_json(&divergent_draft_path, &draft);
+        assert!(seal(
+            &divergent_draft_path,
+            &root.join("cross-link-manifest.json")
+        )
+        .is_err());
 
         fs::write(root.join("rates.json"), b"tampered\n").unwrap();
         assert!(verify_manifest(&manifest_path).is_err());

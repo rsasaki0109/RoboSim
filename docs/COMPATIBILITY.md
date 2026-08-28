@@ -305,10 +305,11 @@ Shadow-manifest schema v2 binds the portable TaskSpec/controller v2 contract
 and v2 action, rate, and observation streams. Its observation records retain
 the exact controller action, so replay covers fusion, controller execution,
 physical projection, and rate scheduling rather than merely proving that the
-controller accepts the observation width. The typed validators retain schema
-v1 readability. The filesystem capture/seal/verify command still emits and
-verifies v1 bundles until its v2 migration is completed; schema v2 must not yet
-be presented as captured physical evidence.
+controller accepts the observation width. The typed validators retain schema-v1
+readability. The filesystem seal/verify command dispatches by manifest schema,
+validates the canonical v1 or v2 TaskSpec/controller artifact, replays the
+matching observation type, and cross-links the v2 controller action to both
+physical-boundary streams.
 
 LeKiwi physical-evidence manifest schema v1 indexes every required v0.6 exit
 artifact by explicit kind/schema, a unique canonical relative path, and a

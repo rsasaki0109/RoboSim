@@ -284,11 +284,11 @@ consumes only those flattened values, derives geometric features from the bound
 model, holds without state advance on red/uncleared traffic, and rejects missing
 RGB-D or phase disagreement without state advance.
 
-The remaining Gate 4 implementation work is to migrate the filesystem
-capture/verifier, installed Rapier/MuJoCo runner, and recorded path to this v2
-identity before any elevated capture. Only then may an elevated physical
-shadow, separately authorized bounded live success, and intentional safety-stop
-run count. No actuation is authorized by either manifest version.
+The remaining Gate 4 implementation work is to migrate the installed
+Rapier/MuJoCo runner and recorded path to this v2 identity before any elevated
+capture. Only then may an elevated physical shadow, separately authorized
+bounded live success, and intentional safety-stop run count. No actuation is
+authorized by either manifest version.
 
 The typed LeKiwi boundary portion of that migration is now implemented as
 `FlagshipLeKiwiObservationFuserV2`. It preserves the five independently
@@ -299,9 +299,12 @@ unit replay feeds the fused bytes directly into the portable v2 controller.
 Action projection, rate scheduling, typed replay streams, and the enclosing
 manifest now have schema-v2 identities; each observation record freezes the
 controller action and replay verifies the complete
-observation-to-controller-to-projection chain. The existing xtask filesystem
-capture/seal/verify implementation remains v1 and is the next migration
-boundary, so this is not yet a capturable physical-v2 claim.
+observation-to-controller-to-projection chain. The xtask filesystem seal/verify
+path now dispatches between historical v1 and current v2 artifacts, validates
+the canonical TaskSpec/controller for the selected schema, and cross-links the
+stored v2 controller action to projection and rate evidence. A full mock v2
+directory is sealed, verified, and tamper-tested. This enables a future
+physical-v2 capture but does not itself constitute one.
 
 ### Gate 5: independent adoption
 
