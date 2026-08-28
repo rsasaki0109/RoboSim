@@ -231,6 +231,7 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
     rne_compatibility_suite::verify_historical_source_history(&root)?;
     release_exit::validate_exit_matrix(&root)?;
     release_artifacts::validate_release_workflow_contract(&root)?;
+    release_artifacts::validate_release_documentation_contract(&root)?;
     external_intake::validate_committed(&root)?;
     release_readiness::validate_committed_manifest(&root)?;
     release_readiness::enforce_release_promotion(&root)?;

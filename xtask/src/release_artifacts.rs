@@ -3676,6 +3676,59 @@ pub(crate) fn validate_release_workflow_contract(root: &Path) -> anyhow::Result<
         .with_context(|| format!("validate release workflow {}", path.display()))
 }
 
+/// Ensures the public flagship guide describes the proof shipped by this release.
+pub(crate) fn validate_release_documentation_contract(root: &Path) -> anyhow::Result<()> {
+    let path = root.join("docs/FLAGSHIP_VALIDATION_WORKFLOW.md");
+    let text = fs::read_to_string(&path)
+        .with_context(|| format!("read flagship workflow guide {}", path.display()))?;
+    validate_release_documentation_text(&text)
+        .with_context(|| format!("validate flagship workflow guide {}", path.display()))
+}
+
+fn validate_release_documentation_text(text: &str) -> anyhow::Result<()> {
+    let version_marker = format!("The v{RELEASE_VERSION} release flagship");
+    anyhow::ensure!(
+        text.contains(&version_marker),
+        "flagship workflow guide must identify the current release with `{version_marker}`"
+    );
+
+    for marker in [
+        "./bin/rne-flagship-proof flagship-proof --cross-backend",
+        "--verify-installed-bundle . --measure-on",
+        "rne.flagship.mobile_lift_shared_aisle.v1",
+        "rne.ai.ik_mobile_lift_pick_place_policy.v1",
+        "rapier_native",
+        "mujoco_native",
+        "first step and simulation timestamp",
+        "explicit units",
+        "Failure Capsule binds",
+        "size and SHA-256",
+        "recorded-shadow-proof.json",
+        "time-to-proof-report.json",
+        "15-minute",
+        "not evidence of physical actuation",
+        "Gazebo qualification remains a separate",
+        "hardware-evidence gate",
+    ] {
+        anyhow::ensure!(
+            text.contains(marker),
+            "flagship workflow guide omitted required release-proof marker `{marker}`"
+        );
+    }
+
+    for stale in [
+        "The v0.7 flagship",
+        "remaining v0.7 portability gate",
+        "report names only `rapier_native` until that evidence exists",
+    ] {
+        anyhow::ensure!(
+            !text.contains(stale),
+            "flagship workflow guide retained stale claim `{stale}`"
+        );
+    }
+    Ok(())
+}
+
 fn validate_release_workflow_text(text: &str) -> anyhow::Result<()> {
     let parts = RELEASE_VERSION.split('.').collect::<Vec<_>>();
     anyhow::ensure!(
@@ -5060,6 +5113,34 @@ mod tests {
     fn committed_release_workflow_matches_current_release() {
         let root = workspace_root().expect("workspace root");
         validate_release_workflow_contract(&root).unwrap();
+    }
+
+    #[test]
+    fn committed_flagship_guide_matches_current_release_proof() {
+        let root = workspace_root().expect("workspace root");
+        validate_release_documentation_contract(&root).unwrap();
+    }
+
+    #[test]
+    fn flagship_guide_rejects_version_backend_and_physical_claim_drift() {
+        let root = workspace_root().expect("workspace root");
+        let guide = fs::read_to_string(root.join("docs/FLAGSHIP_VALIDATION_WORKFLOW.md"))
+            .expect("flagship workflow guide");
+
+        assert!(validate_release_documentation_text(&guide.replace(
+            &format!("The v{RELEASE_VERSION} release flagship"),
+            "The v0.1.0 release flagship"
+        ))
+        .is_err());
+        assert!(validate_release_documentation_text(
+            &guide.replace("mujoco_native", "second_backend")
+        )
+        .is_err());
+        assert!(validate_release_documentation_text(&guide.replace(
+            "not evidence of physical actuation",
+            "evidence of physical actuation"
+        ))
+        .is_err());
     }
 
     #[test]
