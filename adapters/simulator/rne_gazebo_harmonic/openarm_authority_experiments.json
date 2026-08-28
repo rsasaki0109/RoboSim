@@ -1,0 +1,16 @@
+{
+  "kind": "rne_openarm_actuator_authority_experiment_manifest",
+  "schema_version": 1,
+  "experiment_id": "rne.openarm.right.joint5_authority.v1",
+  "controlled_joint": "openarm_right_joint5",
+  "authority_scale_grid": [1.0, 0.8, 0.6, 0.4, 0.2],
+  "declared_minimum_supported_authority_scale": 0.6,
+  "requirements": [
+    {"id": "authority.maximum_controlled_joint_rmse_rad", "unit": "rad", "maximum": 0.02},
+    {"id": "authority.maximum_controlled_joint_final_error_rad", "unit": "rad", "maximum": 0.005},
+    {"id": "authority.minimum_supported_scale", "unit": "ratio", "minimum": 0.6},
+    {"id": "authority.requires_exact_replay", "unit": "bool", "required": true}
+  ],
+  "degradation_semantics": "scale_controlled_joint_max_effort_only_before_backend_realization",
+  "boundary_rule": "largest_degradation_with_all_non_capacity_requirements_passing"
+}

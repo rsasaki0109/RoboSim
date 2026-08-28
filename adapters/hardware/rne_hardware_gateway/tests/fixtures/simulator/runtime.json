@@ -1,0 +1,28 @@
+{
+  "kind": "rne_external_simulator_runtime_manifest",
+  "schema_version": 1,
+  "simulator_id": "gazebo_sim_fixture",
+  "simulator_version": "8.9.0",
+  "distribution": "harmonic_fixture",
+  "fixed_delta_ticks": 16666667,
+  "artifacts": [
+    {
+      "role": "world",
+      "file": "world.sdf",
+      "size_bytes": 205,
+      "sha256": "821b86987b8edaf929a2335b3461842286f86ab85c121e8b9c709cc2003431a8"
+    },
+    {
+      "role": "robot_model",
+      "file": "robot.urdf",
+      "size_bytes": 105,
+      "sha256": "2abaf9841e7524fc4cc2e8886a6cd0560202d686e508b12ca30a7afbe6d656a9"
+    },
+    {
+      "role": "adapter_config",
+      "file": "adapter.toml",
+      "size_bytes": 286,
+      "sha256": "178a7aefd5cb14341f1b48a5ff91a6efdc6bc10d8c82ed9e9529104ca2f501d3"
+    }
+  ]
+}

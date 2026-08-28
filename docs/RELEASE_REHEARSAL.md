@@ -14,7 +14,7 @@ plugin/physics/hardware/accelerator external-conformance guides, compatibility a
 documentation, locked dependency SBOM,
 artifact-attestation policy, Rust API baseline, Python API manifest, locked
 dependency graph, Failure Capsule authoring guides, replay fixtures, provenance
-report, and `SHA256SUMS`. Installed-rehearsal schema v6 runs eleven frozen
+report, and `SHA256SUMS`. Installed-rehearsal schema v7 runs twelve frozen
 checks: robot replay, installed flagship proof, scenario replay, physics
 conformance, external hardware-adapter conformance, accelerator protocol
 conformance, the 100-actor scale case, standalone controller-plugin conformance,
@@ -29,13 +29,26 @@ denied; the scaffold SDK must match the bundled SDK byte-for-byte and its
 canonical schema-v1 `rne-scaffold.json` must validate the exact author file set.
 The accelerator check executes all nine JSONL exchanges against the bundled
 mock, then generates a dependency-free adapter scaffold from the installed CLI
-and runs the same process kit against it. Both eleven-check content-addressed
+and runs the same process kit against it. Both twelve-check content-addressed
 reports must bind the exact manifest, runtime contract, TaskSpec, checkpoint,
 and clean shutdown. The scaffold README must retain its explicit warning that
 the fixture is authoring-path evidence, not independent accelerator evidence;
 its canonical `rne-scaffold.json` must validate the exact schema-v1 file set.
 Both scaffold contracts are retained compatibility fixtures; neither counts as
 independent external implementation evidence.
+
+The installed flagship check also runs the same mobile-manipulation TaskSpec
+through recorded playback and process-authority shadow evaluation. It requires
+an exact 512-sample playback, retains the first unit-bearing Rapier/MuJoCo
+trajectory divergence from another 512 samples, injects a sequence-128
+disconnect, suppresses every action, and rejects any actuator write. These
+artifacts are semantically replayed when the bundled Failure Capsule is
+verified; they are not counted as physical-device evidence.
+Before that proof starts, the packaged runner independently verifies the exact
+internal `SHA256SUMS` regular-file graph. Its schema-v1 verification report is
+freshly recomputed by the rehearsal and bound into installed-proof schema v4,
+time-to-proof schema v2, and the Failure Capsule; the measured interval includes
+this verification.
 The robot-replay check also uses the installed `rne-asset` binary to create and
 verify a content-addressed Failure Capsule from a retained failed behavior
 replay and TaskSpec. This proves the external-project evidence authoring path
@@ -47,11 +60,18 @@ The independent run additionally emits
 `rne_archive_install_rehearsal` schema v2. This outer report binds the archive
 file name, byte length, and SHA-256 to the extracted bundle root,
 `release-report.json`, canonical `SHA256SUMS`, the hardware-named time-to-proof
-report, and the complete inner schema-v6 rehearsal. Validation reconstructs the
+report, and the complete inner schema-v7 rehearsal. Validation reconstructs the
 checksum graph and requires the staged and independently extracted verdict maps
 to be identical. Schema v1 remains historical archive-bound evidence but lacks
 the timing-report identity required by the current gate.
-After all eleven checks pass, including the installed flagship proof, xtask deletes the tool-owned wheel virtual
+Bundle assembly is deliberately two-stage. The pre-manifest rehearsal executes
+the packaged flagship proof without installed-bundle verification or a
+time-to-proof report, because `release-report.json` and `SHA256SUMS` do not exist
+yet. After those files are written and verified, `release-install-smoke` runs
+from a fresh extraction and requires the full checksum graph, retained
+installed-bundle verification, and the 15-minute timing report. The two stages
+must produce identical twelve-check verdict maps.
+After all twelve checks pass, including the installed flagship and external simulator proofs, xtask deletes the tool-owned wheel virtual
 environment and controller and accelerator scaffolds. `release-bundle`
 additionally deletes its
 internal `.rehearsal-<target>` directory and target-local copied supply-chain
@@ -94,21 +114,25 @@ maturin build --locked --release --features extension-module \
   --manifest-path crates/rne_py/Cargo.toml --out artifacts/wheels
 cargo run --locked -p xtask -- release-bundle \
   --target x86_64-unknown-linux-gnu \
-  --wheel artifacts/wheels/rne_py-0.1.0-*.whl \
+  --wheel artifacts/wheels/rne_py-0.2.0-*.whl \
   --python python
 ```
 
 Use target `x86_64-pc-windows-msvc` on Windows. A tag build also passes
-`--expected-tag v0.1.0`; the bundle reports `reproducible = true` only when the
+`--expected-tag v0.2.0`; the bundle reports `reproducible = true` only when the
 worktree is clean and that exact tag identifies `HEAD`. `--allow-dirty` exists
 for local development only and is never used by release CI.
+Both `release-check` and `release-bundle` fail before packaging when the
+workflow's declared release version or tag-series trigger differs from the
+Rust release version. Missing pinned audit tools are reported by executable
+name and required version.
 
 After creating and extracting the deterministic archive, rerun:
 
 ```bash
 cargo run --locked -p xtask -- release-install-smoke \
-  --archive artifacts/release/rne-0.1.0-x86_64-unknown-linux-gnu.tar.gz \
-  --bundle-dir artifacts/extracted/rne-0.1.0-x86_64-unknown-linux-gnu \
+  --archive artifacts/release/rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz \
+  --bundle-dir artifacts/extracted/rne-0.2.0-x86_64-unknown-linux-gnu \
   --output-dir artifacts/extracted-evidence \
   --python python
 ```

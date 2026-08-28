@@ -12,9 +12,9 @@ use rne_core::SimDuration;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Hertz, Quat, Vec3};
 use rne_physics::{
-    capture_physics_snapshot, Collider, JointState, MultibodyLink, PhysicsBackend,
-    PhysicsBackendManifest, PhysicsCapability, PhysicsMaterial, PhysicsSnapshot, PhysicsWorldDesc,
-    RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyType,
+    capture_physics_snapshot, Collider, JointEffortMeasurement, JointState, MultibodyLink,
+    PhysicsBackend, PhysicsBackendManifest, PhysicsCapability, PhysicsMaterial, PhysicsSnapshot,
+    PhysicsWorldDesc, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyType,
     PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION, PHYSICS_TOLERANCE_REGISTRY_VERSION,
 };
 use rne_physics_analytic::AnalyticBackend;
@@ -29,7 +29,7 @@ use std::collections::BTreeSet;
 pub const CONFORMANCE_REPORT_KIND: &str = "rne_physics_conformance_report";
 
 /// Version of the shared capability-to-vector catalog.
-pub const CONFORMANCE_CATALOG_VERSION: u16 = 3;
+pub const CONFORMANCE_CATALOG_VERSION: u16 = 4;
 
 const BACKEND_ANALYTIC: &str = "analytic";
 #[cfg(feature = "mujoco")]
@@ -71,6 +71,7 @@ enum MetricUnit {
     MetrePerSecond,
     Radian,
     NewtonSecond,
+    NewtonMetre,
     Unitless,
 }
 
@@ -81,6 +82,7 @@ impl MetricUnit {
             Self::MetrePerSecond => "m/s",
             Self::Radian => "rad",
             Self::NewtonSecond => "N*s",
+            Self::NewtonMetre => "N*m",
             Self::Unitless => "1",
         }
     }
@@ -203,6 +205,15 @@ const TOLERANCES: &[ToleranceSpec] = &[
         absolute: 0.002,
         relative: 0.02,
         rationale: "settled MuJoCo contact force integrated over one fixed step tracks body weight",
+    },
+    ToleranceSpec {
+        id: "direct_revolute_effort_nm_v1",
+        case_id: "shared.joint_effort_measurement",
+        metric_id: "measured_effort_nm",
+        unit: MetricUnit::NewtonMetre,
+        absolute: 1e-6,
+        relative: 1e-6,
+        rationale: "direct native actuator effort retains the commanded SI value within backend numeric conversion rounding",
     },
     ToleranceSpec {
         id: "raycast_distance_m_v1",
@@ -761,6 +772,12 @@ where
                 capability,
                 run_raycast_case(factory(), backend_id),
             ),
+            PhysicsCapability::JointEffortMeasurement => result_case(
+                &capability_case_id(backend_id, capability),
+                backend_id,
+                capability,
+                run_joint_effort_measurement_case(factory(), backend_id),
+            ),
             PhysicsCapability::GpuRigidBody | PhysicsCapability::SoftBody => failed_case(
                 &capability_case_id(backend_id, capability),
                 backend_id,
@@ -795,6 +812,9 @@ fn capability_case_id(backend: &str, capability: PhysicsCapability) -> String {
         PhysicsCapability::SoftBody => "soft_body.catalog_missing",
         PhysicsCapability::ContactForce => "contact_force.resting_impulse",
         PhysicsCapability::RaycastBatch => "raycast_batch.ordered_hits",
+        PhysicsCapability::JointEffortMeasurement => {
+            "joint_effort_measurement.direct_revolute_effort"
+        }
     };
     format!("{backend}.{suffix}")
 }
@@ -1090,6 +1110,78 @@ fn run_articulation_case<B: PhysicsBackend>(
         snapshot_hash: Some(snapshot.stable_hash()),
         metrics,
         detail: "revolute motor pushes against a bounded joint limit".to_string(),
+    })
+}
+
+fn run_joint_effort_measurement_case<B: PhysicsBackend>(
+    mut backend: B,
+    backend_id: &str,
+) -> anyhow::Result<CaseReport> {
+    let physics_world = backend.create_world(PhysicsWorldDesc {
+        gravity_m_s2: Vec3::ZERO,
+        solver_iterations: 16,
+    })?;
+    let mut world = World::new();
+    let parent = spawn_named(&mut world, "joint_effort_parent");
+    world.entity_mut(parent).insert((
+        RigidBody {
+            body_type: RigidBodyType::Fixed,
+            ..RigidBody::default()
+        },
+        Collider::sphere(0.05),
+        MultibodyLink,
+        Transform3::default(),
+    ));
+    let child = spawn_named(&mut world, "joint_effort_child");
+    world.entity_mut(child).insert((
+        RigidBody::default(),
+        Collider::sphere(0.05),
+        MultibodyLink,
+        Transform3::from_translation_rotation(Vec3::new(0.0, -1.0, 0.0), Quat::IDENTITY),
+        RevoluteJointDesc {
+            parent,
+            axis: Vec3::Z,
+            anchor_parent_m: Vec3::ZERO,
+            anchor_child_m: Vec3::new(0.0, 1.0, 0.0),
+            lower_rad: None,
+            upper_rad: None,
+        },
+        rne_physics::JointActuation::RevoluteEffort {
+            effort_nm: 2.0,
+            max_effort_nm: 2.0,
+        },
+    ));
+    for _ in 0..30 {
+        step_backend(&mut backend, &mut world, physics_world, fixed_dt())?;
+    }
+    let measured_effort_nm = match world.get::<JointEffortMeasurement>(child) {
+        Some(JointEffortMeasurement::Revolute { measured_effort_nm }) => *measured_effort_nm,
+        Some(JointEffortMeasurement::Prismatic { .. }) => {
+            return Err(anyhow!(
+                "backend synchronized a prismatic measurement for a revolute joint"
+            ))
+        }
+        None => {
+            return Err(anyhow!(
+                "backend did not retain completed-step joint effort"
+            ))
+        }
+    };
+    let metrics = vec![metric(
+        "measured_effort_nm",
+        measured_effort_nm,
+        2.0,
+        "direct_revolute_effort_nm_v1",
+    )];
+    Ok(CaseReport {
+        id: capability_case_id(backend_id, PhysicsCapability::JointEffortMeasurement),
+        backend: backend_id.to_string(),
+        capability: PhysicsCapability::JointEffortMeasurement,
+        passed: metrics.iter().all(|metric| metric.passed),
+        snapshot_hash: None,
+        metrics,
+        detail: "completed-step native actuator effort is retained as a revolute N*m measurement"
+            .to_string(),
     })
 }
 
@@ -1432,6 +1524,29 @@ mod tests {
             .backends
             .iter()
             .all(|backend| backend.manifest_passed && backend.coverage_passed));
+
+        let rapier_effort = report
+            .cases
+            .iter()
+            .find(|case| case.id == "rapier.joint_effort_measurement.direct_revolute_effort")
+            .expect("Rapier joint-effort capability case");
+        assert!(rapier_effort.passed);
+        assert_eq!(rapier_effort.metrics.len(), 1);
+        assert_eq!(rapier_effort.metrics[0].unit, "N*m");
+        assert_eq!(rapier_effort.metrics[0].measured, 2.0);
+
+        #[cfg(feature = "mujoco")]
+        {
+            let effort = report
+                .cases
+                .iter()
+                .find(|case| case.id == "mujoco.joint_effort_measurement.direct_revolute_effort")
+                .expect("MuJoCo joint-effort capability case");
+            assert!(effort.passed);
+            assert_eq!(effort.metrics.len(), 1);
+            assert_eq!(effort.metrics[0].unit, "N*m");
+            assert_eq!(effort.metrics[0].measured, 2.0);
+        }
     }
 
     #[test]

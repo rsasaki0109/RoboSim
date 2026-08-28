@@ -1,0 +1,26 @@
+{
+  "kind": "rne_joint_state_calibration",
+  "schema_version": 1,
+  "calibration_id": "rne.openarm.right.joint_state.identity_si.v1",
+  "task_id": "rne.openarm.right_joint_tracking.v1",
+  "joint_order": [
+    "openarm_right_joint1",
+    "openarm_right_joint2",
+    "openarm_right_joint3",
+    "openarm_right_joint4",
+    "openarm_right_joint5",
+    "openarm_right_joint6",
+    "openarm_right_joint7",
+    "openarm_right_finger_joint1",
+    "openarm_right_finger_joint2"
+  ],
+  "position_unit": "rad",
+  "velocity_unit": "rad/s",
+  "position_scale": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+  "position_offset_rad": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+  "velocity_scale": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+  "velocity_offset_rad_s": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+  "timestamp_behavior": "source_capture_sim_clock_ticks_retained_before_availability_latency",
+  "latency_behavior": "one_fixed_control_period",
+  "noise_behavior": "no_additional_noise_during_recorded_playback"
+}

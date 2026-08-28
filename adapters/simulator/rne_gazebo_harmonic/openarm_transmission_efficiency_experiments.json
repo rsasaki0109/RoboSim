@@ -1,0 +1,21 @@
+{
+  "kind": "rne_openarm_transmission_efficiency_experiment_manifest",
+  "schema_version": 1,
+  "experiment_id": "rne.openarm.right.joint5_transmission_efficiency.v1",
+  "controlled_joint": "openarm_right_joint5",
+  "transmission_efficiency_grid": [1.0, 0.9, 0.75, 0.5, 0.25],
+  "declared_minimum_supported_efficiency": 0.9,
+  "backend_order": ["rne_rapier", "mujoco_native", "gazebo_sim"],
+  "requirements": [
+    {"id": "transmission.maximum_efficiency_realization_delta", "unit": "1", "maximum": 0.000000000001},
+    {"id": "transmission.maximum_fixed_model_hash_delta", "unit": "bool", "required": true},
+    {"id": "transmission.maximum_motor_effort_excess_nm", "unit": "N*m", "maximum": 0.000000000001},
+    {"id": "transmission.maximum_joint_effort_excess_nm", "unit": "N*m", "maximum": 0.000000000001},
+    {"id": "transmission.maximum_controlled_joint_rmse_rad", "unit": "rad", "maximum": 0.02},
+    {"id": "transmission.maximum_controlled_joint_final_error_rad", "unit": "rad", "maximum": 0.005},
+    {"id": "transmission.minimum_supported_efficiency", "unit": "1", "minimum": 0.9},
+    {"id": "transmission.requires_exact_replay", "unit": "bool", "required": true}
+  ],
+  "parameter_semantics": "motor_side_pd_then_effort_and_speed_limit_then_efficiency_multiply_then_joint_side_effort_then_passive_coulomb",
+  "boundary_rule": "highest_efficiency_below_support_with_any_predeclared_non_capacity_requirement_failure"
+}

@@ -17,8 +17,8 @@ Use the exact RNE release shared by the backend:
 
 ```toml
 [dev-dependencies]
-rne_physics = "=0.1.0"
-rne_physics_conformance = "=0.1.0"
+rne_physics = "=0.2.0"
+rne_physics_conformance = "=0.2.0"
 ```
 
 Then bind the exact implementation artifact or deterministic source bundle,
@@ -67,9 +67,9 @@ cargo run -p rne_physics_conformance \
   --output artifacts/external-physics-conformance/report.json
 ```
 
-## Catalog v1
+## Catalog v2
 
-The report always carries these nine checks in this order:
+The report always carries these ten checks in this order:
 
 | Check | Contract |
 |---|---|
@@ -82,10 +82,12 @@ The report always carries these nine checks in this order:
 | `contact_force.resting_impulse` | A settled load-bearing pair reports a bounded positive impulse |
 | `raycast_batch.ordered_hits` | Query shape, hit distance/order, and repeated output are stable |
 | `kinematic_body.external_pose` | An externally supplied pose remains authoritative across a fixed step |
+| `joint_effort_measurement.direct_revolute_effort` | A direct 2 N*m command is retained as finite completed-step revolute effort |
 
 Unadvertised capabilities are recorded as `not_advertised` and do not weaken
 the verdict. An advertised capability must pass its fixed catalog case. Authors
-cannot supply custom tolerances: catalog v1 owns the named SI-unit bounds.
+cannot supply custom tolerances: the catalog owns the named SI-unit bounds.
+Catalog v2 adds the completed-step `joint_effort_measurement` direct-torque vector.
 Semantic failures produce a valid failed report; malformed subjects or report
 shapes are errors. Reports contain no timestamp, duration, host path, or random
 identifier, so two same-runtime fresh executions are byte-identical.

@@ -1,0 +1,50 @@
+{
+  "kind": "rne_openarm_physical_configuration_experiment_manifest",
+  "schema_version": 1,
+  "experiment_id": "rne.openarm.right.physical_configuration_coupled_mode.v1",
+  "upstream_repository": "https://github.com/enactic/openarm_description",
+  "upstream_commit": "1fba2cbc05001f05b4514120b70130b4ac06f409",
+  "source_model": "assets/robot/openarm_v2.0/urdf/example/v2.urdf",
+  "configuration_order": ["arm_only", "pinch_gripper"],
+  "configurations": [
+    {
+      "id": "arm_only",
+      "upstream_preset": "assets/robot/openarm_v2.0/config/robot_presets/right_arm.yaml",
+      "vendored_preset": "assets/robots/openarm_description/upstream/right_arm.yaml",
+      "preset_sha256": "5e220a35c622bd7b498ec534c7fce5ee895be247ef75d019f5f1faffb2d70739",
+      "primary_arm_end_effector_enabled": false,
+      "removed_links": ["openarm_right_ee_link1", "openarm_right_ee_link2"],
+      "removed_joints": ["openarm_right_finger_joint1", "openarm_right_finger_joint2"],
+      "expected_articulated_mass_kg": 5.890304604235864
+    },
+    {
+      "id": "pinch_gripper",
+      "upstream_preset": "assets/robot/openarm_v2.0/config/robot_presets/right_arm_with_pinch_gripper.yaml",
+      "vendored_preset": "assets/robots/openarm_description/upstream/right_arm_with_pinch_gripper.yaml",
+      "preset_sha256": "1eaa4785cdff6eb46f9ed6c14b6f46d1454ee6855922ec14435f8fedd41ab7ce",
+      "primary_arm_end_effector_enabled": true,
+      "removed_links": [],
+      "removed_joints": [],
+      "expected_articulated_mass_kg": 6.130003651602535
+    }
+  ],
+  "expected_gripper_mass_delta_kg": 0.23969904736667047,
+  "source_controller": "adapters/simulator/rne_gazebo_harmonic/openarm_multijoint_identification.controller.json",
+  "source_task_spec": "adapters/simulator/rne_gazebo_harmonic/openarm_right_joint_tracking.task.json",
+  "source_actuation_config": "adapters/simulator/rne_gazebo_harmonic/openarm_right.rne_actuation.json",
+  "controller_id": "rne.controller.openarm_right_physical_configuration_identification.v1",
+  "task_id": "rne.openarm.right_physical_configuration_identification.v1",
+  "controlled_joint_count": 7,
+  "validation_segment": {"start_step": 3661, "end_step": 4380},
+  "requirements": [
+    {"id": "physical_configuration.maximum_source_hash_mismatch_count", "gate": "source_integrity", "unit": "count", "maximum": 0},
+    {"id": "physical_configuration.maximum_model_realization_delta", "gate": "plant_integrity", "unit": "SI", "maximum": 1e-12},
+    {"id": "physical_configuration.maximum_mass_delta_kg", "gate": "plant_integrity", "unit": "kg", "maximum": 1e-12},
+    {"id": "physical_configuration.minimum_gripper_mass_delta_kg", "gate": "plant_integrity", "unit": "kg", "minimum": 0.239699047366},
+    {"id": "physical_configuration.minimum_coupled_response_rms_delta_rad", "gate": "identification_validity", "unit": "rad", "minimum": 0.000001},
+    {"id": "physical_configuration.minimum_coupling_matrix_frobenius_delta", "gate": "identification_validity", "unit": "1", "minimum": 0.00001},
+    {"id": "physical_configuration.maximum_hard_limit_violation_count", "gate": "plant_integrity", "unit": "count", "maximum": 0},
+    {"id": "physical_configuration.requires_exact_replay", "gate": "portability", "unit": "bool", "required": true},
+    {"id": "physical_configuration.maximum_intentional_failure_step_delta", "gate": "portability", "unit": "step", "maximum": 0}
+  ]
+}

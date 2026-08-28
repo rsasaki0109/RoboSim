@@ -42,6 +42,103 @@ impl Default for RigidBody {
     }
 }
 
+/// Exact rigid-body centre of mass and symmetric inertia tensor.
+///
+/// When present, [`RigidBody::mass_kg`] together with this component defines the
+/// body's complete inertial properties. Physics backends must not add collider
+/// mass or infer a replacement tensor. Tensor entries are expressed about
+/// [`Self::center_of_mass_local_m`] in the rigid body's local frame.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RigidBodyInertia {
+    /// Centre of mass in the rigid body's local frame, in metres.
+    pub center_of_mass_local_m: Vec3,
+    /// Inertia tensor x-x entry in kg·m².
+    pub ixx_kg_m2: f64,
+    /// Inertia tensor x-y entry in kg·m².
+    pub ixy_kg_m2: f64,
+    /// Inertia tensor x-z entry in kg·m².
+    pub ixz_kg_m2: f64,
+    /// Inertia tensor y-y entry in kg·m².
+    pub iyy_kg_m2: f64,
+    /// Inertia tensor y-z entry in kg·m².
+    pub iyz_kg_m2: f64,
+    /// Inertia tensor z-z entry in kg·m².
+    pub izz_kg_m2: f64,
+}
+
+impl RigidBodyInertia {
+    /// Returns true when every value is finite, the symmetric tensor is
+    /// positive definite, and its principal moments satisfy the physical
+    /// triangle inequalities.
+    pub fn is_valid(self) -> bool {
+        let values = [
+            self.center_of_mass_local_m.x,
+            self.center_of_mass_local_m.y,
+            self.center_of_mass_local_m.z,
+            self.ixx_kg_m2,
+            self.ixy_kg_m2,
+            self.ixz_kg_m2,
+            self.iyy_kg_m2,
+            self.iyz_kg_m2,
+            self.izz_kg_m2,
+        ];
+        if values.into_iter().any(|value| !value.is_finite()) {
+            return false;
+        }
+        let leading_minor_2 = self.ixx_kg_m2 * self.iyy_kg_m2 - self.ixy_kg_m2 * self.ixy_kg_m2;
+        let determinant = self.ixx_kg_m2
+            * (self.iyy_kg_m2 * self.izz_kg_m2 - self.iyz_kg_m2 * self.iyz_kg_m2)
+            - self.ixy_kg_m2 * (self.ixy_kg_m2 * self.izz_kg_m2 - self.iyz_kg_m2 * self.ixz_kg_m2)
+            + self.ixz_kg_m2 * (self.ixy_kg_m2 * self.iyz_kg_m2 - self.iyy_kg_m2 * self.ixz_kg_m2);
+        if !(self.ixx_kg_m2 > 0.0 && leading_minor_2 > 0.0 && determinant > 0.0) {
+            return false;
+        }
+
+        // Positive-definite symmetric matrices are not automatically
+        // realizable inertia tensors. Principal moments must also satisfy the
+        // triangle inequalities. Equivalently, trace(I)/2 * identity - I is a
+        // positive-semidefinite second-moment matrix.
+        let half_trace = (self.ixx_kg_m2 + self.iyy_kg_m2 + self.izz_kg_m2) * 0.5;
+        let covariance = [
+            [
+                half_trace - self.ixx_kg_m2,
+                -self.ixy_kg_m2,
+                -self.ixz_kg_m2,
+            ],
+            [
+                -self.ixy_kg_m2,
+                half_trace - self.iyy_kg_m2,
+                -self.iyz_kg_m2,
+            ],
+            [
+                -self.ixz_kg_m2,
+                -self.iyz_kg_m2,
+                half_trace - self.izz_kg_m2,
+            ],
+        ];
+        let tolerance = half_trace.abs().max(1.0) * 1.0e-12;
+        let principal_minor_xy =
+            covariance[0][0] * covariance[1][1] - covariance[0][1] * covariance[0][1];
+        let principal_minor_xz =
+            covariance[0][0] * covariance[2][2] - covariance[0][2] * covariance[0][2];
+        let principal_minor_yz =
+            covariance[1][1] * covariance[2][2] - covariance[1][2] * covariance[1][2];
+        let covariance_determinant = covariance[0][0]
+            * (covariance[1][1] * covariance[2][2] - covariance[1][2] * covariance[1][2])
+            - covariance[0][1]
+                * (covariance[0][1] * covariance[2][2] - covariance[1][2] * covariance[0][2])
+            + covariance[0][2]
+                * (covariance[0][1] * covariance[1][2] - covariance[1][1] * covariance[0][2]);
+        covariance[0][0] >= -tolerance
+            && covariance[1][1] >= -tolerance
+            && covariance[2][2] >= -tolerance
+            && principal_minor_xy >= -tolerance * tolerance
+            && principal_minor_xz >= -tolerance * tolerance
+            && principal_minor_yz >= -tolerance * tolerance
+            && covariance_determinant >= -tolerance * tolerance * tolerance
+    }
+}
+
 /// Collision shape definition.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ColliderShape {
@@ -269,6 +366,111 @@ pub struct JointMotor {
     pub max_force: f64,
 }
 
+/// Selects how a backend interprets position/velocity servo gains.
+///
+/// The default preserves the historical mass-normalized response. Controllers
+/// that declare gains in force or torque units must opt into [`Self::ForceBased`]
+/// and retain that choice as part of their configuration evidence.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JointMotorGainModel {
+    /// Gains produce a target acceleration and are normalized by body inertia.
+    #[default]
+    AccelerationBased,
+    /// Gains produce force/torque directly in the units declared by actuation.
+    ForceBased,
+}
+
+/// Backend-neutral passive dynamics of a single-degree-of-freedom joint.
+///
+/// The component describes plant loss independently from actuator servo gains.
+/// Physics backends apply viscous damping against joint velocity. Coulomb loss
+/// uses the backend-neutral regularization `-magnitude * tanh(velocity /
+/// transition_velocity)`. This is a smooth kinetic-friction model, not a claim
+/// of true set-valued static friction or breakaway behavior.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum JointPassiveDynamics {
+    /// Passive dynamics of a revolute joint.
+    Revolute {
+        /// Viscous damping coefficient in newton-metre-seconds per radian.
+        viscous_damping_nm_s_per_rad: f64,
+        /// Requested Coulomb-friction magnitude in newton-metres.
+        coulomb_friction_nm: f64,
+        /// Velocity scale of the smooth Coulomb transition in radians per second.
+        #[serde(default)]
+        coulomb_transition_velocity_rad_s: f64,
+    },
+    /// Passive dynamics of a prismatic joint.
+    Prismatic {
+        /// Viscous damping coefficient in newton-seconds per metre.
+        viscous_damping_n_s_per_m: f64,
+        /// Requested Coulomb-friction magnitude in newtons.
+        coulomb_friction_n: f64,
+        /// Velocity scale of the smooth Coulomb transition in metres per second.
+        #[serde(default)]
+        coulomb_transition_velocity_m_s: f64,
+    },
+}
+
+impl JointPassiveDynamics {
+    /// Returns true when every coefficient is finite and non-negative.
+    pub fn has_valid_values(self) -> bool {
+        match self {
+            Self::Revolute {
+                viscous_damping_nm_s_per_rad,
+                coulomb_friction_nm,
+                coulomb_transition_velocity_rad_s,
+            } => {
+                non_negative(viscous_damping_nm_s_per_rad)
+                    && valid_coulomb_transition(
+                        coulomb_friction_nm,
+                        coulomb_transition_velocity_rad_s,
+                    )
+            }
+            Self::Prismatic {
+                viscous_damping_n_s_per_m,
+                coulomb_friction_n,
+                coulomb_transition_velocity_m_s,
+            } => {
+                non_negative(viscous_damping_n_s_per_m)
+                    && valid_coulomb_transition(coulomb_friction_n, coulomb_transition_velocity_m_s)
+            }
+        }
+    }
+
+    /// Computes the signed generalized Coulomb-loss effort opposing `velocity`.
+    ///
+    /// Callers must first require [`Self::has_valid_values`] and a finite
+    /// velocity. The result is a torque in newton-metres for revolute joints and
+    /// a force in newtons for prismatic joints.
+    pub fn regularized_coulomb_effort(self, velocity: f64) -> f64 {
+        let (magnitude, transition_velocity) = match self {
+            Self::Revolute {
+                coulomb_friction_nm,
+                coulomb_transition_velocity_rad_s,
+                ..
+            } => (coulomb_friction_nm, coulomb_transition_velocity_rad_s),
+            Self::Prismatic {
+                coulomb_friction_n,
+                coulomb_transition_velocity_m_s,
+                ..
+            } => (coulomb_friction_n, coulomb_transition_velocity_m_s),
+        };
+        if magnitude == 0.0 {
+            0.0
+        } else {
+            -magnitude * (velocity / transition_velocity).tanh()
+        }
+    }
+}
+
+fn valid_coulomb_transition(magnitude: f64, transition_velocity: f64) -> bool {
+    non_negative(magnitude)
+        && non_negative(transition_velocity)
+        && (magnitude == 0.0 || transition_velocity > 0.0)
+}
+
 /// Unit-explicit actuation command for a one-degree-of-freedom joint.
 ///
 /// Physics backends apply this component before each fixed step. Commands with
@@ -417,6 +619,39 @@ impl JointActuation {
     }
 }
 
+/// Backend-reported effort realized during the most recently completed step.
+///
+/// Backends insert or replace this component during physics-to-ECS
+/// synchronization only when they can expose a qualifying realized actuator
+/// effort. Absence is meaningful and must remain distinguishable from a
+/// measured zero. Joint-feedback sensors sample the value at their simulation
+/// capture time and apply their declared transport latency without adding
+/// noise.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum JointEffortMeasurement {
+    /// Realized revolute-joint effort in newton-metres.
+    Revolute {
+        /// Measured effort in newton-metres.
+        measured_effort_nm: f64,
+    },
+    /// Realized prismatic-joint force in newtons.
+    Prismatic {
+        /// Measured force in newtons.
+        measured_force_n: f64,
+    },
+}
+
+impl JointEffortMeasurement {
+    /// Returns true when the measured value is finite.
+    pub fn has_valid_value(self) -> bool {
+        match self {
+            Self::Revolute { measured_effort_nm } => measured_effort_nm.is_finite(),
+            Self::Prismatic { measured_force_n } => measured_force_n.is_finite(),
+        }
+    }
+}
+
 fn non_negative(value: f64) -> bool {
     value.is_finite() && value >= 0.0
 }
@@ -483,7 +718,81 @@ impl Default for JointMotor {
 
 #[cfg(test)]
 mod tests {
-    use super::JointActuation;
+    use super::{JointActuation, JointPassiveDynamics, RigidBodyInertia};
+    use rne_math::Vec3;
+
+    #[test]
+    fn passive_joint_dynamics_require_finite_non_negative_coefficients() {
+        assert!(JointPassiveDynamics::Revolute {
+            viscous_damping_nm_s_per_rad: 2.5,
+            coulomb_friction_nm: 0.4,
+            coulomb_transition_velocity_rad_s: 0.01,
+        }
+        .has_valid_values());
+        assert!(!JointPassiveDynamics::Prismatic {
+            viscous_damping_n_s_per_m: f64::NAN,
+            coulomb_friction_n: 0.0,
+            coulomb_transition_velocity_m_s: 0.0,
+        }
+        .has_valid_values());
+        assert!(!JointPassiveDynamics::Revolute {
+            viscous_damping_nm_s_per_rad: 0.0,
+            coulomb_friction_nm: -0.1,
+            coulomb_transition_velocity_rad_s: 0.01,
+        }
+        .has_valid_values());
+        assert!(!JointPassiveDynamics::Revolute {
+            viscous_damping_nm_s_per_rad: 0.0,
+            coulomb_friction_nm: 0.1,
+            coulomb_transition_velocity_rad_s: 0.0,
+        }
+        .has_valid_values());
+    }
+
+    #[test]
+    fn regularized_coulomb_effort_is_smooth_bounded_and_opposes_motion() {
+        let dynamics = JointPassiveDynamics::Revolute {
+            viscous_damping_nm_s_per_rad: 0.0,
+            coulomb_friction_nm: 0.4,
+            coulomb_transition_velocity_rad_s: 0.02,
+        };
+        assert_eq!(dynamics.regularized_coulomb_effort(0.0), 0.0);
+        let positive = dynamics.regularized_coulomb_effort(0.02);
+        let negative = dynamics.regularized_coulomb_effort(-0.02);
+        assert!(positive < 0.0);
+        assert_eq!(positive, -negative);
+        assert!(positive.abs() < 0.4);
+        assert!(dynamics.regularized_coulomb_effort(1.0).abs() <= 0.4);
+    }
+
+    #[test]
+    fn exact_inertia_requires_positive_definite_and_physically_realizable_tensor() {
+        let valid = RigidBodyInertia {
+            center_of_mass_local_m: Vec3::new(0.01, -0.02, 0.03),
+            ixx_kg_m2: 0.4,
+            ixy_kg_m2: 0.01,
+            ixz_kg_m2: -0.02,
+            iyy_kg_m2: 0.5,
+            iyz_kg_m2: 0.03,
+            izz_kg_m2: 0.6,
+        };
+        assert!(valid.is_valid());
+        assert!(!RigidBodyInertia {
+            iyy_kg_m2: -0.5,
+            ..valid
+        }
+        .is_valid());
+        assert!(!RigidBodyInertia {
+            ixx_kg_m2: 1.0,
+            ixy_kg_m2: 0.0,
+            ixz_kg_m2: 0.0,
+            iyy_kg_m2: 1.0,
+            iyz_kg_m2: 0.0,
+            izz_kg_m2: 3.0,
+            ..valid
+        }
+        .is_valid());
+    }
 
     #[test]
     fn joint_actuation_has_explicit_units_and_fail_closed_values() {

@@ -1,0 +1,121 @@
+{
+  "kind": "rne_openarm_plant_experiment_manifest",
+  "schema_version": 1,
+  "experiment_id": "rne.openarm.right.plant_lab.v1",
+  "task_id": "rne.openarm.right_joint_tracking.v1",
+  "controller_id": "rne.controller.openarm_right_plant_lab.v1",
+  "fixed_delta_ticks": 16666667,
+  "sample_rate_hz": 59.99999880000002,
+  "action_joint_order": [
+    "openarm_right_joint1",
+    "openarm_right_joint2",
+    "openarm_right_joint3",
+    "openarm_right_joint4",
+    "openarm_right_joint5",
+    "openarm_right_joint6",
+    "openarm_right_joint7",
+    "openarm_right_finger_joint1",
+    "openarm_right_finger_joint2"
+  ],
+  "rne_actuator_link_order": [
+    "openarm_right_link1",
+    "openarm_right_link2",
+    "openarm_right_link3",
+    "openarm_right_link4",
+    "openarm_right_link5",
+    "openarm_right_link6",
+    "openarm_right_ee_base_link",
+    "openarm_right_ee_link1",
+    "openarm_right_ee_link2"
+  ],
+  "initial_reference_rad": [0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, -0.01, -0.01],
+  "operating_point_rad": [0.0, 0.0, 0.0, 1.2, 0.0, 0.0, -0.2, -0.4, -0.4],
+  "input": {
+    "field": "joint_position_target_rad",
+    "unit": "rad",
+    "semantics": "open_loop_reference_without_outer_feedback"
+  },
+  "output": {
+    "fields": ["joint_position_rad", "joint_velocity_rad_s"],
+    "units": ["rad", "rad/s"],
+    "sampling": "typed_joint_feedback_after_completed_physics_step"
+  },
+  "segments": [
+    {
+      "id": "settle",
+      "kind": "operating_point_ramp",
+      "start_step": 1,
+      "end_step": 300,
+      "ramp_end_step": 240
+    },
+    {
+      "id": "joint5_step_doublet",
+      "kind": "step_doublet",
+      "start_step": 301,
+      "end_step": 900,
+      "joint": "openarm_right_joint5",
+      "amplitude_rad": 0.12,
+      "positive_step": 361,
+      "negative_step": 661
+    },
+    {
+      "id": "joint5_triangular_ramp",
+      "kind": "triangular_ramp",
+      "start_step": 901,
+      "end_step": 1200,
+      "joint": "openarm_right_joint5",
+      "peak_amplitude_rad": 0.15,
+      "peak_step": 1050
+    },
+    {
+      "id": "joint5_chirp_training",
+      "kind": "linear_chirp",
+      "start_step": 1201,
+      "end_step": 2400,
+      "joint": "openarm_right_joint5",
+      "amplitude_rad": 0.08,
+      "start_frequency_hz": 0.15,
+      "end_frequency_hz": 1.5,
+      "frequency_grid_hz": [0.2, 0.35, 0.5, 0.75, 1.0, 1.25, 1.45]
+    },
+    {
+      "id": "joint5_multisine_validation",
+      "kind": "multisine",
+      "start_step": 2401,
+      "end_step": 3000,
+      "joint": "openarm_right_joint5",
+      "frequencies_hz": [0.3, 0.6, 0.9, 1.2],
+      "amplitudes_rad": [0.02, 0.02, 0.02, 0.02],
+      "phases_rad": [0.0, 0.7, 1.4, 2.1]
+    },
+    {
+      "id": "multi_axis_coupling",
+      "kind": "frequency_separated_coupling",
+      "start_step": 3001,
+      "end_step": 3600,
+      "sources": [
+        {"joint": "openarm_right_joint1", "frequency_hz": 0.3, "amplitude_rad": 0.08, "phase_rad": 0.0},
+        {"joint": "openarm_right_joint2", "frequency_hz": 0.5, "amplitude_rad": 0.08, "phase_rad": 0.4},
+        {"joint": "openarm_right_joint4", "frequency_hz": 0.7, "amplitude_rad": 0.08, "phase_rad": 0.8},
+        {"joint": "openarm_right_joint6", "frequency_hz": 0.9, "amplitude_rad": 0.08, "phase_rad": 1.2}
+      ]
+    }
+  ],
+  "analysis": {
+    "step_settling_band_fraction": 0.02,
+    "step_rise_low_fraction": 0.1,
+    "step_rise_high_fraction": 0.9,
+    "chirp_window_samples": 240,
+    "chirp_window": "hann",
+    "frequency_estimator": "local_complex_demodulation_v1",
+    "frequency_validity_measure": "normalized_input_projection_amplitude",
+    "plant_model": "siso_arx_2_2_with_intercept",
+    "training_segment": "joint5_chirp_training",
+    "validation_segment": "joint5_multisine_validation"
+  },
+  "intentional_failure": {
+    "kind": "controller_output_truncation",
+    "inject_at_step": 307,
+    "expected_first_violation": "action_width_mismatch"
+  }
+}

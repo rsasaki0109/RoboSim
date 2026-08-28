@@ -6,6 +6,8 @@ body:
     attributes:
       value: |
         Use the exact checklist in docs/EXTERNAL_EVIDENCE_INTAKE.md.
+        Current campaign: v0.2.0 — https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0
+        Do not submit before these assets are published.
         A submitted issue is not acceptance evidence. Maintainers re-download, hash, and replay every retained artifact.
   - type: checkboxes
     id: independence
@@ -40,8 +42,20 @@ body:
     id: rne_release
     attributes:
       label: RNE release
-      description: Exact RNE release tag and archive checksum used for the run.
-      placeholder: v0.x.y, sha256:...
+      description: Exact RNE release tag and archive checksum used for the run. Only v0.2.0 qualifies for this campaign.
+      placeholder: v0.2.0, sha256:...
+    validations:
+      required: true
+  - type: textarea
+    id: release_archive
+    attributes:
+      label: RNE release archive
+      description: Immutable URL, official file name, byte size, and lowercase SHA-256 of the exact native archive used.
+      placeholder: |
+        URL:
+        file:
+        size_bytes:
+        sha256:
     validations:
       required: true
   - type: input
@@ -82,6 +96,36 @@ body:
         capsule_path:
         archive_sha256:
         verify_output:
+    validations:
+      required: true
+  - type: textarea
+    id: submission_candidate
+    attributes:
+      label: Submission candidate
+      description: Repository path and lowercase SHA-256 of the completed acyclic external-project candidate JSON.
+      placeholder: |
+        path:
+        sha256:
+    validations:
+      required: true
+  - type: textarea
+    id: stdout_log
+    attributes:
+      label: Reproduction stdout
+      description: Committed repository path and lowercase SHA-256 of the complete stdout log.
+      placeholder: |
+        path:
+        sha256:
+    validations:
+      required: true
+  - type: textarea
+    id: stderr_log
+    attributes:
+      label: Reproduction stderr
+      description: Committed repository path and lowercase SHA-256 of the complete stderr log.
+      placeholder: |
+        path:
+        sha256:
     validations:
       required: true
   - type: textarea

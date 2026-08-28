@@ -1,11 +1,12 @@
 //! URDF parsing.
 
 use crate::schema::{
-    UrdfGeometry, UrdfGeometryElement, UrdfJoint, UrdfJointLimit, UrdfJointMimic, UrdfJointType,
-    UrdfLink, UrdfRobot,
+    UrdfDocument, UrdfGeometry, UrdfGeometryElement, UrdfInertial, UrdfJoint, UrdfJointDynamics,
+    UrdfJointLimit, UrdfJointMimic, UrdfJointType, UrdfLink, UrdfRobot,
 };
 use rne_math::{Quat, Vec3};
 use roxmltree::Document;
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::Path;
 use thiserror::Error;
@@ -34,6 +35,22 @@ pub enum UrdfParseError {
 
 /// Parses a URDF document from XML text.
 pub fn parse_urdf(xml: &str) -> Result<UrdfRobot, UrdfParseError> {
+    parse_urdf_impl(xml, false).map(|document| document.robot)
+}
+
+/// Parses a URDF document and retains extended inertial and joint properties.
+///
+/// The extended properties live outside [`UrdfRobot`] so existing callers that
+/// construct [`UrdfLink`] values continue to use the compatibility-stable
+/// schema.
+pub fn parse_urdf_document(xml: &str) -> Result<UrdfDocument, UrdfParseError> {
+    parse_urdf_impl(xml, true)
+}
+
+fn parse_urdf_impl(
+    xml: &str,
+    retain_complete_inertials: bool,
+) -> Result<UrdfDocument, UrdfParseError> {
     ensure_input_len(xml.len())?;
     let document =
         Document::parse(xml).map_err(|error| UrdfParseError::InvalidXml(error.to_string()))?;
@@ -49,11 +66,25 @@ pub fn parse_urdf(xml: &str) -> Result<UrdfRobot, UrdfParseError> {
 
     let mut links = Vec::new();
     let mut joints = Vec::new();
+    let mut inertials = BTreeMap::new();
+    let mut joint_dynamics = BTreeMap::new();
 
     for child in robot.children().filter(|node| node.is_element()) {
         match child.tag_name().name() {
-            "link" => links.push(parse_link(child)?),
-            "joint" => joints.push(parse_joint(child)?),
+            "link" => {
+                let (link, inertial) = parse_link(child, retain_complete_inertials)?;
+                if let Some(inertial) = inertial {
+                    inertials.insert(link.name.clone(), inertial);
+                }
+                links.push(link);
+            }
+            "joint" => {
+                let (joint, dynamics) = parse_joint(child)?;
+                if let Some(dynamics) = dynamics {
+                    joint_dynamics.insert(joint.name.clone(), dynamics);
+                }
+                joints.push(joint);
+            }
             _ => {}
         }
     }
@@ -62,15 +93,30 @@ pub fn parse_urdf(xml: &str) -> Result<UrdfRobot, UrdfParseError> {
         return Err(UrdfParseError::Missing("at least one link".into()));
     }
 
-    Ok(UrdfRobot {
-        name,
-        links,
-        joints,
+    Ok(UrdfDocument {
+        robot: UrdfRobot {
+            name,
+            links,
+            joints,
+        },
+        inertials,
+        joint_dynamics,
     })
 }
 
 /// Parses a URDF document from a file path.
 pub fn parse_urdf_file(path: &Path) -> Result<UrdfRobot, UrdfParseError> {
+    let xml = read_urdf_text(path)?;
+    parse_urdf(&xml)
+}
+
+/// Parses a URDF file and retains complete link inertial properties.
+pub fn parse_urdf_document_file(path: &Path) -> Result<UrdfDocument, UrdfParseError> {
+    let xml = read_urdf_text(path)?;
+    parse_urdf_document(&xml)
+}
+
+fn read_urdf_text(path: &Path) -> Result<String, UrdfParseError> {
     let mut bytes = Vec::new();
     std::fs::File::open(path)
         .and_then(|file| {
@@ -83,7 +129,7 @@ pub fn parse_urdf_file(path: &Path) -> Result<UrdfRobot, UrdfParseError> {
     ensure_input_len(bytes.len())?;
     let xml = String::from_utf8(bytes)
         .map_err(|error| UrdfParseError::InvalidXml(error.utf8_error().to_string()))?;
-    parse_urdf(&xml)
+    Ok(xml)
 }
 
 fn ensure_input_len(actual: usize) -> Result<(), UrdfParseError> {
@@ -95,7 +141,10 @@ fn ensure_input_len(actual: usize) -> Result<(), UrdfParseError> {
     Ok(())
 }
 
-fn parse_link(node: roxmltree::Node<'_, '_>) -> Result<UrdfLink, UrdfParseError> {
+fn parse_link(
+    node: roxmltree::Node<'_, '_>,
+    retain_complete_inertial: bool,
+) -> Result<(UrdfLink, Option<UrdfInertial>), UrdfParseError> {
     let name = node
         .attribute("name")
         .ok_or_else(|| UrdfParseError::Missing("link@name".into()))?
@@ -104,31 +153,38 @@ fn parse_link(node: roxmltree::Node<'_, '_>) -> Result<UrdfLink, UrdfParseError>
     let mut collisions = Vec::new();
     let mut visuals = Vec::new();
     let mut inertial_mass_kg = None;
+    let mut inertial = None;
     for child in node.children().filter(|node| node.is_element()) {
         match child.tag_name().name() {
             "collision" => collisions.push(parse_geometry_element(child)?),
             "visual" => visuals.push(parse_geometry_element(child)?),
-            "inertial" => inertial_mass_kg = parse_inertial_mass_kg(child)?,
+            "inertial" => {
+                (inertial_mass_kg, inertial) = parse_inertial(child, retain_complete_inertial)?;
+            }
             _ => {}
         }
     }
 
-    Ok(UrdfLink {
-        name,
-        inertial_mass_kg,
-        collisions,
-        visuals,
-    })
+    Ok((
+        UrdfLink {
+            name,
+            inertial_mass_kg,
+            collisions,
+            visuals,
+        },
+        inertial,
+    ))
 }
 
-fn parse_inertial_mass_kg(
+fn parse_inertial(
     inertial: roxmltree::Node<'_, '_>,
-) -> Result<Option<f64>, UrdfParseError> {
+    retain_complete_inertial: bool,
+) -> Result<(Option<f64>, Option<UrdfInertial>), UrdfParseError> {
     let Some(mass) = inertial
         .children()
         .find(|node| node.is_element() && node.tag_name().name() == "mass")
     else {
-        return Ok(None);
+        return Ok((None, None));
     };
     let value = mass
         .attribute("value")
@@ -140,7 +196,71 @@ fn parse_inertial_mass_kg(
             value: value.into(),
         });
     }
-    Ok(Some(mass_kg))
+    if !retain_complete_inertial {
+        return Ok((Some(mass_kg), None));
+    }
+    let Some(inertia) = inertial
+        .children()
+        .find(|node| node.is_element() && node.tag_name().name() == "inertia")
+    else {
+        return Ok((Some(mass_kg), None));
+    };
+    let value = |name: &str| -> Result<f64, UrdfParseError> {
+        let raw = inertia
+            .attribute(name)
+            .ok_or_else(|| UrdfParseError::Missing(format!("inertial/inertia@{name}")))?;
+        let parsed = parse_f64(raw)?;
+        if parsed.is_finite() {
+            Ok(parsed)
+        } else {
+            Err(UrdfParseError::InvalidValue {
+                field: format!("inertial/inertia@{name}"),
+                value: raw.into(),
+            })
+        }
+    };
+    let origin = inertial
+        .children()
+        .find(|node| node.is_element() && node.tag_name().name() == "origin");
+    let (origin_xyz_m, origin_rpy_rad) = parse_inertial_origin(origin)?;
+    let properties = UrdfInertial {
+        origin_xyz_m,
+        origin_rpy_rad,
+        mass_kg,
+        ixx_kg_m2: value("ixx")?,
+        ixy_kg_m2: value("ixy")?,
+        ixz_kg_m2: value("ixz")?,
+        iyy_kg_m2: value("iyy")?,
+        iyz_kg_m2: value("iyz")?,
+        izz_kg_m2: value("izz")?,
+    };
+    Ok((Some(mass_kg), (mass_kg > 0.0).then_some(properties)))
+}
+
+fn parse_inertial_origin(
+    origin: Option<roxmltree::Node<'_, '_>>,
+) -> Result<(Vec3, Vec3), UrdfParseError> {
+    let Some(origin) = origin else {
+        return Ok((Vec3::ZERO, Vec3::ZERO));
+    };
+    let value = |attribute: &str| -> Result<Vec3, UrdfParseError> {
+        let Some(raw) = origin.attribute(attribute) else {
+            return Ok(Vec3::ZERO);
+        };
+        let parsed = parse_vec3(raw).map_err(|_| UrdfParseError::InvalidValue {
+            field: format!("inertial/origin@{attribute}"),
+            value: raw.into(),
+        })?;
+        if parsed.x.is_finite() && parsed.y.is_finite() && parsed.z.is_finite() {
+            Ok(parsed)
+        } else {
+            Err(UrdfParseError::InvalidValue {
+                field: format!("inertial/origin@{attribute}"),
+                value: raw.into(),
+            })
+        }
+    };
+    Ok((value("xyz")?, value("rpy")?))
 }
 
 fn parse_geometry_element(
@@ -232,7 +352,9 @@ fn parse_geometry(node: roxmltree::Node<'_, '_>) -> Result<UrdfGeometry, UrdfPar
     }
 }
 
-fn parse_joint(node: roxmltree::Node<'_, '_>) -> Result<UrdfJoint, UrdfParseError> {
+fn parse_joint(
+    node: roxmltree::Node<'_, '_>,
+) -> Result<(UrdfJoint, Option<UrdfJointDynamics>), UrdfParseError> {
     let name = node
         .attribute("name")
         .ok_or_else(|| UrdfParseError::Missing("joint@name".into()))?
@@ -266,18 +388,48 @@ fn parse_joint(node: roxmltree::Node<'_, '_>) -> Result<UrdfJoint, UrdfParseErro
         .find(|node| node.is_element() && node.tag_name().name() == "mimic")
         .map(parse_joint_mimic)
         .transpose()?;
+    let dynamics = node
+        .children()
+        .find(|node| node.is_element() && node.tag_name().name() == "dynamics")
+        .map(parse_joint_dynamics)
+        .transpose()?;
 
-    Ok(UrdfJoint {
-        name,
-        joint_type,
-        parent,
-        child,
-        origin_xyz,
-        origin_rpy,
-        axis,
-        limit,
-        mimic,
-    })
+    Ok((
+        UrdfJoint {
+            name,
+            joint_type,
+            parent,
+            child,
+            origin_xyz,
+            origin_rpy,
+            axis,
+            limit,
+            mimic,
+        },
+        dynamics,
+    ))
+}
+
+fn parse_joint_dynamics(
+    node: roxmltree::Node<'_, '_>,
+) -> Result<UrdfJointDynamics, UrdfParseError> {
+    let damping = node
+        .attribute("damping")
+        .map(parse_f64)
+        .transpose()?
+        .unwrap_or(0.0);
+    let friction = node
+        .attribute("friction")
+        .map(parse_f64)
+        .transpose()?
+        .unwrap_or(0.0);
+    if !damping.is_finite() || damping < 0.0 || !friction.is_finite() || friction < 0.0 {
+        return Err(UrdfParseError::InvalidValue {
+            field: "joint/dynamics".into(),
+            value: format!("damping={damping},friction={friction}"),
+        });
+    }
+    Ok(UrdfJointDynamics { damping, friction })
 }
 
 fn parse_joint_limit(node: roxmltree::Node<'_, '_>) -> Result<UrdfJointLimit, UrdfParseError> {
@@ -492,6 +644,47 @@ mod tests {
     }
 
     #[test]
+    fn parses_complete_link_inertial_properties() {
+        let document = parse_urdf_document(
+            r#"
+            <robot name="identified">
+              <link name="arm">
+                <inertial>
+                  <origin xyz="0.1 -0.2 0.3" rpy="0 0 1.5707963267948966"/>
+                  <mass value="2.5"/>
+                  <inertia ixx="1" ixy="0.1" ixz="0.2" iyy="2" iyz="0.3" izz="3"/>
+                </inertial>
+              </link>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        assert_eq!(document.robot.links[0].inertial_mass_kg, Some(2.5));
+        let inertia = document.inertials["arm"];
+        assert_eq!(inertia.origin_xyz_m, Vec3::new(0.1, -0.2, 0.3));
+        assert_eq!(inertia.mass_kg, 2.5);
+        assert_eq!(inertia.ixy_kg_m2, 0.1);
+        assert_eq!(inertia.izz_kg_m2, 3.0);
+    }
+
+    #[test]
+    fn legacy_parser_keeps_mass_only_behavior_for_incomplete_tensor() {
+        let xml = r#"
+            <robot name="legacy">
+              <link name="arm">
+                <inertial>
+                  <mass value="2.5"/>
+                  <inertia ixx="1"/>
+                </inertial>
+              </link>
+            </robot>
+        "#;
+        let robot = parse_urdf(xml).expect("legacy mass parser");
+        assert_eq!(robot.links[0].inertial_mass_kg, Some(2.5));
+        assert!(parse_urdf_document(xml).is_err());
+    }
+
+    #[test]
     fn rejects_negative_link_inertial_mass() {
         let error = parse_urdf(
             r#"
@@ -562,6 +755,41 @@ mod tests {
         assert_eq!(limit.upper, 1.5);
         assert_eq!(limit.max_velocity_rad_s, 2.0);
         assert_eq!(limit.max_effort_nm, 10.0);
+    }
+
+    #[test]
+    fn parses_non_negative_joint_passive_dynamics() {
+        let document = parse_urdf_document(
+            r#"
+            <robot name="lossy_arm">
+              <link name="base_link"/>
+              <link name="arm_link"/>
+              <joint name="shoulder" type="revolute">
+                <parent link="base_link"/>
+                <child link="arm_link"/>
+                <dynamics damping="2.5" friction="0.4"/>
+              </joint>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        let dynamics = document.joint_dynamics["shoulder"];
+        assert_eq!(dynamics.damping, 2.5);
+        assert_eq!(dynamics.friction, 0.4);
+    }
+
+    #[test]
+    fn rejects_negative_or_non_finite_joint_passive_dynamics() {
+        for dynamics in [
+            r#"<dynamics damping="-0.1" friction="0"/>"#,
+            r#"<dynamics damping="0" friction="-0.1"/>"#,
+            r#"<dynamics damping="NaN" friction="0"/>"#,
+        ] {
+            let xml = format!(
+                r#"<robot name="invalid"><link name="a"/><link name="b"/><joint name="j" type="revolute"><parent link="a"/><child link="b"/>{dynamics}</joint></robot>"#
+            );
+            assert!(parse_urdf(&xml).is_err(), "accepted {dynamics}");
+        }
     }
 
     #[test]

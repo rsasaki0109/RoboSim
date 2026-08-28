@@ -1,0 +1,31 @@
+{
+  "kind": "rne_openarm_robustness_experiment_manifest",
+  "schema_version": 1,
+  "experiment_id": "rne.openarm.right.state_feedback.robustness.v1",
+  "controller_role": "state_feedback",
+  "backend_order": ["rne_rapier", "mujoco_native", "gazebo_sim"],
+  "primary_sweep_backend": "rne_rapier",
+  "dimension": {
+    "kind": "additive_actuator_target_bias_pulse_v1",
+    "classification": "actuator_realization_error",
+    "joint": "openarm_right_joint5",
+    "unit": "rad",
+    "values": [0.0, 0.03, 0.06, 0.09, 0.12],
+    "start_step": 3241,
+    "end_step": 3300,
+    "application_order": "after_controller_limits_before_backend_actuation",
+    "controller_visibility": "unobserved_except_through_typed_joint_feedback"
+  },
+  "evaluation": {
+    "recovery_band_rad": 0.005,
+    "recovery_hold_samples": 30,
+    "evaluation_steps_after_pulse": 120,
+    "requirement_ids": [
+      "controller.state.maximum_disturbance_peak_error_rad",
+      "controller.state.maximum_disturbance_recovery_time_s",
+      "controller.state.maximum_disturbance_iae_rad_s"
+    ],
+    "boundary_rule": "smallest_grid_value_with_any_failed_requirement",
+    "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
+  }
+}

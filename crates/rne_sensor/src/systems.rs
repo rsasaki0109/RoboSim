@@ -1,17 +1,31 @@
 //! Sensor sampling systems.
 
 use crate::camera::sample_camera_rgbd_keyed;
-use crate::components::{ImuState, Sensor, SensorKind, SensorState};
-use crate::imu::sample_imu_stateful;
+use crate::components::{
+    ImuFeedbackFault, ImuFeedbackSensor, ImuFeedbackSensorState, ImuKinematicState, ImuMount,
+    ImuState, JointFeedbackFault, JointFeedbackSensor, JointFeedbackSensorState, Sensor,
+    SensorKind, SensorState,
+};
+use crate::imu::{
+    sample_imu_stateful_diagnostic_with_kinematics, sample_imu_stateful_with_kinematics,
+    ImuSampleError,
+};
 use crate::lidar::sample_lidar_at_entity_keyed;
 use crate::noise::SensorNoiseKey;
 use crate::wheel_encoder::sample_wheel_encoder;
 use rne_core::{SimDuration, SimTime};
-use rne_data::{DataBus, Frame, FramePayload};
-use rne_ecs::World;
-use rne_physics::{PhysicsBackend, PhysicsWorldId};
+use rne_data::{
+    DataBus, Frame, FramePayload, ImuFeedback, ImuFeedbackStatus, JointCommandFeedback,
+    JointCommandMode, JointCoordinateFeedback, JointEffortFeedback, JointFeedback,
+    JointFeedbackChannel, JointFeedbackStatus,
+};
+use rne_ecs::{Entity, World};
+use rne_physics::{
+    JointActuation, JointEffortMeasurement, JointState, PhysicsBackend, PhysicsWorldId,
+};
 use rne_render::{HeadlessRenderBackend, RenderBackend, RenderScene};
 use rne_world::{Transform3, WorldRandom};
+use thiserror::Error;
 
 /// Context required to sample sensors in the simulation loop.
 pub struct SensorSampleContext<'a, B: PhysicsBackend> {
@@ -39,7 +53,7 @@ pub fn sample_sensors<B: PhysicsBackend>(
 ) -> usize {
     let mut published = 0_usize;
     let mut updates: Vec<(rne_ecs::Entity, SensorState)> = Vec::new();
-    let mut imu_updates: Vec<(rne_ecs::Entity, ImuState)> = Vec::new();
+    let mut imu_updates: Vec<(rne_ecs::Entity, ImuState, ImuKinematicState)> = Vec::new();
     let mut headless_render = HeadlessRenderBackend::new();
     let empty_scene = RenderScene::new();
     let world_seed = ctx
@@ -80,7 +94,12 @@ pub fn sample_sensors<B: PhysicsBackend>(
                     .get::<ImuState>(entity)
                     .copied()
                     .unwrap_or_default();
-                let sample = sample_imu_stateful(
+                let mut kinematic_state = ctx
+                    .world
+                    .get::<ImuKinematicState>(entity)
+                    .copied()
+                    .unwrap_or_default();
+                let sample = sample_imu_stateful_with_kinematics(
                     ctx.world,
                     entity,
                     spec,
@@ -92,8 +111,9 @@ pub fn sample_sensors<B: PhysicsBackend>(
                     ),
                     ctx.sim_time,
                     &mut imu_state,
+                    &mut kinematic_state,
                 );
-                imu_updates.push((entity, imu_state));
+                imu_updates.push((entity, imu_state, kinematic_state));
                 publish_frame(
                     bus,
                     Frame::new(
@@ -211,8 +231,10 @@ pub fn sample_sensors<B: PhysicsBackend>(
         }
     }
 
-    for (entity, state) in imu_updates {
-        ctx.world.entity_mut(entity).insert(state);
+    for (entity, state, kinematic_state) in imu_updates {
+        ctx.world
+            .entity_mut(entity)
+            .insert((state, kinematic_state));
     }
 
     published
@@ -233,6 +255,575 @@ fn should_sample(sensor: &Sensor, state: &SensorState, sim_time: SimTime) -> boo
     }
 
     sim_time.ticks().saturating_sub(state.last_sample_ticks) >= period.ticks()
+}
+
+/// Typed IMU-feedback sampling error.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum ImuFeedbackError {
+    /// Sensor configuration is invalid or its exact period is zero.
+    #[error("invalid IMU feedback sensor on entity {sensor_entity_index}")]
+    InvalidSensor {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+    /// The sensor entity has no explicit mount calibration.
+    #[error("IMU feedback sensor {sensor_entity_index} has no ImuMount")]
+    MissingMount {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+    /// The sample schedule overflowed simulation ticks.
+    #[error("IMU feedback schedule overflow on entity {sensor_entity_index}")]
+    ScheduleOverflow {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+    /// Mount or body kinematics failed validation before publication.
+    #[error("IMU feedback sensor {sensor_entity_index} cannot sample: {source}")]
+    Sampling {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+        /// Precise mount/kinematics failure.
+        source: ImuSampleError,
+    },
+    /// A stuck-value fault has no prior emitted value to hold.
+    #[error("IMU stuck-value fault on entity {sensor_entity_index} has no prior sample")]
+    StuckWithoutPrevious {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+}
+
+/// Samples every typed IMU-feedback sensor in deterministic entity order.
+///
+/// Processing order is fixed: schedule, mount-aware truth and raw measurement,
+/// range saturation, quantization/noise, stuck substitution, frame dropout,
+/// then availability latency. Every due sensor is validated before any state or
+/// frame is published, so an invalid mount fails the complete sampling call
+/// closed. Truth returned by the diagnostic sampler is deliberately discarded;
+/// it belongs in validation evidence, never in the raw sensor payload.
+pub fn sample_imu_feedback_sensors(
+    world: &mut World,
+    sim_time: SimTime,
+    bus: &mut impl DataBus,
+) -> Result<usize, ImuFeedbackError> {
+    let mut sensors: Vec<(Entity, ImuFeedbackSensor)> = world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            entity_ref
+                .get::<ImuFeedbackSensor>()
+                .cloned()
+                .map(|sensor| (entity_ref.id(), sensor))
+        })
+        .collect();
+    sensors.sort_unstable_by_key(|(entity, _)| entity.index());
+    let world_seed = world
+        .get_resource::<WorldRandom>()
+        .map(WorldRandom::seed)
+        .unwrap_or(0);
+
+    let mut pending = Vec::new();
+    for (sensor_entity, sensor) in sensors {
+        if !sensor.enabled {
+            continue;
+        }
+        if !sensor.is_valid() || sensor.period().ticks() == 0 {
+            return Err(ImuFeedbackError::InvalidSensor {
+                sensor_entity_index: sensor_entity.index(),
+            });
+        }
+        if world.get::<ImuMount>(sensor_entity).is_none() {
+            return Err(ImuFeedbackError::MissingMount {
+                sensor_entity_index: sensor_entity.index(),
+            });
+        }
+        let mut state = world
+            .get::<ImuFeedbackSensorState>(sensor_entity)
+            .cloned()
+            .unwrap_or_default();
+        let scheduled_capture_ticks = sensor
+            .period()
+            .ticks()
+            .checked_mul(state.attempted_sequence)
+            .and_then(|ticks| sensor.phase_offset_ticks.checked_add(ticks))
+            .ok_or(ImuFeedbackError::ScheduleOverflow {
+                sensor_entity_index: sensor_entity.index(),
+            })?;
+        if sim_time.ticks() < scheduled_capture_ticks {
+            continue;
+        }
+        let sequence =
+            state
+                .attempted_sequence
+                .checked_add(1)
+                .ok_or(ImuFeedbackError::ScheduleOverflow {
+                    sensor_entity_index: sensor_entity.index(),
+                })?;
+        let diagnostic = sample_imu_stateful_diagnostic_with_kinematics(
+            world,
+            sensor_entity,
+            &sensor.spec,
+            SensorNoiseKey::new(world_seed, sensor.spec.seed, sensor.stream_id.0, sequence),
+            sim_time,
+            &mut state.imu_state,
+            &mut state.kinematic_state,
+        )
+        .map_err(|source| ImuFeedbackError::Sampling {
+            sensor_entity_index: sensor_entity.index(),
+            source,
+        })?;
+        let saturated = diagnostic.gyro_saturated.into_iter().any(|value| value)
+            || diagnostic.accel_saturated.into_iter().any(|value| value);
+        let mut payload = ImuFeedback {
+            schema_version: ImuFeedback::SCHEMA_VERSION,
+            scheduled_capture_ticks,
+            sample_phase_error_ticks: sim_time.ticks() - scheduled_capture_ticks,
+            status: if saturated {
+                ImuFeedbackStatus::Saturated
+            } else {
+                ImuFeedbackStatus::Nominal
+            },
+            angular_velocity_rad_s: diagnostic.measurement.angular_velocity_rad_s,
+            specific_force_m_s2: diagnostic.measurement.linear_acceleration_m_s2,
+            gyro_saturated: diagnostic.gyro_saturated,
+            accel_saturated: diagnostic.accel_saturated,
+        };
+        if matches!(
+            sensor.fault,
+            ImuFeedbackFault::StuckFromSequence { sequence: start } if sequence >= start
+        ) {
+            let previous =
+                state
+                    .last_emitted
+                    .as_ref()
+                    .ok_or(ImuFeedbackError::StuckWithoutPrevious {
+                        sensor_entity_index: sensor_entity.index(),
+                    })?;
+            payload.angular_velocity_rad_s = previous.angular_velocity_rad_s;
+            payload.specific_force_m_s2 = previous.specific_force_m_s2;
+            payload.gyro_saturated = previous.gyro_saturated;
+            payload.accel_saturated = previous.accel_saturated;
+            payload.status = ImuFeedbackStatus::StuckValue;
+        }
+
+        state.attempted_sequence = sequence;
+        let dropped = matches!(
+            sensor.fault,
+            ImuFeedbackFault::DropSequence { sequence: dropped } if sequence == dropped
+        );
+        let frame = if dropped {
+            None
+        } else {
+            state.emitted_frames += 1;
+            state.last_emitted = Some(payload);
+            Some(
+                Frame::new(sensor.stream_id, sensor_entity, sequence, sim_time, payload)
+                    .with_latency(SimDuration::from_ticks(sensor.latency_ticks)),
+            )
+        };
+        pending.push((sensor_entity, state, frame));
+    }
+
+    let mut published = 0;
+    for (sensor_entity, state, frame) in pending {
+        world.entity_mut(sensor_entity).insert(state);
+        if let Some(frame) = frame {
+            bus.publish(frame);
+            published += 1;
+        }
+    }
+    Ok(published)
+}
+
+/// Joint-feedback sampling error.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum JointFeedbackError {
+    /// Sensor configuration is invalid.
+    #[error("invalid joint-feedback sensor on entity {sensor_entity_index}")]
+    InvalidSensor {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+    /// The sample schedule overflowed simulation ticks.
+    #[error("joint-feedback schedule overflow on entity {sensor_entity_index}")]
+    ScheduleOverflow {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+    /// A configured joint has no completed-step state.
+    #[error("joint-feedback channel {joint_name} has no state on entity {joint_entity_index}")]
+    MissingJointState {
+        /// Stable joint name.
+        joint_name: String,
+        /// Stable joint entity index.
+        joint_entity_index: u32,
+    },
+    /// Joint state contains a non-finite value.
+    #[error("joint-feedback channel {joint_name} contains non-finite state")]
+    InvalidJointState {
+        /// Stable joint name.
+        joint_name: String,
+    },
+    /// Actuation mode does not match the joint coordinate kind.
+    #[error("joint-feedback channel {joint_name} has mismatched or invalid actuation")]
+    InvalidActuation {
+        /// Stable joint name.
+        joint_name: String,
+    },
+    /// A backend effort value is non-finite or disagrees with the joint kind.
+    #[error("joint-feedback channel {joint_name} has invalid realized effort")]
+    InvalidEffortMeasurement {
+        /// Stable joint name.
+        joint_name: String,
+    },
+    /// A stuck-value fault has no prior emitted value to hold.
+    #[error(
+        "joint-feedback stuck-value fault on entity {sensor_entity_index} has no prior sample"
+    )]
+    StuckWithoutPrevious {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+}
+
+/// Samples every typed joint-feedback sensor in deterministic entity order.
+///
+/// Processing order is fixed and externally observable: schedule, completed-step
+/// coordinate read, command reconstruction and limiting, stuck-value substitution,
+/// frame dropout, then output latency. Errors are validated for every due sensor
+/// before any frame or runtime state is published, so a bad channel fails closed.
+pub fn sample_joint_feedback_sensors(
+    world: &mut World,
+    sim_time: SimTime,
+    bus: &mut impl DataBus,
+) -> Result<usize, JointFeedbackError> {
+    let mut sensors: Vec<(Entity, JointFeedbackSensor)> = world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            entity_ref
+                .get::<JointFeedbackSensor>()
+                .cloned()
+                .map(|sensor| (entity_ref.id(), sensor))
+        })
+        .collect();
+    sensors.sort_unstable_by_key(|(entity, _)| entity.index());
+
+    let mut pending = Vec::new();
+    for (sensor_entity, sensor) in sensors {
+        if !sensor.enabled {
+            continue;
+        }
+        if !sensor.is_valid() || sensor.period().ticks() == 0 {
+            return Err(JointFeedbackError::InvalidSensor {
+                sensor_entity_index: sensor_entity.index(),
+            });
+        }
+        let mut state = world
+            .get::<JointFeedbackSensorState>(sensor_entity)
+            .cloned()
+            .unwrap_or_default();
+        let scheduled_capture_ticks = sensor
+            .period()
+            .ticks()
+            .checked_mul(state.attempted_sequence)
+            .and_then(|ticks| sensor.phase_offset_ticks.checked_add(ticks))
+            .ok_or(JointFeedbackError::ScheduleOverflow {
+                sensor_entity_index: sensor_entity.index(),
+            })?;
+        if sim_time.ticks() < scheduled_capture_ticks {
+            continue;
+        }
+        let sequence = state.attempted_sequence.checked_add(1).ok_or(
+            JointFeedbackError::ScheduleOverflow {
+                sensor_entity_index: sensor_entity.index(),
+            },
+        )?;
+        let mut payload = build_joint_feedback(world, &sensor, scheduled_capture_ticks, sim_time)?;
+        if matches!(
+            sensor.fault,
+            JointFeedbackFault::StuckFromSequence { sequence: start } if sequence >= start
+        ) {
+            let previous =
+                state
+                    .last_emitted
+                    .as_ref()
+                    .ok_or(JointFeedbackError::StuckWithoutPrevious {
+                        sensor_entity_index: sensor_entity.index(),
+                    })?;
+            payload.joints.clone_from(&previous.joints);
+            payload.status = JointFeedbackStatus::StuckValue;
+        }
+
+        state.attempted_sequence = sequence;
+        let dropped = matches!(
+            sensor.fault,
+            JointFeedbackFault::DropSequence { sequence: dropped } if sequence == dropped
+        );
+        let frame = if dropped {
+            None
+        } else {
+            state.emitted_frames += 1;
+            state.last_emitted = Some(payload.clone());
+            Some(
+                Frame::new(sensor.stream_id, sensor_entity, sequence, sim_time, payload)
+                    .with_latency(SimDuration::from_ticks(sensor.latency_ticks)),
+            )
+        };
+        pending.push((sensor_entity, state, frame));
+    }
+
+    let mut published = 0;
+    for (sensor_entity, state, frame) in pending {
+        world.entity_mut(sensor_entity).insert(state);
+        if let Some(frame) = frame {
+            bus.publish(frame);
+            published += 1;
+        }
+    }
+    Ok(published)
+}
+
+fn build_joint_feedback(
+    world: &World,
+    sensor: &JointFeedbackSensor,
+    scheduled_capture_ticks: u64,
+    sim_time: SimTime,
+) -> Result<JointFeedback, JointFeedbackError> {
+    let joints = sensor
+        .channels
+        .iter()
+        .map(|channel| {
+            let state = world
+                .get::<JointState>(channel.joint_entity)
+                .copied()
+                .ok_or_else(|| JointFeedbackError::MissingJointState {
+                    joint_name: channel.name.clone(),
+                    joint_entity_index: channel.joint_entity.index(),
+                })?;
+            let actuation = world
+                .get::<JointActuation>(channel.joint_entity)
+                .copied()
+                .unwrap_or_default();
+            let (coordinate, command) =
+                joint_coordinate_and_command(&channel.name, state, actuation)?;
+            let effort = joint_effort_feedback(
+                &channel.name,
+                state,
+                world
+                    .get::<JointEffortMeasurement>(channel.joint_entity)
+                    .copied(),
+            )?;
+            Ok(JointFeedbackChannel {
+                name: channel.name.clone(),
+                coordinate,
+                command,
+                effort,
+            })
+        })
+        .collect::<Result<Vec<_>, JointFeedbackError>>()?;
+    Ok(JointFeedback {
+        schema_version: JointFeedback::SCHEMA_VERSION,
+        scheduled_capture_ticks,
+        sample_phase_error_ticks: sim_time.ticks() - scheduled_capture_ticks,
+        status: JointFeedbackStatus::Nominal,
+        joints,
+    })
+}
+
+fn joint_effort_feedback(
+    joint_name: &str,
+    state: JointState,
+    measurement: Option<JointEffortMeasurement>,
+) -> Result<JointEffortFeedback, JointFeedbackError> {
+    let Some(measurement) = measurement else {
+        return Ok(JointEffortFeedback::Unavailable);
+    };
+    if !measurement.has_valid_value() {
+        return Err(JointFeedbackError::InvalidEffortMeasurement {
+            joint_name: joint_name.to_owned(),
+        });
+    }
+    match (state, measurement) {
+        (JointState::Revolute { .. }, JointEffortMeasurement::Revolute { measured_effort_nm }) => {
+            Ok(JointEffortFeedback::Revolute { measured_effort_nm })
+        }
+        (JointState::Prismatic { .. }, JointEffortMeasurement::Prismatic { measured_force_n }) => {
+            Ok(JointEffortFeedback::Prismatic { measured_force_n })
+        }
+        _ => Err(JointFeedbackError::InvalidEffortMeasurement {
+            joint_name: joint_name.to_owned(),
+        }),
+    }
+}
+
+fn joint_coordinate_and_command(
+    joint_name: &str,
+    state: JointState,
+    actuation: JointActuation,
+) -> Result<(JointCoordinateFeedback, JointCommandFeedback), JointFeedbackError> {
+    if !actuation.has_valid_values() {
+        return Err(JointFeedbackError::InvalidActuation {
+            joint_name: joint_name.to_owned(),
+        });
+    }
+    match state {
+        JointState::Revolute {
+            position_rad,
+            velocity_rad_s,
+        } => {
+            if !position_rad.is_finite() || !velocity_rad_s.is_finite() {
+                return Err(JointFeedbackError::InvalidJointState {
+                    joint_name: joint_name.to_owned(),
+                });
+            }
+            let command = revolute_command(joint_name, position_rad, velocity_rad_s, actuation)?;
+            Ok((
+                JointCoordinateFeedback::Revolute {
+                    position_rad,
+                    velocity_rad_s,
+                },
+                command,
+            ))
+        }
+        JointState::Prismatic {
+            position_m,
+            velocity_m_s,
+        } => {
+            if !position_m.is_finite() || !velocity_m_s.is_finite() {
+                return Err(JointFeedbackError::InvalidJointState {
+                    joint_name: joint_name.to_owned(),
+                });
+            }
+            let command = prismatic_command(joint_name, position_m, velocity_m_s, actuation)?;
+            Ok((
+                JointCoordinateFeedback::Prismatic {
+                    position_m,
+                    velocity_m_s,
+                },
+                command,
+            ))
+        }
+        JointState::Fixed if actuation == JointActuation::Disabled => Ok((
+            JointCoordinateFeedback::Fixed,
+            JointCommandFeedback::Disabled,
+        )),
+        JointState::Fixed => Err(JointFeedbackError::InvalidActuation {
+            joint_name: joint_name.to_owned(),
+        }),
+    }
+}
+
+fn revolute_command(
+    joint_name: &str,
+    position_rad: f64,
+    velocity_rad_s: f64,
+    actuation: JointActuation,
+) -> Result<JointCommandFeedback, JointFeedbackError> {
+    let (mode, target_position_rad, target_velocity_rad_s, request, limit) = match actuation {
+        JointActuation::Disabled => return Ok(JointCommandFeedback::Disabled),
+        JointActuation::RevolutePosition {
+            target_position_rad,
+            stiffness_nm_per_rad,
+            damping_nm_s_per_rad,
+            max_effort_nm,
+        } => (
+            JointCommandMode::Position,
+            Some(target_position_rad),
+            None,
+            stiffness_nm_per_rad * (target_position_rad - position_rad)
+                - damping_nm_s_per_rad * velocity_rad_s,
+            max_effort_nm,
+        ),
+        JointActuation::RevoluteVelocity {
+            target_velocity_rad_s,
+            gain_nm_s_per_rad,
+            max_effort_nm,
+        } => (
+            JointCommandMode::Velocity,
+            None,
+            Some(target_velocity_rad_s),
+            gain_nm_s_per_rad * (target_velocity_rad_s - velocity_rad_s),
+            max_effort_nm,
+        ),
+        JointActuation::RevoluteEffort {
+            effort_nm,
+            max_effort_nm,
+        } => (
+            JointCommandMode::Effort,
+            None,
+            None,
+            effort_nm,
+            max_effort_nm,
+        ),
+        _ => {
+            return Err(JointFeedbackError::InvalidActuation {
+                joint_name: joint_name.to_owned(),
+            });
+        }
+    };
+    let limited = request.clamp(-limit, limit);
+    Ok(JointCommandFeedback::Revolute {
+        mode,
+        target_position_rad,
+        target_velocity_rad_s,
+        unconstrained_effort_request_nm: request,
+        limited_effort_command_nm: limited,
+        effort_limit_nm: limit,
+        saturated: limited != request,
+    })
+}
+
+fn prismatic_command(
+    joint_name: &str,
+    position_m: f64,
+    velocity_m_s: f64,
+    actuation: JointActuation,
+) -> Result<JointCommandFeedback, JointFeedbackError> {
+    let (mode, target_position_m, target_velocity_m_s, request, limit) = match actuation {
+        JointActuation::Disabled => return Ok(JointCommandFeedback::Disabled),
+        JointActuation::PrismaticPosition {
+            target_position_m,
+            stiffness_n_per_m,
+            damping_n_s_per_m,
+            max_force_n,
+        } => (
+            JointCommandMode::Position,
+            Some(target_position_m),
+            None,
+            stiffness_n_per_m * (target_position_m - position_m) - damping_n_s_per_m * velocity_m_s,
+            max_force_n,
+        ),
+        JointActuation::PrismaticVelocity {
+            target_velocity_m_s,
+            gain_n_s_per_m,
+            max_force_n,
+        } => (
+            JointCommandMode::Velocity,
+            None,
+            Some(target_velocity_m_s),
+            gain_n_s_per_m * (target_velocity_m_s - velocity_m_s),
+            max_force_n,
+        ),
+        JointActuation::PrismaticEffort {
+            force_n,
+            max_force_n,
+        } => (JointCommandMode::Effort, None, None, force_n, max_force_n),
+        _ => {
+            return Err(JointFeedbackError::InvalidActuation {
+                joint_name: joint_name.to_owned(),
+            });
+        }
+    };
+    let limited = request.clamp(-limit, limit);
+    Ok(JointCommandFeedback::Prismatic {
+        mode,
+        target_position_m,
+        target_velocity_m_s,
+        unconstrained_force_request_n: request,
+        limited_force_command_n: limited,
+        force_limit_n: limit,
+        saturated: limited != request,
+    })
 }
 
 /// Trait for sensor backends used by higher-level schedulers.
@@ -262,10 +853,10 @@ mod tests {
     use crate::Sensor;
     use rne_data::{InMemoryDataBus, StreamId};
     use rne_ecs::spawn_named;
-    use rne_math::Seconds;
+    use rne_math::{Quat, Seconds, Vec3};
     use rne_physics::{
         ContactEvent, PhysicsBackend, PhysicsCapability, PhysicsError, PhysicsWorldDesc,
-        PhysicsWorldId, RaycastHit, RaycastQuery,
+        PhysicsWorldId, RaycastHit, RaycastQuery, RigidBody,
     };
 
     struct NullPhysics;
@@ -559,5 +1150,334 @@ mod tests {
             first.payload.linear_acceleration_m_s2,
             second.payload.linear_acceleration_m_s2
         );
+    }
+
+    fn imu_feedback_fixture(
+        fault: ImuFeedbackFault,
+    ) -> (World, Entity, Entity, StreamId, InMemoryDataBus) {
+        let mut world = World::new();
+        world.insert_resource(WorldRandom::new(123));
+        let body = spawn_named(&mut world, "imu_body");
+        world.entity_mut(body).insert((
+            Transform3::IDENTITY,
+            RigidBody {
+                angular_velocity_rad_s: Vec3::new(0.0, 0.0, 0.5),
+                ..RigidBody::default()
+            },
+        ));
+        let sensor = spawn_named(&mut world, "typed_imu");
+        let stream = StreamId::new(79);
+        world.entity_mut(sensor).insert((
+            ImuMount {
+                body_entity: body,
+                body_from_sensor: Transform3::from_translation_rotation(
+                    Vec3::new(0.1, 0.0, 0.0),
+                    Quat::IDENTITY,
+                ),
+            },
+            ImuFeedbackSensor {
+                spec: ImuSpec::default(),
+                update_rate_hz: 1_000_000.0,
+                sample_period_ticks: Some(1_000),
+                phase_offset_ticks: 5,
+                latency_ticks: 7,
+                enabled: true,
+                stream_id: stream,
+                fault,
+            },
+            ImuFeedbackSensorState::default(),
+        ));
+        (world, body, sensor, stream, InMemoryDataBus::new())
+    }
+
+    #[test]
+    fn imu_feedback_exposes_mount_schedule_latency_units_and_status() {
+        let (mut world, _, _, stream, mut bus) = imu_feedback_fixture(ImuFeedbackFault::None);
+        assert_eq!(
+            sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(4), &mut bus).unwrap(),
+            0
+        );
+        assert_eq!(
+            sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus).unwrap(),
+            1
+        );
+
+        let frame = bus.latest::<ImuFeedback>(stream).expect("IMU feedback");
+        assert_eq!(frame.sequence, 1);
+        assert_eq!(frame.capture_time.ticks(), 5);
+        assert_eq!(frame.available_time.ticks(), 12);
+        assert_eq!(frame.payload.schema_version, ImuFeedback::SCHEMA_VERSION);
+        assert_eq!(frame.payload.scheduled_capture_ticks, 5);
+        assert_eq!(frame.payload.sample_phase_error_ticks, 0);
+        assert_eq!(frame.payload.status, ImuFeedbackStatus::Nominal);
+        assert_eq!(
+            frame.payload.angular_velocity_rad_s,
+            Vec3::new(0.0, 0.0, 0.5)
+        );
+        assert_eq!(
+            frame.payload.specific_force_m_s2,
+            Vec3::new(-0.025, 9.81, 0.0)
+        );
+        assert!(bus
+            .latest_available::<ImuFeedback>(stream, SimTime::from_ticks(11))
+            .is_none());
+        assert!(bus
+            .latest_available::<ImuFeedback>(stream, SimTime::from_ticks(12))
+            .is_some());
+    }
+
+    #[test]
+    fn imu_feedback_drop_creates_a_gap_but_advances_physical_state() {
+        let (mut world, body, sensor, stream, mut bus) =
+            imu_feedback_fixture(ImuFeedbackFault::DropSequence { sequence: 2 });
+        sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus).unwrap();
+        world
+            .get_mut::<RigidBody>(body)
+            .unwrap()
+            .linear_velocity_m_s = Vec3::X;
+        assert_eq!(
+            sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(1_005), &mut bus).unwrap(),
+            0
+        );
+        let state_after_drop = world
+            .get::<ImuFeedbackSensorState>(sensor)
+            .expect("IMU sensor state");
+        assert_eq!(state_after_drop.attempted_sequence, 2);
+        assert_eq!(state_after_drop.emitted_frames, 1);
+        assert_eq!(
+            state_after_drop.imu_state.previous_linear_velocity_m_s,
+            Vec3::X
+        );
+
+        assert_eq!(
+            sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(2_005), &mut bus).unwrap(),
+            1
+        );
+        assert_eq!(bus.frame_count(stream), 2);
+        assert_eq!(bus.latest::<ImuFeedback>(stream).unwrap().sequence, 3);
+    }
+
+    #[test]
+    fn imu_feedback_stuck_fault_holds_values_but_advances_kinematics() {
+        let (mut world, body, sensor, stream, mut bus) =
+            imu_feedback_fixture(ImuFeedbackFault::StuckFromSequence { sequence: 2 });
+        sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus).unwrap();
+        world
+            .get_mut::<RigidBody>(body)
+            .unwrap()
+            .angular_velocity_rad_s = Vec3::Z;
+        sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(1_005), &mut bus).unwrap();
+
+        let frame = bus.latest::<ImuFeedback>(stream).expect("stuck IMU frame");
+        assert_eq!(frame.sequence, 2);
+        assert_eq!(frame.payload.status, ImuFeedbackStatus::StuckValue);
+        assert_eq!(
+            frame.payload.angular_velocity_rad_s,
+            Vec3::new(0.0, 0.0, 0.5)
+        );
+        assert_eq!(
+            world
+                .get::<ImuFeedbackSensorState>(sensor)
+                .unwrap()
+                .kinematic_state
+                .previous_angular_velocity_rad_s,
+            Vec3::Z
+        );
+    }
+
+    #[test]
+    fn missing_imu_mount_fails_all_due_publication_and_state_closed() {
+        let (mut world, _, valid_sensor, valid_stream, mut bus) =
+            imu_feedback_fixture(ImuFeedbackFault::None);
+        let invalid_sensor = spawn_named(&mut world, "unmounted_imu");
+        world.entity_mut(invalid_sensor).insert(ImuFeedbackSensor {
+            spec: ImuSpec::default(),
+            update_rate_hz: 1_000_000.0,
+            sample_period_ticks: Some(1_000),
+            phase_offset_ticks: 5,
+            latency_ticks: 0,
+            enabled: true,
+            stream_id: StreamId::new(80),
+            fault: ImuFeedbackFault::None,
+        });
+
+        let error = sample_imu_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus)
+            .expect_err("missing mount must fail closed");
+        assert_eq!(
+            error,
+            ImuFeedbackError::MissingMount {
+                sensor_entity_index: invalid_sensor.index()
+            }
+        );
+        assert_eq!(bus.frame_count(valid_stream), 0);
+        assert_eq!(
+            world
+                .get::<ImuFeedbackSensorState>(valid_sensor)
+                .unwrap()
+                .attempted_sequence,
+            0
+        );
+    }
+
+    fn joint_feedback_fixture(
+        fault: JointFeedbackFault,
+    ) -> (World, Entity, Entity, StreamId, InMemoryDataBus) {
+        let mut world = World::new();
+        let joint = spawn_named(&mut world, "shoulder_joint");
+        world.entity_mut(joint).insert((
+            JointState::Revolute {
+                position_rad: 0.1,
+                velocity_rad_s: 0.2,
+            },
+            JointActuation::RevolutePosition {
+                target_position_rad: 1.0,
+                stiffness_nm_per_rad: 20.0,
+                damping_nm_s_per_rad: 2.0,
+                max_effort_nm: 5.0,
+            },
+        ));
+        let sensor_entity = spawn_named(&mut world, "joint_feedback");
+        let stream = StreamId::new(88);
+        world.entity_mut(sensor_entity).insert((
+            JointFeedbackSensor {
+                update_rate_hz: 1_000.0,
+                sample_period_ticks: None,
+                phase_offset_ticks: 5,
+                latency_ticks: 7,
+                enabled: true,
+                stream_id: stream,
+                channels: vec![crate::JointFeedbackChannelSpec {
+                    name: "shoulder_joint".into(),
+                    joint_entity: joint,
+                }],
+                fault,
+            },
+            JointFeedbackSensorState::default(),
+        ));
+        (world, joint, sensor_entity, stream, InMemoryDataBus::new())
+    }
+
+    #[test]
+    fn joint_feedback_exposes_schedule_latency_units_and_saturation() {
+        let (mut world, _, _, stream, mut bus) = joint_feedback_fixture(JointFeedbackFault::None);
+        assert_eq!(
+            sample_joint_feedback_sensors(&mut world, SimTime::from_ticks(4), &mut bus).unwrap(),
+            0
+        );
+        assert_eq!(
+            sample_joint_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus).unwrap(),
+            1
+        );
+        let frame = bus.latest::<JointFeedback>(stream).expect("joint feedback");
+        assert_eq!(frame.sequence, 1);
+        assert_eq!(frame.payload.schema_version, JointFeedback::SCHEMA_VERSION);
+        assert_eq!(frame.capture_time.ticks(), 5);
+        assert_eq!(frame.available_time.ticks(), 12);
+        assert!(bus
+            .latest_available::<JointFeedback>(stream, SimTime::from_ticks(11))
+            .is_none());
+        assert!(bus
+            .latest_available::<JointFeedback>(stream, SimTime::from_ticks(12))
+            .is_some());
+        assert_eq!(frame.payload.scheduled_capture_ticks, 5);
+        assert_eq!(frame.payload.sample_phase_error_ticks, 0);
+        assert_eq!(frame.payload.status, JointFeedbackStatus::Nominal);
+        assert!(matches!(
+            frame.payload.joints[0].coordinate,
+            JointCoordinateFeedback::Revolute {
+                position_rad: 0.1,
+                velocity_rad_s: 0.2
+            }
+        ));
+        assert!(matches!(
+            frame.payload.joints[0].command,
+            JointCommandFeedback::Revolute {
+                unconstrained_effort_request_nm: 17.6,
+                limited_effort_command_nm: 5.0,
+                effort_limit_nm: 5.0,
+                saturated: true,
+                ..
+            }
+        ));
+        assert_eq!(
+            frame.payload.joints[0].effort,
+            JointEffortFeedback::Unavailable
+        );
+    }
+
+    #[test]
+    fn joint_feedback_preserves_measured_effort_and_rejects_wrong_units() {
+        let (mut world, joint, _, stream, mut bus) =
+            joint_feedback_fixture(JointFeedbackFault::None);
+        world
+            .entity_mut(joint)
+            .insert(JointEffortMeasurement::Revolute {
+                measured_effort_nm: -1.25,
+            });
+        sample_joint_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus).unwrap();
+        let frame = bus.latest::<JointFeedback>(stream).expect("joint feedback");
+        assert_eq!(
+            frame.payload.joints[0].effort,
+            JointEffortFeedback::Revolute {
+                measured_effort_nm: -1.25
+            }
+        );
+        assert_eq!(frame.capture_time.ticks(), 5);
+        assert_eq!(frame.available_time.ticks(), 12);
+
+        world
+            .entity_mut(joint)
+            .insert(JointEffortMeasurement::Prismatic {
+                measured_force_n: 2.0,
+            });
+        assert!(matches!(
+            sample_joint_feedback_sensors(&mut world, SimTime::from_ticks(1_000_005), &mut bus),
+            Err(JointFeedbackError::InvalidEffortMeasurement { .. })
+        ));
+        assert_eq!(
+            bus.frame_count(stream),
+            1,
+            "invalid effort must fail closed"
+        );
+    }
+
+    #[test]
+    fn joint_feedback_drop_creates_a_sequence_gap() {
+        let (mut world, _, sensor, stream, mut bus) =
+            joint_feedback_fixture(JointFeedbackFault::DropSequence { sequence: 2 });
+        for ticks in [5, 1_000_005, 2_000_005] {
+            sample_joint_feedback_sensors(&mut world, SimTime::from_ticks(ticks), &mut bus)
+                .unwrap();
+        }
+        assert_eq!(bus.frame_count(stream), 2);
+        assert_eq!(bus.latest::<JointFeedback>(stream).unwrap().sequence, 3);
+        let state = world
+            .get::<JointFeedbackSensorState>(sensor)
+            .expect("sensor state");
+        assert_eq!(state.attempted_sequence, 3);
+        assert_eq!(state.emitted_frames, 2);
+    }
+
+    #[test]
+    fn joint_feedback_stuck_fault_holds_the_previous_value() {
+        let (mut world, joint, _, stream, mut bus) =
+            joint_feedback_fixture(JointFeedbackFault::StuckFromSequence { sequence: 2 });
+        sample_joint_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus).unwrap();
+        world.entity_mut(joint).insert(JointState::Revolute {
+            position_rad: 0.9,
+            velocity_rad_s: -0.4,
+        });
+        sample_joint_feedback_sensors(&mut world, SimTime::from_ticks(1_000_005), &mut bus)
+            .unwrap();
+        let frame = bus.latest::<JointFeedback>(stream).expect("stuck frame");
+        assert_eq!(frame.sequence, 2);
+        assert_eq!(frame.payload.status, JointFeedbackStatus::StuckValue);
+        assert!(matches!(
+            frame.payload.joints[0].coordinate,
+            JointCoordinateFeedback::Revolute {
+                position_rad: 0.1,
+                velocity_rad_s: 0.2
+            }
+        ));
     }
 }

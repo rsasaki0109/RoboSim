@@ -12,6 +12,67 @@ pub struct ImuSample {
     pub linear_acceleration_m_s2: Vec3,
 }
 
+/// Timestamp-contract IMU feedback for validation and closed-loop estimation.
+///
+/// Capture and availability timestamps remain on [`crate::Frame`]. This
+/// payload adds the scheduled time, phase error, measurement status, and
+/// saturation visibility that the legacy [`ImuSample`] intentionally lacks.
+/// Orientation is not included because a raw gyroscope/accelerometer does not
+/// measure it; estimator orientation and simulation truth remain separate
+/// evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImuFeedback {
+    /// Version of this serialized observation schema.
+    pub schema_version: u32,
+    /// Scheduled sample time in simulation nanosecond ticks.
+    pub scheduled_capture_ticks: u64,
+    /// Non-negative delay from scheduled to actual capture, in ticks.
+    pub sample_phase_error_ticks: u64,
+    /// Whether the measurement is nominal, saturated, or fault-held.
+    pub status: ImuFeedbackStatus,
+    /// Raw gyroscope measurement in radians per second, sensor frame.
+    pub angular_velocity_rad_s: Vec3,
+    /// Raw accelerometer specific force in meters per second squared, sensor frame.
+    pub specific_force_m_s2: Vec3,
+    /// Per-axis gyroscope saturation flags before quantization.
+    pub gyro_saturated: [bool; 3],
+    /// Per-axis accelerometer saturation flags before quantization.
+    pub accel_saturated: [bool; 3],
+}
+
+impl ImuFeedback {
+    /// Current serialized IMU-feedback schema version.
+    pub const SCHEMA_VERSION: u32 = 1;
+}
+
+impl Default for ImuFeedback {
+    fn default() -> Self {
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            scheduled_capture_ticks: 0,
+            sample_phase_error_ticks: 0,
+            status: ImuFeedbackStatus::default(),
+            angular_velocity_rad_s: Vec3::ZERO,
+            specific_force_m_s2: Vec3::ZERO,
+            gyro_saturated: [false; 3],
+            accel_saturated: [false; 3],
+        }
+    }
+}
+
+/// Sample-level status for typed IMU feedback.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImuFeedbackStatus {
+    /// Current sample is fresh and no axis saturated.
+    #[default]
+    Nominal,
+    /// Current sample is fresh but at least one declared measurement range clipped.
+    Saturated,
+    /// Values were held from an earlier emitted sample by a declared fault.
+    StuckValue,
+}
+
 /// LiDAR point cloud payload.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PointCloud {
@@ -157,6 +218,161 @@ pub struct JointState {
     pub velocities_rad_s: Vec<f64>,
 }
 
+/// Timestamped joint and actuator feedback for control validation.
+///
+/// Frame capture and availability times carry transport latency. The scheduled
+/// timestamp and phase error below make sampling jitter explicit instead of
+/// silently folding it into the measurement.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct JointFeedback {
+    /// Version of this serialized observation schema.
+    pub schema_version: u32,
+    /// Scheduled sample time in simulation nanosecond ticks.
+    pub scheduled_capture_ticks: u64,
+    /// Non-negative delay from the scheduled time to actual capture, in ticks.
+    pub sample_phase_error_ticks: u64,
+    /// Whether values were freshly sampled or held by an injected stuck-value fault.
+    pub status: JointFeedbackStatus,
+    /// Joint channels in the declared contract order.
+    pub joints: Vec<JointFeedbackChannel>,
+}
+
+impl JointFeedback {
+    /// Current serialized observation schema version.
+    pub const SCHEMA_VERSION: u32 = 1;
+}
+
+impl Default for JointFeedback {
+    fn default() -> Self {
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            scheduled_capture_ticks: 0,
+            sample_phase_error_ticks: 0,
+            status: JointFeedbackStatus::default(),
+            joints: Vec::new(),
+        }
+    }
+}
+
+/// Sample-level joint-feedback status.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JointFeedbackStatus {
+    /// Values were sampled from the current completed physics step.
+    #[default]
+    Nominal,
+    /// Values were held from the previous emitted sample by a declared fault.
+    StuckValue,
+}
+
+/// One named joint-feedback channel.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct JointFeedbackChannel {
+    /// Stable joint name.
+    pub name: String,
+    /// Measured coordinate with explicit revolute or prismatic units.
+    pub coordinate: JointCoordinateFeedback,
+    /// Command demand and limit state computed from the same captured coordinate.
+    pub command: JointCommandFeedback,
+    /// Backend-reported effort measurement, or an explicit unavailable marker.
+    pub effort: JointEffortFeedback,
+}
+
+/// Unit-explicit measured coordinate for one joint.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum JointCoordinateFeedback {
+    /// Revolute coordinate.
+    Revolute {
+        /// Angular position in radians.
+        position_rad: f64,
+        /// Angular velocity in radians per second.
+        velocity_rad_s: f64,
+    },
+    /// Prismatic coordinate.
+    Prismatic {
+        /// Linear position in metres.
+        position_m: f64,
+        /// Linear velocity in metres per second.
+        velocity_m_s: f64,
+    },
+    /// Fixed joint with no measurable degree of freedom.
+    Fixed,
+}
+
+/// Controller mode associated with a joint command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JointCommandMode {
+    /// Position servo.
+    Position,
+    /// Velocity servo.
+    Velocity,
+    /// Direct effort or force command.
+    Effort,
+}
+
+/// Unit-explicit actuator demand reconstructed at the sample time.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum JointCommandFeedback {
+    /// No actuator command is active.
+    Disabled,
+    /// Revolute actuator demand.
+    Revolute {
+        /// Active controller mode.
+        mode: JointCommandMode,
+        /// Position target for position mode, in radians.
+        target_position_rad: Option<f64>,
+        /// Velocity target for velocity mode, in radians per second.
+        target_velocity_rad_s: Option<f64>,
+        /// Demand before the symmetric effort limit, in newton-metres.
+        unconstrained_effort_request_nm: f64,
+        /// Demand after the symmetric effort limit, in newton-metres.
+        limited_effort_command_nm: f64,
+        /// Symmetric actuator effort limit in newton-metres.
+        effort_limit_nm: f64,
+        /// Whether limiting changed the requested demand.
+        saturated: bool,
+    },
+    /// Prismatic actuator demand.
+    Prismatic {
+        /// Active controller mode.
+        mode: JointCommandMode,
+        /// Position target for position mode, in metres.
+        target_position_m: Option<f64>,
+        /// Velocity target for velocity mode, in metres per second.
+        target_velocity_m_s: Option<f64>,
+        /// Demand before the symmetric force limit, in newtons.
+        unconstrained_force_request_n: f64,
+        /// Demand after the symmetric force limit, in newtons.
+        limited_force_command_n: f64,
+        /// Symmetric actuator force limit in newtons.
+        force_limit_n: f64,
+        /// Whether limiting changed the requested demand.
+        saturated: bool,
+    },
+}
+
+/// Backend-reported realized joint effort.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum JointEffortFeedback {
+    /// The backend did not expose a qualifying effort measurement.
+    #[default]
+    Unavailable,
+    /// Measured revolute effort in newton-metres.
+    Revolute {
+        /// Realized effort in newton-metres.
+        measured_effort_nm: f64,
+    },
+    /// Measured prismatic force in newtons.
+    Prismatic {
+        /// Realized force in newtons.
+        measured_force_n: f64,
+    },
+}
+
 /// RGBA8 camera image payload.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImageRgb8 {
@@ -290,5 +506,50 @@ mod tests {
         cloud.push_return(Vec3::Z, 0.4, 2, 1, 0, 0.1);
 
         assert!((cloud.scan_duration_s() - 0.1).abs() < 1e-12);
+    }
+
+    #[test]
+    fn joint_feedback_schema_has_a_stable_version_and_unit_tags() {
+        let feedback = JointFeedback {
+            joints: vec![JointFeedbackChannel {
+                name: "joint_1".into(),
+                coordinate: JointCoordinateFeedback::Revolute {
+                    position_rad: 0.25,
+                    velocity_rad_s: -0.5,
+                },
+                command: JointCommandFeedback::Disabled,
+                effort: JointEffortFeedback::Unavailable,
+            }],
+            ..JointFeedback::default()
+        };
+
+        let value = serde_json::to_value(feedback).expect("joint feedback JSON");
+        assert_eq!(value["schema_version"], JointFeedback::SCHEMA_VERSION);
+        assert_eq!(value["joints"][0]["coordinate"]["kind"], "revolute");
+        assert_eq!(value["joints"][0]["coordinate"]["position_rad"], 0.25);
+        assert_eq!(value["joints"][0]["effort"]["kind"], "unavailable");
+    }
+
+    #[test]
+    fn imu_feedback_schema_names_physical_units_and_status() {
+        let feedback = ImuFeedback {
+            scheduled_capture_ticks: 10,
+            sample_phase_error_ticks: 2,
+            status: ImuFeedbackStatus::Saturated,
+            angular_velocity_rad_s: Vec3::new(0.1, 0.2, 0.3),
+            specific_force_m_s2: Vec3::new(1.0, 2.0, 3.0),
+            gyro_saturated: [false, false, true],
+            accel_saturated: [true, false, false],
+            ..ImuFeedback::default()
+        };
+
+        let value = serde_json::to_value(feedback).expect("IMU feedback JSON");
+        assert_eq!(value["schema_version"], ImuFeedback::SCHEMA_VERSION);
+        assert_eq!(value["scheduled_capture_ticks"], 10);
+        assert_eq!(value["sample_phase_error_ticks"], 2);
+        assert_eq!(value["status"], "saturated");
+        assert_eq!(value["angular_velocity_rad_s"][2], 0.3);
+        assert_eq!(value["specific_force_m_s2"][1], 2.0);
+        assert!(value.get("orientation").is_none());
     }
 }

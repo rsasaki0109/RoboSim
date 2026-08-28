@@ -17,6 +17,14 @@ pub fn mm_mobile_twist_to_wheel_velocities(linear_x_m_s: f64, angular_z_rad_s: f
     )
 }
 
+/// Converts semantic wheel velocities into the corresponding planar twist.
+pub fn mm_mobile_wheel_velocities_to_twist(left_rad_s: f64, right_rad_s: f64) -> (f64, f64) {
+    let linear_x_m_s = MM_MOBILE_WHEEL_RADIUS_M * (left_rad_s + right_rad_s) * 0.5;
+    let angular_z_rad_s =
+        MM_MOBILE_WHEEL_RADIUS_M * (right_rad_s - left_rad_s) / MM_MOBILE_TRACK_WIDTH_M;
+    (linear_x_m_s, angular_z_rad_s)
+}
+
 /// Maps a semantic wheel velocity command to the joint motor setpoint.
 pub fn wheel_command_to_motor_rad_s(command_rad_s: f64) -> f64 {
     MM_MOBILE_WHEEL_JOINT_SIGN * command_rad_s
@@ -36,5 +44,14 @@ mod tests {
     #[test]
     fn motor_sign_inverts_positive_command() {
         assert!(wheel_command_to_motor_rad_s(6.0) < 0.0);
+    }
+
+    #[test]
+    fn wheel_twist_conversion_round_trips() {
+        let expected = (0.075, -0.2);
+        let wheels = mm_mobile_twist_to_wheel_velocities(expected.0, expected.1);
+        let actual = mm_mobile_wheel_velocities_to_twist(wheels.0, wheels.1);
+        assert!((actual.0 - expected.0).abs() < 1.0e-12);
+        assert!((actual.1 - expected.1).abs() < 1.0e-12);
     }
 }

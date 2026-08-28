@@ -44,6 +44,8 @@ one required case:
 | Rapier | `Articulation` | revolute anchor and limit invariants remain bounded under load |
 | Rapier | `ContactForce` | a resting body's reported impulse matches `mass * g * dt` within tolerance |
 | Rapier | `RaycastBatch` | repeated queries return bounded hits in distance/entity order |
+| Rapier | `JointEffortMeasurement` | the native accepted force/torque increment for direct effort actuation is retained after the step |
+| MuJoCo | `JointEffortMeasurement` | a direct 2 N*m revolute command is retained as completed-step native actuator effort |
 
 `GpuRigidBody` and `SoftBody` remain unadvertised. A coverage test fails when a
 backend adds a capability without adding a catalog case.
@@ -152,11 +154,27 @@ assumption:
   Rapier writes reduced-coordinate revolute/prismatic state during ECS sync,
   and MuJoCo must implement the same contract before advertising articulation.
 
-Backend-manifest schema v2 adds the `kinematic_body` vocabulary. Analytic and
+Backend-manifest schema v2 added the `kinematic_body` vocabulary. Analytic and
 Rapier advertise it only after passing the shared external-pose vector. MuJoCo
 does not advertise it: both `preflight_world` and the trait sync boundary reject
 a kinematic entity before native model creation with a typed missing-capability
 error.
+
+Schema v3 adds `joint_effort_measurement`, which requires a completed-step,
+backend-measured, unit-explicit realization of direct effort actuation. MuJoCo
+and Rapier advertise it only after passing the shared direct 2 N*m revolute-effort
+vector. Rapier measures the native `user_torque`/`user_force` increment accepted
+before the step and retains it only after that step completes; motor-driven
+position/velocity modes remain unavailable rather than copying their command.
+
+The OpenArm cross-backend controller now consumes the same position reference
+but realizes it with an explicit backend-neutral PD-to-effort law. Rapier and
+MuJoCo recompute `Kp * position_error - Kd * velocity` at 19 equal 877,193-tick
+physics substeps, apply the same symmetric N·m clamp and URDF no-load-speed
+envelope, and retain the final substep's measured effort. This replaces the
+previous comparison of two backend-native position motors. Rapier also clears
+both linear and angular one-step user wrenches after each step; otherwise its
+persistent `user_torque` storage accumulates direct effort and Coulomb friction.
 
 MuJoCo rigid-body compilation now registers
 `mujoco_free_fall_position_m_v1` and runs in the same catalog behind the
@@ -172,3 +190,15 @@ position/velocity bounds. `rne-physics-divergence` tightens only the latter
 position bound to 1 cm, finds the first violation at a stable fixed step, and
 emits an existing-schema Behavior replay plus a deliberately failing report.
 The MuJoCo Windows/Linux job packages both into a verified Failure Capsule.
+
+The next articulation observable is optional completed-step joint-effort
+evidence. `JointEffortMeasurement` keeps revolute N*m and prismatic N distinct;
+absence remains different from measured zero. The joint-feedback sensor samples
+it at the declared simulation capture time, applies the existing sensor latency,
+adds no noise, and fails closed on non-finite values or unit-kind mismatch.
+MuJoCo writes native `actuator_force` into this contract after each completed
+step. Rapier remains explicitly unavailable because its multibody constraint
+solver does not retain the solved motor impulse in public joint state. A backend
+must not substitute the reconstructed bounded PD command for this measurement.
+The follow-on conformance vector must compare command limit, actuator-space
+effort, and any passive/implicit compensation as separate quantities.

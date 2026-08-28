@@ -44,7 +44,7 @@ cargo run --locked -p xtask -- readiness-pack init `
 The command validates the immutable candidate identity, then atomically
 publishes `one-zero-readiness.toml` and the retained compatibility report. It
 refuses an existing output directory. The new pack therefore begins at the same
-honest `2/9`, `eligible=false` state as the source tracker.
+honest `2/10`, `eligible=false` state as the source tracker.
 
 Stage each independently produced file before referencing it in the manifest:
 
@@ -68,9 +68,118 @@ existing destination fail closed. Bytes are copied through a private temporary
 name and hashed before the final name is published.
 
 This helper establishes file identity only. A human must still review external
-ownership and independence, add the appropriate typed entry shown below, and
-run `release-readiness`. Staging a file cannot change a readiness check by
-itself.
+ownership and independence. For an accepted installed flagship run, stage all
+six retained files and atomically register their already-staged paths:
+
+```powershell
+cargo run --locked -p xtask -- readiness-pack accept-installed-flagship `
+  --pack E:/RoboSim-readiness `
+  --id community-lab-a `
+  --owner external-owner `
+  --repository https://github.com/external-owner/rne-reproduction `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --measured-on 2026-08-27 `
+  --release-archive flagship/community-lab-a/rne-0.2.0-windows.zip `
+  --proof-bundle flagship/community-lab-a/proof.zip `
+  --submission-candidate flagship/community-lab-a/submission.json `
+  --stdout-log flagship/community-lab-a/stdout.txt `
+  --stderr-log flagship/community-lab-a/stderr.txt `
+  --report flagship/community-lab-a/maintainer-report.json
+```
+
+The command rehashes all six regular files, revalidates the report/candidate
+chain and independent identity, rejects reused roles, removes the canonical
+empty-array placeholder, validates the complete schema-v9 manifest, and then
+atomically replaces only the manifest. Other evidence types still use the
+typed entries shown below. Staging alone never changes a readiness check.
+
+An accepted external Gazebo or other simulator adapter uses the same boundary
+for its complete twelve-file chain. `--runtime-artifact` is ordered and appears
+exactly three times; `--adapter-argument` repeats the exact normalized launch
+arguments recorded by the candidate and maintainer report:
+
+```powershell
+cargo run --locked -p xtask -- readiness-pack accept-external-simulator `
+  --pack E:/RoboSim-readiness `
+  --id external-gazebo-a `
+  --owner external-owner `
+  --repository https://github.com/external-owner/gazebo-adapter `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --adapter systems/gazebo/adapter.py `
+  --task-spec systems/gazebo/task.json `
+  --runtime-manifest systems/gazebo/runtime.json `
+  --runtime-artifact systems/gazebo/world.sdf `
+  --runtime-artifact systems/gazebo/robot.sdf `
+  --runtime-artifact systems/gazebo/adapter.json `
+  --adapter-argument "<adapter-subject>" `
+  --adapter-argument "--runtime-manifest" `
+  --adapter-argument "<runtime-manifest>" `
+  --conformance-report systems/gazebo/conformance.json `
+  --release-archive systems/gazebo/rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz `
+  --submission-candidate systems/gazebo/submission.json `
+  --stdout-log systems/gazebo/stdout.txt `
+  --stderr-log systems/gazebo/stderr.txt `
+  --submission-report systems/gazebo/maintainer-report.json
+```
+
+The command reruns the typed simulator-adapter validator before writing the
+manifest, requires twelve distinct contained regular files, and rehashes every
+file again immediately before the atomic swap. It does not execute the
+untrusted adapter or infer external ownership.
+
+An accepted third-party controller plugin uses the corresponding eight-file
+operation after the maintainer has independently produced its submission
+report:
+
+```powershell
+cargo run --locked -p xtask -- readiness-pack accept-external-plugin `
+  --pack E:/RoboSim-readiness `
+  --id external-controller-a `
+  --owner external-owner `
+  --repository https://github.com/external-owner/controller-plugin `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --release-archive plugins/controller-a/rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz `
+  --library plugins/controller-a/libexternal_controller.so `
+  --manifest plugins/controller-a/rne-plugin.json `
+  --conformance-report plugins/controller-a/controller-report.json `
+  --submission-candidate plugins/controller-a/submission.json `
+  --stdout-log plugins/controller-a/stdout.txt `
+  --stderr-log plugins/controller-a/stderr.txt `
+  --submission-report plugins/controller-a/maintainer-report.json
+```
+
+The command requires eight distinct contained regular files, reruns the typed
+controller-plugin submission validator without loading the untrusted library,
+and rehashes every file again immediately before the atomic manifest swap.
+Ownership and independence remain human-reviewed facts rather than inferred
+claims.
+
+An accepted external project uses the full Failure Capsule closure rather than
+registering only its `capsule.json` digest:
+
+```powershell
+cargo run --locked -p xtask -- readiness-pack accept-external-project `
+  --pack E:/RoboSim-readiness `
+  --id independent-project-a `
+  --owner external-owner `
+  --repository https://github.com/external-owner/mobile-manipulation `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --first-used-on 2026-08-16 `
+  --last-verified-on 2026-08-27 `
+  --release-archive projects/a/rne-0.2.0-x86_64-pc-windows-msvc.zip `
+  --task-spec projects/a/task.json `
+  --failure-capsule projects/a/capsule/capsule.json `
+  --submission-candidate projects/a/submission.json `
+  --stdout-log projects/a/stdout.txt `
+  --stderr-log projects/a/stderr.txt `
+  --submission-report projects/a/maintainer-report.json
+```
+
+The command requires seven distinct contained primary files. It reruns the
+typed external-project validator both before staging the updated manifest and
+immediately before the atomic swap, so every artifact named by `capsule.json`
+is rehashed and matched to the independent maintainer report. It does not run
+the external project or infer ownership.
 
 Independent projects and extension authors submit the complete metadata and
 artifact checklist through the fixed
@@ -83,7 +192,13 @@ regular files no larger than 64 MiB and rejects symlinks or paths outside the
 pack. It does not download URLs, create tags, or infer evidence from GitHub
 stars.
 
-Manifest v4 requires the accelerator evidence collection to be explicit. Use
+Manifest v9 retains the external-project chain from v8 and makes the public
+installed-flagship intake route an explicit readiness gate. An accepted run
+retains and rehashes the official release archive, proof bundle, acyclic
+candidate, committed stdout/stderr logs, and schema-v2 maintainer report. The
+audit rebinds their exact bytes to the independent owner, repository revision,
+measurement date, machine, 15-minute verdict, and Rapier/MuJoCo execution paths.
+Use
 `accelerator_adapter = []` at the top level while no entries are retained;
 replace that empty array with one or more `[[accelerator_adapter]]` tables when
 evidence is accepted.
@@ -93,17 +208,18 @@ evidence is accepted.
 | Check | Passing evidence |
 |---|---|
 | `stability_window` | At least 183 calendar days since the immutable Rust API baseline, at least 183 days of observed external-project use, and zero declared unplanned breaks |
-| `external_projects` | At least two distinct repositories, owned outside the RNE repository owner, each with a valid TaskSpec and fully verifiable Failure Capsule produced without repository-author assistance |
-| `third_party_plugin` | At least one externally owned controller plugin whose passing typed report is rebound to the exact retained library and manifest bytes |
-| `external_system` | At least one externally owned physics backend or hardware adapter whose passing typed report is rebound to the exact retained implementation subject; hardware also retains its TaskSpec and normalized launch arguments. Audited accelerator adapters are reported separately and do not satisfy this check |
-| `reference_hardware` | A full LeKiwi physical-evidence manifest accepted by the safety and provenance verifier |
-| `release_artifacts` | Linux x86-64 and Windows x86-64 archives plus archive-bound eleven-check install reports, including the installed flagship proof, both freshly Sigstore-verified from retained bundles; extracted release reports and SHA256SUMS must reconstruct the same clean tagged artifact graph |
+| `external_projects` | At least two distinct repositories, owned outside the RNE repository owner, each with an official release archive, valid TaskSpec, fully verifiable Failure Capsule, acyclic candidate, committed logs, and revalidated maintainer report produced without repository-author assistance |
+| `installed_flagship_reproduction` | At least one independently owned, author-assistance-free installed run whose accepted report rebinds the exact release archive, proof bundle, acyclic candidate, committed logs, repository revision, named machine, 15-minute verdict, and Rapier/MuJoCo proof paths |
+| `third_party_plugin` | At least one externally owned controller plugin whose passing typed report and maintainer submission report are rebound to the exact release archive, library, manifest, acyclic candidate, committed logs, repository revision, and ownership |
+| `external_system` | At least one externally owned physics backend, simulator adapter, or hardware adapter whose passing typed report is rebound to the exact retained implementation subject; simulator evidence also retains its TaskSpec, runtime manifest, world, robot model, adapter config, normalized arguments, official release archive, acyclic candidate, committed logs, and maintainer report, while hardware retains its TaskSpec and arguments. Audited accelerator adapters are reported separately and do not satisfy this check |
+| `reference_hardware` | A full base-only LeKiwi physical-evidence manifest accepted by the safety and provenance verifier. This proves the selected device envelope; it does not by itself prove the flagship TaskSpec/controller projection required by the external product proof Gate 4 |
+| `release_artifacts` | Linux x86-64 and Windows x86-64 archives plus archive-bound twelve-check install reports, including the installed flagship and external simulator proofs, both freshly Sigstore-verified from retained bundles; platform attestation bundles and reports remain durable tagged-release assets, while release-level and extracted SHA256SUMS reconstruct the same clean tagged artifact graph |
 | `historical_compatibility` | A retained report exactly equal to a fresh execution of at least 36 registered typed-reader checks, including fail-closed accelerator capability/status/protocol/process/conformance/scale/scaffold, the controller scaffold, future/unknown-field mutations, and verified historical Git revision/tree/blob provenance |
 | `p0_p1_blockers` | `release/blockers.toml` is structurally valid and has no open P0/P1 entry |
 | `support_commitment` | A named maintainer, unambiguous support period, and published HTTPS policy are explicitly committed; an uncommitted table must contain no partial claims |
 
 The manifest, report, and attestation receipt schemas are registered as
-`evidence.one_zero_readiness_manifest = 4`,
+`evidence.one_zero_readiness_manifest = 9`,
 `evidence.one_zero_readiness_report = 1`, and
 `evidence.github_attestation_verification = 1` in `release/contracts.toml`.
 The archive-bound install result is separately registered as
@@ -113,7 +229,7 @@ honest baseline. `manifest_sha256` binds the complete normalized input,
 including external identities and support fields. The retained 36-check
 compatibility report is byte-for-byte equal to a fresh typed-reader replay and
 the blocker registry is clean, so the committed 2026-08-16 baseline is
-`eligible=false` with 2 of 9 checks satisfied. The remaining seven checks still
+`eligible=false` with 2 of 10 checks satisfied. The remaining eight checks still
 require real external, physical, signed-release, elapsed-time, or maintainer
 evidence.
 
@@ -132,6 +248,20 @@ references before `[candidate]`; repeated entries use TOML arrays:
 reference_hardware = { path = "hardware/lekiwi-evidence.json", sha256 = "sha256:<64-lowercase-hex>" }
 compatibility_report = { path = "compatibility/report.json", sha256 = "sha256:<64-lowercase-hex>" }
 
+[[installed_flagship_reproduction]]
+id = "community-lab-a"
+owner = "external-owner"
+repository = "https://github.com/external-owner/rne-reproduction"
+revision = "<40-lowercase-hex-commit>"
+measured_on = "2026-08-27"
+author_assistance = false
+release_archive = { path = "flagship/community-lab-a/rne-0.2.0-windows.zip", sha256 = "sha256:<64-lowercase-hex>" }
+proof_bundle = { path = "flagship/community-lab-a/proof.zip", sha256 = "sha256:<64-lowercase-hex>" }
+submission_candidate = { path = "flagship/community-lab-a/submission.json", sha256 = "sha256:<64-lowercase-hex>" }
+stdout_log = { path = "flagship/community-lab-a/stdout.txt", sha256 = "sha256:<64-lowercase-hex>" }
+stderr_log = { path = "flagship/community-lab-a/stderr.txt", sha256 = "sha256:<64-lowercase-hex>" }
+report = { path = "flagship/community-lab-a/maintainer-report.json", sha256 = "sha256:<64-lowercase-hex>" }
+
 [[external_project]]
 id = "independent-project-a"
 owner = "external-owner"
@@ -140,17 +270,27 @@ revision = "<40-lowercase-hex-commit>"
 first_used_on = "2026-08-16"
 last_verified_on = "2027-02-15"
 author_assistance = false
+release_archive = { path = "projects/a/rne-0.2.0-x86_64-pc-windows-msvc.zip", sha256 = "sha256:<64-lowercase-hex>" }
 task_spec = { path = "projects/a/task.json", sha256 = "sha256:<64-lowercase-hex>" }
 failure_capsule = { path = "projects/a/capsule/capsule.json", sha256 = "sha256:<64-lowercase-hex>" }
+submission_candidate = { path = "projects/a/submission.json", sha256 = "sha256:<64-lowercase-hex>" }
+stdout_log = { path = "projects/a/stdout.txt", sha256 = "sha256:<64-lowercase-hex>" }
+stderr_log = { path = "projects/a/stderr.txt", sha256 = "sha256:<64-lowercase-hex>" }
+submission_report = { path = "projects/a/maintainer-report.json", sha256 = "sha256:<64-lowercase-hex>" }
 
 [[third_party_plugin]]
 id = "external-controller"
 owner = "external-owner"
 repository = "https://example.invalid/controller"
 revision = "<40-lowercase-hex-commit>"
+release_archive = { path = "plugins/rne-0.2.0-x86_64-pc-windows-msvc.zip", sha256 = "sha256:<64-lowercase-hex>" }
 library = { path = "plugins/external-controller.dll", sha256 = "sha256:<64-lowercase-hex>" }
 manifest = { path = "plugins/rne-plugin.json", sha256 = "sha256:<64-lowercase-hex>" }
 report = { path = "plugins/controller-report.json", sha256 = "sha256:<64-lowercase-hex>" }
+submission_candidate = { path = "plugins/submission.json", sha256 = "sha256:<64-lowercase-hex>" }
+stdout_log = { path = "plugins/plugin-check.stdout.txt", sha256 = "sha256:<64-lowercase-hex>" }
+stderr_log = { path = "plugins/plugin-check.stderr.txt", sha256 = "sha256:<64-lowercase-hex>" }
+submission_report = { path = "plugins/maintainer-report.json", sha256 = "sha256:<64-lowercase-hex>" }
 
 [[external_system]]
 id = "external-physics"
@@ -173,6 +313,28 @@ task_spec = { path = "systems/task.json", sha256 = "sha256:<64-lowercase-hex>" }
 # subject path is represented by the runner as "<adapter-subject>".
 adapter_arguments = ["<adapter-subject>", "--sandbox", "isolated-v1"]
 report = { path = "systems/hardware-report.json", sha256 = "sha256:<64-lowercase-hex>" }
+
+[[external_system]]
+id = "external-gazebo"
+owner = "external-owner"
+repository = "https://github.com/external-owner/gazebo-adapter"
+revision = "<40-lowercase-hex-commit>"
+kind = "simulator_adapter"
+subject = { path = "systems/gazebo/adapter.py", sha256 = "sha256:<64-lowercase-hex>" }
+task_spec = { path = "systems/gazebo/task.json", sha256 = "sha256:<64-lowercase-hex>" }
+adapter_arguments = ["<adapter-subject>", "--runtime-manifest", "<runtime-manifest>"]
+runtime_manifest = { path = "systems/gazebo/runtime.json", sha256 = "sha256:<64-lowercase-hex>" }
+runtime_artifacts = [
+  { path = "systems/gazebo/world.sdf", sha256 = "sha256:<64-lowercase-hex>" },
+  { path = "systems/gazebo/robot.sdf", sha256 = "sha256:<64-lowercase-hex>" },
+  { path = "systems/gazebo/adapter.json", sha256 = "sha256:<64-lowercase-hex>" },
+]
+report = { path = "systems/gazebo/conformance.json", sha256 = "sha256:<64-lowercase-hex>" }
+release_archive = { path = "systems/gazebo/rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz", sha256 = "sha256:<64-lowercase-hex>" }
+submission_candidate = { path = "systems/gazebo/submission.json", sha256 = "sha256:<64-lowercase-hex>" }
+stdout_log = { path = "systems/gazebo/simulator-check.stdout.txt", sha256 = "sha256:<64-lowercase-hex>" }
+stderr_log = { path = "systems/gazebo/simulator-check.stderr.txt", sha256 = "sha256:<64-lowercase-hex>" }
+submission_report = { path = "systems/gazebo/maintainer-report.json", sha256 = "sha256:<64-lowercase-hex>" }
 
 [[accelerator_adapter]]
 id = "external-accelerator"
@@ -228,11 +390,14 @@ references `archive`, `attestation`, `archive_attestation_verification`,
 `release_report`, `checksum_manifest`, `install_report`, and
 `install_attestation_verification`. Both platforms must resolve to the same
 retained tag and commit. The release report must say the checkout was clean,
-tag-matched, reproducible, supply-chain clean, and passing all eleven installed
+tag-matched, reproducible, supply-chain clean, and passing all twelve installed
 workflows. `install_report` is the strict
 `rne_archive_install_rehearsal` schema-v2 wrapper: it fixes the archive file,
 size, digest, extracted bundle root, release report, checksum manifest,
-hardware-named time-to-proof report, and schema-v6 eleven-check rehearsal.
+hardware-named time-to-proof report, and schema-v7 twelve-check rehearsal.
+The installed proof must also retain schema-v1 full-bundle verification inside
+its schema-v4 proof and schema-v2 timing chain; a process-only timing artifact
+does not satisfy the current gate.
 `attestation` is the exact JSON Sigstore bundle
 emitted by `actions/attest@v4`; both verification fields are strict
 `rne_github_attestation_verification` schema-v1 receipts, not raw CLI output.
@@ -246,7 +411,7 @@ rejection. Each verification must return exactly one in-toto subject with the
 expected SHA-256. The gate regenerates both stable receipts, compares every
 field, rehashes the extracted reports, and proves that `SHA256SUMS` equals the
 release report's complete member graph plus the report itself. It also requires
-the staged and independently extracted eleven-check verdicts to agree. Missing
+the staged and independently extracted twelve-check verdicts to agree. Missing
 `gh`, failed signature or transparency verification, a bundle/archive/report
 swap, unknown fields, or any policy drift fails closed. Store all seven files
 per platform together in the external evidence pack; the committed release

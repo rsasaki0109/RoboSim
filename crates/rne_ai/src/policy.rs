@@ -593,13 +593,20 @@ impl Policy<crate::MobileManipulatorEpisode> for IkMobileClutterPickPlacePolicy 
 }
 
 const MOBILE_LIFT_SETTLE_STEPS: u64 = 600;
-const MOBILE_LIFT_NAVIGATE_STEPS: u64 = 540;
+// The portable flagship controller caps the base at 0.1 m/s. The shipped
+// scene requires 1.3 m of travel to the 0.9 m pickup standoff, so the 60 Hz
+// phase budget must exceed 780 decisions without relying on a timeout.
+const MOBILE_LIFT_NAVIGATE_STEPS: u64 = 900;
 const MOBILE_LIFT_APPROACH_STEPS: u64 = 900;
 const MOBILE_LIFT_LOWER_TO_PICK_STEPS: u64 = 1400;
 const MOBILE_LIFT_GRASP_STEPS: u64 = 300;
 const MOBILE_LIFT_GRASP_SETTLE_STEPS: u64 = 30;
 const MOBILE_LIFT_RAISE_STEPS: u64 = 600;
-const MOBILE_LIFT_TRANSPORT_STEPS: u64 = 1800;
+// At the portable controller's 0.1 m/s base cap the carried payload needs about
+// 2.2 m of travel. Keep margin for steering instead of relying on the timeout
+// transition.
+const MOBILE_LIFT_TRANSPORT_STEPS: u64 = 3200;
+const MOBILE_LIFT_TRANSPORT_TARGET_TOLERANCE_M: f64 = 0.01;
 const MOBILE_LIFT_LOWER_STEPS: u64 = 1200;
 const MOBILE_LIFT_RELEASE_STEPS: u64 = 120;
 const MOBILE_LIFT_PICK_BASE_STANDOFF_M: f64 = 0.90;
@@ -774,7 +781,8 @@ impl IkMobileLiftPickPlacePolicy {
             }
             MobileLiftPickPlacePhase::Transport
                 if self.phase_step >= MOBILE_LIFT_TRANSPORT_STEPS
-                    && observation.target_dx_m.hypot(observation.target_dz_m) >= 0.06 =>
+                    && observation.target_dx_m.hypot(observation.target_dz_m)
+                        >= MOBILE_LIFT_TRANSPORT_TARGET_TOLERANCE_M =>
             {
                 MobileLiftFailureClass::TransportTimeout
             }
@@ -923,7 +931,8 @@ impl IkMobileLiftPickPlacePolicy {
                 Some(MobileLiftPickPlacePhase::Transport)
             }
             MobileLiftPickPlacePhase::Transport
-                if observation.target_dx_m.hypot(observation.target_dz_m) < 0.06
+                if observation.target_dx_m.hypot(observation.target_dz_m)
+                    < MOBILE_LIFT_TRANSPORT_TARGET_TOLERANCE_M
                     || self.phase_step >= MOBILE_LIFT_TRANSPORT_STEPS =>
             {
                 Some(MobileLiftPickPlacePhase::Lower)

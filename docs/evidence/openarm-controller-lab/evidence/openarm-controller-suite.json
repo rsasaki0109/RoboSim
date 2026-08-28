@@ -1,0 +1,39 @@
+{
+  "kind": "rne_openarm_controller_suite",
+  "schema_version": 1,
+  "suite_id": "rne.openarm.right.plant_controller_comparison.v1",
+  "task_id": "rne.openarm.right_joint_tracking.v1",
+  "experiment_id": "rne.openarm.right.plant_lab.v1",
+  "controlled_joint": "openarm_right_joint5",
+  "nominal_model_backend_id": "rne_rapier",
+  "source_plant_report_sha256": "7cbe59fa79e5e5971ef79730bb3a9741bfcc72bc37a44e3581853c944f7711d4",
+  "source_experiment_manifest_sha256": "ecadeba864e1a290eba67d3eccb345c02437d41e9e90e550facf18c0ac5ef0d5",
+  "fixed_delta_ticks": 16666667,
+  "observation_latency_samples": 1,
+  "shared_maximum_correction_rad": 0.04,
+  "shared_maximum_integral_correction_rad": 0.015,
+  "shared_disturbance_contract": {
+    "kind": "additive_actuator_target_bias_pulse_v1",
+    "classification": "actuator_realization_error",
+    "joint": "openarm_right_joint5",
+    "start_step": 3241,
+    "end_step": 3300,
+    "offset_rad": 0.03,
+    "controller_visibility": "unobserved_except_through_typed_joint_feedback",
+    "application_order": "after_controller_limits_before_backend_actuation"
+  },
+  "controllers": [
+    {
+      "role": "pid",
+      "controller_id": "rne.controller.openarm_right.plant_pid.v1",
+      "path": "openarm-plant-pid.controller.json",
+      "sha256": "67ef98372bee75c033530ebccc3af98d8bf17ace776b5cf5ce5cf1fa4fe68873"
+    },
+    {
+      "role": "state_feedback",
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.v1",
+      "path": "openarm-plant-state-feedback.controller.json",
+      "sha256": "07c5a8ec848831b36803c3a24d6ae0277cef6b88477f1e0fdd8475f4afe9a803"
+    }
+  ]
+}

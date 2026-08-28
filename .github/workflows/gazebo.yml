@@ -1,0 +1,85 @@
+name: Gazebo conformance
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/gazebo.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "adapters/hardware/rne_hardware_gateway/**"
+      - "adapters/simulator/rne_gazebo_harmonic/**"
+      - "crates/rne_ai/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/gazebo.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "adapters/hardware/rne_hardware_gateway/**"
+      - "adapters/simulator/rne_gazebo_harmonic/**"
+      - "crates/rne_ai/**"
+  workflow_dispatch:
+
+jobs:
+  openarm_adapter:
+    name: OpenArm adapter / Gazebo Harmonic 8.15.0
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: gazebo-harmonic-8.15.0
+      - name: Install pinned Gazebo runtime and Python bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg lsb-release
+          sudo curl --fail --show-error --location \
+            https://packages.osrfoundation.org/gazebo.gpg \
+            --output /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] https://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/gazebo-stable.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y \
+            gz-sim8-cli=8.15.0-1~jammy \
+            libgz-sim8=8.15.0-1~jammy \
+            libgz-sim8-plugins=8.15.0-1~jammy \
+            python3-gz-sim8=8.15.0-1~jammy
+          test "$(gz sim --versions | tail -n 1)" = "8.15.0"
+          python3 -c 'import gz.sim8'
+      - name: Run real fixed-step adapter conformance
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture=adapters/simulator/rne_gazebo_harmonic
+          output=artifacts/gazebo-openarm-conformance/conformance.report.json
+          cargo build --locked -p rne_hardware_gateway \
+            --bin rne-simulator-conformance
+          target/debug/rne-simulator-conformance \
+            --adapter /usr/bin/python3 \
+            --subject "$fixture/rne_gazebo_harmonic_adapter.py" \
+            --runtime-manifest "$fixture/runtime.json" \
+            --task "$fixture/openarm_right_joint_tracking.task.json" \
+            --timeout-ms 15000 \
+            --output "$output" \
+            --adapter-arg "$fixture/rne_gazebo_harmonic_adapter.py" \
+            --adapter-arg --runtime-manifest \
+            --adapter-arg "$fixture/runtime.json" \
+            --adapter-arg --task \
+            --adapter-arg "$fixture/openarm_right_joint_tracking.task.json"
+          if ! cmp --silent "$fixture/conformance.report.json" "$output"; then
+            diff --unified "$fixture/conformance.report.json" "$output" || true
+            echo "generated Gazebo conformance differs from committed evidence" >&2
+            exit 1
+          fi
+          cargo test --locked -p rne_hardware_gateway \
+            --test simulator_conformance
+      - name: Upload freshly generated Gazebo evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gazebo-openarm-conformance-8.15.0
+          path: artifacts/gazebo-openarm-conformance/conformance.report.json

@@ -8,6 +8,10 @@
 
 #![deny(missing_docs)]
 
+pub mod flagship_observation;
+pub mod flagship_projection;
+pub mod flagship_rate;
+pub mod flagship_shadow;
 pub mod physical_evidence;
 pub mod session;
 

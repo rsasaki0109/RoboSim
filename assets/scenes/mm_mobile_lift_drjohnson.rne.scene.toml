@@ -8,17 +8,18 @@ enabled = true
 [[robots]]
 path = "../robots/mm_mobile_lift_drjohnson.rne.robot.toml"
 
-# Invisible pickup support aligned to the captured rug surface.
+# Invisible pickup support whose top-center projects onto the retained real
+# IMG_6293 rug annotation in drjohnson.validation.json.
 [[obstacles]]
 name = "mobile_lift_pick_support"
-translation_m = [0.50, 0.015, -3.30]
+translation_m = [-0.593675032775816, 0.015, -4.025096749341726]
 half_extents_m = [0.35, 0.015, 0.005]
 body_type = "fixed"
 friction = 0.0
 
 [[obstacles]]
 name = "mobile_lift_cube"
-translation_m = [0.50, 0.065, -3.30]
+translation_m = [-0.593675032775816, 0.065, -4.025096749341726]
 half_extents_m = [0.035, 0.035, 0.035]
 body_type = "dynamic"
 mass_kg = 0.05

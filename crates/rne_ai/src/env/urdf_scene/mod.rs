@@ -97,22 +97,29 @@ use rne_assets::{
     SpawnSceneOptions,
 };
 use rne_core::{SimDuration, SimTime};
+use rne_data::{DataBus, StreamId};
 use rne_deformable::{
     release_deformable_attachment, step_deformable_world, try_attach_deformable_at_colliders,
     try_attach_deformable_at_points, DeformableAttachment, DeformableBody, DeformableCollider,
     DeformableSolverConfig, DeformableStepError,
 };
-use rne_ecs::{Entity, Name, Parent, World};
+use rne_ecs::{spawn_named, Entity, Name, Parent, World};
 use rne_math::{y_up_euler_rad, Hertz, Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointMotor, MultibodyLink,
-    PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc, RevoluteJointDesc,
-    RigidBody, RigidBodyType,
+    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointActuation, JointMotor,
+    JointMotorGainModel, JointState, MultibodyLink, PhysicsBackend, PhysicsWorldDesc,
+    PhysicsWorldId, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_robot::{Joint, JointKind, Link};
+use rne_sensor::{
+    sample_joint_feedback_sensors, JointFeedbackChannelSpec, JointFeedbackError,
+    JointFeedbackFault, JointFeedbackSensor, JointFeedbackSensorState,
+};
 use rne_world::{world_transform_of, TaskMarker, Transform3 as WorldTransform3, WorldEntity};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 
 /// Observation for a generic URDF scene simulation.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -176,6 +183,47 @@ pub struct UrdfJointPositionTarget<'a> {
     pub position: f64,
 }
 
+/// Configuration for a typed joint-feedback stream attached to a URDF scene.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UrdfJointFeedbackSensorConfig {
+    /// Unique ECS name assigned to the sensor entity.
+    pub sensor_name: String,
+    /// Child-link names whose articulation coordinates are sampled, in stream order.
+    pub link_names: Vec<String>,
+    /// Sampling frequency in hertz.
+    pub update_rate_hz: f64,
+    /// Exact sampling period in ticks, overriding the hertz-derived period.
+    pub sample_period_ticks: Option<u64>,
+    /// First scheduled capture time in simulation nanosecond ticks.
+    pub phase_offset_ticks: u64,
+    /// Capture-to-availability latency in simulation nanosecond ticks.
+    pub latency_ticks: u64,
+    /// DataBus stream identifier.
+    pub stream_id: StreamId,
+    /// Optional deterministic sensor fault.
+    pub fault: JointFeedbackFault,
+}
+
+/// Failure while attaching a typed joint-feedback stream to a URDF scene.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum UrdfJointFeedbackInstallError {
+    /// The sensor name is empty or already belongs to an entity in the scene.
+    #[error("joint-feedback sensor name is empty or already exists: {sensor_name}")]
+    InvalidSensorName {
+        /// Rejected sensor name.
+        sensor_name: String,
+    },
+    /// A declared child link does not exist in the loaded articulation.
+    #[error("joint-feedback link does not exist: {link_name}")]
+    MissingLink {
+        /// Missing child-link name.
+        link_name: String,
+    },
+    /// The resulting sampling, channel, or fault configuration is invalid.
+    #[error("joint-feedback sensor configuration is invalid")]
+    InvalidConfiguration,
+}
+
 /// Feed-forward torque command for a named actuated URDF child link.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UrdfJointTorqueTarget<'a> {
@@ -193,6 +241,45 @@ pub struct UrdfJointTorqueTarget<'a> {
     /// that are non-positive or non-finite fall back to an effectively
     /// unbounded 1000.
     pub max_velocity_rad_s: f64,
+}
+
+/// Direct effort command for a named actuated URDF child link.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UrdfJointEffortTarget<'a> {
+    /// Child-link name whose articulation joint owns the actuator.
+    pub link_name: &'a str,
+    /// Requested joint torque in N·m. The configured effort ceiling is retained.
+    pub effort_nm: f64,
+}
+
+/// Portable PD-to-effort command for a named revolute URDF child link.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UrdfJointPdEffortTarget<'a> {
+    /// Child-link name whose articulation joint owns the actuator.
+    pub link_name: &'a str,
+    /// Desired revolute angle in radians.
+    pub target_position_rad: f64,
+    /// Proportional gain in N·m/rad.
+    pub stiffness_nm_per_rad: f64,
+    /// Derivative gain in N·m·s/rad.
+    pub damping_nm_s_per_rad: f64,
+    /// Symmetric output ceiling in N·m.
+    pub max_effort_nm: f64,
+    /// No-load actuator speed ceiling in rad/s.
+    pub max_velocity_rad_s: f64,
+    /// Motor-to-joint effort transmission efficiency in `(0, 1]`.
+    pub transmission_efficiency: f64,
+}
+
+/// Applied output of a portable PD-to-effort command.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UrdfJointAppliedEffort {
+    /// Bounded motor-side command before transmission loss in N·m.
+    pub motor_effort_command_nm: f64,
+    /// Clamped torque delivered to the backend in N·m.
+    pub effort_nm: f64,
+    /// Whether the unclamped PD output exceeded its configured ceiling.
+    pub saturated: bool,
 }
 
 /// Headless URDF scene simulation (cart drive or fixed-base arm viewing).
@@ -257,6 +344,26 @@ impl UrdfSceneSim {
         solver_iterations: usize,
     ) -> Result<Self, AssetError> {
         Self::from_scene_path_with_options(scene_path, solver_iterations, &[])
+    }
+
+    /// Loads a URDF scene with explicit solver iterations and fixed-step duration.
+    ///
+    /// This constructor is intended for versioned TaskSpecs whose integer tick
+    /// duration must match the physics clock exactly. A zero duration is rejected.
+    pub fn from_scene_path_with_solver_iterations_and_fixed_delta(
+        scene_path: &Path,
+        solver_iterations: usize,
+        fixed_delta: SimDuration,
+    ) -> Result<Self, AssetError> {
+        if fixed_delta.ticks() == 0 {
+            return Err(AssetError::Invalid {
+                path: scene_path.display().to_string(),
+                message: "fixed simulation delta must be greater than zero ticks".into(),
+            });
+        }
+        let mut sim = Self::from_scene_path_with_options(scene_path, solver_iterations, &[])?;
+        sim.dt = fixed_delta;
+        Ok(sim)
     }
 
     /// Loads a URDF scene with selected links fixed before physics initialization.
@@ -482,6 +589,74 @@ impl UrdfSceneSim {
     /// Returns the ECS world.
     pub fn world(&self) -> &World {
         &self.world
+    }
+
+    /// Returns the completed simulation time used to timestamp sensor samples.
+    pub fn sim_time(&self) -> SimTime {
+        self.sim_time
+    }
+
+    /// Returns the exact fixed-step duration used by the physics clock.
+    pub fn fixed_delta(&self) -> SimDuration {
+        self.dt
+    }
+
+    /// Attaches a typed joint-feedback sensor by resolving URDF child-link names.
+    ///
+    /// Resolution is atomic: no sensor entity is created when any name or
+    /// sampling parameter is invalid. The resulting channel order exactly
+    /// matches [`UrdfJointFeedbackSensorConfig::link_names`].
+    pub fn install_joint_feedback_sensor(
+        &mut self,
+        config: UrdfJointFeedbackSensorConfig,
+    ) -> Result<Entity, UrdfJointFeedbackInstallError> {
+        if config.sensor_name.trim().is_empty()
+            || find_entity_by_name(&self.world, &config.sensor_name).is_some()
+        {
+            return Err(UrdfJointFeedbackInstallError::InvalidSensorName {
+                sensor_name: config.sensor_name,
+            });
+        }
+        let channels = config
+            .link_names
+            .iter()
+            .map(|link_name| {
+                find_link_by_name(&self.world, link_name)
+                    .map(|joint_entity| JointFeedbackChannelSpec {
+                        name: link_name.clone(),
+                        joint_entity,
+                    })
+                    .ok_or_else(|| UrdfJointFeedbackInstallError::MissingLink {
+                        link_name: link_name.clone(),
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let sensor = JointFeedbackSensor {
+            update_rate_hz: config.update_rate_hz,
+            sample_period_ticks: config.sample_period_ticks,
+            phase_offset_ticks: config.phase_offset_ticks,
+            latency_ticks: config.latency_ticks,
+            enabled: true,
+            stream_id: config.stream_id,
+            channels,
+            fault: config.fault,
+        };
+        if !sensor.is_valid() || sensor.period().ticks() == 0 {
+            return Err(UrdfJointFeedbackInstallError::InvalidConfiguration);
+        }
+        let sensor_entity = spawn_named(&mut self.world, config.sensor_name);
+        self.world
+            .entity_mut(sensor_entity)
+            .insert((sensor, JointFeedbackSensorState::default()));
+        Ok(sensor_entity)
+    }
+
+    /// Samples all installed joint-feedback sensors at the completed simulation time.
+    pub fn sample_joint_feedback(
+        &mut self,
+        bus: &mut impl DataBus,
+    ) -> Result<usize, JointFeedbackError> {
+        sample_joint_feedback_sensors(&mut self.world, self.sim_time, bus)
     }
 
     /// Attaches distinct deformable particles near named contact frames to a named target frame.
@@ -1369,6 +1544,222 @@ impl UrdfSceneSim {
         self.step_physics();
     }
 
+    /// Applies targets to explicitly configured, unit-bearing revolute position
+    /// actuators and steps one simulation tick.
+    ///
+    /// Only links carrying [`JointActuation::RevolutePosition`] are updated.
+    /// Unknown links and other actuation modes are ignored, so changing mode is
+    /// always an explicit operation. Gains and the effort ceiling configured by
+    /// [`Self::configure_named_revolute_position_actuation`] are retained.
+    pub fn step_joint_position_actuation_targets(
+        &mut self,
+        targets: &[UrdfJointPositionTarget<'_>],
+    ) {
+        self.set_joint_position_actuation_targets(targets);
+        self.step_physics();
+    }
+
+    /// Applies one set of position-actuator targets over exact physics substeps.
+    ///
+    /// The configured control-period duration is partitioned into positive
+    /// integer-tick steps whose sum is exact, so control and sensor timestamps
+    /// do not drift when the period is not divisible by the substep count.
+    pub fn step_joint_position_actuation_targets_substeps(
+        &mut self,
+        targets: &[UrdfJointPositionTarget<'_>],
+        physics_substeps: usize,
+    ) -> Result<(), AssetError> {
+        let parts = NonZeroUsize::new(physics_substeps)
+            .and_then(|count| self.dt.split_evenly(count))
+            .ok_or_else(|| AssetError::Invalid {
+                path: self.scene_path.display().to_string(),
+                message: format!(
+                    "physics_substeps_per_control_step must be in 1..={}",
+                    self.dt.ticks()
+                ),
+            })?;
+        self.set_joint_position_actuation_targets(targets);
+        for delta in parts {
+            self.step_physics_with_delta(delta);
+        }
+        Ok(())
+    }
+
+    fn set_joint_position_actuation_targets(&mut self, targets: &[UrdfJointPositionTarget<'_>]) {
+        for target in targets {
+            let Some(entity) = find_link_by_name(&self.world, target.link_name) else {
+                continue;
+            };
+            let Some(JointActuation::RevolutePosition {
+                stiffness_nm_per_rad,
+                damping_nm_s_per_rad,
+                max_effort_nm,
+                ..
+            }) = self.world.get::<JointActuation>(entity).copied()
+            else {
+                continue;
+            };
+            self.world
+                .entity_mut(entity)
+                .insert(JointActuation::RevolutePosition {
+                    target_position_rad: target.position,
+                    stiffness_nm_per_rad,
+                    damping_nm_s_per_rad,
+                    max_effort_nm,
+                });
+        }
+    }
+
+    /// Applies direct revolute-effort commands over exact physics substeps.
+    ///
+    /// Only links explicitly configured through
+    /// [`Self::configure_named_revolute_effort_actuation`] are updated. Each
+    /// requested torque is clamped by that actuator's retained N·m ceiling.
+    pub fn step_joint_effort_actuation_targets_substeps(
+        &mut self,
+        targets: &[UrdfJointEffortTarget<'_>],
+        physics_substeps: usize,
+    ) -> Result<(), AssetError> {
+        let parts = NonZeroUsize::new(physics_substeps)
+            .and_then(|count| self.dt.split_evenly(count))
+            .ok_or_else(|| AssetError::Invalid {
+                path: self.scene_path.display().to_string(),
+                message: format!(
+                    "physics_substeps_per_control_step must be in 1..={}",
+                    self.dt.ticks()
+                ),
+            })?;
+        for target in targets {
+            let Some(entity) = find_link_by_name(&self.world, target.link_name) else {
+                continue;
+            };
+            let Some(JointActuation::RevoluteEffort { max_effort_nm, .. }) =
+                self.world.get::<JointActuation>(entity).copied()
+            else {
+                continue;
+            };
+            if !target.effort_nm.is_finite() {
+                continue;
+            }
+            self.world
+                .entity_mut(entity)
+                .insert(JointActuation::RevoluteEffort {
+                    effort_nm: target.effort_nm.clamp(-max_effort_nm, max_effort_nm),
+                    max_effort_nm,
+                });
+        }
+        for delta in parts {
+            self.step_physics_with_delta(delta);
+        }
+        Ok(())
+    }
+
+    /// Recomputes portable PD effort at every exact physics substep.
+    ///
+    /// The same `Kp * position_error - Kd * velocity` law is evaluated from
+    /// completed backend state before each substep. This gives an explicit
+    /// discrete-time controller contract independent of a backend's built-in
+    /// position motor. Returned outputs are those applied in the final substep.
+    pub fn step_joint_pd_effort_targets_substeps(
+        &mut self,
+        targets: &[UrdfJointPdEffortTarget<'_>],
+        physics_substeps: usize,
+    ) -> Result<Vec<UrdfJointAppliedEffort>, AssetError> {
+        let parts = NonZeroUsize::new(physics_substeps)
+            .and_then(|count| self.dt.split_evenly(count))
+            .ok_or_else(|| AssetError::Invalid {
+                path: self.scene_path.display().to_string(),
+                message: format!(
+                    "physics_substeps_per_control_step must be in 1..={}",
+                    self.dt.ticks()
+                ),
+            })?;
+        if !targets.iter().all(|target| {
+            [
+                target.target_position_rad,
+                target.stiffness_nm_per_rad,
+                target.damping_nm_s_per_rad,
+                target.max_effort_nm,
+                target.max_velocity_rad_s,
+                target.transmission_efficiency,
+            ]
+            .iter()
+            .all(|value| value.is_finite())
+                && target.stiffness_nm_per_rad >= 0.0
+                && target.damping_nm_s_per_rad >= 0.0
+                && target.max_effort_nm >= 0.0
+                && target.max_velocity_rad_s > 0.0
+                && target.transmission_efficiency > 0.0
+                && target.transmission_efficiency <= 1.0
+        }) {
+            return Err(AssetError::Invalid {
+                path: self.scene_path.display().to_string(),
+                message: "portable PD effort target has invalid value, gain, or limit".into(),
+            });
+        }
+        let mut applied = Vec::with_capacity(targets.len());
+        for delta in parts {
+            applied.clear();
+            for target in targets {
+                let Some(entity) = find_link_by_name(&self.world, target.link_name) else {
+                    return Err(AssetError::Invalid {
+                        path: self.scene_path.display().to_string(),
+                        message: format!(
+                            "portable PD effort link does not exist: {}",
+                            target.link_name
+                        ),
+                    });
+                };
+                let position_rad =
+                    self.named_joint_position(target.link_name).ok_or_else(|| {
+                        AssetError::Invalid {
+                            path: self.scene_path.display().to_string(),
+                            message: format!(
+                                "portable PD effort link is not revolute: {}",
+                                target.link_name
+                            ),
+                        }
+                    })?;
+                let velocity_rad_s =
+                    self.named_joint_velocity(target.link_name).ok_or_else(|| {
+                        AssetError::Invalid {
+                            path: self.scene_path.display().to_string(),
+                            message: format!(
+                                "portable PD effort link has no velocity: {}",
+                                target.link_name
+                            ),
+                        }
+                    })?;
+                let raw_effort_nm = target.stiffness_nm_per_rad
+                    * (target.target_position_rad - position_rad)
+                    - target.damping_nm_s_per_rad * velocity_rad_s;
+                let clamped_effort_nm =
+                    raw_effort_nm.clamp(-target.max_effort_nm, target.max_effort_nm);
+                let motor_effort_command_nm = if clamped_effort_nm * velocity_rad_s > 0.0 {
+                    let drive_fraction =
+                        (1.0 - velocity_rad_s.abs() / target.max_velocity_rad_s).clamp(0.0, 1.0);
+                    clamped_effort_nm * drive_fraction
+                } else {
+                    clamped_effort_nm
+                };
+                let effort_nm = motor_effort_command_nm * target.transmission_efficiency;
+                self.world
+                    .entity_mut(entity)
+                    .insert(JointActuation::RevoluteEffort {
+                        effort_nm,
+                        max_effort_nm: target.max_effort_nm,
+                    });
+                applied.push(UrdfJointAppliedEffort {
+                    motor_effort_command_nm,
+                    effort_nm,
+                    saturated: raw_effort_nm != motor_effort_command_nm,
+                });
+            }
+            self.step_physics_with_delta(delta);
+        }
+        Ok(applied)
+    }
+
     /// Updates named joint position targets **without stepping** the
     /// simulation.
     ///
@@ -1451,6 +1842,18 @@ impl UrdfSceneSim {
         let entity = find_link_by_name(&self.world, link_name)?;
         self.backend
             .multibody_joint_position(self.physics_world, entity)
+            .or_else(|| {
+                self.world
+                    .get::<JointState>(entity)
+                    .copied()
+                    .and_then(JointState::position_rad)
+            })
+            .or_else(|| {
+                self.world.iter_entities().find_map(|entity_ref| {
+                    let joint = entity_ref.get::<Joint>()?;
+                    (joint.child_link == entity).then_some(joint.position)
+                })
+            })
     }
 
     /// Reads the generalized velocity of a named link's articulation joint in
@@ -1462,6 +1865,17 @@ impl UrdfSceneSim {
         let entity = find_link_by_name(&self.world, link_name)?;
         self.backend
             .multibody_joint_velocity(self.physics_world, entity)
+            .or_else(|| match self.world.get::<JointState>(entity).copied()? {
+                JointState::Revolute { velocity_rad_s, .. } => Some(velocity_rad_s),
+                JointState::Prismatic { velocity_m_s, .. } => Some(velocity_m_s),
+                JointState::Fixed => None,
+            })
+            .or_else(|| {
+                self.world.iter_entities().find_map(|entity_ref| {
+                    let joint = entity_ref.get::<Joint>()?;
+                    (joint.child_link == entity).then_some(joint.velocity)
+                })
+            })
     }
 
     /// Configures every actuated joint as a force-limited position motor.
@@ -1519,6 +1933,84 @@ impl UrdfSceneSim {
         true
     }
 
+    /// Configures one named revolute link with a unit-explicit position servo.
+    ///
+    /// Stiffness is expressed in N·m/rad, damping in N·m·s/rad, and maximum
+    /// effort in N·m. The initial target is the measured joint position, falling
+    /// back to the authored joint state before the first physics step. This
+    /// prevents configuration itself from commanding a discontinuous move.
+    /// Returns false for a missing/non-revolute link or invalid parameters.
+    pub fn configure_named_revolute_position_actuation(
+        &mut self,
+        link_name: &str,
+        stiffness_nm_per_rad: f64,
+        damping_nm_s_per_rad: f64,
+        max_effort_nm: f64,
+    ) -> bool {
+        if [stiffness_nm_per_rad, damping_nm_s_per_rad, max_effort_nm]
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return false;
+        }
+        let Some(entity) = find_link_by_name(&self.world, link_name) else {
+            return false;
+        };
+        if self.world.get::<RevoluteJointDesc>(entity).is_none() {
+            return false;
+        }
+        let target_position_rad = self
+            .backend
+            .multibody_joint_position(self.physics_world, entity)
+            .or_else(|| {
+                self.world.iter_entities().find_map(|entity_ref| {
+                    let joint = entity_ref.get::<Joint>()?;
+                    (joint.child_link == entity).then_some(joint.position)
+                })
+            });
+        let Some(target_position_rad) = target_position_rad else {
+            return false;
+        };
+        self.world.entity_mut(entity).insert((
+            JointActuation::RevolutePosition {
+                target_position_rad,
+                stiffness_nm_per_rad,
+                damping_nm_s_per_rad,
+                max_effort_nm,
+            },
+            JointMotorGainModel::ForceBased,
+        ));
+        true
+    }
+
+    /// Configures one named revolute link for direct, unit-explicit effort control.
+    ///
+    /// The actuator starts at zero N·m and retains `max_effort_nm` when later
+    /// commands are applied. Returns false for a missing/non-revolute link or
+    /// an invalid effort ceiling.
+    pub fn configure_named_revolute_effort_actuation(
+        &mut self,
+        link_name: &str,
+        max_effort_nm: f64,
+    ) -> bool {
+        if !max_effort_nm.is_finite() || max_effort_nm < 0.0 {
+            return false;
+        }
+        let Some(entity) = find_link_by_name(&self.world, link_name) else {
+            return false;
+        };
+        if self.world.get::<RevoluteJointDesc>(entity).is_none() {
+            return false;
+        }
+        self.world
+            .entity_mut(entity)
+            .insert(JointActuation::RevoluteEffort {
+                effort_nm: 0.0,
+                max_effort_nm,
+            });
+        true
+    }
+
     /// Returns the summed normal contact impulse for a named link in N·s.
     ///
     /// This is intended for deterministic foot-contact observations. It returns
@@ -1573,11 +2065,15 @@ impl UrdfSceneSim {
     }
 
     fn step_physics(&mut self) {
+        self.step_physics_with_delta(self.dt);
+    }
+
+    fn step_physics_with_delta(&mut self, delta: SimDuration) {
         step_physics(
             &mut self.backend,
             &mut self.world,
             self.physics_world,
-            self.dt,
+            delta,
         )
         .expect("urdf scene physics step");
         let gravity_m_s2 = self
@@ -1588,11 +2084,11 @@ impl UrdfSceneSim {
         step_deformable_world(
             &mut self.world,
             gravity_m_s2,
-            self.dt.as_seconds().value(),
+            delta.as_seconds().value(),
             self.deformable_solver_config,
         )
         .expect("urdf scene deformable step");
-        self.sim_time = self.sim_time + self.dt;
+        self.sim_time = self.sim_time + delta;
     }
 }
 
@@ -1797,6 +2293,206 @@ mod tests {
             .expect("shoulder motor");
         assert_eq!(motor.target_position, 0.35);
         assert_eq!(motor.velocity_rad_s, 0.0);
+    }
+
+    #[test]
+    fn unit_explicit_position_actuation_retains_gains_and_updates_target() {
+        let scene_path = UrdfSceneSim::so101_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn so101");
+        assert!(sim.configure_named_revolute_position_actuation("shoulder_link", 12.0, 3.0, 4.0,));
+        sim.step_joint_position_actuation_targets(&[UrdfJointPositionTarget {
+            link_name: "shoulder_link",
+            position: 0.35,
+        }]);
+        let shoulder = find_link_by_name(sim.world(), "shoulder_link").expect("shoulder link");
+        assert_eq!(
+            sim.world().get::<JointActuation>(shoulder),
+            Some(&JointActuation::RevolutePosition {
+                target_position_rad: 0.35,
+                stiffness_nm_per_rad: 12.0,
+                damping_nm_s_per_rad: 3.0,
+                max_effort_nm: 4.0,
+            })
+        );
+        assert_eq!(
+            sim.world().get::<JointMotorGainModel>(shoulder),
+            Some(&JointMotorGainModel::ForceBased)
+        );
+        assert!(!sim.configure_named_revolute_position_actuation(
+            "shoulder_link",
+            f64::NAN,
+            3.0,
+            4.0,
+        ));
+    }
+
+    #[test]
+    fn direct_effort_actuation_retains_ceiling_and_clamps_command() {
+        let scene_path = UrdfSceneSim::so101_scene_path();
+        let mut sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn so101");
+        assert!(sim.configure_named_revolute_effort_actuation("shoulder_link", 2.0));
+        sim.step_joint_effort_actuation_targets_substeps(
+            &[UrdfJointEffortTarget {
+                link_name: "shoulder_link",
+                effort_nm: 3.5,
+            }],
+            2,
+        )
+        .expect("step direct effort actuation");
+        let shoulder = find_link_by_name(sim.world(), "shoulder_link").expect("shoulder link");
+        assert_eq!(
+            sim.world().get::<JointActuation>(shoulder),
+            Some(&JointActuation::RevoluteEffort {
+                effort_nm: 2.0,
+                max_effort_nm: 2.0,
+            })
+        );
+        assert!(sim
+            .world()
+            .get::<rne_physics::JointEffortMeasurement>(shoulder)
+            .is_some());
+        let mut pd_sim = UrdfSceneSim::from_scene_path(&scene_path).expect("spawn PD so101");
+        assert!(pd_sim.configure_named_revolute_effort_actuation("shoulder_link", 1.0));
+        let applied = pd_sim
+            .step_joint_pd_effort_targets_substeps(
+                &[UrdfJointPdEffortTarget {
+                    link_name: "shoulder_link",
+                    target_position_rad: 10.0,
+                    stiffness_nm_per_rad: 4.0,
+                    damping_nm_s_per_rad: 0.5,
+                    max_effort_nm: 1.0,
+                    max_velocity_rad_s: 5.0,
+                    transmission_efficiency: 1.0,
+                }],
+                2,
+            )
+            .expect("step portable PD effort actuation");
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].motor_effort_command_nm, 1.0);
+        assert_eq!(applied[0].effort_nm, 1.0);
+        assert!(applied[0].saturated);
+        let lossy = pd_sim
+            .step_joint_pd_effort_targets_substeps(
+                &[UrdfJointPdEffortTarget {
+                    link_name: "shoulder_link",
+                    target_position_rad: 10.0,
+                    stiffness_nm_per_rad: 4.0,
+                    damping_nm_s_per_rad: 0.5,
+                    max_effort_nm: 1.0,
+                    max_velocity_rad_s: 5.0,
+                    transmission_efficiency: 0.5,
+                }],
+                1,
+            )
+            .expect("step lossy portable PD effort actuation");
+        assert_eq!(lossy[0].motor_effort_command_nm, 1.0);
+        assert_eq!(lossy[0].effort_nm, 0.5);
+        assert!(!sim.configure_named_revolute_effort_actuation("shoulder_link", f64::NAN,));
+        assert!(sim
+            .step_joint_effort_actuation_targets_substeps(&[], 0)
+            .is_err());
+    }
+
+    #[test]
+    fn openarm_direct_effort_matches_reported_joint_coordinate_direction() {
+        let scene_path = assets_scene_path("openarm_v2_right_validation.rne.scene.toml");
+        let run =
+            |effort_nm: f64| {
+                let mut sim = UrdfSceneSim::from_scene_path_with_solver_iterations_and_fixed_delta(
+                    &scene_path,
+                    16,
+                    SimDuration::from_ticks(16_666_667),
+                )
+                .expect("spawn OpenArm");
+                assert!(sim.configure_named_revolute_effort_actuation(
+                    "openarm_right_link4",
+                    effort_nm.abs(),
+                ));
+                sim.step_joint_effort_actuation_targets_substeps(
+                    &[UrdfJointEffortTarget {
+                        link_name: "openarm_right_link4",
+                        effort_nm,
+                    }],
+                    10,
+                )
+                .expect("step OpenArm direct effort");
+                sim.named_joint_position("openarm_right_link4")
+                    .expect("OpenArm joint4 position")
+            };
+        let positive = run(0.5);
+        let negative = run(-0.5);
+        assert!(
+            positive > negative,
+            "positive effort produced {positive} rad; negative produced {negative} rad"
+        );
+    }
+
+    #[test]
+    fn exact_task_delta_and_feedback_installation_are_preserved() {
+        let scene_path = UrdfSceneSim::so101_scene_path();
+        let fixed_delta = SimDuration::from_ticks(12_345);
+        let mut sim = UrdfSceneSim::from_scene_path_with_solver_iterations_and_fixed_delta(
+            &scene_path,
+            0,
+            fixed_delta,
+        )
+        .expect("spawn SO-101 with exact TaskSpec delta");
+        assert_eq!(sim.fixed_delta(), fixed_delta);
+        assert!(sim.configure_named_revolute_position_actuation("shoulder_link", 12.0, 3.0, 4.0,));
+        let stream = StreamId::new(404);
+        sim.install_joint_feedback_sensor(UrdfJointFeedbackSensorConfig {
+            sensor_name: "controller_feedback".into(),
+            link_names: vec!["shoulder_link".into()],
+            update_rate_hz: 1_000.0,
+            sample_period_ticks: Some(fixed_delta.ticks()),
+            phase_offset_ticks: fixed_delta.ticks(),
+            latency_ticks: 7,
+            stream_id: stream,
+            fault: JointFeedbackFault::None,
+        })
+        .expect("install feedback sensor");
+        sim.step_joint_position_targets(&[]);
+        assert_eq!(sim.sim_time().ticks(), fixed_delta.ticks());
+        sim.step_joint_position_actuation_targets_substeps(&[], 10)
+            .expect("step exact substeps");
+        assert_eq!(sim.sim_time().ticks(), fixed_delta.ticks() * 2);
+        assert!(sim
+            .step_joint_position_actuation_targets_substeps(&[], 0)
+            .is_err());
+        let sensor_entity = find_entity_by_name(sim.world(), "controller_feedback")
+            .expect("installed sensor entity");
+        let sensor = sim
+            .world()
+            .get::<JointFeedbackSensor>(sensor_entity)
+            .expect("installed sensor component");
+        assert_eq!(sensor.stream_id, stream);
+        assert_eq!(sensor.channels.len(), 1);
+        assert_eq!(sensor.channels[0].name, "shoulder_link");
+    }
+
+    #[test]
+    fn missing_feedback_link_leaves_no_partial_sensor() {
+        let mut sim =
+            UrdfSceneSim::from_scene_path(&UrdfSceneSim::so101_scene_path()).expect("spawn SO-101");
+        let error = sim
+            .install_joint_feedback_sensor(UrdfJointFeedbackSensorConfig {
+                sensor_name: "invalid_feedback".into(),
+                link_names: vec!["shoulder_link".into(), "missing_link".into()],
+                update_rate_hz: 60.0,
+                sample_period_ticks: None,
+                phase_offset_ticks: 0,
+                latency_ticks: 0,
+                stream_id: StreamId::new(405),
+                fault: JointFeedbackFault::None,
+            })
+            .unwrap_err();
+        assert_eq!(
+            error,
+            UrdfJointFeedbackInstallError::MissingLink {
+                link_name: "missing_link".into()
+            }
+        );
+        assert!(find_entity_by_name(sim.world(), "invalid_feedback").is_none());
     }
 
     #[test]

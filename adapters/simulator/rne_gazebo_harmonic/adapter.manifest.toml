@@ -1,0 +1,19 @@
+schema_version = 1
+adapter_id = "rne.gazebo_harmonic.openarm_right.v1"
+adapter_kind = "external_simulator"
+simulator_id = "gazebo_sim"
+simulator_release = "harmonic"
+protocol = "rne_external_simulator_jsonl_v1"
+entrypoint = "rne_gazebo_harmonic_adapter.py"
+runtime_manifest = "runtime.json"
+example_task = "openarm_right_joint_tracking.task.json"
+
+[requirements]
+operating_system = "Ubuntu 22.04 amd64"
+gazebo_sim_major = 8
+python_module = "gz.sim8"
+
+[isolation]
+ros2_required = false
+dds_required = false
+renderer_required = false

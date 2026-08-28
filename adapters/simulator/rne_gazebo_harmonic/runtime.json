@@ -1,0 +1,28 @@
+{
+  "kind": "rne_external_simulator_runtime_manifest",
+  "schema_version": 1,
+  "simulator_id": "gazebo_sim",
+  "simulator_version": "8.15.0",
+  "distribution": "harmonic_ubuntu_22.04_amd64",
+  "fixed_delta_ticks": 16666667,
+  "artifacts": [
+    {
+      "role": "world",
+      "file": "openarm_right.world.sdf",
+      "size_bytes": 393,
+      "sha256": "5c7c942dec1b39e91fc0f19df5dc3bd7fd61718b78e4475cd5d454d0a2154926"
+    },
+    {
+      "role": "robot_model",
+      "file": "openarm_v2_right.rne.urdf",
+      "size_bytes": 13791,
+      "sha256": "1f65aa51542976319bea688332f267a47bd17df48a5860bf23e3f1adb8563994"
+    },
+    {
+      "role": "adapter_config",
+      "file": "openarm_right.adapter.json",
+      "size_bytes": 590,
+      "sha256": "e37b53c8d0e3070be2fe581afd12cf21bbc25bf5000747ed30df863e1293d169"
+    }
+  ]
+}

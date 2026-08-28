@@ -1,12 +1,12 @@
 {
   "kind": "rne_physics_conformance_report",
   "schema_version": 2,
-  "catalog_version": 3,
-  "tolerance_registry_version": 1,
+  "catalog_version": 4,
+  "tolerance_registry_version": 2,
   "backends": [
     {
       "manifest": {
-        "schema_version": 2,
+        "schema_version": 3,
         "backend_id": "fixture",
         "adapter_version": "0.1.0",
         "engine_id": "fixture_engine",

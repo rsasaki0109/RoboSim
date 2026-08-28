@@ -1,6 +1,19 @@
 //! Parsed URDF schema.
 
 use rne_math::Vec3;
+use std::collections::BTreeMap;
+
+/// Parsed URDF document with optional extended properties kept outside the
+/// compatibility-stable [`UrdfRobot`], [`UrdfLink`], and [`UrdfJoint`] layouts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UrdfDocument {
+    /// Robot topology, geometry, joints, and legacy inertial mass fields.
+    pub robot: UrdfRobot,
+    /// Complete inertial properties keyed by link name.
+    pub inertials: BTreeMap<String, UrdfInertial>,
+    /// Passive dynamics keyed by joint name.
+    pub joint_dynamics: BTreeMap<String, UrdfJointDynamics>,
+}
 
 /// Parsed URDF robot description.
 #[derive(Clone, Debug, PartialEq)]
@@ -24,6 +37,29 @@ pub struct UrdfLink {
     pub collisions: Vec<UrdfGeometryElement>,
     /// Visual elements.
     pub visuals: Vec<UrdfGeometryElement>,
+}
+
+/// Complete inertial properties declared by a URDF `<inertial>` element.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UrdfInertial {
+    /// Centre-of-mass translation in the link frame, in metres.
+    pub origin_xyz_m: Vec3,
+    /// Inertial-frame roll-pitch-yaw rotation relative to the link frame, in radians.
+    pub origin_rpy_rad: Vec3,
+    /// Declared mass in kilograms.
+    pub mass_kg: f64,
+    /// Inertia tensor x-x entry in kg·m², expressed in the inertial frame.
+    pub ixx_kg_m2: f64,
+    /// Inertia tensor x-y entry in kg·m², expressed in the inertial frame.
+    pub ixy_kg_m2: f64,
+    /// Inertia tensor x-z entry in kg·m², expressed in the inertial frame.
+    pub ixz_kg_m2: f64,
+    /// Inertia tensor y-y entry in kg·m², expressed in the inertial frame.
+    pub iyy_kg_m2: f64,
+    /// Inertia tensor y-z entry in kg·m², expressed in the inertial frame.
+    pub iyz_kg_m2: f64,
+    /// Inertia tensor z-z entry in kg·m², expressed in the inertial frame.
+    pub izz_kg_m2: f64,
 }
 
 /// Geometry attached to a URDF collision or visual element.
@@ -112,6 +148,21 @@ pub struct UrdfJointMimic {
     pub multiplier: f64,
     /// Constant offset added after scaling.
     pub offset: f64,
+}
+
+/// Parsed URDF `<dynamics>` coefficients for a joint.
+///
+/// URDF uses the same attributes for revolute and prismatic joints; their SI
+/// units are interpreted from [`UrdfJointType`] when the articulation is
+/// attached to the physics world.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UrdfJointDynamics {
+    /// Viscous damping coefficient. Units are N·m·s/rad for revolute joints and
+    /// N·s/m for prismatic joints.
+    pub damping: f64,
+    /// Coulomb-friction magnitude. Units are N·m for revolute joints and N for
+    /// prismatic joints.
+    pub friction: f64,
 }
 
 /// Parsed URDF joint.

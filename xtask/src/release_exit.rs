@@ -558,6 +558,46 @@ fn validate_release_attestation_workflow(
         verify_index < publish_index && report_verify_index < publish_index,
         "release assets and archive-install reports must be attestation-verified before publication"
     );
+    validate_durable_release_assets(&publish)?;
+    Ok(())
+}
+
+fn validate_durable_release_assets(publish: &str) -> anyhow::Result<()> {
+    for requirement in [
+        "publish_dir=dist/release-assets",
+        "linux:x86_64-unknown-linux-gnu",
+        "windows:x86_64-pc-windows-msvc",
+        "evidence_prefix=rne-${RELEASE_VERSION}-${target}",
+        "$platform_dir/attestations/release-bundle.json",
+        "$publish_dir/${evidence_prefix}.attestation-bundle.json",
+        "$platform_dir/extracted-evidence/archive-install-rehearsal-report.json",
+        "$publish_dir/${evidence_prefix}.archive-install-rehearsal-report.json",
+        "expected 8 checksum subjects",
+        "sha256sum ${checksum_subjects[@]} > SHA256SUMS",
+        "expected 9 durable release assets",
+    ] {
+        anyhow::ensure!(
+            publish.contains(requirement),
+            "release publish job omitted durable evidence requirement {requirement}"
+        );
+    }
+    let evidence_index = publish
+        .find("$publish_dir/${evidence_prefix}.attestation-bundle.json")
+        .context("release publish job omitted durable attestation bundle")?;
+    let checksum_index = publish
+        .find("sha256sum ${checksum_subjects[@]} > SHA256SUMS")
+        .context("release publish job omitted durable checksum manifest")?;
+    let publish_index = publish
+        .find("gh release create")
+        .context("release publish job omitted gh release create")?;
+    anyhow::ensure!(
+        evidence_index < checksum_index && checksum_index < publish_index,
+        "release evidence must be retained and checksummed before publication"
+    );
+    anyhow::ensure!(
+        publish[publish_index..].contains("${assets[@]}"),
+        "gh release create must publish the complete nine-asset set"
+    );
     Ok(())
 }
 
@@ -693,6 +733,9 @@ fn validate_semver_packages(block: &str) -> anyhow::Result<()> {
         "release/rust-api-baseline.toml",
         "cargo metadata --locked --no-deps --format-version 1",
         "git diff --quiet \"$registry_guard_ref\" -- release/rust-api-baseline.toml",
+        "previous[\"release_version\"]",
+        "if [[ \"$previous_release\" == \"$current_release\" ]]",
+        "Rust API baseline release version must increase",
         "git cat-file -e \"$baseline^{commit}\"",
         "git merge-base --is-ancestor \"$baseline\" HEAD",
         "git cat-file -e \"$baseline:$frozen_manifest\"",
@@ -794,8 +837,9 @@ fn git_output(root: &Path, args: &[&str]) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_workflow, parse_options, validate_attestation_policy, validate_exit_matrix,
-        validate_locked_command, workflow_job_block, ArtifactAttestationPolicy,
+        normalize_workflow, parse_options, validate_attestation_policy,
+        validate_durable_release_assets, validate_exit_matrix, validate_locked_command,
+        workflow_job_block, ArtifactAttestationPolicy,
     };
 
     #[test]
@@ -839,6 +883,25 @@ mod tests {
         validate_attestation_policy(&policy).expect("committed policy");
         policy.repository = "untrusted/fork".to_string();
         assert!(validate_attestation_policy(&policy).is_err());
+    }
+
+    #[test]
+    fn durable_release_evidence_cannot_be_dropped_from_publication() {
+        let root = super::workspace_root().expect("workspace root");
+        let workflow = std::fs::read_to_string(root.join(".github/workflows/release.yml"))
+            .expect("release workflow");
+        let publish = normalize_workflow(
+            workflow_job_block(&workflow, "publish").expect("publish job block"),
+        );
+        validate_durable_release_assets(&publish).expect("durable release evidence");
+        assert!(
+            validate_durable_release_assets(&publish.replace("SHA256SUMS", "CHECKSUMS")).is_err()
+        );
+        assert!(validate_durable_release_assets(&publish.replace(
+            "expected 9 durable release assets",
+            "expected 8 release assets"
+        ))
+        .is_err());
     }
 
     #[test]

@@ -3,8 +3,10 @@
 use crate::{CameraSpec, ImuSpec, LidarSpec, WheelEncoderSpec};
 use bevy_ecs::prelude::Component;
 use rne_core::SimDuration;
-use rne_data::StreamId;
+use rne_data::{ImuFeedback, JointFeedback, StreamId};
+use rne_ecs::Entity;
 use rne_math::Vec3;
+use rne_world::Transform3;
 use serde::{Deserialize, Serialize};
 
 /// Non-visual optical properties used by physics-aware LiDAR sampling.
@@ -162,6 +164,129 @@ pub struct ImuState {
     pub initialized: bool,
 }
 
+/// Angular-kinematics history used by lever-arm-aware IMU sampling.
+///
+/// This state is kept separate from [`ImuState`] so the compatibility-stable
+/// error-state layout remains constructible by downstream crates. Attach it to
+/// the same sensor entity when angular acceleration at an offset mount matters.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ImuKinematicState {
+    /// World-frame angular velocity at the previous sample, in radians per second.
+    pub previous_angular_velocity_rad_s: Vec3,
+    /// Whether a previous angular-velocity sample has been recorded.
+    pub initialized: bool,
+}
+
+/// Fixed transform from a rigid body frame to a separately mounted IMU frame.
+///
+/// `body_from_sensor` maps sensor-frame points into the body frame. The body
+/// entity supplies the world pose and rigid-body velocities. A non-zero
+/// translation therefore contributes tangential and centripetal acceleration
+/// at the IMU location; it is not treated as a rotation-only shortcut.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct ImuMount {
+    /// Rigid body whose kinematics drive the mounted sensor.
+    pub body_entity: Entity,
+    /// Fixed sensor pose expressed in the rigid body frame.
+    pub body_from_sensor: Transform3,
+}
+
+impl ImuMount {
+    /// Returns true when the mount is finite, unit-scale, and has a unit rotation.
+    pub fn is_valid(self) -> bool {
+        let transform = self.body_from_sensor;
+        transform.translation.is_finite()
+            && transform.rotation.is_finite()
+            && (transform.rotation.length_squared() - 1.0).abs() <= 1.0e-9
+            && transform.scale == Vec3::ONE
+    }
+}
+
+/// Deterministic fault injected after IMU measurement and before output latency.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ImuFeedbackFault {
+    /// No injected fault.
+    #[default]
+    None,
+    /// Drop exactly one attempted sequence, producing an observable sequence gap.
+    DropSequence {
+        /// One-based attempted sequence to drop.
+        sequence: u64,
+    },
+    /// Hold the last emitted values from this attempted sequence onward.
+    StuckFromSequence {
+        /// One-based first attempted sequence that reuses the previous values.
+        sequence: u64,
+    },
+}
+
+/// Typed, mount-aware IMU sensor configuration for validation and estimation.
+///
+/// This is additive to the compatibility-stable [`SensorKind::Imu`] path. The
+/// sensor entity must also carry an [`ImuMount`] so missing or invalid mount
+/// calibration fails before publication.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct ImuFeedbackSensor {
+    /// IMU error, range, quantization, and deterministic-noise specification.
+    pub spec: ImuSpec,
+    /// Nominal update rate in hertz.
+    pub update_rate_hz: f64,
+    /// Exact sampling period in ticks, overriding `update_rate_hz` when present.
+    pub sample_period_ticks: Option<u64>,
+    /// First scheduled capture time in simulation nanosecond ticks.
+    pub phase_offset_ticks: u64,
+    /// Capture-to-availability latency in simulation nanosecond ticks.
+    pub latency_ticks: u64,
+    /// Whether sampling is enabled.
+    pub enabled: bool,
+    /// DataBus stream id.
+    pub stream_id: StreamId,
+    /// Optional deterministic fault applied in the documented processing order.
+    pub fault: ImuFeedbackFault,
+}
+
+impl ImuFeedbackSensor {
+    /// Sample period derived from the exact ticks or declared update rate.
+    pub fn period(&self) -> SimDuration {
+        self.sample_period_ticks.map_or_else(
+            || SimDuration::from_hertz(rne_math::Hertz::new(self.update_rate_hz)),
+            SimDuration::from_ticks,
+        )
+    }
+
+    /// Returns true when timing, physical error parameters, and fault are valid.
+    pub fn is_valid(&self) -> bool {
+        if !self.update_rate_hz.is_finite()
+            || self.update_rate_hz <= 0.0
+            || self.sample_period_ticks == Some(0)
+            || !self.spec.is_valid()
+        {
+            return false;
+        }
+        match self.fault {
+            ImuFeedbackFault::None => true,
+            ImuFeedbackFault::DropSequence { sequence } => sequence > 0,
+            ImuFeedbackFault::StuckFromSequence { sequence } => sequence > 1,
+        }
+    }
+}
+
+/// Runtime state for an [`ImuFeedbackSensor`].
+#[derive(Component, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ImuFeedbackSensorState {
+    /// Number of scheduled attempts, including injected drops.
+    pub attempted_sequence: u64,
+    /// Number of frames actually emitted.
+    pub emitted_frames: u64,
+    /// Time-correlated physical error and kinematic differentiation state.
+    pub imu_state: ImuState,
+    /// Angular-velocity history used for mount lever-arm acceleration.
+    pub kinematic_state: ImuKinematicState,
+    /// Last emitted payload used by deterministic stuck-value injection.
+    pub last_emitted: Option<ImuFeedback>,
+}
+
 /// Runtime sensor sampling state.
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct SensorState {
@@ -171,4 +296,105 @@ pub struct SensorState {
     pub last_sample_ticks: u64,
     /// Total emitted frames.
     pub frame_count: u64,
+}
+
+/// One named joint included in a [`JointFeedbackSensor`] stream.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JointFeedbackChannelSpec {
+    /// Stable joint name serialized into every sample.
+    pub name: String,
+    /// ECS entity carrying backend-neutral joint state and actuation components.
+    pub joint_entity: Entity,
+}
+
+/// Deterministic fault injected after sampling and before output latency.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum JointFeedbackFault {
+    /// No injected fault.
+    #[default]
+    None,
+    /// Drop exactly one attempted sequence, producing an observable sequence gap.
+    DropSequence {
+        /// One-based attempted sequence to drop.
+        sequence: u64,
+    },
+    /// Hold the last emitted values from this attempted sequence onward.
+    StuckFromSequence {
+        /// One-based first attempted sequence that reuses the previous values.
+        sequence: u64,
+    },
+}
+
+/// Typed joint and actuator feedback sensor configuration.
+///
+/// This is separate from [`SensorKind`] so adding the control-oriented stream
+/// does not break exhaustive matches over the compatibility-stable sensor enum.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct JointFeedbackSensor {
+    /// Update rate in hertz.
+    pub update_rate_hz: f64,
+    /// Exact sampling period in simulation ticks, overriding `update_rate_hz`.
+    ///
+    /// Use this when a TaskSpec declares an integer control period that cannot
+    /// be represented exactly by conversion from hertz.
+    pub sample_period_ticks: Option<u64>,
+    /// First scheduled capture time in simulation nanosecond ticks.
+    pub phase_offset_ticks: u64,
+    /// Capture-to-availability latency in simulation nanosecond ticks.
+    pub latency_ticks: u64,
+    /// Whether sampling is enabled.
+    pub enabled: bool,
+    /// DataBus stream id.
+    pub stream_id: StreamId,
+    /// Joint channels in externally visible contract order.
+    pub channels: Vec<JointFeedbackChannelSpec>,
+    /// Optional deterministic fault applied in the documented processing order.
+    pub fault: JointFeedbackFault,
+}
+
+impl JointFeedbackSensor {
+    /// Sample period derived from the declared update rate.
+    pub fn period(&self) -> SimDuration {
+        self.sample_period_ticks.map_or_else(
+            || SimDuration::from_hertz(rne_math::Hertz::new(self.update_rate_hz)),
+            SimDuration::from_ticks,
+        )
+    }
+
+    /// Returns true when rate, channel identities, and fault sequence are valid.
+    pub fn is_valid(&self) -> bool {
+        if !self.update_rate_hz.is_finite()
+            || self.update_rate_hz <= 0.0
+            || self.sample_period_ticks == Some(0)
+            || self.channels.is_empty()
+        {
+            return false;
+        }
+        let mut names = std::collections::BTreeSet::new();
+        let mut entities = std::collections::BTreeSet::new();
+        if self.channels.iter().any(|channel| {
+            channel.name.is_empty()
+                || !names.insert(channel.name.as_str())
+                || !entities.insert(channel.joint_entity.index())
+        }) {
+            return false;
+        }
+        match self.fault {
+            JointFeedbackFault::None => true,
+            JointFeedbackFault::DropSequence { sequence } => sequence > 0,
+            JointFeedbackFault::StuckFromSequence { sequence } => sequence > 1,
+        }
+    }
+}
+
+/// Runtime state for a [`JointFeedbackSensor`].
+#[derive(Component, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct JointFeedbackSensorState {
+    /// Number of scheduled sample attempts, including injected drops.
+    pub attempted_sequence: u64,
+    /// Number of frames actually emitted.
+    pub emitted_frames: u64,
+    /// Last emitted payload used by deterministic stuck-value injection.
+    pub last_emitted: Option<JointFeedback>,
 }

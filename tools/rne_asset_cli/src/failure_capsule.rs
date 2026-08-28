@@ -18,6 +18,10 @@ use rne_hardware_gateway::conformance::{
 use rne_hardware_gateway::mock::{
     MockConformanceReport, MOCK_CONFORMANCE_REPORT_KIND, MOCK_CONFORMANCE_SCHEMA_VERSION,
 };
+use rne_hardware_gateway::recorded::{
+    evaluate_recorded_shadow_session, RecordedShadowReport, RecordedShadowSession,
+    RECORDED_SHADOW_REPORT_KIND, RECORDED_SHADOW_SCHEMA_VERSION, RECORDED_SHADOW_SESSION_KIND,
+};
 use rne_hardware_gateway::shadow::{
     ShadowComparisonReport, SHADOW_COMPARISON_REPORT_KIND, SHADOW_COMPARISON_SCHEMA_VERSION,
 };
@@ -270,6 +274,8 @@ fn evidence_metadata(bytes: &[u8]) -> Result<(String, u32)> {
             | HARDWARE_SESSION_EVIDENCE_KIND
             | HARDWARE_WIRE_TRACE_KIND
             | SHADOW_COMPARISON_REPORT_KIND
+            | RECORDED_SHADOW_SESSION_KIND
+            | RECORDED_SHADOW_REPORT_KIND
             | MOCK_CONFORMANCE_REPORT_KIND
             | HARDWARE_ADAPTER_CONFORMANCE_REPORT_KIND
             | EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_KIND
@@ -296,6 +302,11 @@ fn validate_hardware_evidence<'a>(
         .iter()
         .map(|(_, bytes)| sha256_hex(bytes))
         .collect::<BTreeSet<_>>();
+    let recorded_sessions = evidence
+        .iter()
+        .filter(|(kind, _)| *kind == RECORDED_SHADOW_SESSION_KIND)
+        .map(|(_, bytes)| (sha256_hex(bytes), *bytes))
+        .collect::<BTreeMap<_, _>>();
     let mut tasks = BTreeMap::<String, TaskSpec>::new();
     for (kind, bytes) in &evidence {
         if *kind != TASK_SPEC_KIND {
@@ -377,6 +388,83 @@ fn validate_hardware_evidence<'a>(
                 report.validate_against(task).map_err(|error| {
                     anyhow::anyhow!("invalid hardware shadow comparison evidence: {error}")
                 })?;
+            }
+            RECORDED_SHADOW_SESSION_KIND => {
+                let session: RecordedShadowSession = serde_json::from_slice(bytes)
+                    .context("invalid recorded/shadow session JSON")?;
+                anyhow::ensure!(
+                    session.schema_version == RECORDED_SHADOW_SCHEMA_VERSION,
+                    "unsupported recorded/shadow session schema {}",
+                    session.schema_version
+                );
+                let task = tasks.get(&session.task_id).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "recorded/shadow session requires matching {TASK_SPEC_KIND} evidence for {:?}",
+                        session.task_id
+                    )
+                })?;
+                session.validate_against(task).map_err(|error| {
+                    anyhow::anyhow!("invalid recorded/shadow session evidence: {error}")
+                })?;
+                for (role, digest) in std::iter::once(("TaskSpec", &session.task_sha256))
+                    .chain(std::iter::once(("controller", &session.controller_sha256)))
+                    .chain(std::iter::once((
+                        "requirements",
+                        &session.requirements_sha256,
+                    )))
+                    .chain(
+                        session
+                            .sources
+                            .iter()
+                            .map(|binding| (binding.role.as_str(), &binding.sha256)),
+                    )
+                {
+                    anyhow::ensure!(
+                        evidence_digests.contains(digest),
+                        "recorded/shadow session requires exact {role} evidence with SHA-256 {digest}"
+                    );
+                }
+            }
+            RECORDED_SHADOW_REPORT_KIND => {
+                let report: RecordedShadowReport =
+                    serde_json::from_slice(bytes).context("invalid recorded/shadow report JSON")?;
+                anyhow::ensure!(
+                    report.schema_version == RECORDED_SHADOW_SCHEMA_VERSION,
+                    "unsupported recorded/shadow report schema {}",
+                    report.schema_version
+                );
+                let task = tasks.get(&report.task_id).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "recorded/shadow report requires matching {TASK_SPEC_KIND} evidence for {:?}",
+                        report.task_id
+                    )
+                })?;
+                let session_bytes =
+                    recorded_sessions
+                        .get(&report.session_sha256)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "recorded/shadow report requires its exact session evidence {}",
+                                report.session_sha256
+                            )
+                        })?;
+                let session: RecordedShadowSession = serde_json::from_slice(session_bytes)
+                    .context("invalid bound recorded/shadow session JSON")?;
+                let recomputed = evaluate_recorded_shadow_session(
+                    task.clone(),
+                    session,
+                    report.session_sha256.clone(),
+                    report.mode,
+                )
+                .map_err(|error| {
+                    anyhow::anyhow!("recorded/shadow report replay failed: {error}")
+                })?;
+                let expected = serde_json::to_value(&report)?;
+                let actual = serde_json::to_value(&recomputed)?;
+                if let Some(difference) = first_json_difference(&expected, &actual, "$".to_string())
+                {
+                    bail!("recorded/shadow report differs from replayed session: {difference}");
+                }
             }
             MOCK_CONFORMANCE_REPORT_KIND => {
                 let report: MockConformanceReport = serde_json::from_slice(bytes)
@@ -489,6 +577,55 @@ fn validate_hardware_evidence<'a>(
         }
     }
     Ok(())
+}
+
+fn first_json_difference(
+    expected: &serde_json::Value,
+    actual: &serde_json::Value,
+    path: String,
+) -> Option<String> {
+    match (expected, actual) {
+        (serde_json::Value::Number(left), serde_json::Value::Number(right)) => {
+            if (left.is_i64() || left.is_u64()) && (right.is_i64() || right.is_u64()) {
+                return (left != right).then(|| format!("{path} expected {left}, got {right}"));
+            }
+            let left = left.as_f64()?;
+            let right = right.as_f64()?;
+            ((left - right).abs() > 1.0e-12).then(|| format!("{path} expected {left}, got {right}"))
+        }
+        (serde_json::Value::Array(left), serde_json::Value::Array(right)) => {
+            if left.len() != right.len() {
+                return Some(format!(
+                    "{path} length expected {}, got {}",
+                    left.len(),
+                    right.len()
+                ));
+            }
+            left.iter()
+                .zip(right)
+                .enumerate()
+                .find_map(|(index, (left, right))| {
+                    first_json_difference(left, right, format!("{path}[{index}]"))
+                })
+        }
+        (serde_json::Value::Object(left), serde_json::Value::Object(right)) => {
+            if left.len() != right.len() {
+                return Some(format!(
+                    "{path} field count expected {}, got {}",
+                    left.len(),
+                    right.len()
+                ));
+            }
+            left.iter().find_map(|(key, left)| {
+                right.get(key).map_or_else(
+                    || Some(format!("{path}.{key} is missing")),
+                    |right| first_json_difference(left, right, format!("{path}.{key}")),
+                )
+            })
+        }
+        _ if expected == actual => None,
+        _ => Some(format!("{path} expected {expected}, got {actual}")),
+    }
 }
 
 fn replay_kind(bytes: &[u8]) -> Result<String> {
@@ -770,23 +907,69 @@ fn fallback_target_triple() -> String {
 }
 
 fn git_commit(root: &Path) -> String {
-    let Ok(output) = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["rev-parse", "HEAD"])
-        .output()
-    else {
+    if let Some(commit) = invoke_git_commit(root, None) {
+        return commit;
+    }
+    let Some(git_dir) = linked_worktree_git_dir(root) else {
         return "unknown".to_string();
     };
+    invoke_git_commit(root, Some(&git_dir)).unwrap_or_else(|| "unknown".to_string())
+}
+
+fn invoke_git_commit(root: &Path, git_dir: Option<&Path>) -> Option<String> {
+    let mut command = Command::new("git");
+    if let Some(git_dir) = git_dir {
+        command
+            .arg("--git-dir")
+            .arg(git_dir)
+            .arg("--work-tree")
+            .arg(root);
+    } else {
+        command.arg("-C").arg(root);
+    }
+    let output = command.args(["rev-parse", "HEAD"]).output().ok()?;
     if !output.status.success() {
-        return "unknown".to_string();
+        return None;
     }
     let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if value.is_empty() {
-        "unknown".to_string()
+        None
     } else {
-        value
+        Some(value)
     }
+}
+
+fn linked_worktree_git_dir(root: &Path) -> Option<PathBuf> {
+    let pointer = fs::read_to_string(root.join(".git")).ok()?;
+    let raw = pointer.trim().strip_prefix("gitdir:")?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(resolve_linked_git_dir(root, raw))
+}
+
+fn resolve_linked_git_dir(root: &Path, raw: &str) -> PathBuf {
+    let path = Path::new(raw);
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    #[cfg(unix)]
+    {
+        let normalized = raw.replace('\\', "/");
+        let bytes = normalized.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && bytes[2] == b'/'
+        {
+            let drive = (bytes[0] as char).to_ascii_lowercase();
+            let mount = format!("/mnt/{drive}/");
+            if root.to_string_lossy().starts_with(&mount) {
+                return PathBuf::from(format!("{mount}{}", &normalized[3..]));
+            }
+        }
+    }
+    root.join(path)
 }
 
 enum SourceReplay {
@@ -1000,6 +1183,17 @@ mod tests {
     use rne_physics::{PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCapability};
     use rne_physics_analytic::AnalyticBackend;
 
+    #[test]
+    fn recorded_shadow_replay_comparison_is_exact_except_for_tiny_float_reduction_drift() {
+        let expected = serde_json::json!({"count": 7, "metric": 0.10441429364807651});
+        let within = serde_json::json!({"count": 7, "metric": 0.10441429364807653});
+        let changed_metric = serde_json::json!({"count": 7, "metric": 0.104414293650});
+        let changed_count = serde_json::json!({"count": 8, "metric": 0.10441429364807651});
+        assert!(first_json_difference(&expected, &within, "$".into()).is_none());
+        assert!(first_json_difference(&expected, &changed_metric, "$".into()).is_some());
+        assert!(first_json_difference(&expected, &changed_count, "$".into()).is_some());
+    }
+
     #[derive(Debug, Default)]
     struct FixtureClock(u64);
 
@@ -1111,6 +1305,29 @@ mod tests {
                 let _ = fs::remove_dir_all(&self.0);
             }
         }
+    }
+
+    #[test]
+    fn linked_worktree_git_dir_resolves_relative_pointer() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::write(temp.path().join(".git"), "gitdir: metadata/worktree\n")
+            .expect("write worktree pointer");
+        assert_eq!(
+            linked_worktree_git_dir(temp.path()),
+            Some(temp.path().join("metadata/worktree"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linked_worktree_git_dir_maps_windows_pointer_on_matching_wsl_drive() {
+        assert_eq!(
+            resolve_linked_git_dir(
+                Path::new("/mnt/c/workspace/proof"),
+                "C:/workspace/main/.git/worktrees/proof"
+            ),
+            PathBuf::from("/mnt/c/workspace/main/.git/worktrees/proof")
+        );
     }
 
     fn generic_fixture() -> ReplayArtifact {
@@ -1648,6 +1865,48 @@ mod tests {
         )
         .unwrap();
         assert!(invoke_verify(&output).is_err());
+    }
+
+    #[test]
+    fn repository_openarm_cross_sim_capsule_is_portable_and_hash_complete() {
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/evidence/openarm-cross-sim");
+        verify_directory(&root).expect("verify retained OpenArm cross-simulator capsule");
+        let manifest: FailureCapsule = serde_json::from_slice(
+            &fs::read(root.join("capsule.json")).expect("read retained capsule manifest"),
+        )
+        .expect("parse retained capsule manifest");
+        assert_eq!(manifest.artifacts.len(), 31);
+        assert_ne!(manifest.build.git_commit, "unknown");
+        for required in [
+            "evidence/control-dynamics-report.json",
+            "evidence/control-dynamics-report.html",
+            "evidence/cross-sim-report.json",
+            "evidence/mujoco-success-trace.json",
+            "evidence/mujoco-intentional-failure.json",
+            "evidence/openarm_right.rne_actuation.json",
+            "evidence/openarm_right.adapter.json",
+            "evidence/openarm_v2_right.rne.robot.toml",
+            "evidence/openarm_v2_right.rne.urdf",
+            "evidence/openarm_v2_right_validation.rne.scene.toml",
+        ] {
+            assert!(
+                manifest
+                    .artifacts
+                    .iter()
+                    .any(|artifact| artifact.path == required),
+                "retained capsule is missing {required}"
+            );
+        }
+        let control_report: Value = serde_json::from_slice(
+            &fs::read(root.join("evidence/control-dynamics-report.json"))
+                .expect("read retained control-dynamics report"),
+        )
+        .expect("parse retained control-dynamics report");
+        assert_eq!(control_report["status"], "passed");
+        assert!(control_report["first_contract_violation"].is_null());
+        assert_eq!(manifest.failure.step, 307);
+        assert_eq!(manifest.failure.sim_time_ticks, 5_116_666_769);
     }
 
     #[cfg(unix)]

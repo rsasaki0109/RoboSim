@@ -1,0 +1,17 @@
+{
+  "kind": "rne_openarm_coulomb_transition_tuning_manifest",
+  "schema_version": 1,
+  "experiment_id": "rne.openarm.right.joint5_coulomb_transition_tuning.v1",
+  "controlled_joint": "openarm_right_joint5",
+  "tuning_backend_id": "rne_rapier",
+  "plant_viscous_damping_nm_s_per_rad": 10.0,
+  "plant_coulomb_friction_nm": 0.5,
+  "transition_velocity_grid_rad_s": [0.01, 0.02, 0.04, 0.05],
+  "kinetic_reference_velocity_rad_s": 0.1,
+  "minimum_kinetic_fraction_at_reference_velocity": 0.95,
+  "maximum_controlled_joint_rmse_rad": 0.02,
+  "maximum_controlled_joint_final_error_rad": 0.005,
+  "requires_exact_replay": true,
+  "selection_rule": "largest_transition_velocity_passing_all_predeclared_requirements",
+  "validation_rule": "selected_transition_is_held_fixed_for_the_complete_three_backend_friction_grid"
+}

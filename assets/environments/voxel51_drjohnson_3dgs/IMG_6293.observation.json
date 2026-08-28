@@ -1,0 +1,49 @@
+{
+  "kind": "rne_registered_real_sim_observation",
+  "schema_version": 1,
+  "environment_id": "voxel51.drjohnson.real_capture.v1",
+  "camera_id": "colmap.IMG_6293.jpg",
+  "renderer_identity": "rne.gaussian_splat.v1",
+  "gpu_adapter": {
+    "name": "NVIDIA GeForce GTX 1660 Ti",
+    "vendor": 4318,
+    "device": 8593,
+    "device_type": "DiscreteGpu",
+    "driver": "NVIDIA",
+    "driver_info": "596.36",
+    "backend": "Vulkan"
+  },
+  "reference_image": {
+    "path": "IMG_6293.reference.jpg",
+    "size_bytes": 622185,
+    "sha256": "278a543e1755beab9cef1ac708c587ffef12f5cc418db7afea91f52205157cca"
+  },
+  "rne_render": {
+    "path": "IMG_6293.rne.png",
+    "size_bytes": 1442825,
+    "sha256": "465a433f8334b4d588c0f00e9e646be3d797c5f395c685acb37d588c41dec954"
+  },
+  "intrinsics": {
+    "width_px": 1332,
+    "height_px": 876,
+    "fx_px": 1035.496599050006,
+    "fy_px": 1034.9718637370904,
+    "cx_px": 666.0,
+    "cy_px": 438.0,
+    "fov_y_rad": 0.8006899358019289
+  },
+  "metrics": {
+    "rgb_mae_8bit": 53.397328550011196,
+    "rgb_rmse_8bit": 56.78427070466878,
+    "rgb_psnr_db": 13.046242560724968,
+    "luminance_pearson": 0.9266620671360476,
+    "gradient_magnitude_pearson": 0.6879226988132977
+  },
+  "tolerances": {
+    "min_rgb_psnr_db": 12.0,
+    "min_luminance_pearson": 0.9,
+    "min_gradient_magnitude_pearson": 0.65
+  },
+  "status": "verified",
+  "photometric_note": "Raw PSNR is retained and bounded; luminance and gradient correlation provide exposure-robust structural registration metrics."
+}

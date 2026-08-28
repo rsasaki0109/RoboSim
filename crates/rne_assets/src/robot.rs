@@ -6,6 +6,7 @@ use rne_physics::RigidBodyType;
 use rne_robot::{DiffDriveConfig, DiffDriveDriveMode};
 use rne_urdf_import::{UrdfArticulationConfig, UrdfSpawnConfig};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// Supported robot asset kinds.
@@ -205,9 +206,33 @@ pub struct UrdfRobotAsset {
     /// When true, the backend uses reduced-coordinate multibody joints.
     #[serde(default)]
     pub multibody: bool,
-    /// When true, positive URDF inertial masses override legacy link defaults.
+    /// When true, positive URDF inertial masses, centres of mass, and complete
+    /// inertia tensors override legacy link defaults when declared.
     #[serde(default)]
     pub use_declared_inertial_masses: bool,
+}
+
+/// Unit-bearing passive-dynamics override for one URDF joint.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UrdfJointPassiveDynamicsAsset {
+    /// URDF joint name receiving the override.
+    pub joint: String,
+    /// Revolute regularized-Coulomb transition velocity in radians per second.
+    pub coulomb_transition_velocity_rad_s: Option<f64>,
+    /// Prismatic regularized-Coulomb transition velocity in metres per second.
+    pub coulomb_transition_velocity_m_s: Option<f64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+struct UrdfRobotAssetExtensions {
+    #[serde(default)]
+    joint_passive_dynamics: Vec<UrdfJointPassiveDynamicsAsset>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+struct RobotAssetExtensions {
+    #[serde(default)]
+    urdf: Option<UrdfRobotAssetExtensions>,
 }
 
 /// Base rigid-body type for URDF robot assets.
@@ -301,11 +326,44 @@ pub fn load_robot_asset(path: &Path) -> Result<RobotAsset, AssetError> {
     parse_robot_asset(&text, path)
 }
 
+/// Loads validated passive-dynamics extensions retained in a robot asset TOML.
+///
+/// The extension is deliberately parsed separately from [`UrdfRobotAsset`] so
+/// adding it does not break downstream code that constructs that public struct.
+pub fn load_robot_asset_passive_dynamics(
+    path: &Path,
+) -> Result<Vec<UrdfJointPassiveDynamicsAsset>, AssetError> {
+    let text = std::fs::read_to_string(path).map_err(|error| AssetError::Io {
+        path: path.display().to_string(),
+        message: error.to_string(),
+    })?;
+    parse_robot_asset_passive_dynamics(&text, path)
+}
+
+/// Parses and validates passive-dynamics extensions from robot asset TOML.
+pub fn parse_robot_asset_passive_dynamics(
+    text: &str,
+    path: &Path,
+) -> Result<Vec<UrdfJointPassiveDynamicsAsset>, AssetError> {
+    let asset: RobotAsset = toml::from_str(text)
+        .map_err(|error| AssetError::invalid(path.display().to_string(), error.to_string()))?;
+    let extensions: RobotAssetExtensions = toml::from_str(text)
+        .map_err(|error| AssetError::invalid(path.display().to_string(), error.to_string()))?;
+    let overrides = extensions
+        .urdf
+        .map(|urdf| urdf.joint_passive_dynamics)
+        .unwrap_or_default();
+    validate_robot_asset_passive_dynamics(&asset, &overrides, path)?;
+    Ok(overrides)
+}
+
 /// Parses robot asset TOML from memory.
 pub fn parse_robot_asset(text: &str, path: &Path) -> Result<RobotAsset, AssetError> {
     let asset: RobotAsset = toml::from_str(text)
         .map_err(|error| AssetError::invalid(path.display().to_string(), error.to_string()))?;
-    validate_robot_asset(&asset, path)
+    let asset = validate_robot_asset(&asset, path)?;
+    parse_robot_asset_passive_dynamics(text, path)?;
+    Ok(asset)
 }
 
 fn validate_robot_asset(asset: &RobotAsset, path: &Path) -> Result<RobotAsset, AssetError> {
@@ -345,6 +403,46 @@ fn validate_robot_asset(asset: &RobotAsset, path: &Path) -> Result<RobotAsset, A
     }
 
     Ok(asset.clone())
+}
+
+fn validate_robot_asset_passive_dynamics(
+    asset: &RobotAsset,
+    overrides: &[UrdfJointPassiveDynamicsAsset],
+    path: &Path,
+) -> Result<(), AssetError> {
+    let path = path.display().to_string();
+    if !overrides.is_empty() {
+        let articulation = asset.urdf.as_ref().is_some_and(|urdf| urdf.articulation);
+        if !articulation {
+            return Err(AssetError::invalid(
+                path,
+                "URDF passive-dynamics overrides require articulation = true",
+            ));
+        }
+        let mut joint_names = HashSet::new();
+        for dynamics in overrides {
+            let transitions = [
+                dynamics.coulomb_transition_velocity_rad_s,
+                dynamics.coulomb_transition_velocity_m_s,
+            ];
+            let transition_count = transitions.iter().filter(|value| value.is_some()).count();
+            let transitions_valid = transitions
+                .iter()
+                .flatten()
+                .all(|value| value.is_finite() && *value > 0.0);
+            if dynamics.joint.is_empty()
+                || !joint_names.insert(dynamics.joint.as_str())
+                || transition_count != 1
+                || !transitions_valid
+            {
+                return Err(AssetError::invalid(
+                    path,
+                    "each URDF passive-dynamics override requires a unique non-empty joint and exactly one finite positive transition velocity",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn default_wheel_radius_m() -> f64 {
@@ -449,6 +547,10 @@ collisions = false
 mesh_collisions = false
 self_collisions = false
 multibody = true
+
+[[urdf.joint_passive_dynamics]]
+joint = "joint5"
+coulomb_transition_velocity_rad_s = 0.04
 "#;
         let asset = parse_robot_asset(text, Path::new("test.toml")).unwrap();
         let urdf = asset.urdf.expect("urdf section");
@@ -459,6 +561,9 @@ multibody = true
         assert!(!urdf.self_collisions);
         assert!(urdf.multibody);
         assert_eq!(urdf.initial_translation_m, [0.0, 0.25, 0.0]);
+        let overrides = parse_robot_asset_passive_dynamics(text, Path::new("test.toml")).unwrap();
+        assert_eq!(overrides.len(), 1);
+        assert_eq!(overrides[0].coulomb_transition_velocity_rad_s, Some(0.04));
     }
 
     #[test]
@@ -482,6 +587,30 @@ kind = "diff_drive"
 model_name = "diff_drive"
 "#;
         let error = parse_robot_asset(text, Path::new("bad.toml")).unwrap_err();
+        assert!(matches!(error, AssetError::Invalid { .. }));
+    }
+
+    #[test]
+    fn rejects_invalid_urdf_passive_dynamics_override() {
+        let text = r#"
+kind = "urdf"
+model_name = "arm"
+
+[urdf]
+path = "arm.urdf"
+
+[[urdf.joint_passive_dynamics]]
+joint = "joint5"
+coulomb_transition_velocity_rad_s = 0.0
+"#;
+        let error = parse_robot_asset(text, Path::new("bad.toml")).unwrap_err();
+        assert!(matches!(error, AssetError::Invalid { .. }));
+
+        let mixed_units = text.replace(
+            "coulomb_transition_velocity_rad_s = 0.0",
+            "coulomb_transition_velocity_rad_s = 0.04\ncoulomb_transition_velocity_m_s = 0.02",
+        );
+        let error = parse_robot_asset(&mixed_units, Path::new("bad.toml")).unwrap_err();
         assert!(matches!(error, AssetError::Invalid { .. }));
     }
 }

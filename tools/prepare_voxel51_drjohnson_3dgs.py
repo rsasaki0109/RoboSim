@@ -26,12 +26,12 @@ SOURCE_URL = (
 )
 SOURCE_BYTES = 788_034_924
 SOURCE_SHA256 = "92f4898839ec4ad7f197cf6c74b89918b35ea712b4e41435593ccb152d22b7f5"
-STRIDE = 10
+STRIDE = 4
 SOURCE_RECORD_BYTES = 248
 OUTPUT_RECORD_BYTES = 56
-OUTPUT_RECORDS = 317_756
-OUTPUT_BYTES = 17_794_698
-OUTPUT_SHA256 = "f357a929801db2be75574c47205479c53a6bf71686af3f4bf8c1641db3688663"
+OUTPUT_RECORDS = 794_389
+OUTPUT_BYTES = 44_486_146
+OUTPUT_SHA256 = "9e1c89c18b6dd70f3f77ef1463983d86d34d859e118aec56d77394b36a41458f"
 
 OUTPUT_HEADER = b"""ply
 format binary_little_endian 1.0
@@ -253,7 +253,7 @@ def main() -> None:
         "--output",
         type=pathlib.Path,
         default=pathlib.Path(
-            "assets/environments/voxel51_drjohnson_3dgs/drjohnson_dc_every10.ply"
+            "assets/environments/voxel51_drjohnson_3dgs/drjohnson_dc_every4.ply"
         ),
     )
     parser.add_argument("--check", action="store_true")

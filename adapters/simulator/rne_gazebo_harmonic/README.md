@@ -1,0 +1,1009 @@
+# Gazebo Harmonic OpenArm adapter
+
+This process adapter executes the official OpenArm v2 right-arm model in
+Gazebo Harmonic and translates the RNE external-simulator JSONL contract into
+fixed-step Gazebo commands. It is an adapter, not an RNE physics backend: no
+Gazebo, ROS 2, DDS, or simulator-specific type enters a core crate.
+
+The example contract exposes nine joint positions and velocities as its
+observation and accepts nine joint-position targets as its action. The default
+runtime uses a bounded velocity servo. A runtime may instead declare the tested
+effort-PD realization, explicit per-joint effort limits, failure behavior, and
+multiple physics substeps per 16,666,667 ns control step. Positions and
+velocities are sampled during PostUpdate. Trace collection also writes a
+deterministic actuation sidecar for each replay. It records raw and applied
+commands, command kind and units, initial/final position error, and saturation
+count across every physics substep while leaving the strict JSONL wire v1
+payload unchanged.
+
+## Requirements
+
+- Ubuntu 22.04 amd64
+- Gazebo Harmonic (`gz-sim8-cli`, `libgz-sim8`, and
+  `libgz-sim8-plugins`)
+- `python3-gz-sim8`
+- a release build containing `rne-simulator-conformance`
+
+The checked runtime manifest records the exact locally validated Gazebo
+version. Regenerate it when deliberately qualifying another patch version.
+
+Generate deterministic physical payload fixtures with:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_payload_suite.py \
+  --output artifacts/openarm-payload/fixtures
+```
+
+The nonzero cases lump the payload into the hand inertial using the
+parallel-axis theorem and retain explicit mass, center-of-mass, inertia, model,
+scene, and runtime hashes. Their Gazebo world fixes the robot base and selects
+bounded effort-PD actuation over ten physics substeps, so payload mass affects
+the measured trajectory. Gain scaling is declared per joint so shoulder and
+wrist authority are not conflated. The derivative path declares a deterministic
+first-order low-pass time constant and records both measured and filtered
+velocity; the URDF effort limits remain unchanged. Invalid actuator declarations
+fail before startup.
+
+After collecting the three backend traces, independently recompute the model
+and control requirements and write the browser report with:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_payload_report.py \
+  --fixture-root artifacts/openarm-payload/fixtures \
+  --trace-root artifacts/openarm-payload \
+  --output artifacts/openarm-payload/report
+```
+
+Compile the joint-5 actuator-authority envelope from the zero-payload physical
+fixture with:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_authority_suite.py \
+  --baseline-fixture artifacts/openarm-payload/fixtures/payload-0000g \
+  --output artifacts/openarm-authority/fixtures
+```
+
+The suite scales only the controlled joint's `max_effort_nm`, writes matching
+native and Gazebo actuation artifacts, and binds every model/config/runtime
+hash. After collecting the three backend traces, build the portable report:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_authority_report.py \
+  --fixture-root artifacts/openarm-authority/fixtures \
+  --trace-root artifacts/openarm-authority \
+  --output artifacts/openarm-authority/report
+```
+
+Compile the joint-5 plant viscous-damping envelope independently of actuator
+servo damping with:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_joint_loss_suite.py \
+  --baseline-fixture artifacts/openarm-payload/fixtures/payload-0000g \
+  --output artifacts/openarm-joint-loss/fixtures
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_joint_loss_controller_tuning.py \
+  --output artifacts/openarm-joint-loss/controller-tuning
+```
+
+The fixed `[0, 2.5, 5, 10, 20] N*m*s/rad` grid holds Coulomb friction at zero
+and leaves the TaskSpec, controller, actuator gains/limits, scene, world, and
+Gazebo adapter config unchanged. Each fixture binds the requested value, the
+independently parsed URDF realization, and every model/config/runtime hash. The
+zero case is byte-identical to the source model. Nonzero cases add exactly one
+joint-5 `<dynamics>` declaration. Plant damping and the existing joint-5 servo
+damping remain separate unit-bearing report fields.
+This viscous-only grid still holds Coulomb friction at zero so its existing
+boundary evidence remains one-dimensional. The portable Coulomb successor uses
+`-magnitude*tanh(velocity/transition_velocity)` rather than backend-native
+static-friction settings. Rapier and MuJoCo consume the typed plant component;
+the Gazebo effort adapter consumes explicit per-joint
+`plant_coulomb_friction_nm` and
+`plant_coulomb_transition_velocity_rad_s` arrays, adds passive loss after
+actuator saturation, and records passive effort plus the total force sent on
+every physics substep. This model is smooth kinetic loss and makes no stiction
+or breakaway claim.
+
+The controller tuning manifest freezes the `[0.04, 0.05, 0.06, 0.08] rad`
+state-feedback correction-limit candidates before execution. Run only the
+declared MuJoCo 10 N*m*s/rad tuning case for each candidate, then select it with:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_joint_loss_controller_tuning_report.py \
+  --candidate-root artifacts/openarm-joint-loss/controller-tuning \
+  --trace-root artifacts/openarm-joint-loss/controller-tuning-results \
+  --output artifacts/openarm-joint-loss/controller-tuning-report
+```
+
+The report selects the passing candidate with minimum RMSE, breaking a tie in
+favor of the smaller correction limit, and copies the exact selected controller
+with its SHA-256. The remaining damping/backend combinations are validation
+data, not tuning data. After running the selected controller unchanged beneath
+`rapier/CASE`, `mujoco/CASE`, and `gazebo/CASE`, build the browser report and
+minimum aggregate boundary-failure replay:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_joint_loss_report.py \
+  --fixture-root artifacts/openarm-joint-loss/fixtures \
+  --trace-root artifacts/openarm-joint-loss \
+  --controller artifacts/openarm-joint-loss/controller-tuning-report/openarm-joint-loss-selected.controller.json \
+  --output artifacts/openarm-joint-loss/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-joint-loss-failure-replay -- \
+  --report artifacts/openarm-joint-loss/report/openarm-joint-loss-report.json \
+  --trace artifacts/openarm-joint-loss/rapier/joint5-damping-20000mnms-per-rad/rapier-success-trace.json \
+  --output artifacts/openarm-joint-loss/report/minimum-joint-loss-failure.rne-replay
+```
+
+The initially declared 10 N*m*s/rad cross-backend contract and `0.02 rad` RMSE
+limit are not relaxed after measurement. The predeclared selection chooses the
+bounded `0.08 rad` correction candidate. Its content-addressed controller passes
+10 on Rapier, MuJoCo, and Gazebo at `0.013450`, `0.017185`, and `0.009439 rad`
+RMSE respectively. At the first out-of-envelope point, 20, all three fail the
+same unchanged RMSE contract at `0.021962`, `0.024173`, and `0.021684 rad`.
+The final report is `passed`: supported cases pass, model/hash/replay checks
+remain exact, and the 20-point rows are retained as
+`expected_boundary_failure`, not hidden or converted into successes.
+
+Build the separate regularized-Coulomb envelope with:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_coulomb_friction_suite.py \
+  --baseline-fixture artifacts/openarm-payload/fixtures/payload-0000g \
+  --output artifacts/openarm-coulomb/fixtures
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_coulomb_friction_report.py \
+  --fixture-root artifacts/openarm-coulomb/fixtures \
+  --trace-root artifacts/openarm-coulomb \
+  --controller artifacts/openarm-coulomb-controller-poles/candidates/openarm-coulomb-poles-fast.controller.json \
+  --output artifacts/openarm-coulomb/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-joint-loss-failure-replay -- \
+  --report artifacts/openarm-coulomb/report/openarm-coulomb-friction-report.json \
+  --trace artifacts/openarm-coulomb/rapier/joint5-coulomb-2000mn/rapier-success-trace.json \
+  --output artifacts/openarm-coulomb/report/openarm-coulomb-friction-first-failure.rne-replay
+```
+
+Use `--case-id joint5-coulomb-0500mn` for a focused three-backend rerun. The
+compiled Gazebo fixture copies the portable actuation artifact's exact PD gains,
+effort and velocity limits, full effort-controlled joint set, and physics
+substep count. Its effort-speed envelope is applied after effort clamping, just
+as in the native backends; Gazebo evidence remains adapter diagnostics rather
+than a backend effort measurement.
+
+The frozen `[0, 0.25, 0.5, 1, 2] N*m` grid keeps plant viscous damping at
+10 N*m*s/rad and the transition velocity at 0.01 rad/s. The predeclared
+`fast`, `baseline`, `medium`, and `slow` pole candidates were rerun after the
+typed actuator law and current 19-substep fixture were corrected. On the fixed
+0.5 N*m Rapier tuning case they produce `0.016882`, `0.021732`, `0.030511`,
+and `0.039050 rad` RMSE. The unchanged selection rule therefore chooses
+`fast`; no effort limit, friction envelope, or `0.02 rad` tolerance changes.
+The selected controller is then held byte-identical across the complete grid
+and all three backends.
+
+URDF cannot encode that transition width. Portable fixtures therefore bind it
+in the hashed robot asset rather than a runner-only argument:
+
+```toml
+[[urdf.joint_passive_dynamics]]
+joint = "openarm_right_joint5"
+coulomb_transition_velocity_rad_s = 0.01
+```
+
+The asset loader requires articulation, a unique known joint, exactly one
+revolute or prismatic unit field, and a finite positive value. It preserves the
+URDF damping and Coulomb magnitude and overrides only the unrepresentable
+transition velocity. Build the pole candidates and browser-readable selection
+report with:
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_coulomb_controller_pole_tuning.py \
+  --base-controller artifacts/openarm-controller-lab/openarm-plant-state-feedback.controller.json \
+  --output artifacts/openarm-coulomb-controller-poles/candidates
+# Run each candidate on the unchanged 0.5 N*m Rapier fixture, then:
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_coulomb_controller_pole_tuning_report.py \
+  --candidate-root artifacts/openarm-coulomb-controller-poles/candidates \
+  --trace-root artifacts/openarm-coulomb-controller-poles/results \
+  --output artifacts/openarm-coulomb-controller-poles/report
+```
+
+The final 15-run report is `passed`. Rapier RMSE is `0.014596`, `0.015728`,
+`0.016882`, `0.019263`, and `0.023701 rad`; native MuJoCo is `0.014596`,
+`0.015727`, `0.016881`, `0.019284`, and `0.023813 rad`; Gazebo is `0.005441`,
+`0.006037`, `0.006932`, `0.009224`, and `0.014510 rad`. All supported points
+through 0.5 N*m pass. The 1 N*m rows remain performance-green but are
+`outside_declared_envelope`; Rapier and MuJoCo first fail the unchanged RMSE
+gate at 2 N*m, while Gazebo remains performance-green outside capacity. Model
+and transition realization, controller/action provenance, and same-runtime
+replay are exact in every row.
+
+The browser report deliberately distinguishes commands from measurements and
+has a fixed structural check that actuator-side effort exceeds its declared
+clamp by no more than `1e-12 N*m`. Rapier and MuJoCo use completed-step native
+measurement; Gazebo uses the adapter-owned post-clamp diagnostic. All 15 rows
+have zero excess. The largest native peak is `6.684050 N*m`, and Gazebo never
+exceeds `7 N*m`.
+
+The portable measurement boundary is `rne_physics::JointEffortMeasurement`.
+It is optional completed-step evidence, so a missing backend measurement stays
+`Unavailable` instead of being replaced by the reconstructed PD command. The
+joint-feedback sensor preserves its capture timestamp and declared latency,
+adds no effort noise, and rejects non-finite or revolute/prismatic mismatches.
+MuJoCo publishes its native actuator-space force through this path. The first
+real 0.5 N*m rerun exposed an `18.148104 N*m` peak against the `7 N*m` clamp:
+implicit actuator-damping cancellation had been added outside the bounded
+control law. Typed actuator damping is now evaluated inside the clamp, passive
+plant damping remains native, and regularized Coulomb loss is applied as a
+separate generalized plant force. A same-controller, same-action rerun retains
+all 3,600 measurements and exact replay. With the selected fast-pole controller,
+the same case reaches `0.016881 rad` RMSE and a `6.538169 N*m` measured peak.
+The 2 N*m Rapier boundary failure is retained as a step-3600 behavior replay
+and a verified 30-artifact Failure Capsule alongside all three focused traces,
+model/configuration inputs, hashes, and runner/report sources.
+
+Gazebo diagnostics are serialized as compact JSON through a sibling temporary
+file and atomically replaced on close. This keeps the unchanged 15-second wire
+response timeout viable on WSL shared mounts and prevents a killed adapter from
+leaving a valid-looking partial sidecar.
+
+## Sweep motor-to-joint transmission efficiency
+
+The transmission lab holds the qualified `0.5 N*m` regularized-Coulomb plant,
+TaskSpec, controller, model geometry, mass, center of mass, inertia, limits,
+world, and scene fixed. It changes only right joint 5's dimensionless
+transmission efficiency over `[1.00, 0.90, 0.75, 0.50, 0.25]`. The portable
+actuation order is explicit: motor-side PD, motor effort/speed limits,
+efficiency multiplication, joint-side effort, then passive Coulomb loss.
+
+```bash
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_transmission_efficiency_suite.py \
+  --baseline-fixture artifacts/openarm-coulomb/fixtures/joint5-coulomb-0500mn \
+  --output artifacts/openarm-transmission/fixtures
+
+# Run every fixture through the Rapier and MuJoCo trace binaries and the Gazebo
+# adapter, retaining CASE/{rapier,mujoco,gazebo}. Then build the fixed-grid report:
+python adapters/simulator/rne_gazebo_harmonic/build_openarm_transmission_efficiency_report.py \
+  --fixture-root artifacts/openarm-transmission/fixtures \
+  --trace-root artifacts/openarm-transmission/runs \
+  --controller artifacts/openarm-coulomb-controller-poles/candidates/openarm-coulomb-poles-fast.controller.json \
+  --output artifacts/openarm-transmission/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-joint-loss-failure-replay -- \
+  --report artifacts/openarm-transmission/report/transmission-efficiency-report.json \
+  --trace artifacts/openarm-transmission/runs/joint5-efficiency-075pct/rapier/rapier-success-trace.json \
+  --output artifacts/openarm-transmission/report/transmission-efficiency-failure.rne-replay
+```
+
+The pilot rejected the initial `0.75` support hypothesis without changing the
+predeclared `0.02 rad` RMSE requirement: Rapier and native MuJoCo measure
+approximately `0.022008` and `0.022010 rad`. The declared production envelope
+therefore starts at `0.90`. At that supported boundary Rapier, MuJoCo, and
+Gazebo measure `0.018792`, `0.018792`, and `0.008468 rad`; all pass. The first
+outside case, `0.75`, is retained as an expected boundary failure because the
+two native paths fail while Gazebo remains performance-green at `0.011672 rad`.
+
+All 15 rows use the same action hash and exact same-runtime replay. Native
+traces retain the bounded motor command separately from backend-measured joint
+effort. Gazebo diagnostics retain motor-side `joint_applied_command_*` and
+joint-side `joint_transmitted_effort_*` independently. At `0.75`, Gazebo's
+`7.0 N*m` motor ceiling becomes a `5.25 N*m` joint-side ceiling; it is not
+misreported as motor saturation. The browser report binds fixture, model,
+configuration, controller, action, trace, and diagnostic hashes, and the first
+Rapier RMSE failure converts into a portable behavior replay and verified
+Failure Capsule.
+
+## Run conformance
+
+From the repository root on Ubuntu:
+
+```bash
+cargo build --locked -p rne_hardware_gateway --bin rne-simulator-conformance
+target/debug/rne-simulator-conformance \
+  --adapter /usr/bin/python3 \
+  --subject adapters/simulator/rne_gazebo_harmonic/rne_gazebo_harmonic_adapter.py \
+  --runtime-manifest adapters/simulator/rne_gazebo_harmonic/runtime.json \
+  --task adapters/simulator/rne_gazebo_harmonic/openarm_right_joint_tracking.task.json \
+  --timeout-ms 15000 \
+  --output artifacts/gazebo-openarm-conformance/report.json \
+  --adapter-arg adapters/simulator/rne_gazebo_harmonic/rne_gazebo_harmonic_adapter.py \
+  --adapter-arg --runtime-manifest \
+  --adapter-arg adapters/simulator/rne_gazebo_harmonic/runtime.json \
+  --adapter-arg --task \
+  --adapter-arg adapters/simulator/rne_gazebo_harmonic/openarm_right_joint_tracking.task.json
+```
+
+`.github/workflows/gazebo.yml` runs this same command on Ubuntu 22.04 with
+the exact `gz-sim8-cli`, `libgz-sim8`, `libgz-sim8-plugins`, and
+`python3-gz-sim8` 8.15.0 Jammy packages. It requires the
+fresh report to be byte-identical to `conformance.report.json`; changing the
+adapter, TaskSpec, runtime manifest, world, robot model, adapter config, launch
+arguments, handshake, or any canonical verdict therefore fails CI until real
+Gazebo conformance is rerun and reviewed. The workflow uploads its freshly
+generated report even on failure.
+
+Gazebo Harmonic's DART backend currently reports that it cannot create the
+URDF gripper's mimic constraint. The adapter therefore commands and observes
+both finger joints explicitly. The upstream bimanual URDF also uses negative
+mesh scales for its mirrored left arm, which DART rejects; this first fixture
+intentionally qualifies the official positive-scale right-arm URDF only.
+
+This in-repository adapter proves real external-simulator execution but does
+not count as independent third-party adapter evidence.
+
+## Run the same OpenArm controller on Rapier, MuJoCo, and Gazebo
+
+The portable pose-cycle controller owns one content-addressed reference
+trajectory, typed joint-feedback timing contract, and bounded joint-space PID
+correction law with per-joint integral anti-windup limits. RNE/Rapier, native
+MuJoCo 3.9.0, and Gazebo execute that same controller artifact against their own
+observations; no backend owns a private trajectory or gain set. The generated
+`controller-actions.json` is therefore the shared reference input, while each
+backend trace retains the observation sequence, age, proportional/derivative
+plus integral correction, and emitted target for every decision.
+
+The Rapier command also writes `sensor-validation-report.json` and a
+self-contained `sensor-validation-report.html`, plus the complete
+`sensor-dropout-trace.json` and `sensor-stuck-trace.json` golden streams. That
+gate reruns the real OpenArm plant for nominal replay, sequence-307 dropout, and
+sequence-307 stuck-value cases; it verifies exact one-period DataBus latency,
+zero sampling phase error, backend calibration, explicit unavailable effort
+measurements, observable actuator saturation, two declared bootstrap frames,
+and 1,798 sensor-feedback decisions. The same evidence proves fail-closed
+controller behavior at action step 309: sequence-307 dropout exceeds the
+one-period age contract, while sequence-307 stuck feedback violates the
+required nominal status. A failed check is written to both reports before the
+command exits non-zero.
+
+```bash
+cargo run --locked -p showcase_captures --bin rne-openarm-rapier-trace -- \
+  --output artifacts/openarm-cross-sim
+MUJOCO_DYNAMIC_LINK_DIR=/path/to/mujoco-3.9.0/lib \
+LD_LIBRARY_PATH=/path/to/mujoco-3.9.0/lib \
+cargo run --locked -p showcase_captures --features mujoco \
+  --bin rne-openarm-mujoco-trace -- \
+  --actions artifacts/openarm-cross-sim/controller-actions.json \
+  --output artifacts/openarm-cross-sim
+python3 adapters/simulator/rne_gazebo_harmonic/run_openarm_trace.py \
+  --actions artifacts/openarm-cross-sim/controller-actions.json \
+  --output artifacts/openarm-cross-sim
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_cross_sim_report.py \
+  --output artifacts/openarm-cross-sim
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_control_dynamics_report.py \
+  --trace-root artifacts/openarm-cross-sim \
+  --output artifacts/openarm-cross-sim
+```
+
+The successful comparison independently recomputes all 1,800 controller
+decisions from the artifact and each backend's retained typed observation. It
+requires zero timing mismatches and at most `1e-12 rad` reproduction error,
+then gates all three final reference-tracking errors and the maximum pairwise
+final joint delta with named radian tolerances. Maximum transient divergence is
+retained as a non-gating dynamics diagnostic. The intentional controller fault
+truncates the nine-element action at step 307; all three paths identify that
+exact first violation, and native MuJoCo plus Gazebo prove that rejection did
+not advance state before accepting the corrected action.
+
+Rapier and native MuJoCo also use the portable
+`rne_physics_state_v2_fnv1a_1e-6_si` replay digest. It covers articulated joint
+coordinates and velocities as well as non-fixed rigid-body pose and velocity;
+the report fails if the moving arm produces a constant digest or if the exact
+replay final digest changes. Solver-private digests are never compared across
+backends.
+
+The control-dynamics report evaluates the complete trajectory rather than only
+the final pose. It binds the backend-neutral force-based actuation
+configuration, native MuJoCo source/runtime evidence, and Gazebo
+runtime/configuration hashes, then records per-joint RMSE, IAE, ISE, terminal
+bias, position range, peak velocity, all three pairwise backend deltas, and the
+first URDF position/velocity-limit violation. MuJoCo evaluates declared typed
+actuator damping in the bounded control law and reserves native implicit joint
+damping for passive plant loss. `needs_tuning` is a valid diagnostic result and must
+not be converted to `passed` by widening a tolerance.
+
+## Identify the OpenArm joint-5 coupled response
+
+The identification controller uses the same TaskSpec, robot model, actuator
+configuration, and trace runners. It first excites joint 5 in isolation, then
+holds its target while moving the rest of the arm. Generate both traces and the
+self-contained report with:
+
+```bash
+cargo run --locked -p showcase_captures --bin rne-openarm-rapier-trace -- \
+  --controller adapters/simulator/rne_gazebo_harmonic/openarm_joint5_identification.controller.json \
+  --output artifacts/openarm-joint5-identification
+python3 adapters/simulator/rne_gazebo_harmonic/run_openarm_trace.py \
+  --controller adapters/simulator/rne_gazebo_harmonic/openarm_joint5_identification.controller.json \
+  --actions artifacts/openarm-joint5-identification/controller-actions.json \
+  --output artifacts/openarm-joint5-identification
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_joint5_identification_report.py \
+  --trace-root artifacts/openarm-joint5-identification \
+  --output artifacts/openarm-joint5-identification
+```
+
+The report fits a SISO ARX(2,2) model only on the isolated window, validates it
+on the coupled window, and records the first URDF position-limit violation. Its
+corrected status is `coupled_response_passed`: the Rapier path consumes the
+URDF-declared mass, centre of mass, and complete inertia tensor, while the robot
+asset configuration, actuation configuration, and model remain independently
+content-addressed. The coupled and hard-limit checks turned green without
+changing their registered tolerances or URDF effort limits.
+
+## Run the OpenArm plant and control-engineering lab
+
+Compile the versioned experiment manifest once, then supply the exact controller
+and generated action trace to all three backends:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_plant_controller.py \
+  --output artifacts/openarm-plant-lab/controller.json
+cargo run --locked -p showcase_captures --bin rne-openarm-rapier-trace -- \
+  --controller artifacts/openarm-plant-lab/controller.json \
+  --output artifacts/openarm-plant-lab
+MUJOCO_DYNAMIC_LINK_DIR=/path/to/mujoco-3.9.0/lib \
+LD_LIBRARY_PATH=/path/to/mujoco-3.9.0/lib \
+cargo run --locked -p showcase_captures --features mujoco \
+  --bin rne-openarm-mujoco-trace -- \
+  --controller artifacts/openarm-plant-lab/controller.json \
+  --actions artifacts/openarm-plant-lab/controller-actions.json \
+  --output artifacts/openarm-plant-lab
+python3 adapters/simulator/rne_gazebo_harmonic/run_openarm_trace.py \
+  --controller artifacts/openarm-plant-lab/controller.json \
+  --actions artifacts/openarm-plant-lab/controller-actions.json \
+  --output artifacts/openarm-plant-lab
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_plant_report.py \
+  --trace-root artifacts/openarm-plant-lab \
+  --controller artifacts/openarm-plant-lab/controller.json \
+  --output artifacts/openarm-plant-lab
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-plant-failure-replay -- \
+  --report artifacts/openarm-plant-lab/openarm-plant-lab-report.json \
+  --trace artifacts/openarm-plant-lab/rapier-success-trace.json \
+  --output artifacts/openarm-plant-lab/plant-settling-failure.rne-replay
+```
+
+The report independently recompiles the manifest and rejects controller/action
+drift. It checks time response, saturation, empirical frequency response,
+frequency-separated coupling, disjoint ARX training/validation windows, exact
+same-runtime replay, URDF limits, and cross-backend differences against fixed
+SI-unit requirements. `needs_tuning` is a valid diagnostic: the retained
+baseline localizes Rapier's joint-5 settling-time failure at step 571 instead
+of widening the 3.5 s requirement or the +/-0.0024 rad settling band.
+
+The committed 34-artifact proof, including complete traces and the derived
+failure replay, verifies without loading any simulator:
+
+```bash
+cargo run --locked -p xtask -- failure-capsule verify \
+  docs/evidence/openarm-plant-lab
+```
+
+## Identify all seven OpenArm joints in a held-out coupled mode
+
+The multijoint successor keeps the same TaskSpec, model, actuation contract,
+and three runners. It excites each arm joint in a separate 480-step multisine
+training region, then applies a 720-step simultaneous seven-input multisine that
+is never used for fitting. The report fits 21 full-rank models from typed
+position, velocity, and action data only; no model reads solver-private state.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_plant_controller.py \
+  --manifest adapters/simulator/rne_gazebo_harmonic/openarm_multijoint_identification_experiments.json \
+  --output artifacts/openarm-multijoint-identification/controller.json
+# Run the Rapier, MuJoCo, and Gazebo commands above with this controller and one
+# shared controller-actions.json, then build the held-out report:
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_multijoint_identification_report.py \
+  --trace-root artifacts/openarm-multijoint-identification \
+  --controller artifacts/openarm-multijoint-identification/controller.json \
+  --output artifacts/openarm-multijoint-identification
+```
+
+The fixed 149-check report passes on Rapier, native MuJoCo, and Gazebo. Every
+training design has rank `22/22`; minimum diagonal coherence is `0.99485`; the
+largest held-out one-step RMSE and cross-backend RMSE delta are approximately
+`0.0002073 rad`. Residual autocorrelation is gated directly unless residual
+RMSE is below the separately fixed `1e-8 rad` numerical-exactness floor. This
+preserves Gazebo's raw autocorrelation diagnostic instead of treating a
+`~1e-11 rad` residual as stochastic noise. All three intentional action-width
+failures remain localized at step 307.
+
+## Compare the official arm-only and pinch-gripper configurations
+
+This experiment uses the upstream OpenArm `right_arm` and
+`right_arm_with_pinch_gripper` product presets at the pinned source commit. It
+does not scale a tensor. The generated models share one seven-axis TaskSpec,
+controller, actuation contract, and action trace; only the official end-effector
+component changes.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_physical_configuration_suite.py \
+  --output artifacts/openarm-physical-configuration
+# Run rne-openarm-rapier-trace and rne-openarm-mujoco-trace for both generated
+# case directories with their --task, --actuation-config, --robot-asset,
+# --model-urdf, and --scene files. Run this adapter with each runtime.json.
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_physical_configuration_report.py \
+  --trace-root artifacts/openarm-physical-configuration \
+  --output artifacts/openarm-physical-configuration
+```
+
+All 30 fixed checks pass. The official gripper adds `0.239699047367 kg` of
+articulated mass with positive-definite, physically realizable source tensors.
+Held-out configuration response RMS deltas are `0.0108432 rad` on Rapier,
+`0.0104996 rad` on native MuJoCo, and `6.02431e-6 rad` on Gazebo. The
+seven-by-seven coupling-matrix Frobenius deltas are `0.0544213`, `0.0541451`,
+and `2.71880e-5`, respectively. All six runs are exact same-runtime replays and
+all intentional action-width failures occur at step 307.
+
+## Compare PID and state-space control
+
+The controller lab consumes the retained Rapier ARX model without refitting,
+forms the discrete three-state plant plus an integrated tracking-error state,
+checks controllability, and places four declared stable poles. A one-sample ARX
+predictor compensates the exact typed-observation latency. PID and state-space
+artifacts control only right joint 5 and share the same reference, sample time,
+latency, +/-0.04 rad feedback-correction bound, +/-0.015 rad integral-correction
+bound, target limits, actuator configuration, intentional failure, and a
+declared one-second `+0.03 rad` actuator-target bias pulse. The pulse is applied
+after controller limits and is invisible to the controller except through the
+same delayed typed joint feedback.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_controller_suite.py \
+  --output artifacts/openarm-controller-lab
+
+# Run this command once for each generated controller, changing ROLE and CONTROLLER.
+cargo run --locked -p showcase_captures --bin rne-openarm-rapier-trace -- \
+  --controller artifacts/openarm-controller-lab/CONTROLLER \
+  --output artifacts/openarm-controller-lab/ROLE
+# Then run the MuJoCo and Gazebo commands from the plant lab with the same
+# controller and ROLE/controller-actions.json paths.
+
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_controller_report.py \
+  --suite-root artifacts/openarm-controller-lab \
+  --output artifacts/openarm-controller-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-controller-failure-replay -- \
+  --report artifacts/openarm-controller-lab/report/openarm-controller-comparison-report.json \
+  --trace artifacts/openarm-controller-lab/pid/rapier-success-trace.json \
+  --output artifacts/openarm-controller-lab/report/pid-settling-failure.rne-replay
+```
+
+The report independently reproduces all 21,600 controller decisions across two
+controllers and three backends. The fixed PID baseline settles in approximately
+4.983 s on Rapier, 3.017 s on MuJoCo, and 1.283 s on Gazebo; only the Rapier
+baseline misses the unchanged 3.5 s requirement. State-space control settles in
+approximately 0.567 s, 0.550 s, and 0.467 s respectively. Its largest
+cross-backend settling delta is approximately 0.10 s, and every declared pole
+lies inside the unit circle. The PID replay distinguishes the 3.5 s deadline at
+step 571 from the first subsequent band exit at step 577.
+
+Under the shared actuator-realization disturbance, state-space control limits
+joint-5 peak error to approximately `0.0111-0.0125 rad`, recovers into the fixed
+`0.005 rad` band in `0.20-0.233 s`, and records `0.00448-0.00576 rad*s` IAE
+across Rapier, MuJoCo, and Gazebo. Every trace separately records reference,
+controller output, injected offset, and actual backend target; the report
+reproduces all four values rather than treating the pulse as a reference move.
+
+The committed 43-artifact controller proof verifies without loading Rapier,
+MuJoCo, or Gazebo:
+
+```bash
+cargo run --locked -p xtask -- failure-capsule verify \
+  docs/evidence/openarm-controller-lab
+```
+
+## Sweep the OpenArm actuator-bias robustness boundary
+
+The first robustness dimension holds the TaskSpec, state-feedback design,
+typed-observation latency, actuator limits, reference, and fixed requirements
+constant while sweeping an unobserved joint-5 actuator-target bias over
+`[0.00, 0.03, 0.06, 0.09, 0.12] rad`. Rapier executes the complete grid; the
+last passing and first failing cases are then run unchanged on MuJoCo and
+Gazebo:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --output artifacts/openarm-robustness-lab
+
+# Run every generated controller on Rapier. Then run the 0.03 rad and 0.06 rad
+# cases on MuJoCo and Gazebo using the same controller-actions.json artifact.
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-robustness-lab \
+  --output artifacts/openarm-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-robustness-lab/report/openarm-robustness-report.json \
+  --trace artifacts/openarm-robustness-lab/bias-060mrad/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-robustness-lab/report/minimum-bias-failure.rne-replay
+```
+
+The fixed grid brackets the boundary at `0.03 rad` passing and `0.06 rad`
+failing. At `0.06 rad`, all three backends first fail the unchanged
+`0.02 rad*s` IAE requirement while still passing peak-error and recovery-time
+requirements. Rapier localizes the first cumulative IAE crossing to step 3292
+at `0.020305 rad*s`; the replay ends at that first violation.
+
+The retained 49-artifact capsule includes all five Rapier sweep traces, both
+boundary cases on MuJoCo and Gazebo, the exact controllers/actions, report,
+model/configuration inputs, and the 3,293-frame minimum-failure replay:
+
+```bash
+cargo run --locked -p xtask -- failure-capsule verify \
+  docs/evidence/openarm-robustness-lab
+```
+
+The same manifest also defines a controller-visible joint-position bias sweep:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_position_measurement_bias \
+  --output artifacts/openarm-sensor-robustness-lab
+```
+
+This path preserves the raw typed feedback, then separately records the
+nominal-status bias and the exact delayed position consumed by the controller.
+The fixed `[0.00, 0.01, 0.02, 0.04, 0.06] rad` grid brackets the boundary at
+`0.01 rad` passing and `0.02 rad` failing. All three backends first fail the
+same `0.02 rad*s` IAE requirement; Rapier crosses at step 3303 and MuJoCo plus
+Gazebo at step 3304. The bias is active for exactly 60 controller decisions on
+every run, with at most `3.47e-18 rad` realization error.
+
+The retained 43-artifact capsule is bound to producer commit `a730cce` and
+contains both portable boundary cases, all five controller variants, the exact
+raw/visible observation report, and the 3,304-frame first-failure replay.
+
+```bash
+cargo run --locked -p xtask -- failure-capsule verify \
+  docs/evidence/openarm-sensor-robustness-lab
+```
+
+The third dimension sweeps controller-ingress publication dropout while keeping
+the backend measurement intact:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_feedback_publication_dropout \
+  --output artifacts/openarm-sensor-dropout-robustness-lab
+```
+
+The observation contract permits a maximum age of three control periods. It
+therefore passes bursts of zero, one, and two dropped frames. Three frames is
+the first failure: Rapier, MuJoCo, and Gazebo all observe the same
+`66,666,668`-tick age, reject exactly one decision at step 3244, hold the last
+accepted target with zero realization delta while freezing controller state,
+and resume on fresh nominal sequence 3243 at step 3245. The first contract
+deviation remains the third missing publication at capture sequence 3242, so
+the minimum replay stops there rather than hiding it behind the later rejection.
+
+The browser report and retained capsule preserve all five Rapier cases and the
+two/three-frame boundary on all backends:
+
+```bash
+cargo run --locked -p xtask -- failure-capsule verify \
+  docs/evidence/openarm-sensor-dropout-robustness-lab
+```
+
+## Sweep OpenArm controller-ingress sensor latency
+
+The next sensor-timing dimension keeps every typed joint-feedback publication
+and its original capture timestamp, then adds a deterministic delay only
+between DataBus availability and controller ingress:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_feedback_controller_ingress_latency \
+  --output artifacts/openarm-sensor-latency-robustness-lab
+```
+
+The fixed `[0, 1, 2, 3, 4]` additional-control-period grid produces total
+controller-visible ages of one through five periods. The declared supported
+additional delay is zero periods: Rapier, native MuJoCo, and Gazebo all pass
+that case and all identify one additional period as the first unsupported
+case. The report independently verifies the retained capture sequence, exact
+age, and controller-visible values. Rapier and MuJoCo also show the associated
+joint-5 RMSE increase at one period; Gazebo remains performance-green, so the
+portable boundary is the explicit ingress-latency contract rather than an
+overgeneralized solver-performance claim. At three and four additional periods,
+the three-period maximum-age policy rejects stale observations, holds the last
+accepted target, and freezes controller state.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-latency-robustness-lab \
+  --output artifacts/openarm-sensor-latency-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-sensor-latency-robustness-lab/report/openarm-sensor-latency-robustness-report.json \
+  --trace artifacts/openarm-sensor-latency-robustness-lab/sensor-latency-001frames/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-sensor-latency-robustness-lab/report/minimum-sensor-latency-failure.rne-replay
+```
+
+## Sweep deterministic OpenArm sensor jitter
+
+The jitter dimension varies controller-ingress availability without changing
+the typed capture time, base one-period sensor latency, publication count, or
+plant. Within capture sequences 3241 through 3300, the deterministic schedule
+delays `N` consecutive samples by `N` periods and then exposes one nominally
+timed sample before repeating:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_feedback_controller_ingress_jitter \
+  --output artifacts/openarm-sensor-jitter-robustness-lab
+```
+
+The fixed `[0, 1, 2, 3, 4]`-period peak-jitter grid supports one period and
+first fails the fixed jitter requirement at two. Rapier, native MuJoCo, and
+Gazebo reproduce the same one/two-period boundary, visible ages of
+`33,333,334` and `50,000,001` ticks, and zero rejected decisions at both
+points. The two-period failure is localized to controller step 3244, where the
+retained capture sequence is 3240 and the exact age proves two periods of
+jitter beyond base latency. Joint-5 RMSE remains within the fixed performance
+gate on every backend, so the report does not misclassify a transport-contract
+boundary as plant divergence. Three and four periods separately exercise the
+stale-observation hold/freeze path.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-jitter-robustness-lab \
+  --output artifacts/openarm-sensor-jitter-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-sensor-jitter-robustness-lab/report/openarm-sensor-jitter-robustness-report.json \
+  --trace artifacts/openarm-sensor-jitter-robustness-lab/sensor-jitter-002frames/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-sensor-jitter-robustness-lab/report/minimum-sensor-jitter-failure.rne-replay
+```
+
+## Sweep independently selected stale sensor age
+
+The stale-age dimension keeps capture, publication, base availability, and
+backend state nominal. During controller steps 3243 through 3302 it selects the
+`N`th older already-available publication while retaining that publication's
+original capture timestamp:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_feedback_controller_stale_age \
+  --output artifacts/openarm-sensor-stale-age-robustness-lab
+```
+
+The fixed `[0, 1, 2, 3, 4]` additional-frame grid passes two frames, whose
+total age equals the allowed `50,000,001 ticks`, and first fails at three.
+Rapier, native MuJoCo, and Gazebo all localize that failure to controller step
+3243: sequence 3238 is selected with age `66,666,668 ticks`. Each backend then
+rejects exactly 60 decisions, holds the last accepted target with zero delta,
+freezes controller state, and resumes in one decision at step 3303 after the
+selection window closes. Joint-5 RMSE remains green on both sides, separating
+the age/fail-safe contract from plant performance.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-stale-age-robustness-lab \
+  --output artifacts/openarm-sensor-stale-age-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-sensor-stale-age-robustness-lab/report/openarm-sensor-stale-age-robustness-report.json \
+  --trace artifacts/openarm-sensor-stale-age-robustness-lab/sensor-stale-003frames/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-sensor-stale-age-robustness-lab/report/minimum-sensor-stale-age-failure.rne-replay
+```
+
+## Prove bounded OpenArm sensor-dropout recovery
+
+The recovery dimension holds the trigger constant at three consecutive missing
+joint-feedback publications. That trigger produces one stale-observation
+rejection, target hold, and frozen controller state. The sweep then varies only
+the number of additional fresh-observation decisions held before the controller
+law resumes:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_feedback_dropout_recovery \
+  --output artifacts/openarm-sensor-recovery-robustness-lab
+```
+
+The fixed `[0, 1, 2, 3, 4]` additional-decision grid produces exact recovery
+counts `[1, 2, 3, 4, 5]`. Rapier, native MuJoCo, and Gazebo all pass immediate
+fresh-observation recovery at controller step 3245 and first fail the fixed
+one-decision requirement at step 3246 when one extra confirmation hold is
+introduced. The failing boundary records one stale rejection, one
+`recovery_confirmation_pending` rejection, zero target and integral-state
+delta during both holds, and green joint-5 RMSE/final-error gates. Each backend
+retains exact replay evidence.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-recovery-robustness-lab \
+  --output artifacts/openarm-sensor-recovery-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-sensor-recovery-robustness-lab/report/openarm-sensor-recovery-robustness-report.json \
+  --trace artifacts/openarm-sensor-recovery-robustness-lab/sensor-recovery-001decisions/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-sensor-recovery-robustness-lab/report/minimum-sensor-recovery-failure.rne-replay
+```
+
+## Prove repeated-dropout sensor re-arm spacing
+
+This dimension fixes two two-frame publication dropouts and varies only the
+number of fresh publications between them. The descending `[4, 3, 2, 1, 0]`
+grid passes one fresh frame and first fails zero on Rapier, native MuJoCo, and
+Gazebo. With zero separation, capture sequences 3240 through 3243 are all
+unpublished; the earliest failure is sequence 3242 against the fixed one-frame
+minimum. Joint-5 RMSE and final-error checks remain green.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_feedback_repeated_dropout_rearm \
+  --output artifacts/openarm-sensor-rearm-robustness-lab
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-rearm-robustness-lab \
+  --output artifacts/openarm-sensor-rearm-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-sensor-rearm-robustness-lab/report/openarm-sensor-rearm-robustness-report.json \
+  --trace artifacts/openarm-sensor-rearm-robustness-lab/sensor-rearm-000fresh/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-sensor-rearm-robustness-lab/report/minimum-sensor-rearm-failure.rne-replay
+```
+
+## Sweep OpenArm joint-position sensor quantization
+
+The quantization dimension retains raw typed feedback and changes only the
+joint-5 position visible to the controller for 60 decisions. The deterministic
+nearest-multiple, ties-away-from-zero rule is swept over
+`[0, 0.001, 0.002, 0.004, 0.008] rad`. Rapier, native MuJoCo, and Gazebo pass
+the fixed `0.002 rad` resolution limit and first fail `0.004 rad` at controller
+step 3241. The report independently reconstructs every visible value from its
+retained raw source sequence and observes zero realization delta.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_position_measurement_quantization \
+  --output artifacts/openarm-sensor-quantization-robustness-lab
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-quantization-robustness-lab \
+  --output artifacts/openarm-sensor-quantization-robustness-lab/report
+```
+
+## Sweep OpenArm joint-position sensor saturation
+
+The saturation successor retains the raw typed feedback and symmetrically
+clamps only the joint-5 position visible to the controller during steps 882
+through 941. The descending `[0.08, 0.06, 0.05, 0.04, 0.03] rad` range grid
+passes the fixed `0.05 rad` minimum and first fails at `0.04 rad` on Rapier,
+native MuJoCo, and Gazebo. The first failing case performs one real clamp at
+step 941 on
+each backend while all 60 controller decisions and every raw source remain
+available for independent reconstruction with zero realization delta.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_position_measurement_saturation \
+  --output artifacts/openarm-sensor-saturation-robustness-lab
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-saturation-robustness-lab \
+  --output artifacts/openarm-sensor-saturation-robustness-lab/report
+```
+
+## Sweep OpenArm joint-position stuck values
+
+The status-aware stuck-value dimension retains raw typed feedback but holds the
+joint-5 position and velocity consumed by the controller at the last nominal
+sample. It also marks each affected observation `stuck_value`, causing the
+controller to reject it, hold the previous target, freeze state, and recover on
+the first fresh nominal sample. The `[0, 1, 2, 3, 4]` consecutive-frame grid
+passes two frames and first fails three on Rapier, native MuJoCo, and Gazebo.
+The first failing Rapier decision is step 904, consuming sequence 902 from held
+source 899, and the report reconstructs the full relationship with zero
+realization delta.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension joint_position_stuck_value \
+  --output artifacts/openarm-sensor-stuck-robustness-lab
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-sensor-stuck-robustness-lab \
+  --output artifacts/openarm-sensor-stuck-robustness-lab/report
+```
+
+## Sweep the OpenArm actuator command-transport delay
+
+The fourth robustness dimension delays only right joint 5 after controller
+limits and before backend actuation. The controller continues to receive only
+the typed, one-period-latent joint feedback; it does not read the delay history
+or backend state:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension actuator_command_delay \
+  --output artifacts/openarm-command-delay-robustness-lab
+```
+
+The fixed `[0, 1, 2, 3, 4]` control-period grid passes the declared supported
+maximum of two periods and first leaves the supported envelope at three. The
+same two/three-period boundary is executed on Rapier, native MuJoCo, and
+Gazebo. For all six boundary traces, the report independently recomputes the
+source step and proves with zero realization delta that the applied joint-5
+target at step `k` equals the retained controller target at `k-delay_steps`;
+the other eight targets remain current. The first failing case is localized to
+step 3241, where three periods selects source step 3238. Tracking peak, IAE,
+and recovery requirements remain green and are reported separately from the
+declared transport envelope.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-command-delay-robustness-lab \
+  --output artifacts/openarm-command-delay-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-command-delay-robustness-lab/report/openarm-command-delay-robustness-report.json \
+  --trace artifacts/openarm-command-delay-robustness-lab/delay-003steps/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-command-delay-robustness-lab/report/minimum-command-delay-failure.rne-replay
+```
+
+## Sweep the OpenArm actuator command slew-rate limit
+
+The fifth robustness dimension applies a physical command slew-rate limit to
+right joint 5 after controller limits and before backend actuation. Each
+applied target is clamped against the previous applied target using the fixed
+control period, so the contract is expressed in `rad/s` rather than an
+abstract severity value:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension actuator_command_rate_limit \
+  --output artifacts/openarm-command-rate-limit-robustness-lab
+```
+
+The descending `[0.40, 0.25, 0.15, 0.10, 0.05] rad/s` grid exercises steps
+1298 through 1357, where all three backends issue changing joint-5 commands.
+`0.15 rad/s` is the last supported case: Rapier, native MuJoCo, and Gazebo
+perform 43, 42, and 38 limited applications respectively while passing peak,
+IAE, and recovery gates. `0.10 rad/s` is the first unsupported case and limits
+60, 59, and 57 applications. Every backend localizes the first contract
+deviation to step 1298 against the fixed `0.15 rad/s` minimum. The browser
+report independently reconstructs the recursive previous-applied-target
+relationship for both boundary cases and obtains zero realization delta on all
+six traces; the later closed-loop IAE effect remains a separate check.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-command-rate-limit-robustness-lab \
+  --output artifacts/openarm-command-rate-limit-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-command-rate-limit-robustness-lab/report/openarm-command-rate-limit-robustness-report.json \
+  --trace artifacts/openarm-command-rate-limit-robustness-lab/rate-100mrad-s/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-command-rate-limit-robustness-lab/report/minimum-command-rate-limit-failure.rne-replay
+```
+
+## Sweep the OpenArm actuator command deadband
+
+The sixth robustness dimension applies a physical command deadband to right
+joint 5 after controller limits and before backend actuation. During the pulse,
+the backend-facing target holds its previous applied value whenever the new
+controller command differs by no more than the declared deadband. The
+controller observes the result only through typed, one-period-latent joint
+feedback:
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_suite.py \
+  --dimension actuator_command_deadband \
+  --output artifacts/openarm-command-deadband-robustness-lab
+```
+
+The fixed `[0, 0.00025, 0.0005, 0.001, 0.002] rad` grid exercises steps 882
+through 941. `0.001 rad` is the last supported case: Rapier, native MuJoCo,
+and Gazebo hold 28, 31, and 29 changing commands while passing every control
+performance gate. `0.002 rad` is the first unsupported case and produces 38,
+40, and 40 holds. The largest independently recomputed held gaps are
+`0.982-0.999 mrad` and `1.787-1.962 mrad` at the two boundary values, with
+zero realization delta on all six traces. Every backend therefore fails only
+the fixed `0.001 rad` actuator requirement at step 882; the browser report
+keeps peak error, IAE, and recovery as separate passing checks.
+
+```bash
+python3 adapters/simulator/rne_gazebo_harmonic/build_openarm_robustness_report.py \
+  --suite-root artifacts/openarm-command-deadband-robustness-lab \
+  --output artifacts/openarm-command-deadband-robustness-lab/report
+cargo run --locked -p showcase_captures \
+  --bin rne-openarm-robustness-failure-replay -- \
+  --report artifacts/openarm-command-deadband-robustness-lab/report/openarm-command-deadband-robustness-report.json \
+  --trace artifacts/openarm-command-deadband-robustness-lab/deadband-2000urad/rne_rapier/rapier-success-trace.json \
+  --output artifacts/openarm-command-deadband-robustness-lab/report/minimum-command-deadband-failure.rne-replay
+```

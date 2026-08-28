@@ -5,7 +5,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Run the exact released archive workflow in docs/EXTERNAL_EVIDENCE_INTAKE.md without maintainer assistance.
+        Run the archive-only workflow in docs/EXTERNAL_FLAGSHIP_REPRODUCTION.md without maintainer assistance.
+        Current campaign: v0.2.0 — https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0
+        Do not submit before these assets are published.
         A submitted issue is not acceptance evidence. Maintainers re-download and verify every byte with external-flagship-check.
   - type: checkboxes
     id: independence
@@ -42,8 +44,8 @@ body:
     id: rne_release
     attributes:
       label: RNE release
-      description: Exact clean tagged RNE release and archive checksum used.
-      placeholder: v0.x.y, sha256:...
+      description: Exact clean tagged RNE release and archive checksum used. Only v0.2.0 qualifies for this campaign.
+      placeholder: v0.2.0, sha256:...
     validations:
       required: true
   - type: input
@@ -86,20 +88,31 @@ body:
     id: proof_bundle
     attributes:
       label: Proof bundle
-      description: Immutable archive containing the unmodified installed proof directory and generated external reproduction report.
+      description: Immutable archive containing the complete unmodified installed proof directory and reproduction logs. Keep the candidate JSON outside this archive so it can bind the archive SHA-256 without self-reference.
       placeholder: |
         URL:
         file:
         size_bytes:
         sha256:
-        external_report_path:
+    validations:
+      required: true
+  - type: textarea
+    id: submission_candidate
+    attributes:
+      label: Submission candidate
+      description: Immutable raw URL, repository-relative path, byte size, and lowercase SHA-256 of the completed schema-v2 candidate JSON committed at the evidence revision.
+      placeholder: |
+        URL:
+        path:
+        size_bytes:
+        sha256:
     validations:
       required: true
   - type: textarea
     id: reproduction_command
     attributes:
       label: Clean reproduction commands
-      description: Exact extraction, proof, and external-flagship-check commands with exit codes and elapsed output.
+      description: Exact archive verification, extraction, and installed proof commands with exit codes and elapsed output. Maintainers run external-flagship-check after submission.
       render: shell
     validations:
       required: true
@@ -112,7 +125,7 @@ body:
           required: true
         - label: Rapier and bundled MuJoCo passed success and intentional-failure comparisons.
           required: true
-        - label: external-flagship-check emitted a passed report for the exact archive, executable, proof, and Failure Capsule.
+        - label: The proof bundle retains the exact inputs required for maintainers to run external-flagship-check.
           required: true
         - label: Exact downloadable bytes will remain available for maintainer review.
           required: true

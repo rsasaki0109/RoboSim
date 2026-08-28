@@ -1,0 +1,20 @@
+{
+  "kind": "rne_openarm_recorded_shadow_requirements",
+  "schema_version": 1,
+  "experiment_id": "rne.openarm.right.recorded_shadow.coulomb_0500mn.v1",
+  "task_id": "rne.openarm.right_joint_tracking.v1",
+  "fixed_delta_ticks": 16666667,
+  "bootstrap_action_count": 2,
+  "minimum_compared_samples": 1798,
+  "nominal_latency_ticks": 16666667,
+  "maximum_latency_ticks": 16666667,
+  "drop_policy": "explicit_sequence_gap_v1",
+  "maximum_dropped_observations": 0,
+  "requires_zero_actuator_writes": true,
+  "disconnect_after_observation_sequence": 900,
+  "maximum_disconnect_response_ticks": 0,
+  "tolerances": [
+    {"tensor_name": "joint_position_rad", "absolute_tolerance": 0.02, "unit": "rad"},
+    {"tensor_name": "joint_velocity_rad_s", "absolute_tolerance": 0.1, "unit": "rad/s"}
+  ]
+}

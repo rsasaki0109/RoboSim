@@ -8,6 +8,7 @@ pub mod camera;
 pub mod depth;
 pub mod environment;
 pub mod gaussian_splat;
+pub mod gaussian_splat_validation;
 pub mod headless;
 pub mod image;
 pub mod lidar;
@@ -34,6 +35,12 @@ pub use gaussian_splat::{
     validate_gaussian_splat_manifest, validate_gaussian_splat_manifest_with_override,
     GaussianSplatCaptureReport, GaussianSplatEnvironment, GaussianSplatError, HybridRenderScene,
     GAUSSIAN_SPLAT_RENDERER_ID_V1,
+};
+pub use gaussian_splat_validation::{
+    audit_gaussian_splat_validation_fixture, compare_registered_gaussian_splat_observations,
+    gaussian_splat_observation_tolerances, require_qualifying_gaussian_splat_fixture,
+    GaussianSplatObservationMetrics, GaussianSplatObservationTolerances,
+    GaussianSplatValidationAudit, GaussianSplatValidationError,
 };
 pub use headless::HeadlessRenderBackend;
 pub use image::{hash_rgba8, ImageFrame, RenderTarget};

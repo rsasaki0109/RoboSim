@@ -1,5 +1,5 @@
 schema_version = 1
-release_version = "0.1.0"
+release_version = "0.2.0"
 baseline_revision = "9e1ea8cb2dab8f468cf7bc51fac8bd381359acc4"
 baseline_tree = "5d888b77e0d4785fa57c9edd10ce1292089fab5a"
 cargo_semver_checks_version = "0.49.0"

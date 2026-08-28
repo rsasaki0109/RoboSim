@@ -3,7 +3,7 @@ name: Release rehearsal
 on:
   pull_request:
   push:
-    tags: ["v0.1.*"]
+    tags: ["v0.2.*"]
   workflow_dispatch:
 
 permissions:
@@ -12,7 +12,7 @@ permissions:
 env:
   MATURIN_VERSION: "1.13.3"
   MUJOCO_VERSION: "3.9.0"
-  RELEASE_VERSION: "0.1.0"
+  RELEASE_VERSION: "0.2.0"
 
 jobs:
   linux:
@@ -297,12 +297,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          mapfile -d '' assets < <(
+          mapfile -d '' primary_assets < <(
             find dist -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.whl' \) \
               -print0 | sort -z
           )
-          if [[ "${#assets[@]}" -ne 4 ]]; then
-            printf 'expected 4 release assets, found %s\n' "${#assets[@]}" >&2
+          if [[ "${#primary_assets[@]}" -ne 4 ]]; then
+            printf 'expected 4 primary release assets, found %s\n' "${#primary_assets[@]}" >&2
             exit 1
           fi
           for platform_dir in dist/rne-release-linux dist/rne-release-windows; do
@@ -337,6 +337,42 @@ jobs:
               --predicate-type "https://slsa.dev/provenance/v1" \
               --deny-self-hosted-runners
           done
+
+          publish_dir="dist/release-assets"
+          mkdir -p "$publish_dir"
+          for asset in "${primary_assets[@]}"; do
+            cp "$asset" "$publish_dir/"
+          done
+          for platform in \
+            "linux:x86_64-unknown-linux-gnu" \
+            "windows:x86_64-pc-windows-msvc"; do
+            IFS=: read -r platform_id target <<< "$platform"
+            platform_dir="dist/rne-release-${platform_id}"
+            evidence_prefix="rne-${RELEASE_VERSION}-${target}"
+            cp "$platform_dir/attestations/release-bundle.json" \
+              "$publish_dir/${evidence_prefix}.attestation-bundle.json"
+            cp "$platform_dir/extracted-evidence/archive-install-rehearsal-report.json" \
+              "$publish_dir/${evidence_prefix}.archive-install-rehearsal-report.json"
+          done
+          (
+            cd "$publish_dir"
+            mapfile -d '' checksum_subjects < <(
+              find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\0' | sort -z
+            )
+            if [[ "${#checksum_subjects[@]}" -ne 8 ]]; then
+              printf 'expected 8 checksum subjects, found %s\n' \
+                "${#checksum_subjects[@]}" >&2
+              exit 1
+            fi
+            sha256sum "${checksum_subjects[@]}" > SHA256SUMS
+          )
+          mapfile -d '' assets < <(
+            find "$publish_dir" -maxdepth 1 -type f -print0 | sort -z
+          )
+          if [[ "${#assets[@]}" -ne 9 ]]; then
+            printf 'expected 9 durable release assets, found %s\n' "${#assets[@]}" >&2
+            exit 1
+          fi
           gh release create "${GITHUB_REF_NAME}" \
             --verify-tag \
             --prerelease \

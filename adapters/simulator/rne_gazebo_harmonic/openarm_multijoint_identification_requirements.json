@@ -1,0 +1,20 @@
+{
+  "kind": "rne_openarm_multijoint_identification_requirements_registry",
+  "schema_version": 1,
+  "registry_id": "rne.openarm.right.multijoint_identification.requirements.v1",
+  "requirements": [
+    {"id": "identification.input.maximum_offset_rad", "gate": "identification_validity", "unit": "rad", "maximum": 0.1},
+    {"id": "identification.input.minimum_training_rms_rad", "gate": "identification_validity", "unit": "rad", "minimum": 0.015},
+    {"id": "identification.input.minimum_validation_rms_rad", "gate": "identification_validity", "unit": "rad", "minimum": 0.01},
+    {"id": "identification.design.minimum_regressor_rank", "gate": "identification_validity", "unit": "rank", "minimum": 22},
+    {"id": "identification.frequency.minimum_diagonal_coherence", "gate": "identification_validity", "unit": "1", "minimum": 0.5},
+    {"id": "identification.model.maximum_validation_rmse_rad", "gate": "identification_validity", "unit": "rad", "maximum": 0.05},
+    {"id": "identification.model.maximum_absolute_residual_mean_rad", "gate": "identification_validity", "unit": "rad", "maximum": 0.005},
+    {"id": "identification.model.maximum_absolute_residual_autocorrelation", "gate": "identification_validity", "unit": "1", "maximum": 0.95},
+    {"id": "identification.model.maximum_residual_rmse_for_autocorrelation_relevance_rad", "gate": "identification_validity", "unit": "rad", "maximum": 0.00000001},
+    {"id": "identification.model.maximum_95_prediction_half_width_rad", "gate": "identification_validity", "unit": "rad", "maximum": 0.05},
+    {"id": "identification.cross_backend.maximum_validation_rmse_delta_rad", "gate": "portability", "unit": "rad", "maximum": 0.04},
+    {"id": "identification.hard_position_limit_epsilon_rad", "gate": "plant_integrity", "unit": "rad", "maximum": 0.000001},
+    {"id": "identification.hard_velocity_limit_epsilon_rad_s", "gate": "plant_integrity", "unit": "rad/s", "maximum": 0.000001}
+  ]
+}

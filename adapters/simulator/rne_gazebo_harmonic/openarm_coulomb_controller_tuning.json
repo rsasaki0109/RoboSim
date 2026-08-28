@@ -1,0 +1,23 @@
+{
+  "kind": "rne_openarm_joint_loss_controller_tuning_manifest",
+  "schema_version": 1,
+  "tuning_id": "rne.openarm.right.joint5_regularized_coulomb_controller_tuning.v1",
+  "controlled_joint": "openarm_right_joint5",
+  "maximum_state_feedback_correction_grid_rad": [0.08, 0.12, 0.16, 0.24],
+  "tuning_backend_id": "rne_rapier",
+  "tuning_case_id": "joint5-coulomb-0500mn",
+  "requirements": [
+    {
+      "id": "joint_loss.maximum_controlled_joint_rmse_rad",
+      "unit": "rad",
+      "maximum": 0.02
+    },
+    {
+      "id": "joint_loss.maximum_controlled_joint_final_error_rad",
+      "unit": "rad",
+      "maximum": 0.005
+    }
+  ],
+  "selection_rule": "minimum_rmse_among_passing_candidates_then_smallest_correction_limit",
+  "validation_scope": "selected_controller_runs_unchanged_across_full_fixed_coulomb_grid_and_all_declared_backends"
+}

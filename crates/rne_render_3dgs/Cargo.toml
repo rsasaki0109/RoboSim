@@ -13,6 +13,9 @@ glam = "0.29"
 rne_math = { workspace = true }
 rne_render = { workspace = true }
 rne_render_wgpu = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 wgpu = { workspace = true }
 wgpu-3dgs-viewer = "0.2"

@@ -10,9 +10,9 @@ use rne_core::SimDuration;
 use rne_ecs::{Entity, Parent, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
-    ColliderShape, ContactEvent, JointActuation, JointMotor, JointState, PhysicsBackend,
-    PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, RaycastHit, RaycastQuery,
-    RigidBody, RigidBodyType,
+    ColliderShape, ContactEvent, JointActuation, JointEffortMeasurement, JointMotor,
+    JointPassiveDynamics, JointState, PhysicsBackend, PhysicsCapability, PhysicsError,
+    PhysicsWorldDesc, PhysicsWorldId, RaycastHit, RaycastQuery, RigidBody, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::{BTreeMap, HashMap};
@@ -28,6 +28,7 @@ const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::Articulation,
     PhysicsCapability::ContactForce,
     PhysicsCapability::RaycastBatch,
+    PhysicsCapability::JointEffortMeasurement,
 ];
 
 /// Errors specific to the optional MuJoCo adapter.
@@ -71,6 +72,22 @@ pub enum MuJoCoError {
     #[error("invalid MuJoCo joint actuation on entity {entity_index}: {reason}")]
     InvalidActuation {
         /// Stable ECS entity index carrying the rejected command.
+        entity_index: u32,
+        /// Static validation reason.
+        reason: &'static str,
+    },
+    /// Passive joint dynamics are invalid.
+    #[error("invalid MuJoCo passive joint dynamics on entity {entity_index}: {reason}")]
+    InvalidPassiveDynamics {
+        /// Stable ECS entity index carrying the rejected plant parameters.
+        entity_index: u32,
+        /// Static validation reason.
+        reason: &'static str,
+    },
+    /// Exact rigid-body inertial properties are invalid.
+    #[error("invalid MuJoCo rigid-body inertia on entity {entity_index}: {reason}")]
+    InvalidInertia {
+        /// Stable ECS entity index carrying the rejected properties.
         entity_index: u32,
         /// Static validation reason.
         reason: &'static str,
@@ -243,6 +260,20 @@ impl MuJoCoBackend {
                 entity_index,
                 reason,
             },
+            MuJoCoError::InvalidPassiveDynamics {
+                entity_index,
+                reason,
+            } => PhysicsError::InvalidPassiveDynamics {
+                entity_index,
+                reason,
+            },
+            MuJoCoError::InvalidInertia {
+                entity_index,
+                reason,
+            } => PhysicsError::InvalidInertia {
+                entity_index,
+                reason,
+            },
             _ => PhysicsError::InitializationFailed,
         }
     }
@@ -261,6 +292,20 @@ fn map_compile_error(error: CompileError) -> MuJoCoError {
             entity_index,
             reason,
         } => MuJoCoError::InvalidActuation {
+            entity_index,
+            reason,
+        },
+        CompileError::InvalidPassiveDynamics {
+            entity_index,
+            reason,
+        } => MuJoCoError::InvalidPassiveDynamics {
+            entity_index,
+            reason,
+        },
+        CompileError::InvalidInertia {
+            entity_index,
+            reason,
+        } => MuJoCoError::InvalidInertia {
             entity_index,
             reason,
         },
@@ -720,7 +765,8 @@ fn sync_scalar_joint_from_ecs(
             "joint {joint_name} is not scalar"
         )));
     }
-    let control = joint_control(world, entity, revolute, view.qpos[0], view.qvel[0])?;
+    let (control, passive_coulomb_effort) =
+        joint_control(world, entity, revolute, view.qpos[0], view.qvel[0])?;
     let actuator_id = data
         .model()
         .name_to_id(MjtObj::mjOBJ_ACTUATOR, actuator_name)
@@ -728,6 +774,13 @@ fn sync_scalar_joint_from_ecs(
             MuJoCoError::UnsupportedFixture(format!("missing actuator {actuator_name}"))
         })?;
     data.ctrl_mut()[actuator_id] = control;
+    let mut view = joint.view_mut(data);
+    if view.qfrc_applied.len() != 1 {
+        return Err(MuJoCoError::UnsupportedFixture(format!(
+            "joint {joint_name} generalized-force width differs"
+        )));
+    }
+    view.qfrc_applied[0] = passive_coulomb_effort;
     Ok(())
 }
 
@@ -737,7 +790,24 @@ fn joint_control(
     revolute: bool,
     position: f64,
     velocity: f64,
-) -> Result<f64, MuJoCoError> {
+) -> Result<(f64, f64), MuJoCoError> {
+    let coulomb_effort = if let Some(dynamics) = world.get::<JointPassiveDynamics>(entity).copied()
+    {
+        let compatible = matches!(
+            (revolute, dynamics),
+            (true, JointPassiveDynamics::Revolute { .. })
+                | (false, JointPassiveDynamics::Prismatic { .. })
+        );
+        if !dynamics.has_valid_values() || !compatible || !velocity.is_finite() {
+            return Err(MuJoCoError::InvalidPassiveDynamics {
+                entity_index: entity.index(),
+                reason: "kind, coefficient, transition velocity, or joint velocity",
+            });
+        }
+        dynamics.regularized_coulomb_effort(velocity)
+    } else {
+        0.0
+    };
     if let Some(command) = world.get::<JointActuation>(entity).copied() {
         if !command.has_valid_values()
             || (revolute && !command.supports_revolute())
@@ -794,10 +864,10 @@ fn joint_control(
                 max_force_n,
             } => (force_n, max_force_n),
         };
-        return Ok(effort.clamp(-limit, limit));
+        return Ok((effort.clamp(-limit, limit), coulomb_effort));
     }
     let Some(motor) = world.get::<JointMotor>(entity) else {
-        return Ok(0.0);
+        return Ok((0.0, coulomb_effort));
     };
     if !motor.velocity_rad_s.is_finite()
         || !motor.gain.is_finite()
@@ -820,11 +890,14 @@ fn joint_control(
     // `JointActuation` above remains exact and is used by conformance fixtures.
     let (stiffness, damping) = legacy_motor_gains(*motor, revolute);
     let effort = stiffness * (motor.target_position - position) + damping * motor.velocity_rad_s;
-    Ok(if motor.max_force > 0.0 {
-        effort.clamp(-motor.max_force, motor.max_force)
-    } else {
-        effort
-    })
+    Ok((
+        if motor.max_force > 0.0 {
+            effort.clamp(-motor.max_force, motor.max_force)
+        } else {
+            effort
+        },
+        coulomb_effort,
+    ))
 }
 
 impl PhysicsBackend for MuJoCoBackend {
@@ -1022,8 +1095,14 @@ impl PhysicsBackend for MuJoCoBackend {
                             Vec3::from_slice(&joint_view.qvel[3..6]);
                     }
                 }
-                JointBinding::Revolute { joint_name, .. }
-                | JointBinding::Prismatic { joint_name, .. } => {
+                JointBinding::Revolute {
+                    joint_name,
+                    actuator_name,
+                }
+                | JointBinding::Prismatic {
+                    joint_name,
+                    actuator_name,
+                } => {
                     let joint = data
                         .joint(joint_name)
                         .ok_or(PhysicsError::InitializationFailed)?;
@@ -1043,6 +1122,25 @@ impl PhysicsBackend for MuJoCoBackend {
                         JointBinding::Prismatic { .. } => JointState::Prismatic {
                             position_m: joint_view.qpos[0],
                             velocity_m_s: joint_view.qvel[0],
+                        },
+                        JointBinding::Free { .. } | JointBinding::Fixed => unreachable!(),
+                    };
+                    let actuator_id = data
+                        .model()
+                        .name_to_id(MjtObj::mjOBJ_ACTUATOR, actuator_name)
+                        .ok_or(PhysicsError::InitializationFailed)?;
+                    let realized_effort = data.actuator_force()[actuator_id];
+                    if !realized_effort.is_finite() {
+                        return Err(Self::map_error(MuJoCoError::NonFiniteState(
+                            "actuator effort",
+                        )));
+                    }
+                    let effort_measurement = match binding.joint {
+                        JointBinding::Revolute { .. } => JointEffortMeasurement::Revolute {
+                            measured_effort_nm: realized_effort,
+                        },
+                        JointBinding::Prismatic { .. } => JointEffortMeasurement::Prismatic {
+                            measured_force_n: realized_effort,
                         },
                         JointBinding::Free { .. } | JointBinding::Fixed => unreachable!(),
                     };
@@ -1082,7 +1180,9 @@ impl PhysicsBackend for MuJoCoBackend {
                     if let Some(mut transform) = world.get_mut::<Transform3>(binding.entity) {
                         *transform = local_transform;
                     }
-                    world.entity_mut(binding.entity).insert(joint_state);
+                    world
+                        .entity_mut(binding.entity)
+                        .insert((joint_state, effort_measurement));
                 }
                 JointBinding::Fixed => {}
             }

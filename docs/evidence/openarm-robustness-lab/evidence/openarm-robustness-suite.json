@@ -1,0 +1,86 @@
+{
+  "kind": "rne_openarm_robustness_suite",
+  "schema_version": 1,
+  "suite_id": "rne.openarm.right.state_feedback.robustness.v1",
+  "task_id": "rne.openarm.right_joint_tracking.v1",
+  "controller_role": "state_feedback",
+  "primary_sweep_backend": "rne_rapier",
+  "backend_order": [
+    "rne_rapier",
+    "mujoco_native",
+    "gazebo_sim"
+  ],
+  "dimension": {
+    "kind": "additive_actuator_target_bias_pulse_v1",
+    "classification": "actuator_realization_error",
+    "joint": "openarm_right_joint5",
+    "unit": "rad",
+    "values": [
+      0.0,
+      0.03,
+      0.06,
+      0.09,
+      0.12
+    ],
+    "start_step": 3241,
+    "end_step": 3300,
+    "application_order": "after_controller_limits_before_backend_actuation",
+    "controller_visibility": "unobserved_except_through_typed_joint_feedback"
+  },
+  "evaluation": {
+    "recovery_band_rad": 0.005,
+    "recovery_hold_samples": 30,
+    "evaluation_steps_after_pulse": 120,
+    "requirement_ids": [
+      "controller.state.maximum_disturbance_peak_error_rad",
+      "controller.state.maximum_disturbance_recovery_time_s",
+      "controller.state.maximum_disturbance_iae_rad_s"
+    ],
+    "boundary_rule": "smallest_grid_value_with_any_failed_requirement",
+    "cross_backend_cases": "last_passing_and_first_failing_primary_backend_cases"
+  },
+  "inputs": {
+    "robustness_manifest_sha256": "266347e58175c698f93073b10135c86e1c17aed6411ee2baada231e62809645a",
+    "plant_report_sha256": "7cbe59fa79e5e5971ef79730bb3a9741bfcc72bc37a44e3581853c944f7711d4",
+    "plant_experiment_manifest_sha256": "ecadeba864e1a290eba67d3eccb345c02437d41e9e90e550facf18c0ac5ef0d5",
+    "limits_controller_sha256": "0db69a85455ee82c9456a84da4724c97e669e2dcb4aa702c1ee10f33f036d2e4",
+    "requirements_sha256": "ed30ad920000da9beab6e11bf3c3d10f904e2c9f29f7df402c293ad952b34a44"
+  },
+  "cases": [
+    {
+      "case_id": "bias-000mrad",
+      "offset_rad": 0.0,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.bias-000mrad.v1",
+      "controller_path": "openarm-state-feedback-bias-000mrad.controller.json",
+      "controller_sha256": "35dafeb75c3f05df1069c52fb67608690d1f5ea511b00c61f28579c6eb63146d"
+    },
+    {
+      "case_id": "bias-030mrad",
+      "offset_rad": 0.03,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.bias-030mrad.v1",
+      "controller_path": "openarm-state-feedback-bias-030mrad.controller.json",
+      "controller_sha256": "e6bbed1f6095f05a97abba98ff940924d698a300135def8d78dce39c13f7ac4a"
+    },
+    {
+      "case_id": "bias-060mrad",
+      "offset_rad": 0.06,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.bias-060mrad.v1",
+      "controller_path": "openarm-state-feedback-bias-060mrad.controller.json",
+      "controller_sha256": "0f7fbf8ebd9ea1b027262eaaf2b6ed9cc726b4ddc70bd411c47d0baa2f63befb"
+    },
+    {
+      "case_id": "bias-090mrad",
+      "offset_rad": 0.09,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.bias-090mrad.v1",
+      "controller_path": "openarm-state-feedback-bias-090mrad.controller.json",
+      "controller_sha256": "9d454eaa6c4113971c34b091ae8ba487bfd06f3f932d85c292c28f93d5455ecc"
+    },
+    {
+      "case_id": "bias-120mrad",
+      "offset_rad": 0.12,
+      "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.bias-120mrad.v1",
+      "controller_path": "openarm-state-feedback-bias-120mrad.controller.json",
+      "controller_sha256": "efb1f9d3da7800f1e5acc6185e6703b7a287a44a489bc9fb8bae4fa753a5f235"
+    }
+  ]
+}

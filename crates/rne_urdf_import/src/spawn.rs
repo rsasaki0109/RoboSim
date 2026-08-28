@@ -2,13 +2,13 @@
 
 use crate::geometry::{collider_from_link_with_meshes, visual_from_element};
 use crate::parse::rpy_to_quat;
-use crate::schema::{UrdfJoint, UrdfJointType, UrdfLink, UrdfRobot};
+use crate::schema::{UrdfDocument, UrdfInertial, UrdfJoint, UrdfJointType, UrdfLink, UrdfRobot};
 use rne_ecs::{spawn_named, Entity, World};
-use rne_physics::{CollisionGroups, RigidBody, RigidBodyType};
+use rne_physics::{CollisionGroups, RigidBody, RigidBodyInertia, RigidBodyType};
 use rne_render::{LinkVisuals, Visual};
 use rne_robot::{Joint, JointKind, JointLimits, Link, Robot, RobotId};
 use rne_world::Transform3;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -31,7 +31,9 @@ pub struct UrdfSpawnConfig {
     ///
     /// When `None`, mesh collision elements are skipped (legacy behavior).
     pub mesh_assets_root: Option<PathBuf>,
-    /// When true, positive `<inertial><mass>` values override legacy link masses.
+    /// When true, positive `<inertial><mass>` values override legacy link masses;
+    /// complete URDF centre-of-mass and inertia tensors are attached when a
+    /// [`UrdfDocument`] is spawned.
     ///
     /// This is opt-in so existing URDF assets keep their historical dynamics;
     /// authored assets that rely on physical inertial data can enable it explicitly.
@@ -89,6 +91,14 @@ pub fn spawn_urdf_robot(
     spawn_urdf_robot_with_config(world, urdf, UrdfSpawnConfig::default())
 }
 
+/// Spawns a parsed URDF document, including its extended inertial properties.
+pub fn spawn_urdf_document(
+    world: &mut World,
+    document: &UrdfDocument,
+) -> Result<SpawnedUrdfRobot, UrdfSpawnError> {
+    spawn_urdf_document_with_config(world, document, UrdfSpawnConfig::default())
+}
+
 /// Attaches URDF visual components to existing link entities keyed by link name.
 ///
 /// All visual elements on each link are applied. Colliders and rigid bodies are not modified.
@@ -112,6 +122,25 @@ pub fn attach_urdf_visuals(
 pub fn spawn_urdf_robot_with_config(
     world: &mut World,
     urdf: &UrdfRobot,
+    config: UrdfSpawnConfig,
+) -> Result<SpawnedUrdfRobot, UrdfSpawnError> {
+    spawn_urdf_robot_with_inertials(world, urdf, &BTreeMap::new(), config)
+}
+
+/// Spawns a parsed URDF document with explicit configuration and complete
+/// inertial properties.
+pub fn spawn_urdf_document_with_config(
+    world: &mut World,
+    document: &UrdfDocument,
+    config: UrdfSpawnConfig,
+) -> Result<SpawnedUrdfRobot, UrdfSpawnError> {
+    spawn_urdf_robot_with_inertials(world, &document.robot, &document.inertials, config)
+}
+
+fn spawn_urdf_robot_with_inertials(
+    world: &mut World,
+    urdf: &UrdfRobot,
+    inertials: &BTreeMap<String, UrdfInertial>,
     config: UrdfSpawnConfig,
 ) -> Result<SpawnedUrdfRobot, UrdfSpawnError> {
     let robot_entity = spawn_named(world, &urdf.name);
@@ -197,7 +226,14 @@ pub fn spawn_urdf_robot_with_config(
         let Some(link) = link_defs.get(name) else {
             continue;
         };
-        let counts = attach_link_geometry(world, *entity, link, *entity == base_link, &config);
+        let counts = attach_link_geometry(
+            world,
+            *entity,
+            link,
+            inertials.get(name),
+            *entity == base_link,
+            &config,
+        )?;
         collider_count += counts.colliders;
         visual_count += counts.visuals;
     }
@@ -221,9 +257,10 @@ fn attach_link_geometry(
     world: &mut World,
     entity: Entity,
     link: &UrdfLink,
+    inertial: Option<&UrdfInertial>,
     is_base_link: bool,
     config: &UrdfSpawnConfig,
-) -> AttachCounts {
+) -> Result<AttachCounts, UrdfSpawnError> {
     let mut counts = AttachCounts {
         colliders: 0,
         visuals: 0,
@@ -252,21 +289,85 @@ fn attach_link_geometry(
         } else {
             RigidBodyType::Dynamic
         };
+        let exact_inertia = if config.use_declared_inertial_masses {
+            exact_link_inertia(&link.name, inertial)?
+        } else {
+            None
+        };
         world.entity_mut(entity).insert(RigidBody {
             body_type,
             mass_kg: config
                 .use_declared_inertial_masses
-                .then_some(link.inertial_mass_kg)
+                .then(|| {
+                    inertial
+                        .map(|properties| properties.mass_kg)
+                        .or(link.inertial_mass_kg)
+                })
                 .flatten()
                 .filter(|mass_kg| *mass_kg > 0.0)
                 .unwrap_or(if is_base_link { 5.0 } else { 1.0 }),
             ..RigidBody::default()
         });
+        if let Some(inertia) = exact_inertia {
+            world.entity_mut(entity).insert(inertia);
+        }
     }
 
     counts.visuals += attach_link_visuals(world, entity, link, config.visual_color_rgba);
 
-    counts
+    Ok(counts)
+}
+
+fn exact_link_inertia(
+    link_name: &str,
+    source: Option<&UrdfInertial>,
+) -> Result<Option<RigidBodyInertia>, UrdfSpawnError> {
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let source_matrix = [
+        [source.ixx_kg_m2, source.ixy_kg_m2, source.ixz_kg_m2],
+        [source.ixy_kg_m2, source.iyy_kg_m2, source.iyz_kg_m2],
+        [source.ixz_kg_m2, source.iyz_kg_m2, source.izz_kg_m2],
+    ];
+    let rotation = rpy_to_quat(source.origin_rpy_rad);
+    let columns = [
+        rotation * rne_math::Vec3::X,
+        rotation * rne_math::Vec3::Y,
+        rotation * rne_math::Vec3::Z,
+    ];
+    let rotation_matrix = [
+        [columns[0].x, columns[1].x, columns[2].x],
+        [columns[0].y, columns[1].y, columns[2].y],
+        [columns[0].z, columns[1].z, columns[2].z],
+    ];
+    let mut rotated = [[0.0; 3]; 3];
+    for row in 0..3 {
+        for column in 0..3 {
+            for left in 0..3 {
+                for right in 0..3 {
+                    rotated[row][column] += rotation_matrix[row][left]
+                        * source_matrix[left][right]
+                        * rotation_matrix[column][right];
+                }
+            }
+        }
+    }
+    let inertia = RigidBodyInertia {
+        center_of_mass_local_m: source.origin_xyz_m,
+        ixx_kg_m2: rotated[0][0],
+        ixy_kg_m2: rotated[0][1],
+        ixz_kg_m2: rotated[0][2],
+        iyy_kg_m2: rotated[1][1],
+        iyz_kg_m2: rotated[1][2],
+        izz_kg_m2: rotated[2][2],
+    };
+    if !inertia.is_valid() || !source.mass_kg.is_finite() || source.mass_kg <= 0.0 {
+        return Err(UrdfSpawnError::InvalidGraph(format!(
+            "invalid inertial properties for link {link_name}"
+        )));
+    }
+    Ok(Some(inertia))
 }
 
 fn attach_link_visuals(
@@ -317,7 +418,7 @@ fn map_joint_kind(joint_type: UrdfJointType) -> JointKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::{parse_urdf, parse_urdf_file};
+    use crate::parse::{parse_urdf, parse_urdf_document, parse_urdf_file};
     use rne_physics::{Collider, ColliderShape, PhysicsBackend, PhysicsWorldDesc};
     use rne_physics_rapier::RapierBackend;
     use rne_render::Visual;
@@ -360,11 +461,15 @@ mod tests {
 
     #[test]
     fn spawn_uses_declared_link_inertial_mass() {
-        let urdf = parse_urdf(
+        let document = parse_urdf_document(
             r#"
             <robot name="weighted">
               <link name="base_link">
-                <inertial><mass value="2.5"/></inertial>
+                <inertial>
+                  <origin xyz="0.1 -0.2 0.3" rpy="0 0 1.5707963267948966"/>
+                  <mass value="2.5"/>
+                  <inertia ixx="1" ixy="0" ixz="0" iyy="2" iyz="0" izz="3"/>
+                </inertial>
                 <collision><geometry><box size="1 1 1"/></geometry></collision>
               </link>
             </robot>
@@ -372,9 +477,9 @@ mod tests {
         )
         .unwrap();
         let mut world = World::new();
-        let spawned = spawn_urdf_robot_with_config(
+        let spawned = spawn_urdf_document_with_config(
             &mut world,
-            &urdf,
+            &document,
             UrdfSpawnConfig {
                 use_declared_inertial_masses: true,
                 ..UrdfSpawnConfig::default()
@@ -388,6 +493,48 @@ mod tests {
                 .mass_kg,
             2.5
         );
+        let inertia = world
+            .get::<RigidBodyInertia>(spawned.base_link)
+            .expect("exact inertia");
+        assert_eq!(
+            inertia.center_of_mass_local_m,
+            rne_math::Vec3::new(0.1, -0.2, 0.3)
+        );
+        assert!((inertia.ixx_kg_m2 - 2.0).abs() < 1.0e-12);
+        assert!((inertia.iyy_kg_m2 - 1.0).abs() < 1.0e-12);
+        assert!((inertia.izz_kg_m2 - 3.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn invalid_declared_inertia_uses_the_compatible_graph_error() {
+        let document = parse_urdf_document(
+            r#"
+            <robot name="invalid_inertia">
+              <link name="base_link">
+                <inertial>
+                  <mass value="2.5"/>
+                  <inertia ixx="10" ixy="0" ixz="0" iyy="1" iyz="0" izz="1"/>
+                </inertial>
+                <collision><geometry><box size="1 1 1"/></geometry></collision>
+              </link>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        let error = spawn_urdf_document_with_config(
+            &mut World::new(),
+            &document,
+            UrdfSpawnConfig {
+                use_declared_inertial_masses: true,
+                ..UrdfSpawnConfig::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            UrdfSpawnError::InvalidGraph(message)
+                if message == "invalid inertial properties for link base_link"
+        ));
     }
 
     #[test]

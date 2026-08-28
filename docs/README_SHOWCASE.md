@@ -27,13 +27,13 @@ observation state.
 
 | Showcase | GIF / poster | GIF bytes | poster bytes | poster size |
 | --- | --- | ---: | ---: | ---: |
-| Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 523,360 | 808,064 | 960 x 540 |
-| Tsukuba Challenge | `showcase-tsukuba.gif` / `.png` | 2,262,164 | 18,815 | 960 x 540 |
+| Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 414,735 | 749,240 | 960 x 540 |
+| OpenArm v2 bimanual control | `showcase-openarm.gif` / `.png` | 2,471,937 | 26,918 | 960 x 540 |
 | Factory inspection | `showcase-factory.gif` / `.png` | 1,830,619 | 52,228 | 960 x 540 |
 | Office AGV delivery | `showcase-office.gif` / `.png` | 1,935,863 | 18,240 | 960 x 540 |
 | PLATEAU UAV RGB-D flight | `showcase-uav.gif` / `.png` | 4,329,461 | 439,474 | 960 x 540 |
 
-The current GIF total is **10,840,996 bytes**, below the 12,000,000-byte
+The current GIF total is **11,091,240 bytes**, below the 12,000,000-byte
 combined ceiling. `showcase-media-check` verifies the exact total; regeneration
 must update the manifest's sizes and hashes in the same change.
 
@@ -41,8 +41,8 @@ must update the manifest's sizes and hashes in the same change.
 
 | Showcase | Required simulation evidence |
 | --- | --- |
-| Real indoor 3DGS mobile manipulation | Real floor-level friction grasp; terminated without truncation; lift clearance at least 0.20 m; payload transport at least 2.0 m; placement error at most 0.10 m; all ten authored PBR links synchronized with zero recorded transform error; no synthetic room furniture is rendered; rendered wrist RGB-D performs known-robot self masking, payload segmentation, depth back-projection, and analytic-IK correction without payload-truth controller inputs; all 45 post-physics samples show the detected reticle; task telemetry and the 2D trace use the same samples. |
-| Tsukuba Challenge | Three stop lines and three signal waits complete; no roadway entry or unstopped overshoot; headless and capture replay digests match. |
+| Real indoor 3DGS mobile manipulation | Real floor-level friction grasp; terminated without truncation; lift clearance at least 0.20 m; payload transport at least 1.5 m; placement error at most 0.10 m; all ten authored PBR links synchronized with zero recorded transform error; no synthetic room furniture is rendered; rendered wrist RGB-D performs known-robot self masking, payload segmentation, depth back-projection, and analytic-IK correction without payload-truth controller inputs; all 45 post-physics samples show the detected reticle; task telemetry and the 2D trace use the same samples. |
+| OpenArm v2 bimanual control | Both official seven-axis arms and two-finger grippers expose 18 force-limited actuators; each end effector travels at least 0.16 m; each gripper changes aperture by at least 0.015 m; proximal final tracking error is at most 0.13 rad; at least 45 official visual mesh parts resolve; headless and capture replay digests match. |
 | Factory inspection | Official G1 articulation completes all three markers upright; at least 20 mesh items are rendered; replay digest matches. |
 | Office AGV delivery | Yield, dock pickup, desk delivery, and desk placement complete; no contact, corridor exit, or early drop; replay digest matches. |
 | PLATEAU UAV RGB-D flight | Visible `MultirotorFlight` entity travels at least 60 m; RMS position error at most 1.0 m; altitude error at most 0.6 m; building clearance at least 2.0 m; zero collisions; onboard RGB-D and replay hashes are deterministic. |
@@ -64,8 +64,10 @@ trace all derive from the same 45 post-physics rollout samples.
 The committed derivative keeps every tenth upstream position, DC colour,
 opacity, scale, and rotation record byte-for-byte. The UAV view uses official
 PLATEAU Sanjo City geometry, a controlled visible airframe, and synchronized
-onboard RGB-D rather than a free-flying render camera. Tsukuba combines the full-run scenario
-with the PLATEAU test fixture. Factory uses Unitree G1 meshes under its bundled
+onboard RGB-D rather than a free-flying render camera. OpenArm uses the official
+v2.0 description and a pinned Apache-2.0 model derivative, split into two
+reduced-coordinate articulations and reassembled at the original pedestal mount
+transforms. Factory uses Unitree G1 meshes under its bundled
 BSD-3-Clause notice. Office uses a repository-authored scene and synchronized
 render overlays. Exact source, conversion, hashes, and licenses are recorded in
 the manifest and metadata.

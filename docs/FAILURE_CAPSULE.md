@@ -63,6 +63,15 @@ requires the negotiated TaskSpec identity. Missing subject evidence,
 inconsistent top-level session metadata, or a tampered summary fails before a
 capsule is accepted.
 
+Recorded/shadow session and report evidence is also replayed semantically.
+The capsule must contain bytes matching the session's TaskSpec, controller,
+requirements, calibration, action, and trace SHA-256 bindings. Verification
+reruns the non-actuating playback/shadow evaluator from that session and
+compares the retained report, including its first numeric divergence and
+fail-closed gateway audit. Structural fields, identities, hashes, and integer
+counts remain exact; only independently reduced floating metrics admit the
+documented absolute `1e-12` serialization tolerance.
+
 For the LeKiwi reference path, pass the complete
 `rne_lekiwi_reference_session` output from `rne-lekiwi-session` in place of a
 bare nested session. Creation and verification preserve its concrete kind,
@@ -123,6 +132,13 @@ full report and content-subject validation. The
 verifier invokes the known TaskSpec, hardware-session, LeKiwi
 reference-session, wire-trace, and shadow-report validators. It does not trust
 host paths recorded in the capsule.
+
+Creation records the repository HEAD as `build.git_commit`. When a Windows Git
+linked worktree is executed through WSL, the creator resolves the foreign
+drive-letter `.git` pointer against the matching `/mnt/<drive>` mount and asks
+Git for that worktree's HEAD. Failure to resolve either the normal repository
+or the linked-worktree metadata remains explicit as `unknown`; it is never
+replaced with a guessed commit.
 
 The capsule schema is intentionally independent of transport. A future archive
 or object-store adapter can package the same relative paths without changing

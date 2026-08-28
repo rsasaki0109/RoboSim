@@ -1,11 +1,13 @@
-name: External backend, hardware, or accelerator evidence
-description: Submit an independently maintained physics backend, hardware adapter, or accelerator adapter conformance result.
+name: External backend, simulator, hardware, or accelerator evidence
+description: Submit an independently maintained physics backend, simulator adapter, hardware adapter, or accelerator adapter conformance result.
 title: "[External system evidence] "
 body:
   - type: markdown
     attributes:
       value: |
-        Follow the backend, hardware, or accelerator guide linked from docs/EXTERNAL_EVIDENCE_INTAKE.md.
+        Follow the backend, simulator, hardware, or accelerator guide linked from docs/EXTERNAL_EVIDENCE_INTAKE.md.
+        Current campaign: v0.2.0 — https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0
+        Do not submit before these assets are published.
         A submitted issue is not acceptance evidence. The readiness gate rebinds every report to its exact implementation subject.
   - type: checkboxes
     id: independence
@@ -27,6 +29,7 @@ body:
       options:
         - physics_backend
         - hardware_adapter
+        - simulator_adapter
         - accelerator_adapter
     validations:
       required: true
@@ -49,8 +52,8 @@ body:
     id: rne_release
     attributes:
       label: RNE release
-      description: Exact RNE release or crate version and immutable checksum or lockfile identity.
-      placeholder: v0.x.y, sha256:...
+      description: Exact RNE release or crate version and immutable checksum or lockfile identity. Only v0.2.0 qualifies for this campaign.
+      placeholder: v0.2.0, sha256:...
     validations:
       required: true
   - type: dropdown
@@ -78,14 +81,41 @@ body:
     id: task_spec
     attributes:
       label: Adapter TaskSpec or not-applicable declaration
-      description: For hardware or accelerator adapters, provide immutable URL, file name, size, and sha256. For physics, state not applicable.
+      description: For simulator, hardware, or accelerator adapters, provide immutable URL, file name, size, and sha256. For physics, state not applicable.
     validations:
       required: true
   - type: textarea
     id: adapter_arguments
     attributes:
       label: Normalized adapter arguments or not-applicable declaration
-      description: For hardware or accelerator adapters, provide the exact ordered JSON list using the adapter-subject marker. For physics, state not applicable.
+      description: For simulator, hardware, or accelerator adapters, provide the exact ordered JSON list using the documented path markers. For physics, state not applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: simulator_runtime_manifest
+    attributes:
+      label: Simulator runtime manifest or not-applicable declaration
+      description: For simulator adapters, provide immutable URL, file name, size, and sha256 for the runtime manifest. Otherwise state not applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: simulator_runtime_artifacts
+    attributes:
+      label: Simulator runtime artifacts or not-applicable declaration
+      description: For simulator adapters, provide immutable URL, file name, size, and sha256 for the world, robot model, and adapter config in manifest order. Otherwise state not applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: simulator_submission
+    attributes:
+      label: Simulator release and submission chain or not-applicable declaration
+      description: For simulator adapters, provide immutable identities for the official RNE release archive, committed candidate, stdout/stderr logs, and maintainer report. Otherwise state not applicable.
+      placeholder: |
+        release_archive: URL, file, size_bytes, sha256
+        submission_candidate: URL, file, size_bytes, sha256
+        stdout_log: URL, file, size_bytes, sha256
+        stderr_log: URL, file, size_bytes, sha256
+        maintainer_report: URL, file, size_bytes, sha256
     validations:
       required: true
   - type: textarea
@@ -127,7 +157,7 @@ body:
     attributes:
       label: Safety declaration
       options:
-        - label: This is physics or accelerator process conformance, or hardware conformance ran against a sandbox, simulator, process mock, or correctly isolated HIL rig with explicit authorization.
+        - label: This is physics, simulator, or accelerator process conformance, or hardware conformance ran against a sandbox, simulator, process mock, or correctly isolated HIL rig with explicit authorization.
           required: true
     validations:
       required: true

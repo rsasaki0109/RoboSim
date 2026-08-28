@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robot-native-engine.dev/contracts/rne-independent-metric-scale-anchor-v1.schema.json",
+  "title": "RNE independent metric scale anchor v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "environment_id",
+    "operator",
+    "measurement",
+    "endpoints",
+    "evidence_artifacts"
+  ],
+  "properties": {
+    "kind": { "const": "rne_independent_metric_scale_anchor" },
+    "schema_version": { "const": 1 },
+    "environment_id": { "type": "string", "minLength": 1 },
+    "operator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "organization",
+        "operator_role",
+        "independence_statement",
+        "independent_from_rne_fixture_authoring"
+      ],
+      "properties": {
+        "organization": { "type": "string", "minLength": 1 },
+        "operator_role": { "type": "string", "minLength": 1 },
+        "independence_statement": { "type": "string", "minLength": 1 },
+        "independent_from_rne_fixture_authoring": { "const": true }
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "captured_at_utc",
+        "measured_distance_m",
+        "uncertainty_m"
+      ],
+      "properties": {
+        "method": { "type": "string", "minLength": 1 },
+        "captured_at_utc": { "type": "string", "format": "date-time" },
+        "measured_distance_m": { "type": "number", "exclusiveMinimum": 0 },
+        "uncertainty_m": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "endpoints": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["endpoint_id", "camera_id", "pixel_uv", "colmap_point3d_id"],
+        "properties": {
+          "endpoint_id": { "type": "string", "minLength": 1 },
+          "camera_id": { "type": "string", "pattern": "^colmap\\." },
+          "pixel_uv": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": { "type": "number" }
+          },
+          "colmap_point3d_id": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "evidence_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "size_bytes", "sha256", "description"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^[^/\\\\]+$" },
+          "size_bytes": { "type": "integer", "minimum": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "description": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

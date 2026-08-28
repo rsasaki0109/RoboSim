@@ -4,28 +4,40 @@ Robot Native Engine release bundles are native, self-contained rehearsal
 artifacts for Linux x86-64 and Windows x86-64. Select the archive whose target
 matches the host:
 
-- `rne-0.1.0-x86_64-unknown-linux-gnu.tar.gz`
-- `rne-0.1.0-x86_64-pc-windows-msvc.zip`
+- `rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz`
+- `rne-0.2.0-x86_64-pc-windows-msvc.zip`
 
 Extract the archive without flattening its top-level directory. Before running
 anything, first verify that the archive itself has GitHub/Sigstore provenance
 bound to this repository, then verify every extracted entry in `SHA256SUMS`:
 
 ```bash
-REVISION="$(gh api repos/rsasaki0109/RoboSim/commits/v0.1.0 --jq .sha)"
-gh attestation verify rne-0.1.0-x86_64-unknown-linux-gnu.tar.gz \
+gh release download v0.2.0 -R rsasaki0109/RoboSim \
+  --pattern SHA256SUMS \
+  --pattern 'rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz'
+sha256sum --ignore-missing --check SHA256SUMS
+```
+
+On Windows, download the ZIP plus the release-level `SHA256SUMS` and compare
+the matching line with `Get-FileHash -Algorithm SHA256`. This release-level
+manifest checks downloaded asset identity before extraction; the separate
+`SHA256SUMS` inside the archive checks every extracted member.
+
+```bash
+REVISION="$(gh api repos/rsasaki0109/RoboSim/commits/v0.2.0 --jq .sha)"
+gh attestation verify rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz \
   -R rsasaki0109/RoboSim \
-  --cert-identity https://github.com/rsasaki0109/RoboSim/.github/workflows/release.yml@refs/tags/v0.1.0 \
-  --source-ref refs/tags/v0.1.0 \
+  --cert-identity https://github.com/rsasaki0109/RoboSim/.github/workflows/release.yml@refs/tags/v0.2.0 \
+  --source-ref refs/tags/v0.2.0 \
   --source-digest "$REVISION" \
   --signer-digest "$REVISION" \
   --cert-oidc-issuer https://token.actions.githubusercontent.com \
   --predicate-type https://slsa.dev/provenance/v1 \
   --deny-self-hosted-runners
-gh attestation verify rne_py-0.1.0-cp39-abi3-manylinux_2_*.whl \
+gh attestation verify rne_py-0.2.0-cp39-abi3-manylinux_2_*.whl \
   -R rsasaki0109/RoboSim \
-  --cert-identity https://github.com/rsasaki0109/RoboSim/.github/workflows/release.yml@refs/tags/v0.1.0 \
-  --source-ref refs/tags/v0.1.0 \
+  --cert-identity https://github.com/rsasaki0109/RoboSim/.github/workflows/release.yml@refs/tags/v0.2.0 \
+  --source-ref refs/tags/v0.2.0 \
   --source-digest "$REVISION" \
   --signer-digest "$REVISION" \
   --cert-oidc-issuer https://token.actions.githubusercontent.com \
@@ -40,20 +52,24 @@ build workflow and the requested tag as source ref, and must reject self-hosted
 builders. Replace `REVISION` with the exact 40-character commit resolved by the
 verified tag. Maintainer readiness audits additionally pass the retained action
 bundle through `--bundle` so the evidence pack remains independently replayable.
+Each tagged release permanently publishes that platform-specific bundle as
+`rne-VERSION-TARGET.attestation-bundle.json` and its attested install report as
+`rne-VERSION-TARGET.archive-install-rehearsal-report.json`; they are not left
+only in expiring Actions artifacts.
 The committed policy is
 `release/artifact-attestation.toml`; GitHub's verifier checks the signed SLSA
 provenance and subject digest. Checksums remain a separate, offline integrity
 layer after extraction. On Linux:
 
 ```bash
-cd rne-0.1.0-x86_64-unknown-linux-gnu
+cd rne-0.2.0-x86_64-unknown-linux-gnu
 sha256sum --check SHA256SUMS
 ./bin/rne-asset --version
 ```
 
 On Windows, compare each manifest digest with `Get-FileHash -Algorithm SHA256`.
 `release-report.json` records the tested commit, Rust/Cargo versions, target,
-Cargo.lock digest, schema/ABI floors, supply-chain and fuzz verdicts, the eleven
+Cargo.lock digest, schema/ABI floors, supply-chain and fuzz verdicts, the twelve
 `installed_workflows` verdicts, and every bundle-member digest. The
 `flagship_proof` verdict is the bundled indoor mobile-manipulation success,
 expected failure, browser inspector, and verified Failure Capsule workflow on
@@ -61,7 +77,7 @@ both Rapier and MuJoCo. `third-party/mujoco/runtime-manifest.json` records the
 pinned official MuJoCo archive URL and SHA-256 plus byte identities for the
 shipped runtime and license files.
 `reproducible` is true only for a clean build whose exact
-`v0.1.0` tag points to the tested commit.
+`v0.2.0` tag points to the tested commit.
 The retained `Cargo.lock` also lets the installed Failure Capsule author record
 the exact release graph during bundle rehearsal; when run from an external
 project, the same CLI records that project's own lockfile and Git revision.
@@ -74,9 +90,15 @@ metadata and does not require shipping either source tree in the native bundle.
 The bundle includes the fixtures and validation binaries used by the release
 rehearsal. From its top-level directory:
 
+Independent operators reproducing the installed flagship should start with
+`docs/EXTERNAL_FLAGSHIP_REPRODUCTION.md`. That archive-only guide separates
+operator evidence collection from the maintainer-only acceptance check and
+uses `release/external-flagship-submission-template.json` to prevent missing
+provenance or artifact identities.
+
 ```bash
 ./bin/rne-flagship-proof flagship-proof --cross-backend \
-  --measure-on "lab-workstation-a"
+  --measure-on "lab-workstation-a" --verify-installed-bundle .
 ./bin/rne-asset run assets/runs/mesh_diff_drive.rne.run.toml \
   --replay-out robot.rne-replay
 ./bin/rne-asset replay robot.rne-replay
@@ -85,7 +107,7 @@ rehearsal. From its top-level directory:
   --evidence assets/tasks/diff_drive_goal.task.json \
   --output failure-capsule \
   --backend external-project \
-  --backend-version 0.1.0
+  --backend-version 0.2.0
 ./bin/rne-asset failure-capsule verify failure-capsule
 ./bin/rne-asset run assets/runs/scenario_speed.rne.run.toml \
   --replay-out scenario.rne-replay
@@ -105,6 +127,25 @@ rehearsal. From its top-level directory:
   --task assets/tasks/diff_drive_goal.task.json \
   --allow-hil \
   --output hardware-adapter-conformance.json
+./bin/rne-simulator-conformance \
+  --adapter ./bin/rne-simulator-mock-adapter \
+  --runtime-manifest adapters/simulator/reference/runtime.json \
+  --task assets/tasks/diff_drive_goal.task.json \
+  --output simulator-adapter-conformance.json \
+  --adapter-arg --simulator-id \
+  --adapter-arg gazebo_sim_fixture \
+  --adapter-arg --simulator-version \
+  --adapter-arg 8.9.0 \
+  --adapter-arg --task-id \
+  --adapter-arg rne.diff_drive.sensor_goal.v1 \
+  --adapter-arg --task-sha256 \
+  --adapter-arg 532d2e76854cecbc09e5f8d985486c2f9548a3f39a17865a59f10d86dd08e3ca \
+  --adapter-arg --observation-width \
+  --adapter-arg 9 \
+  --adapter-arg --action-width \
+  --adapter-arg 2 \
+  --adapter-arg --fixed-delta-ticks \
+  --adapter-arg 16666667
 ./bin/rne-accelerator-conformance \
   --adapter ./bin/rne-accelerator-protocol-mock \
   --adapter-arg --transcript \
@@ -124,17 +165,26 @@ rehearsal. From its top-level directory:
 ./bin/rne-compatibility --root . --output compatibility-fixture-report.json
 ```
 
-The flagship command writes `flagship-proof/installed-proof-report.json`. Its
-schema-v2 report requires both packaged physics paths, binds the exact packaged
+The flagship command first verifies the exact internal `SHA256SUMS` member
+graph, rejecting missing, extra, modified, duplicate, escaping, or symlinked
+entries before creating output. It writes that result as
+`flagship-proof/installed-bundle-verification.json` and binds it into the
+Failure Capsule. Its `installed-proof-report.json` schema-v4 report requires
+both packaged physics paths, binds the exact packaged
 producer executable, and indexes the generated TaskSpec, Rapier/MuJoCo success
 and failure reports, both verified failure replays, unit-bearing cross-backend
 comparison, browser inspector, workflow report, and verified capsule manifest
-by relative path, byte size, and SHA-256.
+by relative path, byte size, and SHA-256. The same command also retains compact
+controller-time traces and executes three non-actuating cases under that exact
+TaskSpec: 512-sample Rapier playback, 512-sample Rapier-to-MuJoCo shadow
+comparison, and a sequence-128 transport disconnect. Inspect
+`recorded-shadow-proof.json`; its sessions, reports, controller, calibration,
+requirements, and trace hashes are part of the verified Failure Capsule.
 When `--measure-on MACHINE` is present, the same command also writes
-`time-to-proof-report.json`. This timing-only schema-v1 artifact records the
+`time-to-proof-report.json`. This timing-only schema-v2 artifact records the
 operator-supplied machine label, OS, architecture, elapsed milliseconds from
-process start through the verified capsule and bound proof report, the fixed
-900,000 ms target, and SHA-256 identities for the two proof roots. Use a stable,
+full installed-bundle verification through the verified capsule and bound proof report, the fixed
+900,000 ms target, and SHA-256 identities for the verification plus two proof roots. Use a stable,
 specific inventory label; CI labels are rehearsal diagnostics and do not count
 as independent external-user measurements.
 
@@ -225,12 +275,12 @@ maturin build --locked --release --features extension-module \
   --manifest-path crates/rne_py/Cargo.toml --out artifacts/wheels
 cargo run --locked -p xtask -- release-bundle \
   --target x86_64-unknown-linux-gnu \
-  --wheel artifacts/wheels/rne_py-0.1.0-*.whl
+  --wheel artifacts/wheels/rne_py-0.2.0-*.whl
 ```
 
 `release-install-smoke --archive ARCHIVE --bundle-dir PATH --output-dir
 EMPTY_PATH` independently checks `SHA256SUMS`, installs the bundled wheel, and
-reruns all eleven schema-v6 installed-artifact checks. Its flagship check runs
+reruns all twelve schema-v7 installed-artifact checks. Its flagship check runs
 the packaged mobile-manipulation binary with `--cross-backend` and retains the
 Rapier/MuJoCo success and intentional-failure reports, both verified replays,
 TaskSpec, unit-bearing comparison, browser inspector, and verified Failure

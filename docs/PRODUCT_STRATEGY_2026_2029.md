@@ -148,7 +148,7 @@ This is the immediate next development milestone.
 
 Current implementation status:
 
-- conformance report schema v2 and backend manifest schema v2 are registered;
+- conformance report schema v2 and backend manifest schema v3 are registered;
 - the capability catalog is callable through a generic `PhysicsBackend`
   factory for Analytic, Rapier, and feature-gated MuJoCo;
 - Rapier synchronizes backend-neutral completed-step `JointState` values into
@@ -191,6 +191,10 @@ Exit evidence:
 - same-runtime fresh runs are exact where declared;
 - Analytic/Rapier/MuJoCo comparisons pass named, unit-bearing tolerances;
 - one articulated robot fixture executes unchanged on Rapier and MuJoCo;
+- the OpenArm control-engineering fixture runs the same bounded excitation on
+  every advertised articulated backend and retains time response, empirical
+  frequency response, coupling, saturation, model-validation, and first-failed
+  requirement evidence;
 - no MuJoCo type appears in `rne_physics`, `rne_robot`, or `rne_world` public
   APIs;
 - unsupported geometry or actuation fails before the first step with a precise
@@ -262,6 +266,9 @@ Exit evidence:
   and timestamps;
 - the same seeded capture reproduces its declared exact or tolerance contract;
 - delayed and dropped sensor frames remain distinguishable from absent data;
+- joint feedback and IMU validation bind calibration, sample phase, latency,
+  noise/bias, saturation, dropout, stuck-value behavior, estimator residuals,
+  and the first failed measurement or estimation requirement;
 - an offline evaluator reproduces the committed perception metrics headlessly.
 
 ### v0.6: sim-to-real and hardware in the loop
@@ -413,7 +420,8 @@ than rewriting the installed authoring surface.
 The readiness tracker's v2 external-certification contract closes the final
 report-substitution gap before real outreach: each independent source revision
 must retain the exact controller library and manifest, physics implementation
-or source bundle, or hardware adapter plus TaskSpec and normalized launch
+or source bundle, simulator adapter plus TaskSpec and content-addressed runtime
+files, or hardware adapter plus TaskSpec and normalized launch
 arguments. The gate rehashes those subjects and compares file identity, size,
 task identity, and dimensions to the passing report. Human review still proves
 ownership and independence; the machine gate proves the accepted report belongs
@@ -421,16 +429,24 @@ to the preserved implementation bytes.
 
 The external-intake slice makes that contract practical without weakening it.
 `xtask readiness-pack init` creates a non-overwriting external-disk pack from
-the honest 2/9 baseline and its retained compatibility report.
+the honest 2/10 baseline and its retained compatibility report.
 `readiness-pack stage` enforces the gate's size, path-containment, non-symlink,
 and no-overwrite rules while copying and hashing one file, then emits its
 canonical TOML reference. It cannot add manifest claims, determine ownership,
-or turn staged bytes into a passing check.
-The companion external-intake registry fixes three public submission routes
-for task reproductions, controller plugins, and backend/hardware/accelerator
-systems. Readiness manifest v4 audits accelerator subjects, TaskSpecs,
+or turn staged bytes into a passing check. For a reviewed installed flagship
+run, `readiness-pack accept-installed-flagship` revalidates all six staged
+artifacts and atomically adds the schema-v9 entry without trusting copied
+digests. The external-simulator acceptance command applies the same operation
+to the adapter's twelve-file chain and ordered launch arguments. The
+external-plugin acceptance command applies it to the release archive, library,
+manifest, conformance report, candidate, logs, and maintainer report. The
+external-project acceptance command additionally revalidates the complete
+Failure Capsule artifact closure before the manifest swap.
+The companion external-intake registry fixes four public submission routes
+for the installed flagship, task reproductions, controller plugins, and
+backend/hardware/accelerator systems. Readiness manifest v4 audits accelerator subjects, TaskSpecs,
 manifests, runtime contracts, arguments, and process reports separately; these
-do not count as the external physics backend or hardware adapter required for
+do not count as the external physics backend, simulator adapter, or hardware adapter required for
 1.0.
 Required GitHub forms collect immutable revisions, subject bytes, typed
 reports, commands, dates, and safety/independence declarations; CI validates
@@ -491,7 +507,7 @@ RNE 1.0 is allowed only when all of the following are true:
   without an unplanned breaking change;
 - at least two external projects reproduce a task and Failure Capsule without
   repository-author assistance;
-- at least one third-party plugin and one external backend or hardware adapter
+- at least one third-party plugin and one external backend, simulator adapter, or hardware adapter
   pass the published conformance kit;
 - the flagship workflow installs from release artifacts and passes on Windows
   and Linux;
@@ -506,10 +522,10 @@ If the external-use gates are not met, the project remains at 0.x.
 
 These conditions now have a deterministic machine gate. `xtask
 release-readiness` consumes exact SHA-256-bound external evidence, requires an
-explicit assessment date, and emits nine fixed checks. The committed
+explicit assessment date, and emits ten fixed checks. The committed
 `release/one-zero-readiness.toml` remains intentionally incomplete; its
 retained 36-check historical compatibility replay and clean blocker registry
-report 2/9 and `eligible=false` for the 2026-08-16 baseline. See
+report 2/10 and `eligible=false` for the 2026-08-20 baseline. See
 [ONE_ZERO_READINESS.md](ONE_ZERO_READINESS.md). `--require-eligible` is used
 only for the eventual promotion and cannot turn missing evidence into a pass.
 The source metadata check, both platform bundle builders, and the aggregate

@@ -1,0 +1,96 @@
+{
+  "kind": "rne_joint_pose_cycle_controller",
+  "schema_version": 1,
+  "controller_id": "rne.controller.openarm_right_pose_cycle.v1",
+  "task_id": "rne.openarm.right_joint_tracking.v1",
+  "interpolation": "smoothstep_v1",
+  "action_joint_order": [
+    "openarm_right_joint1",
+    "openarm_right_joint2",
+    "openarm_right_joint3",
+    "openarm_right_joint4",
+    "openarm_right_joint5",
+    "openarm_right_joint6",
+    "openarm_right_joint7",
+    "openarm_right_finger_joint1",
+    "openarm_right_finger_joint2"
+  ],
+  "rne_actuator_link_order": [
+    "openarm_right_link1",
+    "openarm_right_link2",
+    "openarm_right_link3",
+    "openarm_right_link4",
+    "openarm_right_link5",
+    "openarm_right_link6",
+    "openarm_right_ee_base_link",
+    "openarm_right_ee_link1",
+    "openarm_right_ee_link2"
+  ],
+  "observation_contract": {
+    "kind": "rne_joint_feedback",
+    "schema_version": 1,
+    "sample_period_ticks": 16666667,
+    "phase_offset_ticks": 16666667,
+    "latency_ticks": 16666667,
+    "maximum_age_ticks": 16666667,
+    "required_status": "nominal",
+    "bootstrap_policy": "reference_until_first_available"
+  },
+  "feedback_law": {
+    "kind": "joint_position_reference_pid_v1",
+    "position_error_gain": [0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.30, 0.15, 0.15],
+    "velocity_damping_s": [0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001],
+    "integral_error_gain_s_inv": [0.60, 0.30, 0.20, 0.60, 0.30, 0.60, 0.20, 0.10, 0.10],
+    "maximum_integral_correction_rad": [0.03, 0.015, 0.01, 0.03, 0.015, 0.03, 0.01, 0.005, 0.005],
+    "maximum_correction_rad": [0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.02, 0.02],
+    "minimum_target_rad": [-1.3963, -0.17453, -1.5708, 0.0, -1.5708, -0.7854, -1.5708, -0.7854, -0.7854],
+    "maximum_target_rad": [3.4907, 3.3161, 1.5708, 2.4435, 1.5708, 0.7854, 1.5708, 0.0, 0.0]
+  },
+  "keyframes": [
+    {
+      "step": 0,
+      "phase": "reset",
+      "joint_position_target_rad": [0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, -0.01, -0.01]
+    },
+    {
+      "step": 200,
+      "phase": "home",
+      "joint_position_target_rad": [0.0, 0.0, 0.0, 1.5707963267948966, 0.0, 0.0, 0.0, -0.55, -0.55]
+    },
+    {
+      "step": 600,
+      "phase": "approach",
+      "joint_position_target_rad": [1.2, 1.1, -0.6, 2.0, 0.6, -0.5, -0.4, -0.55, -0.55]
+    },
+    {
+      "step": 760,
+      "phase": "close_gripper",
+      "joint_position_target_rad": [1.2, 1.1, -0.6, 2.0, 0.6, -0.5, -0.4, -0.08, -0.08]
+    },
+    {
+      "step": 980,
+      "phase": "raise",
+      "joint_position_target_rad": [1.6, 0.8, -0.5, 1.3, 0.5, -0.3, -0.4, -0.08, -0.08]
+    },
+    {
+      "step": 1180,
+      "phase": "present",
+      "joint_position_target_rad": [2.4, 1.4, -1.0, 1.0, 1.0, -0.6, -0.8, -0.08, -0.08]
+    },
+    {
+      "step": 1500,
+      "phase": "return_home",
+      "joint_position_target_rad": [0.0, 0.0, 0.0, 1.5707963267948966, 0.0, 0.0, 0.0, -0.55, -0.55]
+    },
+    {
+      "step": 1800,
+      "phase": "stow_gripper",
+      "joint_position_target_rad": [0.0, 0.0, 0.0, 1.5707963267948966, 0.0, 0.0, 0.0, -0.18, -0.18]
+    }
+  ],
+  "intentional_failure": {
+    "kind": "controller_output_truncation",
+    "inject_at_step": 307,
+    "expected_first_violation": "action_width_mismatch"
+  }
+}

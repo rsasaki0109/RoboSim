@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "kind": "rne_simulator_adapter_conformance_report",
+  "status": "passed",
+  "subject": {
+    "adapter_file": "rne_gazebo_harmonic_adapter.py",
+    "adapter_sha256": "d2776fb3d3613bd9ae57fbb0c94d4d6552fbe5073d8dbd1f79b90d2dd119e63d",
+    "adapter_size_bytes": 13719,
+    "launcher_file": "python3",
+    "arguments_sha256": "2e2da1c1ad6027e8ae12e072a595df487f89c3dcca7c8e806da3ea848c5b0bb0",
+    "argument_count": 5,
+    "task_file": "openarm_right_joint_tracking.task.json",
+    "task_sha256": "f1d7f575ab843df41210a2902182c132ef565b9b3e08610d093773c001c20e5b",
+    "runtime_manifest_file": "runtime.json",
+    "runtime_manifest_sha256": "c38682ca39aa45f9c1184c47958d8d300044ff03e0b8a79d788e296d412eb75f",
+    "runtime_manifest_size_bytes": 824,
+    "runtime_artifacts": [
+      {
+        "role": "world",
+        "file": "openarm_right.world.sdf",
+        "size_bytes": 393,
+        "sha256": "5c7c942dec1b39e91fc0f19df5dc3bd7fd61718b78e4475cd5d454d0a2154926"
+      },
+      {
+        "role": "robot_model",
+        "file": "openarm_v2_right.rne.urdf",
+        "size_bytes": 13791,
+        "sha256": "1f65aa51542976319bea688332f267a47bd17df48a5860bf23e3f1adb8563994"
+      },
+      {
+        "role": "adapter_config",
+        "file": "openarm_right.adapter.json",
+        "size_bytes": 590,
+        "sha256": "e37b53c8d0e3070be2fe581afd12cf21bbc25bf5000747ed30df863e1293d169"
+      }
+    ]
+  },
+  "adapter": {
+    "simulator_id": "gazebo_sim",
+    "simulator_version": "8.15.0",
+    "adapter_id": "rne.gazebo_harmonic.openarm_right.v1",
+    "task_id": "rne.openarm.right_joint_tracking.v1",
+    "wire_schema_version": 1,
+    "observation_width": 18,
+    "action_width": 9,
+    "fixed_delta_ticks": 16666667
+  },
+  "checks": [
+    {
+      "id": "open_identity",
+      "status": "passed",
+      "detail": "simulator_id=gazebo_sim simulator_version=8.15.0 adapter_id=rne.gazebo_harmonic.openarm_right.v1"
+    },
+    {
+      "id": "task_binding",
+      "status": "passed",
+      "detail": "wrong TaskSpec digest rejected before correct binding"
+    },
+    {
+      "id": "fixed_delta_binding",
+      "status": "passed",
+      "detail": "one-tick fixed-delta drift rejected before correct binding"
+    },
+    {
+      "id": "reset_origin",
+      "status": "passed",
+      "detail": "seeded reset returned the TaskSpec observation at step=0 time=0"
+    },
+    {
+      "id": "bounded_step",
+      "status": "passed",
+      "detail": "one TaskSpec-bounded action advanced exactly one simulator step"
+    },
+    {
+      "id": "fixed_step_progression",
+      "status": "passed",
+      "detail": "three actions reached step=3 sim_time_ticks=50000001"
+    },
+    {
+      "id": "deterministic_replay",
+      "status": "passed",
+      "detail": "two fresh seeded executions produced identical observations and state digests"
+    },
+    {
+      "id": "action_sequence_rejection",
+      "status": "passed",
+      "detail": "skipped action sequence rejected without advancing simulator state"
+    },
+    {
+      "id": "session_isolation",
+      "status": "passed",
+      "detail": "cross-session request rejected without corrupting bound session"
+    },
+    {
+      "id": "width_rejection",
+      "status": "passed",
+      "detail": "wrong-width action rejected before simulator advancement"
+    }
+  ]
+}

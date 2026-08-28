@@ -114,6 +114,32 @@ tensor/element/unit divergence, aggregate metrics, and a pass/fail verdict.
 vector through the comparator. This establishes the portable comparison
 contract; an actual reference-device shadow run is still required.
 
+`RecordedShadowSession` is the content-addressed execution envelope above that
+comparator. It binds the exact TaskSpec, controller, requirements, action trace,
+recorded trace, comparison trace, and calibration hashes. The stream contract
+also retains the clock source, tick scale, nominal and maximum latency, explicit
+sequence-gap drop policy, TaskSpec tensor units, bootstrap-action count, and a
+hard sample capacity. `rne-recorded-shadow-session` executes the envelope in a
+separate process through either playback or shadow authority. Every valid
+controller action must be suppressed and the report fails if an actuator frame
+is emitted.
+
+The OpenArm compiler uses the retained 0.5 N·m Coulomb traces without refitting
+the controller or changing tolerances. It produces three distinct cases:
+
+- recorded Rapier to the same recording: exact playback pass;
+- recorded Rapier to MuJoCo: strict `0.02 rad` position and `0.1 rad/s`
+  velocity shadow comparison with the first divergence retained;
+- recorded Rapier to itself with a predeclared sequence-900 disconnect: exact
+  numeric comparison plus a bounded, non-actuating transport failure.
+
+Build the session inputs, run the process boundary, and create the browser gate
+report with `build_openarm_recorded_shadow_session.py`,
+`rne-recorded-shadow-session`, and
+`build_openarm_recorded_shadow_report.py`. The requirements live in
+`openarm_recorded_shadow_requirements.json`; neither runner accepts an
+undeclared disconnect point or an unbound TaskSpec/controller.
+
 ## Evidence and current gate
 
 Gateway evidence schema v1 contains the retained ordered event stream and a

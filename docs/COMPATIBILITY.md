@@ -1,8 +1,9 @@
 # Compatibility and migration policy
 
-This policy applies to Robot Native Engine 0.x. The `0.1.0` release freezes
-the supported surface for this milestone; later 0.x releases may tighten
-validation but must not silently reinterpret accepted input.
+This policy applies to Robot Native Engine 0.x. Release `0.1.0` remains the
+historical compatibility baseline. Release `0.2.0` is the first product-proof
+minor: it may add versioned evidence contracts, but it must not silently
+reinterpret artifacts accepted by their retained 0.1 readers.
 
 ## Supported toolchains and platforms
 
@@ -45,7 +46,7 @@ Patch releases must not retarget the baseline. A deliberate pre-1.0 baseline
 change requires a minor version, migration notes, an ADR, and a final passing
 comparison against the prior baseline before the registry changes. Workspace
 CI rejects changes to an already-present registry relative to the pull-request
-base or push parent while the release remains 0.1.0. Rustdoc runs with warnings
+base or push parent while the release remains 0.2.0. Rustdoc runs with warnings
 denied, and public libraries deny missing documentation.
 
 The v0.3 interchangeable-dynamics milestone extends the pre-1.0 exhaustive
@@ -121,6 +122,17 @@ unsupported constructs remain explicit import errors.
 TaskSpec schema v1 rejects unknown fields and validates fixed tensor shape,
 dtype, row-major order, units, bounds, reward terms, termination, reset,
 curriculum, and randomization before execution. Ordered arrays are semantic.
+The flagship mobile-lift TaskSpec identity v2 is an additive task contract on
+that same generic schema. It expands the controller-visible observation from
+the historical 19-value v1 shape to 24 values by supplying full XYZ base
+position, base yaw, and the world-frame place target. The registered flagship
+controller-contract artifact schema v1 binds that exact 14-tensor order, the
+four action tensors, numeric mobile-lift geometry, and explicit `0.1 m/s` and
+`pi/6 rad/s` output limits. `FlagshipMobileLiftControllerV2` accepts only the
+flattened TaskSpec observation; it derives end-effector and relative-target
+features from the bound kinematics instead of reading simulator-private state.
+The older flagship task/controller identities remain readable compatibility
+artifacts but do not prove a hidden-state-free controller boundary.
 Portable batch checkpoint schema v2 embeds its TaskSpec and chronological
 step/partial-reset operations. The legacy `VectorizedEpisode` API and its
 checkpoint remain unchanged for patch compatibility; new portable execution
@@ -202,6 +214,19 @@ comparison. An untrusted report replays every vector against its TaskSpec; its
 canonical failing fixture is
 `tests/golden/hardware/gateway-shadow-comparison-v1.json`.
 
+Recorded-shadow session/report schema v1 wraps that comparator without changing
+its v1 bytes. The session binds exact TaskSpec, controller, requirements,
+actions, source/comparison traces, and calibration SHA-256 values; it also
+freezes clock source, tick scale, nominal/maximum latency, explicit sequence-gap
+drop accounting, TaskSpec tensor units, bootstrap count, sample capacity, and
+an optional declared disconnect sequence. The process report retains the
+non-actuating gateway audit, requires every accepted action to be suppressed,
+and separately classifies exact playback, numeric shadow divergence, and a
+bounded transport failure. Host timestamps remain external-boundary evidence,
+not simulation time. Failure Capsule replay requires exact structure, integer
+counts, identities, and hashes; independently recomputed floating metrics use
+an absolute `1e-12` serialization/reduction tolerance.
+
 Hardware mock-conformance report schema v1 requires exactly six canonically
 ordered cases: command deadline, disconnect, reconnect, stale command,
 actuator limit, and emergency stop. Every case must prove device zero-output
@@ -227,6 +252,64 @@ checks Open dimensions against the strict profile, and requires the promoted
 device identity to equal the Ready handshake. Mock and physical bridge
 identities are distinct. A Completed outcome additionally requires a clean,
 unlatched, disconnected gateway with no pending actuation.
+
+Flagship-to-LeKiwi action-projection schema v1 validates both bound TaskSpec
+envelopes, applies the versioned differential-drive geometry without clamping,
+and preserves denied arm/lift/gripper authority plus a deterministic parent
+action hash. It proves only the action boundary. Observation fusion, rate
+conversion, full-file content binding, and physical execution remain separate
+gates.
+
+Flagship-to-LeKiwi rate-decision schema v1 freezes phase-zero decimation from
+one `16,666,667 ns` simulation-tick action stream to one `33,333,334 ns`
+physical write stream. Every source action is projection-validated, including
+explicitly suppressed odd sequences. Sequence gaps, duplicates, reordering,
+overflow, or invalid projections fail without advancing scheduler state.
+
+Action-projection and rate-decision schema v2 preserve the exact transform,
+physical envelope, suppression record, and phase-zero 60-to-30 Hz policy while
+binding the portable TaskSpec/controller v2 identities. The v2 controller's
+declared speed limits make its normal base output projectable without adapter
+clamping; the projection still independently fails closed at the physical
+TaskSpec bounds. Historical schema-v1 decisions retain only v1 identities.
+
+Flagship-to-LeKiwi observation-fusion schema v1 requires five independently
+identified, content-labelled, simulation-tick sources plus an explicit
+three-channel morphology calibration. It emits exactly 19 values in the 12
+parent TaskSpec tensors, records source ages and unused physical observations,
+and hashes the result. It never fills unavailable task state with defaults.
+Future/stale samples, source mutation under a reused sequence, identity changes,
+sequence/tick regressions, invalid calibration, missing camera/depth, and
+nonfinite values fail without advancing fuser state.
+
+Observation-fusion schema v2 retains the same five-source freshness and
+continuity rules while migrating to the complete flagship TaskSpec v2. Its
+localization payload carries XYZ position plus yaw, task state carries the
+world-frame place target, and the output is exactly 24 values in 14 tensors.
+The v2 fuser's output is accepted directly by
+`FlagshipMobileLiftControllerV2`; no simulator-private pose or goal field is
+consulted. Reusing a source sequence with changed yaw or place target fails
+without advancing state. Schema v1 remains readable transition evidence only.
+
+Flagship LeKiwi shadow-manifest schema v1 binds twelve content-addressed files:
+the parent TaskSpec/controller, physical profile, morphology calibration, four
+source contracts, non-actuating session, and the three replayable boundary
+streams. Its arm-calibration, source-contract, action-stream, rate-stream, and
+observation-stream schemas are independently registered at v1. The verifier
+rehashes the complete tree, replays every decision, checks exact 60-to-30 Hz
+sample holding, rejects any actuator write, and keeps mock distinct from
+physical-shadow evidence. `xtask flagship-lekiwi-shadow seal` creates the
+self-digested index and `verify` performs the full semantic replay.
+
+Shadow-manifest schema v2 binds the portable TaskSpec/controller v2 contract
+and v2 action, rate, and observation streams. Its observation records retain
+the exact controller action, so replay covers fusion, controller execution,
+physical projection, and rate scheduling rather than merely proving that the
+controller accepts the observation width. The typed validators retain schema-v1
+readability. The filesystem seal/verify command dispatches by manifest schema,
+validates the canonical v1 or v2 TaskSpec/controller artifact, replays the
+matching observation type, and cross-links the v2 controller action to both
+physical-boundary streams.
 
 LeKiwi physical-evidence manifest schema v1 indexes every required v0.6 exit
 artifact by explicit kind/schema, a unique canonical relative path, and a
@@ -266,7 +349,7 @@ tolerance, and verify their own replay. Backend-private failure state digests
 remain diagnostic and are never compared. Schema-v1 reports prove only the
 successful cross-backend path and remain historical evidence.
 
-Physics conformance report schema v2 embeds backend-manifest schema v2,
+Physics conformance report schema v2 embeds backend-manifest schema v3,
 catalog version, tolerance-registry version, declared/runtime capabilities, and
 coverage verdicts. Its canonical shape lives at
 `tests/golden/physics/conformance-report-v2.json`. A backend identifier with no
@@ -291,6 +374,43 @@ SHA-256 appears in the report subject.
 revolute/prismatic position, velocity, and effort variants. Field names carry
 their SI units. A backend rejects unknown variants, non-finite values, negative
 gains/limits, and joint-kind mismatches before a physics step.
+
+`JointPassiveDynamics` is the separate plant-loss contract. Revolute joints use
+`viscous_damping_nm_s_per_rad`, `coulomb_friction_nm`, and
+`coulomb_transition_velocity_rad_s`; prismatic joints use the corresponding
+`_n_s_per_m`, `_n`, and `_m_s` fields. URDF `<dynamics>` imports into this
+component rather than changing actuator servo gains. Because URDF has no
+transition-width field, the importer explicitly records `0.01 rad/s` or
+`0.01 m/s`; these values are policy, not backend defaults. Absent dynamics
+means zero declared plant loss. Rapier multibodies and MuJoCo integrate viscous
+damping implicitly; Rapier impulse-joint fixtures reject nonzero damping rather
+than using an unstable explicit approximation.
+
+A `.rne.robot.toml` URDF section may replace only that unrepresentable policy
+value with `[[urdf.joint_passive_dynamics]]`, a joint name, and exactly one of
+`coulomb_transition_velocity_rad_s` or
+`coulomb_transition_velocity_m_s`. The override is content-addressed with the
+robot asset, requires a matching joint kind and an existing URDF dynamics
+declaration, and does not replace the URDF damping or friction magnitude.
+
+Portable Coulomb loss is the smooth generalized effort
+`-magnitude*tanh(velocity/transition_velocity)`, evaluated from the pre-step
+joint velocity. It approaches the requested kinetic-friction magnitude but is
+zero at rest: RNE does not call this true static friction, stiction, or a
+breakaway model. Rapier applies it as equal-and-opposite joint-axis effort;
+MuJoCo keeps native `frictionloss` disabled and adds the same result outside the
+bounded actuator effort. The process-isolated Gazebo effort adapter exposes the
+same explicit arrays and records both passive effort and the total backend
+command per physics substep. A nonzero magnitude requires a finite positive
+transition velocity. Backends also reject negative, non-finite, or
+joint-kind-mismatched coefficients before stepping.
+
+The OpenArm damping-envelope evidence distinguishes a supported-case failure
+from an expected failure beyond the declared plant-loss envelope. A report may
+be `passed` only when every supported case passes and every out-of-envelope
+`expected_boundary_failure` still passes model realization, provenance, and
+exact replay checks. An out-of-envelope model/hash/replay failure remains a hard
+failure and cannot be relabeled as an observed performance boundary.
 
 The machine-readable values frozen by this policy live in
 `release/contracts.toml`. The release gate compares them with the compiled ABI,
@@ -404,8 +524,31 @@ and shipped file digests are retained in a runtime manifest. Older schema-v6
 reports that list only `rapier_native` remain valid evidence for the narrower
 workflow but do not qualify as the current cross-backend installed proof.
 
-Installed flagship proof report schema v2 is the timing-free index emitted by
-that runner. It fixes the task and outcome identities, binds the exact packaged
+Installed-rehearsal report schema v7 appends `simulator_adapter`. The installed
+kit launches the process-isolated reference adapter and requires all ten
+fixed-step checks to pass while hashing the TaskSpec, runtime manifest, world,
+robot model, adapter configuration, subject, and normalized launch arguments.
+Schema-v6 reports remain valid historical eleven-check rehearsals but do not
+prove that the external simulator authoring path shipped in the archive.
+
+Installed flagship proof report schema v3 adds a required three-case
+recorded/shadow result: 512-sample exact playback, 512-sample Rapier-to-MuJoCo
+shadow comparison with its first measured divergence, and a sequence-128
+fail-closed disconnect. Every submitted action is suppressed and actuator
+writes must remain zero. Its sessions bind the same TaskSpec/controller,
+calibration, requirements, and retained compact traces by SHA-256 and replay
+semantically through Failure Capsule verification. Schema v2 remains valid for
+its original simulation-only installed proof but cannot qualify for the current
+recorded/shadow gate.
+
+Installed flagship proof report schema v4 additionally requires a full
+extracted-bundle verification report. That report binds the canonical internal
+`SHA256SUMS` and `release-report.json` after rejecting missing, extra, modified,
+duplicate, escaping, or symlinked members. A fresh maintainer check recomputes
+the complete member graph rather than trusting the retained `passed` value.
+
+The installed flagship report remains the timing-free index emitted by that
+runner. It fixes the task and outcome identities, binds the exact packaged
 producer executable, and binds the TaskSpec,
 Rapier/MuJoCo success and failure reports, both failure replays, unit-bearing
 cross-backend report, browser inspector, workflow report, and capsule manifest
@@ -414,13 +557,14 @@ artifact. Schema v1 remains evidence for its original artifact set but cannot
 qualify as archive-bound external reproduction because it does not identify the
 executable that produced it.
 
-Time-to-proof report schema v1 is that separate artifact. It records a bounded
-operator-supplied machine label, OS and architecture, command elapsed
-milliseconds, the 900,000 ms acceptance target, and content identities for the
-installed proof report and verified capsule manifest. The report is deliberately
+Time-to-proof report schema v2 is that separate artifact. It records a bounded
+operator-supplied machine label, OS and architecture, elapsed milliseconds from
+full bundle verification, the 900,000 ms acceptance target, and content identities for the
+bundle verification, installed proof report, and verified capsule manifest. The report is deliberately
 excluded from deterministic hashes. CI-generated measurements prove the
 packaged measurement path only; independent acceptance still requires an
-external user and named reference hardware.
+external user and named reference hardware. Schema v1 remains historical
+process-only timing evidence and cannot satisfy the current full installed path.
 
 External flagship reproduction report schema v1 binds one independently owned
 public repository revision to the exact clean tagged release archive, source
@@ -433,12 +577,12 @@ non-identical first violations. The report is reviewable evidence, not proof of
 independence by itself; maintainers still verify ownership and immutable
 downloads before acceptance.
 
-The schema-v6 report remains inside the archive as the staged rehearsal. A
+The schema-v7 report remains inside the archive as the staged rehearsal. A
 fresh extraction emits the separate `rne_archive_install_rehearsal` schema-v2
 wrapper. It binds the exact archive digest, extracted release report and
-checksum manifest, hardware-named time-to-proof report, and a second schema-v6
+checksum manifest, hardware-named time-to-proof report, and a second schema-v7
 result. The wrapper is a distinct
-signed subject; an older standalone schema-v6 report cannot be presented as
+signed subject; an older standalone schema-v6 or schema-v7 report cannot be presented as
 archive-bound evidence.
 
 ## Replay migration

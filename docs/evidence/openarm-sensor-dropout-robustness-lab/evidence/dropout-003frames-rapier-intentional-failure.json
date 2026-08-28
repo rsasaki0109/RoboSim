@@ -1,0 +1,22 @@
+{
+  "kind": "rne_controller_contract_failure",
+  "schema_version": 1,
+  "backend_id": "rne_rapier",
+  "backend_version": "0.22",
+  "task_id": "rne.openarm.right_joint_tracking.v1",
+  "task_sha256": "f1d7f575ab843df41210a2902182c132ef565b9b3e08610d093773c001c20e5b",
+  "controller_id": "rne.controller.openarm_right.plant_state_feedback_integral.dropout-003frames.v1",
+  "controller_sha256": "daad4f6db22518a21489723733c46f2b04790d3d91f2f46440cf2102f87f91fb",
+  "action_trace_sha256": "74613b2114248d29f1753dc47e18059c3c854eb5dfdcf71516eaef94848353c6",
+  "robot_asset_config_sha256": "78df5a87bf5ca80cdef850d72567eff4cd308c0d2b37032d3e78d47d78041a19",
+  "actuation_config_sha256": "5a83e6f018e5f5da9402f34d4310e71b4e13816c6267afa40289c4c32d6957e4",
+  "injection_kind": "controller_output_truncation",
+  "injected_step": 307,
+  "first_violation": "action_width_mismatch",
+  "first_violation_step": 307,
+  "first_violation_sim_time_ticks": 5116666769,
+  "unit": "missing_action_element_count",
+  "observed_missing_action_elements": 1,
+  "maximum_missing_action_elements": 0,
+  "status": "failed_as_expected"
+}

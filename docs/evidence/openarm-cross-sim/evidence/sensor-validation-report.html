@@ -1,0 +1,267 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>OpenArm Joint Feedback Validation</title>
+<style>body{font:16px system-ui;max-width:1100px;margin:40px auto;padding:0 20px;background:#111827;color:#e5e7eb}h1{margin-bottom:8px}.status{display:inline-block;padding:6px 12px;border-radius:999px;background:#064e3b;color:#a7f3d0;font-weight:700}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#1f2937;border:1px solid #374151;border-radius:10px;padding:18px;line-height:1.4}</style>
+<h1>OpenArm Joint Feedback Validation</h1><p class="status">passed</p><p>Self-contained deterministic sensor evidence. All times are simulation ticks and all physical fields retain explicit SI units.</p><pre>{
+  "actuator_evidence": {
+    "first_saturation_joint_index": 7,
+    "first_saturation_joint_name": "openarm_right_finger_joint1",
+    "first_saturation_sequence": 1,
+    "measured_effort_available": false,
+    "saturated_channel_samples": 2788
+  },
+  "artifacts": {
+    "browser_report": "sensor-validation-report.html",
+    "dropout": "sensor-dropout-trace.json",
+    "nominal": "rapier-success-trace.json",
+    "stuck_value": "sensor-stuck-trace.json"
+  },
+  "backend": {
+    "id": "rne_rapier",
+    "version": "0.22"
+  },
+  "checks": [
+    {
+      "classification": "measurement",
+      "expected": 1800,
+      "id": "nominal_frame_count_v1",
+      "observed": 1800,
+      "status": "passed",
+      "unit": "frame"
+    },
+    {
+      "classification": "measurement",
+      "expected": true,
+      "id": "deterministic_replay_hash_v1",
+      "observed": true,
+      "status": "passed",
+      "unit": "sha256_match"
+    },
+    {
+      "classification": "measurement",
+      "id": "sample_phase_error_v1",
+      "maximum": 0,
+      "observed": 0,
+      "status": "passed",
+      "unit": "tick"
+    },
+    {
+      "classification": "measurement",
+      "expected": 16666667,
+      "id": "observation_age_min_v1",
+      "observed": 16666667,
+      "status": "passed",
+      "unit": "tick"
+    },
+    {
+      "classification": "measurement",
+      "expected": 16666667,
+      "id": "observation_age_max_v1",
+      "observed": 16666667,
+      "status": "passed",
+      "unit": "tick"
+    },
+    {
+      "classification": "measurement",
+      "id": "sensor_backend_position_calibration_v1",
+      "maximum_delta": 0.0,
+      "observed_delta": 0.0,
+      "status": "passed",
+      "unit": "rad"
+    },
+    {
+      "classification": "measurement",
+      "id": "sensor_backend_velocity_calibration_v1",
+      "maximum_delta": 0.0,
+      "observed_delta": 0.0,
+      "status": "passed",
+      "unit": "rad/s"
+    },
+    {
+      "classification": "measurement",
+      "expected": 16200,
+      "id": "unavailable_effort_is_explicit_v1",
+      "observed": 16200,
+      "status": "passed",
+      "unit": "channel_sample"
+    },
+    {
+      "classification": "actuator",
+      "id": "effort_saturation_is_observable_v1",
+      "minimum": 1,
+      "observed": 2788,
+      "status": "passed",
+      "unit": "channel_sample"
+    },
+    {
+      "classification": "measurement",
+      "expected": 307,
+      "id": "dropout_first_sequence_gap_v1",
+      "observed": 307,
+      "status": "passed",
+      "unit": "sequence"
+    },
+    {
+      "classification": "measurement",
+      "expected": 307,
+      "id": "stuck_value_first_status_v1",
+      "observed": 307,
+      "status": "passed",
+      "unit": "sequence"
+    },
+    {
+      "classification": "input",
+      "expected": true,
+      "id": "world_seed_consistency_v1",
+      "observed": true,
+      "status": "passed",
+      "unit": "seed_match"
+    },
+    {
+      "classification": "estimation",
+      "expected": 2,
+      "id": "controller_bootstrap_frame_count_v1",
+      "observed": 2,
+      "status": "passed",
+      "unit": "frame"
+    },
+    {
+      "classification": "estimation",
+      "expected": true,
+      "id": "controller_observation_sequence_and_age_v1",
+      "observed": true,
+      "status": "passed",
+      "unit": "sequence_age_match"
+    },
+    {
+      "classification": "estimation",
+      "expected": 1798,
+      "id": "controller_feedback_frame_count_v1",
+      "observed": 1798,
+      "status": "passed",
+      "unit": "frame"
+    },
+    {
+      "classification": "controller",
+      "id": "controller_feedback_correction_bound_v1",
+      "maximum": 0.04,
+      "observed": 0.04,
+      "status": "passed",
+      "unit": "rad"
+    },
+    {
+      "classification": "controller",
+      "id": "controller_integral_anti_windup_bound_v1",
+      "maximum": 0.03,
+      "observed": 0.03,
+      "per_joint_bounds_satisfied": true,
+      "status": "passed",
+      "unit": "rad"
+    },
+    {
+      "classification": "measurement",
+      "expected": 309,
+      "id": "controller_dropout_fail_closed_v1",
+      "observed": 309,
+      "status": "passed",
+      "unit": "action_step"
+    },
+    {
+      "classification": "measurement",
+      "expected": 309,
+      "id": "controller_stuck_value_fail_closed_v1",
+      "observed": 309,
+      "status": "passed",
+      "unit": "action_step"
+    }
+  ],
+  "controller_id": "rne.controller.openarm_right_pose_cycle.v1",
+  "controller_observation_contract": {
+    "bootstrap_frames": 2,
+    "bootstrap_policy": "reference_until_first_available",
+    "configured_maximum_feedback_correction_rad": 0.04,
+    "configured_maximum_integral_correction_rad": 0.03,
+    "feedback_frames": 1798,
+    "input": "typed_joint_feedback_only",
+    "integrator_limit_policy": "per_joint_clamp_anti_windup",
+    "law": "joint_position_reference_pid_v1",
+    "maximum_age_ticks": 16666667,
+    "maximum_feedback_correction_rad": 0.04,
+    "maximum_integral_correction_rad": 0.03,
+    "required_status": "nominal"
+  },
+  "fault_evidence": {
+    "controller_fail_closed": {
+      "dropout": {
+        "action_step": 309,
+        "detected_at_ticks": 5133333436,
+        "first_violated_contract": "maximum_observation_age_ticks",
+        "observation_age_ticks": 33333334,
+        "observation_sequence": 306
+      },
+      "stuck_value": {
+        "action_step": 309,
+        "detected_at_ticks": 5133333436,
+        "first_violated_contract": "required_sensor_status",
+        "observation_age_ticks": 16666667,
+        "observation_sequence": 307
+      }
+    },
+    "dropout": {
+      "attempted_frames": 309,
+      "detected_at_consumption_ticks": 5150000103,
+      "emitted_frames": 308,
+      "expected_detection_ticks": 5150000103,
+      "first_contract_deviation": "sequence_gap",
+      "first_missing_sequence": 307,
+      "injected_sequence": 307,
+      "next_observed_sequence": 308
+    },
+    "stuck_value": {
+      "detected_at_consumption_ticks": 5133333436,
+      "expected_detection_ticks": 5133333436,
+      "first_contract_deviation": "stuck_value_status",
+      "first_status_sequence": 307,
+      "injected_from_sequence": 307
+    }
+  },
+  "input_hashes": {
+    "action_trace_sha256": "95301ebce9c0f9091f08e8f398b0a3898871d2f24c6b83688198c1cc0e8319d7",
+    "actuation_config_sha256": "5a83e6f018e5f5da9402f34d4310e71b4e13816c6267afa40289c4c32d6957e4",
+    "controller_sha256": "0db69a85455ee82c9456a84da4724c97e669e2dcb4aa702c1ee10f33f036d2e4",
+    "robot_asset_config_sha256": "78df5a87bf5ca80cdef850d72567eff4cd308c0d2b37032d3e78d47d78041a19",
+    "task_sha256": "f1d7f575ab843df41210a2902182c132ef565b9b3e08610d093773c001c20e5b"
+  },
+  "kind": "rne_sensor_validation_report",
+  "schema_version": 1,
+  "sensor_contract": {
+    "channel_order": [
+      "openarm_right_link1",
+      "openarm_right_link2",
+      "openarm_right_link3",
+      "openarm_right_link4",
+      "openarm_right_link5",
+      "openarm_right_link6",
+      "openarm_right_ee_base_link",
+      "openarm_right_ee_link1",
+      "openarm_right_ee_link2"
+    ],
+    "consumption": "databus_latest_available",
+    "effort_semantics": "backend_measurement_or_explicit_unavailable",
+    "latency_ticks": 16666667,
+    "payload": "JointFeedback",
+    "phase_offset_ticks": 16666667,
+    "sample_period_ticks": 16666667,
+    "schema_version": 1,
+    "stream_id": 9001
+  },
+  "status": "passed",
+  "stream_hashes": {
+    "dropout_sha256": "de377b50b91845ed009668173b5886206403db46e815f5caae88555e2dbafb82",
+    "nominal_sha256": "f99e436d3123f586c346e571af12377d7fdf623fb65a79f778138994793b2dde",
+    "replay_sha256": "f99e436d3123f586c346e571af12377d7fdf623fb65a79f778138994793b2dde",
+    "stuck_value_sha256": "9f5dfa84dc1cd139ab774f01a3a1a280eae9b2eef5aab011943d5d09d6908ce3"
+  },
+  "task_id": "rne.openarm.right_joint_tracking.v1",
+  "world_seed": 20260824
+}</pre>

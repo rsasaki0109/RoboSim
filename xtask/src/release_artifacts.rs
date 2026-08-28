@@ -20,7 +20,7 @@ use std::process::{Command, Output};
 /// Machine-readable release provenance report schema.
 pub(crate) const RELEASE_REPORT_SCHEMA_VERSION: u32 = 2;
 /// Machine-readable installed-bundle rehearsal report schema.
-pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 6;
+pub(crate) const INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 7;
 /// Archive-bound independently extracted rehearsal report schema.
 pub(crate) const ARCHIVE_INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 2;
 /// Installed Python public-API contract schema.
@@ -30,9 +30,12 @@ pub(crate) const PYTHON_API_REPORT_SCHEMA_VERSION: u32 = 1;
 /// Bundled MuJoCo runtime provenance manifest schema.
 pub(crate) const MUJOCO_RUNTIME_MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// Independently produced installed flagship reproduction report schema.
-pub(crate) const EXTERNAL_FLAGSHIP_REPRODUCTION_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const EXTERNAL_FLAGSHIP_REPRODUCTION_REPORT_SCHEMA_VERSION: u32 = 2;
+const EXTERNAL_FLAGSHIP_SUBMISSION_SCHEMA_VERSION: u32 = 2;
+const EXTERNAL_FLAGSHIP_SUBMISSION_KIND: &str = "rne_external_flagship_submission_candidate";
+const EXTERNAL_FLAGSHIP_CANDIDATE_STATUS: &str = "not_accepted_pending_maintainer_verification";
 
-const RELEASE_BINARY_PACKAGES: [(&str, &str); 9] = [
+const RELEASE_BINARY_PACKAGES: [(&str, &str); 11] = [
     ("rne_asset_cli", "rne-asset"),
     ("rne_compatibility_suite", "rne-compatibility"),
     ("rne_accelerator_contract", "rne-accelerator-conformance"),
@@ -41,6 +44,8 @@ const RELEASE_BINARY_PACKAGES: [(&str, &str); 9] = [
     ("rne_scenario_scale", "rne-scenario-scale"),
     ("rne_hardware_gateway", "rne-hardware-conformance"),
     ("rne_hardware_gateway", "rne-hardware-mock-device"),
+    ("rne_hardware_gateway", "rne-simulator-conformance"),
+    ("rne_hardware_gateway", "rne-simulator-mock-adapter"),
     ("flagship_validation_workflow", "rne-flagship-proof"),
 ];
 const RELEASE_PLUGIN_PACKAGE: &str = "rne_plugin_example_velocity_servo";
@@ -71,21 +76,31 @@ const RELEASE_REPORT: &str = "release-report.json";
 const INSTALL_REPORT: &str = "install-rehearsal-report.json";
 const ARCHIVE_INSTALL_REPORT: &str = "archive-install-rehearsal-report.json";
 const ARCHIVE_INSTALL_REPORT_KIND: &str = "rne_archive_install_rehearsal";
-const INSTALL_CHECK_IDS: [&str; 11] = [
+const INSTALL_CHECK_IDS: [&str; 12] = [
     "robot_replay",
     "flagship_proof",
     "scenario_replay",
     "physics_conformance",
     "scenario_scale_100",
     "hardware_adapter",
+    "simulator_adapter",
     "accelerator_protocol",
     "controller_plugin",
     "compatibility_corpus",
     "python_wheel",
     "python_api",
 ];
+const EXTERNAL_FLAGSHIP_REQUIRED_PROOF_PATHS: [&str; 5] = [
+    "flagship-proof/installed-proof-report.json",
+    "flagship-proof/time-to-proof-report.json",
+    "flagship-proof/cross-backend-report.json",
+    "flagship-proof/recorded-shadow-proof.json",
+    "flagship-proof/failure-capsule/capsule.json",
+];
+const MAX_EXTERNAL_SUBMISSION_BYTES: u64 = 128 * 1024;
+const MAX_EXTERNAL_LOG_BYTES: u64 = 16 * 1024 * 1024;
 
-const BUNDLE_FILES: [(&str, &str); 81] = [
+const BUNDLE_FILES: [(&str, &str); 91] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -101,6 +116,10 @@ const BUNDLE_FILES: [(&str, &str); 81] = [
         "docs/EXTERNAL_EVIDENCE_INTAKE.md",
         "docs/EXTERNAL_EVIDENCE_INTAKE.md",
     ),
+    (
+        "docs/EXTERNAL_FLAGSHIP_REPRODUCTION.md",
+        "docs/EXTERNAL_FLAGSHIP_REPRODUCTION.md",
+    ),
     ("docs/PLUGIN_SDK.md", "docs/PLUGIN_SDK.md"),
     (
         "docs/EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md",
@@ -109,6 +128,10 @@ const BUNDLE_FILES: [(&str, &str); 81] = [
     (
         "docs/HARDWARE_ADAPTER_CONFORMANCE.md",
         "docs/HARDWARE_ADAPTER_CONFORMANCE.md",
+    ),
+    (
+        "docs/EXTERNAL_SIMULATOR_ADAPTER_CONFORMANCE.md",
+        "docs/EXTERNAL_SIMULATOR_ADAPTER_CONFORMANCE.md",
     ),
     (
         "docs/ACCELERATOR_PROTOCOL.md",
@@ -130,6 +153,22 @@ const BUNDLE_FILES: [(&str, &str); 81] = [
     (
         "release/external-evidence-intake.toml",
         "release/external-evidence-intake.toml",
+    ),
+    (
+        "release/external-flagship-submission-template.json",
+        "release/external-flagship-submission-template.json",
+    ),
+    (
+        "release/external-project-submission-template.json",
+        "release/external-project-submission-template.json",
+    ),
+    (
+        "release/external-plugin-submission-template.json",
+        "release/external-plugin-submission-template.json",
+    ),
+    (
+        "release/external-simulator-submission-template.json",
+        "release/external-simulator-submission-template.json",
     ),
     (
         "release/evidence/compatibility-report-v1.json",
@@ -161,6 +200,22 @@ const BUNDLE_FILES: [(&str, &str); 81] = [
     (
         "assets/tasks/diff_drive_goal.task.json",
         "assets/tasks/diff_drive_goal.task.json",
+    ),
+    (
+        "adapters/hardware/rne_hardware_gateway/tests/fixtures/simulator/runtime.json",
+        "adapters/simulator/reference/runtime.json",
+    ),
+    (
+        "adapters/hardware/rne_hardware_gateway/tests/fixtures/simulator/world.sdf",
+        "adapters/simulator/reference/world.sdf",
+    ),
+    (
+        "adapters/hardware/rne_hardware_gateway/tests/fixtures/simulator/robot.urdf",
+        "adapters/simulator/reference/robot.urdf",
+    ),
+    (
+        "adapters/hardware/rne_hardware_gateway/tests/fixtures/simulator/adapter.toml",
+        "adapters/simulator/reference/adapter.toml",
     ),
     (
         "adapters/mjx/accelerator.toml",
@@ -391,11 +446,63 @@ struct ExternalFlagshipOptions {
     archive: PathBuf,
     bundle_dir: PathBuf,
     proof_dir: PathBuf,
-    owner: String,
-    repository: String,
+    proof_bundle: PathBuf,
+    submission: PathBuf,
+    evidence_repo_dir: PathBuf,
     revision: String,
-    measured_on: String,
     output: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ExternalFlagshipSubmissionCandidate {
+    kind: String,
+    schema_version: u32,
+    candidate_status: String,
+    author_assistance: bool,
+    evidence_repository: SubmissionRepository,
+    measurement: SubmissionMeasurement,
+    release_archive: SubmissionArtifact,
+    proof_bundle: SubmissionArtifact,
+    required_proof_paths: Vec<String>,
+    reproduction: SubmissionReproduction,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SubmissionRepository {
+    owner: String,
+    url: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SubmissionMeasurement {
+    measured_on: String,
+    machine_label: String,
+    operating_system: String,
+    architecture: String,
+    release_target: String,
+    elapsed_ms: u64,
+    target_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SubmissionArtifact {
+    url: String,
+    file_name: String,
+    size_bytes: u64,
+    sha256: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SubmissionReproduction {
+    commands: Vec<String>,
+    exit_statuses: Vec<i32>,
+    stdout_log_path: String,
+    stderr_log_path: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -444,8 +551,40 @@ struct InstalledFlagshipProofReport {
     expected_failure_contract: String,
     first_violation_step: u64,
     capsule_verified: bool,
+    recorded_shadow_status: Option<String>,
+    recorded_shadow_case_count: usize,
+    installed_bundle_verified: bool,
+    bundle_verification_report: Option<MemberDigest>,
     producer_executable: MemberDigest,
     artifacts: Vec<MemberDigest>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct InstalledRecordedShadowCase {
+    id: String,
+    mode: rne_hardware_gateway::HardwareMode,
+    expected_status: String,
+    observed_status: String,
+    accepted_samples: usize,
+    violating_elements: usize,
+    first_divergence_tensor: Option<String>,
+    suppressed_actions: usize,
+    actuator_writes_emitted: bool,
+    session: String,
+    report: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct InstalledRecordedShadowProof {
+    kind: String,
+    schema_version: u32,
+    status: String,
+    task_id: String,
+    controller_id: String,
+    clock_source: String,
+    cases: Vec<InstalledRecordedShadowCase>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -475,6 +614,7 @@ struct TimeToProofReport {
     elapsed_ms: u64,
     target_ms: u64,
     within_target: bool,
+    installed_bundle_verification: MemberDigest,
     installed_proof_report: MemberDigest,
     failure_capsule_manifest: MemberDigest,
 }
@@ -524,6 +664,10 @@ struct ExternalFlagshipReproductionReport {
     first_violation_step: u64,
     first_violation_sim_time_ticks: u64,
     archive: MemberDigest,
+    proof_bundle: MemberDigest,
+    submission_candidate: MemberDigest,
+    stdout_log: MemberDigest,
+    stderr_log: MemberDigest,
     release_report: MemberDigest,
     checksum_manifest: MemberDigest,
     producer_executable: MemberDigest,
@@ -531,6 +675,18 @@ struct ExternalFlagshipReproductionReport {
     time_to_proof_report: MemberDigest,
     cross_backend_report: MemberDigest,
     failure_capsule_manifest: MemberDigest,
+}
+
+pub(crate) struct StagedExternalFlagshipReproduction<'a> {
+    pub(crate) owner: &'a str,
+    pub(crate) repository: &'a str,
+    pub(crate) revision: &'a str,
+    pub(crate) measured_on: &'a str,
+    pub(crate) release_archive: &'a Path,
+    pub(crate) proof_bundle: &'a Path,
+    pub(crate) submission_candidate: &'a Path,
+    pub(crate) stdout_log: &'a Path,
+    pub(crate) stderr_log: &'a Path,
 }
 
 impl InstallRehearsalReport {
@@ -796,7 +952,7 @@ pub(crate) fn validate_readiness_release_reports(
                     .get(*id)
                     .is_some_and(|status| status == "passed")
             }),
-        "readiness release report must retain all eleven passing installed workflows"
+        "readiness release report must retain all twelve passing installed workflows"
     );
     anyhow::ensure!(
         !release.members.is_empty(),
@@ -861,7 +1017,7 @@ pub(crate) fn validate_readiness_release_reports(
     );
     anyhow::ensure!(
         install.all_passed(),
-        "readiness install report must pass all eleven canonical checks"
+        "readiness install report must pass all twelve canonical checks"
     );
     anyhow::ensure!(
         release.installed_workflows == install.verdicts(),
@@ -876,6 +1032,7 @@ pub(crate) fn release_bundle(args: &mut impl Iterator<Item = String>) -> anyhow:
     let root = workspace_root()?;
     let options = parse_bundle_options(args)?;
     release_readiness::enforce_release_promotion(&root)?;
+    validate_release_workflow_contract(&root)?;
     validate_release_target(&options.target)?;
     ensure_native_target(&root, &options.target)?;
 
@@ -1086,12 +1243,33 @@ pub(crate) fn external_flagship_check(
     let archive = absolute_from(&root, &options.archive);
     let bundle_dir = absolute_from(&root, &options.bundle_dir);
     let proof_dir = absolute_from(&root, &options.proof_dir);
+    let proof_bundle_path = absolute_from(&root, &options.proof_bundle);
+    let submission_path = absolute_from(&root, &options.submission);
+    let evidence_repo_dir = absolute_from(&root, &options.evidence_repo_dir);
     let output = absolute_from(&root, &options.output);
+    let submission_bytes = read_external_regular_file(
+        &submission_path,
+        "external flagship submission candidate",
+        MAX_EXTERNAL_SUBMISSION_BYTES,
+    )?;
+    let submission: ExternalFlagshipSubmissionCandidate = serde_json::from_slice(&submission_bytes)
+        .context("parse completed external flagship submission candidate")?;
+    validate_external_submission_candidate(&submission)?;
     validate_external_operator(
-        &options.owner,
-        &options.repository,
+        &submission.evidence_repository.owner,
+        &submission.evidence_repository.url,
         &options.revision,
-        &options.measured_on,
+        &submission.measurement.measured_on,
+    )?;
+    validate_external_repository_checkout(
+        &evidence_repo_dir,
+        &submission.evidence_repository.url,
+        &options.revision,
+    )?;
+    let submission_relative_path = validate_committed_external_file(
+        &evidence_repo_dir,
+        &submission_path,
+        "submission candidate",
     )?;
     anyhow::ensure!(
         !output.exists(),
@@ -1153,16 +1331,39 @@ pub(crate) fn external_flagship_check(
         &archive_subject.sha256,
         &release.target,
     )?;
+    validate_submission_artifact(&submission.release_archive, &archive, "release archive")?;
+    let proof_bundle = digest_external_file(&proof_bundle_path, "proof bundle")?;
+    validate_submission_artifact(&submission.proof_bundle, &proof_bundle_path, "proof bundle")?;
+
+    let stdout_path = resolve_submission_member(
+        &evidence_repo_dir,
+        &submission.reproduction.stdout_log_path,
+        "stdout log",
+    )?;
+    let stderr_path = resolve_submission_member(
+        &evidence_repo_dir,
+        &submission.reproduction.stderr_log_path,
+        "stderr log",
+    )?;
+    let mut stdout_log =
+        digest_external_bounded_file(&stdout_path, "stdout log", MAX_EXTERNAL_LOG_BYTES)?;
+    stdout_log.path = submission.reproduction.stdout_log_path.clone();
+    let mut stderr_log =
+        digest_external_bounded_file(&stderr_path, "stderr log", MAX_EXTERNAL_LOG_BYTES)?;
+    stderr_log.path = submission.reproduction.stderr_log_path.clone();
+    validate_committed_external_file(&evidence_repo_dir, &stdout_path, "stdout log")?;
+    validate_committed_external_file(&evidence_repo_dir, &stderr_path, "stderr log")?;
 
     let producer = bundle_dir
         .join("bin")
         .join(native_binary_name("rne-flagship-proof", &release.target));
-    let proof = validate_installed_flagship_proof(&proof_dir, &producer)?;
+    let proof = validate_installed_flagship_proof(&proof_dir, &producer, true)?;
     let timing_path = proof_dir.join("time-to-proof-report.json");
     let timing: TimeToProofReport = serde_json::from_slice(&fs::read(&timing_path)?)?;
     validate_external_machine_label(&timing.machine_label)?;
     validate_time_to_proof_report(&proof_dir, &timing.machine_label)?;
     validate_timing_platform(&timing, &release.target)?;
+    validate_submission_measurement(&submission.measurement, &timing, &release.target)?;
     rne_asset_cli::failure_capsule::verify_directory(&proof_dir.join("failure-capsule"))?;
     let (first_violation_step, first_violation_sim_time_ticks) =
         validate_external_cross_backend_report(&proof_dir.join("cross-backend-report.json"))?;
@@ -1171,10 +1372,10 @@ pub(crate) fn external_flagship_check(
         kind: "rne_external_flagship_reproduction_report".to_string(),
         schema_version: EXTERNAL_FLAGSHIP_REPRODUCTION_REPORT_SCHEMA_VERSION,
         status: "passed".to_string(),
-        owner: options.owner,
-        repository: options.repository,
+        owner: submission.evidence_repository.owner,
+        repository: submission.evidence_repository.url,
         revision: options.revision,
-        measured_on: options.measured_on,
+        measured_on: submission.measurement.measured_on,
         author_assistance: false,
         release_version: release.release_version,
         release_revision: release.git_commit,
@@ -1193,6 +1394,13 @@ pub(crate) fn external_flagship_check(
             size_bytes: archive_metadata.len(),
             sha256: archive_sha256,
         },
+        proof_bundle,
+        submission_candidate: member_digest_from_bytes(
+            &submission_relative_path,
+            &submission_bytes,
+        ),
+        stdout_log,
+        stderr_log,
         release_report: member_digest_from_bytes(RELEASE_REPORT, &release_bytes),
         checksum_manifest: digest_member(&bundle_dir, SHA256_MANIFEST)?,
         producer_executable: proof.producer_executable,
@@ -1215,12 +1423,392 @@ pub(crate) fn external_flagship_check(
     Ok(())
 }
 
+/// Revalidates the retained bytes that make an accepted installed flagship run
+/// eligible for the 1.0 readiness gate.
+pub(crate) fn validate_staged_external_flagship_report(
+    report_bytes: &[u8],
+    staged: StagedExternalFlagshipReproduction<'_>,
+) -> anyhow::Result<()> {
+    let report: ExternalFlagshipReproductionReport = serde_json::from_slice(report_bytes)
+        .context("parse staged external flagship reproduction report")?;
+    validate_external_operator(
+        staged.owner,
+        staged.repository,
+        staged.revision,
+        staged.measured_on,
+    )?;
+    anyhow::ensure!(
+        report.kind == "rne_external_flagship_reproduction_report"
+            && report.schema_version == EXTERNAL_FLAGSHIP_REPRODUCTION_REPORT_SCHEMA_VERSION
+            && report.status == "passed"
+            && report.owner == staged.owner
+            && report.repository == staged.repository
+            && report.revision == staged.revision
+            && report.measured_on == staged.measured_on
+            && !report.author_assistance
+            && report.release_version == RELEASE_VERSION
+            && is_lower_git_object_id(&report.release_revision)
+            && report.elapsed_ms <= report.target_ms
+            && report.target_ms == 15 * 60 * 1_000
+            && report.task_id == "rne.flagship.mobile_lift_shared_aisle.v2"
+            && report.physics_execution_paths == ["rapier_native", "mujoco_native"]
+            && report.first_violation_step > 0
+            && report.first_violation_sim_time_ticks > 0,
+        "staged external flagship report identity or qualifying verdict drifted"
+    );
+    validate_release_target(&report.release_target)?;
+    validate_external_machine_label(&report.machine_label)?;
+    anyhow::ensure!(
+        matches!(report.operating_system.as_str(), "windows" | "linux")
+            && report.architecture == "x86_64",
+        "staged external flagship report platform is not qualifying"
+    );
+
+    let candidate_bytes = read_external_regular_file(
+        staged.submission_candidate,
+        "staged submission candidate",
+        MAX_EXTERNAL_SUBMISSION_BYTES,
+    )?;
+    let candidate: ExternalFlagshipSubmissionCandidate =
+        serde_json::from_slice(&candidate_bytes)
+            .context("parse staged external flagship submission candidate")?;
+    validate_external_submission_candidate(&candidate)?;
+    anyhow::ensure!(
+        candidate.evidence_repository.owner == staged.owner
+            && candidate.evidence_repository.url == staged.repository
+            && candidate.measurement.measured_on == staged.measured_on
+            && candidate.measurement.machine_label == report.machine_label
+            && candidate.measurement.operating_system == report.operating_system
+            && candidate.measurement.architecture == report.architecture
+            && candidate.measurement.release_target == report.release_target
+            && candidate.measurement.elapsed_ms == report.elapsed_ms
+            && candidate.measurement.target_ms == report.target_ms,
+        "staged external flagship candidate does not bind the accepted report"
+    );
+    validate_submission_artifact(
+        &candidate.release_archive,
+        staged.release_archive,
+        "staged release archive",
+    )?;
+    validate_submission_artifact(
+        &candidate.proof_bundle,
+        staged.proof_bundle,
+        "staged proof bundle",
+    )?;
+    anyhow::ensure!(
+        candidate.reproduction.stdout_log_path == report.stdout_log.path
+            && candidate.reproduction.stderr_log_path == report.stderr_log.path,
+        "staged external flagship log paths differ from the candidate"
+    );
+
+    validate_report_member(
+        &report.archive,
+        staged.release_archive,
+        None,
+        "release archive",
+    )?;
+    validate_report_member(
+        &report.proof_bundle,
+        staged.proof_bundle,
+        None,
+        "proof bundle",
+    )?;
+    validate_relative_member(Path::new(&report.submission_candidate.path))?;
+    validate_report_member(
+        &report.submission_candidate,
+        staged.submission_candidate,
+        Some(&report.submission_candidate.path),
+        "submission candidate",
+    )?;
+    validate_report_member(
+        &report.stdout_log,
+        staged.stdout_log,
+        Some(&candidate.reproduction.stdout_log_path),
+        "stdout log",
+    )?;
+    validate_report_member(
+        &report.stderr_log,
+        staged.stderr_log,
+        Some(&candidate.reproduction.stderr_log_path),
+        "stderr log",
+    )?;
+    Ok(())
+}
+
+fn validate_report_member(
+    expected: &MemberDigest,
+    path: &Path,
+    expected_path: Option<&str>,
+    label: &str,
+) -> anyhow::Result<()> {
+    let actual = digest_external_file(path, label)?;
+    anyhow::ensure!(
+        expected.path == expected_path.unwrap_or(&actual.path)
+            && expected.size_bytes == actual.size_bytes
+            && expected.sha256 == actual.sha256,
+        "staged external flagship {label} differs from the accepted report"
+    );
+    Ok(())
+}
+
 fn member_digest_from_bytes(path: &str, bytes: &[u8]) -> MemberDigest {
     MemberDigest {
         path: path.to_string(),
         size_bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
         sha256: sha256_hex(bytes),
     }
+}
+
+fn validate_external_submission_candidate(
+    submission: &ExternalFlagshipSubmissionCandidate,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        submission.kind == EXTERNAL_FLAGSHIP_SUBMISSION_KIND
+            && submission.schema_version == EXTERNAL_FLAGSHIP_SUBMISSION_SCHEMA_VERSION
+            && submission.candidate_status == EXTERNAL_FLAGSHIP_CANDIDATE_STATUS
+            && !submission.author_assistance,
+        "external flagship submission identity or non-acceptance boundary drifted"
+    );
+    anyhow::ensure!(
+        submission.required_proof_paths
+            == EXTERNAL_FLAGSHIP_REQUIRED_PROOF_PATHS.map(str::to_string),
+        "external flagship submission required proof paths drifted"
+    );
+    validate_submission_artifact_shape(&submission.release_archive, "release archive")?;
+    validate_submission_artifact_shape(&submission.proof_bundle, "proof bundle")?;
+    anyhow::ensure!(
+        submission.reproduction.commands.len() >= 3
+            && submission.reproduction.commands.len()
+                == submission.reproduction.exit_statuses.len()
+            && submission
+                .reproduction
+                .commands
+                .iter()
+                .all(|command| !command.trim().is_empty() && command.len() <= 4096)
+            && submission
+                .reproduction
+                .exit_statuses
+                .iter()
+                .all(|status| *status == 0),
+        "external flagship reproduction must retain at least three successful commands and matching zero exit statuses"
+    );
+    anyhow::ensure!(
+        submission.reproduction.stdout_log_path != submission.reproduction.stderr_log_path,
+        "external flagship stdout and stderr logs must be distinct files"
+    );
+    validate_relative_member(Path::new(&submission.reproduction.stdout_log_path))?;
+    validate_relative_member(Path::new(&submission.reproduction.stderr_log_path))?;
+    validate_external_machine_label(&submission.measurement.machine_label)?;
+    validate_release_target(&submission.measurement.release_target)?;
+    anyhow::ensure!(
+        matches!(
+            submission.measurement.operating_system.as_str(),
+            "windows" | "linux"
+        ) && submission.measurement.architecture == "x86_64"
+            && submission.measurement.target_ms == 15 * 60 * 1_000
+            && submission.measurement.elapsed_ms <= submission.measurement.target_ms,
+        "external flagship submitted timing platform or 15-minute verdict is invalid"
+    );
+    Ok(())
+}
+
+fn validate_submission_artifact_shape(
+    artifact: &SubmissionArtifact,
+    label: &str,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        artifact.url.starts_with("https://")
+            && artifact.url.is_ascii()
+            && artifact.url.len() <= 2048
+            && !artifact.url.contains('#')
+            && !artifact.url.contains('?')
+            && artifact.file_name.len() <= 255
+            && !artifact.file_name.is_empty()
+            && Path::new(&artifact.file_name).file_name() == Some(OsStr::new(&artifact.file_name))
+            && artifact.url.ends_with(&format!("/{}", artifact.file_name))
+            && artifact.size_bytes > 0
+            && is_lower_sha256(&artifact.sha256),
+        "external flagship {label} identity is invalid"
+    );
+    Ok(())
+}
+
+fn is_lower_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn is_lower_git_object_id(value: &str) -> bool {
+    value.len() == 40
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn validate_submission_artifact(
+    submitted: &SubmissionArtifact,
+    path: &Path,
+    label: &str,
+) -> anyhow::Result<()> {
+    let actual = digest_external_file(path, label)?;
+    anyhow::ensure!(
+        submitted.file_name == actual.path
+            && submitted.size_bytes == actual.size_bytes
+            && submitted.sha256 == actual.sha256,
+        "external flagship {label} bytes differ from the completed submission candidate"
+    );
+    Ok(())
+}
+
+fn read_external_regular_file(path: &Path, label: &str, maximum: u64) -> anyhow::Result<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("inspect external flagship {label} {}", path.display()))?;
+    anyhow::ensure!(
+        metadata.file_type().is_file()
+            && !metadata.file_type().is_symlink()
+            && metadata.len() > 0
+            && metadata.len() <= maximum,
+        "external flagship {label} must be a non-empty regular non-symlink file no larger than {maximum} bytes"
+    );
+    fs::read(path).with_context(|| format!("read external flagship {label} {}", path.display()))
+}
+
+fn digest_external_bounded_file(
+    path: &Path,
+    label: &str,
+    maximum: u64,
+) -> anyhow::Result<MemberDigest> {
+    let bytes = read_external_regular_file(path, label, maximum)?;
+    let name = path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .with_context(|| format!("external flagship {label} name is not valid Unicode"))?;
+    Ok(member_digest_from_bytes(name, &bytes))
+}
+
+fn digest_external_file(path: &Path, label: &str) -> anyhow::Result<MemberDigest> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("inspect external flagship {label} {}", path.display()))?;
+    anyhow::ensure!(
+        metadata.file_type().is_file() && !metadata.file_type().is_symlink() && metadata.len() > 0,
+        "external flagship {label} must be a non-empty regular non-symlink file"
+    );
+    let name = path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .with_context(|| format!("external flagship {label} name is not valid Unicode"))?;
+    Ok(MemberDigest {
+        path: name.to_string(),
+        size_bytes: metadata.len(),
+        sha256: sha256_file_hex(path)?,
+    })
+}
+
+fn resolve_submission_member(root: &Path, relative: &str, label: &str) -> anyhow::Result<PathBuf> {
+    let relative_path = Path::new(relative);
+    validate_relative_member(relative_path)?;
+    let canonical_root = fs::canonicalize(root).with_context(|| {
+        format!(
+            "resolve external flagship submission root {}",
+            root.display()
+        )
+    })?;
+    let path = root.join(relative_path);
+    let metadata = fs::symlink_metadata(&path)
+        .with_context(|| format!("inspect external flagship {label} {}", path.display()))?;
+    anyhow::ensure!(
+        metadata.file_type().is_file() && !metadata.file_type().is_symlink(),
+        "external flagship {label} must be a regular non-symlink file"
+    );
+    let canonical = fs::canonicalize(&path)
+        .with_context(|| format!("resolve external flagship {label} {}", path.display()))?;
+    anyhow::ensure!(
+        canonical.starts_with(&canonical_root),
+        "external flagship {label} escapes the submission repository"
+    );
+    Ok(canonical)
+}
+
+fn validate_external_repository_checkout(
+    root: &Path,
+    expected_url: &str,
+    expected_revision: &str,
+) -> anyhow::Result<()> {
+    let metadata = fs::symlink_metadata(root)
+        .with_context(|| format!("inspect external evidence repository {}", root.display()))?;
+    anyhow::ensure!(
+        metadata.file_type().is_dir() && !metadata.file_type().is_symlink(),
+        "external evidence repository must be a real non-symlink directory"
+    );
+    anyhow::ensure!(
+        git_output(root, &["rev-parse", "HEAD"])? == expected_revision,
+        "external evidence repository HEAD differs from the submitted revision"
+    );
+    anyhow::ensure!(
+        git_output(root, &["status", "--porcelain", "--untracked-files=all"])?.is_empty(),
+        "external evidence repository must be clean including untracked files"
+    );
+    let origin = git_output(root, &["remote", "get-url", "origin"])?;
+    let normalized_origin = origin.strip_suffix(".git").unwrap_or(&origin);
+    let normalized_expected = expected_url.strip_suffix(".git").unwrap_or(expected_url);
+    anyhow::ensure!(
+        normalized_origin == normalized_expected,
+        "external evidence repository origin differs from the completed submission candidate"
+    );
+    Ok(())
+}
+
+fn validate_committed_external_file(
+    root: &Path,
+    path: &Path,
+    label: &str,
+) -> anyhow::Result<String> {
+    let canonical_root = fs::canonicalize(root)
+        .with_context(|| format!("resolve external evidence repository {}", root.display()))?;
+    let canonical_path = fs::canonicalize(path)
+        .with_context(|| format!("resolve committed external {label} {}", path.display()))?;
+    let relative = canonical_path
+        .strip_prefix(&canonical_root)
+        .with_context(|| format!("external {label} is outside the evidence repository"))?;
+    validate_relative_member(relative)?;
+    let git_relative = relative.to_string_lossy().replace('\\', "/");
+    let object = format!("HEAD:{git_relative}");
+    let output = Command::new("git")
+        .current_dir(&canonical_root)
+        .args(["show", "--no-textconv", &object])
+        .output()
+        .with_context(|| format!("read committed external {label} {object}"))?;
+    anyhow::ensure!(
+        output.status.success(),
+        "external {label} is not committed at the submitted revision: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    let working_bytes = fs::read(&canonical_path)
+        .with_context(|| format!("read external {label} {}", canonical_path.display()))?;
+    anyhow::ensure!(
+        output.stdout == working_bytes,
+        "external {label} working bytes differ from the submitted revision"
+    );
+    Ok(git_relative)
+}
+
+fn validate_submission_measurement(
+    submitted: &SubmissionMeasurement,
+    timing: &TimeToProofReport,
+    release_target: &str,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        submitted.machine_label == timing.machine_label
+            && submitted.operating_system == timing.operating_system
+            && submitted.architecture == timing.architecture
+            && submitted.release_target == release_target
+            && submitted.elapsed_ms == timing.elapsed_ms
+            && submitted.target_ms == timing.target_ms,
+        "external flagship measurement differs from the proof timing report or release target"
+    );
+    Ok(())
 }
 
 fn validate_external_operator(
@@ -1330,11 +1918,11 @@ fn validate_external_cross_backend_report(path: &Path) -> anyhow::Result<(u64, u
                 ))
             && report.get("status").and_then(serde_json::Value::as_str) == Some("passed")
             && report.get("task_id").and_then(serde_json::Value::as_str)
-                == Some("rne.flagship.mobile_lift_shared_aisle.v1")
+                == Some("rne.flagship.mobile_lift_shared_aisle.v2")
             && report
                 .get("controller_id")
                 .and_then(serde_json::Value::as_str)
-                == Some("rne.ai.ik_mobile_lift_pick_place_policy.v1")
+                == Some("rne.ai.portable_ik_mobile_lift_pick_place_controller.v2")
             && report
                 .get("controller_contract")
                 .and_then(serde_json::Value::as_str)
@@ -1385,7 +1973,7 @@ fn validate_external_cross_backend_report(path: &Path) -> anyhow::Result<(u64, u
         .and_then(serde_json::Value::as_array)
         .context("external cross-backend report omitted tolerance checks")?;
     let expected_tolerances = [
-        ("completion_step_delta", "step", 500.0),
+        ("completion_step_delta", "step", 900.0),
         ("base_planar_position_delta", "m", 0.4),
         ("payload_position_delta", "m", 0.06),
         ("payload_apex_delta", "m", 0.07),
@@ -1536,10 +2124,13 @@ fn build_archive_install_report(
     validate_archive_subject(&archive, archive_path, &archive_sha256, &release.target)?;
     let release_bytes = fs::read(bundle_dir.join(RELEASE_REPORT))?;
     let checksum_bytes = fs::read(bundle_dir.join(SHA256_MANIFEST))?;
+    let staged_rehearsal_bytes = fs::read(bundle_dir.join(INSTALL_REPORT))?;
+    let staged_rehearsal: InstallRehearsalReport = serde_json::from_slice(&staged_rehearsal_bytes)?;
     validate_release_members(&release.members)?;
-    validate_release_checksum_chain(release, &release_bytes, &checksum_bytes, rehearsal)?;
+    validate_release_checksum_chain(release, &release_bytes, &checksum_bytes, &staged_rehearsal)?;
     anyhow::ensure!(
-        release.installed_workflows == rehearsal.verdicts(),
+        release.installed_workflows == staged_rehearsal.verdicts()
+            && release.installed_workflows == rehearsal.verdicts(),
         "independent rehearsal verdicts differ from the staged release report"
     );
     let release_report = MemberDigest {
@@ -1633,10 +2224,10 @@ fn parse_external_flagship_options(
     let mut archive = None;
     let mut bundle_dir = None;
     let mut proof_dir = None;
-    let mut owner = None;
-    let mut repository = None;
+    let mut proof_bundle = None;
+    let mut submission = None;
+    let mut evidence_repo_dir = None;
     let mut revision = None;
-    let mut measured_on = None;
     let mut output = None;
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -1647,10 +2238,16 @@ fn parse_external_flagship_options(
             "--proof-dir" => {
                 proof_dir = Some(PathBuf::from(required_arg(args, "--proof-dir")?));
             }
-            "--owner" => owner = Some(required_arg(args, "--owner")?),
-            "--repository" => repository = Some(required_arg(args, "--repository")?),
+            "--proof-bundle" => {
+                proof_bundle = Some(PathBuf::from(required_arg(args, "--proof-bundle")?));
+            }
+            "--submission" => {
+                submission = Some(PathBuf::from(required_arg(args, "--submission")?));
+            }
+            "--evidence-repo-dir" => {
+                evidence_repo_dir = Some(PathBuf::from(required_arg(args, "--evidence-repo-dir")?));
+            }
             "--revision" => revision = Some(required_arg(args, "--revision")?),
-            "--measured-on" => measured_on = Some(required_arg(args, "--measured-on")?),
             "--output" => output = Some(PathBuf::from(required_arg(args, "--output")?)),
             other => bail!("unknown external-flagship-check argument: {other}"),
         }
@@ -1659,10 +2256,12 @@ fn parse_external_flagship_options(
         archive: archive.context("external-flagship-check requires --archive PATH")?,
         bundle_dir: bundle_dir.context("external-flagship-check requires --bundle-dir PATH")?,
         proof_dir: proof_dir.context("external-flagship-check requires --proof-dir PATH")?,
-        owner: owner.context("external-flagship-check requires --owner OWNER")?,
-        repository: repository.context("external-flagship-check requires --repository URL")?,
+        proof_bundle: proof_bundle
+            .context("external-flagship-check requires --proof-bundle PATH")?,
+        submission: submission.context("external-flagship-check requires --submission PATH")?,
+        evidence_repo_dir: evidence_repo_dir
+            .context("external-flagship-check requires --evidence-repo-dir PATH")?,
         revision: revision.context("external-flagship-check requires --revision SHA")?,
-        measured_on: measured_on.context("external-flagship-check requires --measured-on DATE")?,
         output: output.context("external-flagship-check requires --output PATH")?,
     })
 }
@@ -2051,6 +2650,9 @@ fn run_install_rehearsal(
     let scale = bin_dir.join(native_binary_name("rne-scenario-scale", target));
     let hardware_conformance = bin_dir.join(native_binary_name("rne-hardware-conformance", target));
     let hardware_mock = bin_dir.join(native_binary_name("rne-hardware-mock-device", target));
+    let simulator_conformance =
+        bin_dir.join(native_binary_name("rne-simulator-conformance", target));
+    let simulator_mock = bin_dir.join(native_binary_name("rne-simulator-mock-adapter", target));
     let accelerator_conformance =
         bin_dir.join(native_binary_name("rne-accelerator-conformance", target));
     let accelerator_mock =
@@ -2124,29 +2726,41 @@ fn run_install_rehearsal(
 
     let flagship_output = output_dir.join("flagship-proof");
     let flagship_machine_label = format!("github-hosted-release-rehearsal-{target}");
-    let flagship_passed = run_check_command(
-        "installed flagship proof",
-        bundle_dir,
-        &flagship_proof,
-        &[
-            flagship_output.clone().into_os_string(),
-            OsString::from("--cross-backend"),
+    let mut flagship_args = vec![
+        flagship_output.clone().into_os_string(),
+        OsString::from("--cross-backend"),
+    ];
+    if verify_checksums {
+        flagship_args.extend([
             OsString::from("--measure-on"),
             OsString::from(&flagship_machine_label),
-        ],
-        &[],
-    ) && validate_installed_flagship_proof(&flagship_output, &flagship_proof)
-        .map_err(|error| {
-            eprintln!("installed flagship proof validation failed: {error:#}");
-            error
-        })
-        .is_ok()
-        && validate_time_to_proof_report(&flagship_output, &flagship_machine_label)
+            OsString::from("--verify-installed-bundle"),
+            bundle_dir.to_path_buf().into_os_string(),
+        ]);
+    }
+    let flagship_passed =
+        run_check_command(
+            "installed flagship proof",
+            bundle_dir,
+            &flagship_proof,
+            &flagship_args,
+            &[],
+        ) && validate_installed_flagship_proof(&flagship_output, &flagship_proof, verify_checksums)
             .map_err(|error| {
-                eprintln!("time-to-proof report validation failed: {error:#}");
+                eprintln!("installed flagship proof validation failed: {error:#}");
                 error
             })
-            .is_ok();
+            .is_ok()
+            && if verify_checksums {
+                validate_time_to_proof_report(&flagship_output, &flagship_machine_label)
+                    .map_err(|error| {
+                        eprintln!("time-to-proof report validation failed: {error:#}");
+                        error
+                    })
+                    .is_ok()
+            } else {
+                !flagship_output.join("time-to-proof-report.json").exists()
+            };
 
     let scenario_replay = output_dir.join("scenario.rne-replay");
     let scenario_run = run_check_command(
@@ -2242,6 +2856,60 @@ fn run_install_rehearsal(
         &[],
     ) && json_field_matches(
         &hardware_report,
+        "status",
+        &serde_json::Value::String("passed".to_string()),
+    );
+
+    let simulator_report = output_dir.join("simulator-adapter-conformance.json");
+    let simulator_passed = run_check_command(
+        "external simulator adapter conformance",
+        bundle_dir,
+        &simulator_conformance,
+        &[
+            OsString::from("--adapter"),
+            simulator_mock.into_os_string(),
+            OsString::from("--adapter-arg"),
+            OsString::from("--simulator-id"),
+            OsString::from("--adapter-arg"),
+            OsString::from("gazebo_sim_fixture"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--simulator-version"),
+            OsString::from("--adapter-arg"),
+            OsString::from("8.9.0"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--task-id"),
+            OsString::from("--adapter-arg"),
+            OsString::from("rne.diff_drive.sensor_goal.v1"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--task-sha256"),
+            OsString::from("--adapter-arg"),
+            OsString::from("532d2e76854cecbc09e5f8d985486c2f9548a3f39a17865a59f10d86dd08e3ca"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--observation-width"),
+            OsString::from("--adapter-arg"),
+            OsString::from("9"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--action-width"),
+            OsString::from("--adapter-arg"),
+            OsString::from("2"),
+            OsString::from("--adapter-arg"),
+            OsString::from("--fixed-delta-ticks"),
+            OsString::from("--adapter-arg"),
+            OsString::from("16666667"),
+            OsString::from("--runtime-manifest"),
+            bundle_dir
+                .join("adapters/simulator/reference/runtime.json")
+                .into_os_string(),
+            OsString::from("--task"),
+            bundle_dir
+                .join("assets/tasks/diff_drive_goal.task.json")
+                .into_os_string(),
+            OsString::from("--output"),
+            simulator_report.clone().into_os_string(),
+        ],
+        &[],
+    ) && json_field_matches(
+        &simulator_report,
         "status",
         &serde_json::Value::String("passed".to_string()),
     );
@@ -2345,6 +3013,7 @@ fn run_install_rehearsal(
         check("physics_conformance", physics_passed),
         check("scenario_scale_100", scale_passed),
         check("hardware_adapter", hardware_passed),
+        check("simulator_adapter", simulator_passed),
         check("accelerator_protocol", accelerator_passed),
         check("controller_plugin", plugin_passed),
         check("compatibility_corpus", compatibility_passed),
@@ -2649,6 +3318,7 @@ fn check(id: &str, passed: bool) -> InstallCheck {
 fn validate_installed_flagship_proof(
     root: &Path,
     producer: &Path,
+    require_installed_bundle: bool,
 ) -> anyhow::Result<InstalledFlagshipProofReport> {
     let report_path = root.join("installed-proof-report.json");
     let report: InstalledFlagshipProofReport = serde_json::from_slice(
@@ -2667,7 +3337,7 @@ fn validate_installed_flagship_proof(
     );
     anyhow::ensure!(report.status == "passed", "installed flagship proof failed");
     anyhow::ensure!(
-        report.task_id == "rne.flagship.mobile_lift_shared_aisle.v1",
+        report.task_id == "rne.flagship.mobile_lift_shared_aisle.v2",
         "unexpected installed flagship TaskSpec {}",
         report.task_id
     );
@@ -2679,8 +3349,15 @@ fn validate_installed_flagship_proof(
         report.success_status == "passed"
             && report.expected_failure_contract == "perception_stream_alive"
             && report.first_violation_step > 0
-            && report.capsule_verified,
+            && report.capsule_verified
+            && report.recorded_shadow_status.as_deref() == Some("passed")
+            && report.recorded_shadow_case_count == 3,
         "installed flagship proof omitted required success/failure evidence"
+    );
+    anyhow::ensure!(
+        report.installed_bundle_verified == require_installed_bundle
+            && report.bundle_verification_report.is_some() == require_installed_bundle,
+        "installed flagship proof bundle-verification state does not match the rehearsal stage"
     );
     let producer_name = producer
         .file_name()
@@ -2700,7 +3377,7 @@ fn validate_installed_flagship_proof(
         &fs::read(producer).with_context(|| format!("read {}", producer.display()))?,
     )?;
 
-    let expected_paths = [
+    let mut expected_paths = vec![
         "cross-backend-report.json",
         "failure-capsule/capsule.json",
         "failure-minimized.rne-replay",
@@ -2710,10 +3387,25 @@ fn validate_installed_flagship_proof(
         "mujoco-failure.rne-replay",
         "mujoco-success.behavior-report.json",
         "rapier-minimized-failure.behavior-report.json",
+        "recorded-shadow-calibration.json",
+        "recorded-shadow-controller.json",
+        "recorded-shadow-disconnect.report.json",
+        "recorded-shadow-disconnect.session.json",
+        "recorded-shadow-mujoco.trace.json",
+        "recorded-shadow-playback.report.json",
+        "recorded-shadow-playback.session.json",
+        "recorded-shadow-proof.json",
+        "recorded-shadow-rapier.trace.json",
+        "recorded-shadow-requirements.json",
+        "recorded-shadow-shadow.report.json",
+        "recorded-shadow-shadow.session.json",
         "replay-inspector.html",
         "success.behavior-report.json",
         "workflow-report.json",
     ];
+    if require_installed_bundle {
+        expected_paths.insert(5, "installed-bundle-verification.json");
+    }
     anyhow::ensure!(
         report
             .artifacts
@@ -2725,7 +3417,117 @@ fn validate_installed_flagship_proof(
     for artifact in &report.artifacts {
         validate_proof_member(root, artifact, &artifact.path)?;
     }
+    if require_installed_bundle {
+        let bundle_verification = report
+            .bundle_verification_report
+            .as_ref()
+            .context("installed flagship proof omitted bundle verification identity")?;
+        let retained = report
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.path == "installed-bundle-verification.json")
+            .context("installed flagship proof omitted bundle verification artifact")?;
+        anyhow::ensure!(
+            bundle_verification == retained,
+            "installed flagship proof bundle-verification identities differ"
+        );
+        validate_installed_bundle_verification(root, producer)?;
+    }
+    validate_installed_recorded_shadow_proof(root)?;
     Ok(report)
+}
+
+fn validate_installed_bundle_verification(root: &Path, producer: &Path) -> anyhow::Result<()> {
+    let report_path = root.join("installed-bundle-verification.json");
+    let retained: rne_asset_cli::installed_bundle::InstalledBundleVerificationReport =
+        serde_json::from_slice(
+            &fs::read(&report_path).with_context(|| format!("read {}", report_path.display()))?,
+        )
+        .with_context(|| format!("parse {}", report_path.display()))?;
+    let bundle_root = producer
+        .parent()
+        .and_then(Path::parent)
+        .context("installed flagship producer is not inside a bundle bin directory")?;
+    let fresh = rne_asset_cli::installed_bundle::verify(bundle_root)
+        .context("reverify installed release bundle from retained proof")?;
+    anyhow::ensure!(
+        retained == fresh,
+        "retained installed-bundle verification differs from a fresh full verification"
+    );
+    Ok(())
+}
+
+fn validate_installed_recorded_shadow_proof(root: &Path) -> anyhow::Result<()> {
+    let path = root.join("recorded-shadow-proof.json");
+    let proof: InstalledRecordedShadowProof = serde_json::from_slice(
+        &fs::read(&path).with_context(|| format!("read {}", path.display()))?,
+    )
+    .with_context(|| format!("parse {}", path.display()))?;
+    anyhow::ensure!(
+        proof.kind == "rne_installed_recorded_shadow_proof"
+            && proof.schema_version == 2
+            && proof.status == "passed"
+            && proof.task_id == "rne.flagship.mobile_lift_shared_aisle.v2"
+            && proof.controller_id == "rne.ai.portable_ik_mobile_lift_pick_place_controller.v2"
+            && proof.clock_source == "sim_clock_fixed_step",
+        "installed recorded/shadow proof identity or status is invalid"
+    );
+    let expected = [
+        (
+            "playback",
+            rne_hardware_gateway::HardwareMode::Playback,
+            "passed",
+            512,
+            "recorded-shadow-playback.session.json",
+            "recorded-shadow-playback.report.json",
+        ),
+        (
+            "shadow",
+            rne_hardware_gateway::HardwareMode::Shadow,
+            "failed",
+            512,
+            "recorded-shadow-shadow.session.json",
+            "recorded-shadow-shadow.report.json",
+        ),
+        (
+            "disconnect",
+            rne_hardware_gateway::HardwareMode::Shadow,
+            "failed_as_expected",
+            128,
+            "recorded-shadow-disconnect.session.json",
+            "recorded-shadow-disconnect.report.json",
+        ),
+    ];
+    anyhow::ensure!(
+        proof.cases.len() == expected.len(),
+        "installed recorded/shadow proof must contain three cases"
+    );
+    for (case, (id, mode, status, samples, session, report)) in proof.cases.iter().zip(expected) {
+        anyhow::ensure!(
+            case.id == id
+                && case.mode == mode
+                && case.expected_status == status
+                && case.observed_status == status
+                && case.accepted_samples == samples
+                && case.suppressed_actions == samples
+                && !case.actuator_writes_emitted
+                && case.session == session
+                && case.report == report,
+            "installed recorded/shadow case {id} violates its retained contract"
+        );
+        if id == "shadow" {
+            anyhow::ensure!(
+                case.violating_elements > 0 && case.first_divergence_tensor.is_some(),
+                "installed shadow case omitted its measured divergence"
+            );
+        } else {
+            anyhow::ensure!(
+                case.violating_elements == 0 && case.first_divergence_tensor.is_none(),
+                "installed {id} case unexpectedly contains numeric divergence"
+            );
+        }
+    }
+    Ok(())
 }
 
 fn validate_time_to_proof_report(root: &Path, expected_machine: &str) -> anyhow::Result<()> {
@@ -2747,14 +3549,19 @@ fn validate_time_to_proof_report(root: &Path, expected_machine: &str) -> anyhow:
         "time-to-proof measurement exceeded its 15-minute target"
     );
     anyhow::ensure!(
-        report.task_id == "rne.flagship.mobile_lift_shared_aisle.v1"
+        report.task_id == "rne.flagship.mobile_lift_shared_aisle.v2"
             && report.machine_label == expected_machine
             && !report.operating_system.is_empty()
             && !report.architecture.is_empty()
             && report.measurement_scope
-                == "proof_process_start_to_verified_capsule_and_bound_report",
+                == "verified_installed_bundle_to_verified_capsule_and_bound_report",
         "time-to-proof measurement identity does not match the installed rehearsal"
     );
+    validate_proof_member(
+        root,
+        &report.installed_bundle_verification,
+        "installed-bundle-verification.json",
+    )?;
     validate_proof_member(
         root,
         &report.installed_proof_report,
@@ -2873,9 +3680,105 @@ fn ensure_success(label: &str, output: &Output) -> anyhow::Result<()> {
 }
 
 fn program_version(program: &str) -> anyhow::Result<String> {
-    let output = Command::new(program).arg("--version").output()?;
+    let output = Command::new(program)
+        .arg("--version")
+        .output()
+        .with_context(|| format!("run required release program {program} --version"))?;
     ensure_success(&format!("{program} --version"), &output)?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Ensures a release tag for the current version actually starts the release workflow.
+pub(crate) fn validate_release_workflow_contract(root: &Path) -> anyhow::Result<()> {
+    let path = root.join(".github/workflows/release.yml");
+    let text = fs::read_to_string(&path)
+        .with_context(|| format!("read release workflow {}", path.display()))?;
+    validate_release_workflow_text(&text)
+        .with_context(|| format!("validate release workflow {}", path.display()))
+}
+
+/// Ensures the public flagship guide describes the proof shipped by this release.
+pub(crate) fn validate_release_documentation_contract(root: &Path) -> anyhow::Result<()> {
+    let path = root.join("docs/FLAGSHIP_VALIDATION_WORKFLOW.md");
+    let text = fs::read_to_string(&path)
+        .with_context(|| format!("read flagship workflow guide {}", path.display()))?;
+    validate_release_documentation_text(&text)
+        .with_context(|| format!("validate flagship workflow guide {}", path.display()))
+}
+
+fn validate_release_documentation_text(text: &str) -> anyhow::Result<()> {
+    let version_marker = format!("The v{RELEASE_VERSION} release flagship");
+    anyhow::ensure!(
+        text.contains(&version_marker),
+        "flagship workflow guide must identify the current release with `{version_marker}`"
+    );
+
+    for marker in [
+        "./bin/rne-flagship-proof flagship-proof --cross-backend",
+        "--verify-installed-bundle . --measure-on",
+        "rne.flagship.mobile_lift_shared_aisle.v2",
+        "rne.ai.portable_ik_mobile_lift_pick_place_controller.v2",
+        "rapier_native",
+        "mujoco_native",
+        "first step and simulation timestamp",
+        "explicit units",
+        "Failure Capsule binds",
+        "size and SHA-256",
+        "recorded-shadow-proof.json",
+        "time-to-proof-report.json",
+        "15-minute",
+        "not evidence of physical actuation",
+        "Gazebo qualification remains a separate",
+        "hardware-evidence gate",
+    ] {
+        anyhow::ensure!(
+            text.contains(marker),
+            "flagship workflow guide omitted required release-proof marker `{marker}`"
+        );
+    }
+
+    for stale in [
+        "The v0.7 flagship",
+        "remaining v0.7 portability gate",
+        "report names only `rapier_native` until that evidence exists",
+    ] {
+        anyhow::ensure!(
+            !text.contains(stale),
+            "flagship workflow guide retained stale claim `{stale}`"
+        );
+    }
+    Ok(())
+}
+
+fn validate_release_workflow_text(text: &str) -> anyhow::Result<()> {
+    let parts = RELEASE_VERSION.split('.').collect::<Vec<_>>();
+    anyhow::ensure!(
+        parts.len() == 3 && parts.iter().all(|part| !part.is_empty()),
+        "release version must have exactly three non-empty components"
+    );
+
+    let expected_tag_trigger = format!("tags: [\"v{}.{}.*\"]", parts[0], parts[1]);
+    let tag_triggers = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("tags:"))
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        tag_triggers == [expected_tag_trigger.as_str()],
+        "release workflow tag trigger must be exactly `{expected_tag_trigger}`, found {tag_triggers:?}"
+    );
+
+    let expected_version = format!("RELEASE_VERSION: \"{RELEASE_VERSION}\"");
+    let declared_versions = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("RELEASE_VERSION:"))
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        declared_versions == [expected_version.as_str()],
+        "release workflow version must be exactly `{expected_version}`, found {declared_versions:?}"
+    );
+    Ok(())
 }
 
 fn git_worktree_is_clean(root: &Path) -> anyhow::Result<bool> {
@@ -3175,6 +4078,133 @@ fn write_pretty_json(path: &Path, value: &impl Serialize) -> anyhow::Result<()> 
 mod tests {
     use super::*;
 
+    fn valid_external_submission_candidate() -> ExternalFlagshipSubmissionCandidate {
+        ExternalFlagshipSubmissionCandidate {
+            kind: EXTERNAL_FLAGSHIP_SUBMISSION_KIND.to_string(),
+            schema_version: EXTERNAL_FLAGSHIP_SUBMISSION_SCHEMA_VERSION,
+            candidate_status: EXTERNAL_FLAGSHIP_CANDIDATE_STATUS.to_string(),
+            author_assistance: false,
+            evidence_repository: SubmissionRepository {
+                owner: "external-owner".to_string(),
+                url: "https://github.com/external-owner/rne-reproduction".to_string(),
+            },
+            measurement: SubmissionMeasurement {
+                measured_on: "2026-08-27".to_string(),
+                machine_label: "community-lab-desktop-a".to_string(),
+                operating_system: "windows".to_string(),
+                architecture: "x86_64".to_string(),
+                release_target: "x86_64-pc-windows-msvc".to_string(),
+                elapsed_ms: 21_921,
+                target_ms: 15 * 60 * 1_000,
+            },
+            release_archive: SubmissionArtifact {
+                url: "https://example.invalid/rne-0.2.0-windows.zip".to_string(),
+                file_name: "rne-0.2.0-windows.zip".to_string(),
+                size_bytes: 7,
+                sha256: sha256_hex(b"archive"),
+            },
+            proof_bundle: SubmissionArtifact {
+                url: "https://example.invalid/proof.zip".to_string(),
+                file_name: "proof.zip".to_string(),
+                size_bytes: 5,
+                sha256: sha256_hex(b"proof"),
+            },
+            required_proof_paths: EXTERNAL_FLAGSHIP_REQUIRED_PROOF_PATHS
+                .map(str::to_string)
+                .to_vec(),
+            reproduction: SubmissionReproduction {
+                commands: vec![
+                    "verify archive".to_string(),
+                    "extract archive".to_string(),
+                    "run proof".to_string(),
+                ],
+                exit_statuses: vec![0, 0, 0],
+                stdout_log_path: "logs/stdout.txt".to_string(),
+                stderr_log_path: "logs/stderr.txt".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn staged_external_flagship_report_rebinds_every_retained_input() {
+        let directory = tempfile::tempdir().expect("external flagship evidence");
+        let archive = directory.path().join("rne-0.2.0-windows.zip");
+        let proof_bundle = directory.path().join("proof.zip");
+        let candidate_path = directory.path().join("candidate.json");
+        let stdout = directory.path().join("stdout.txt");
+        let stderr = directory.path().join("stderr.txt");
+        fs::write(&archive, b"archive").expect("archive");
+        fs::write(&proof_bundle, b"proof").expect("proof bundle");
+        fs::write(&stdout, b"stdout").expect("stdout");
+        fs::write(&stderr, b"stderr").expect("stderr");
+        let candidate = valid_external_submission_candidate();
+        write_pretty_json(&candidate_path, &candidate).expect("candidate");
+
+        let mut stdout_member = digest_external_file(&stdout, "stdout").expect("stdout digest");
+        stdout_member.path = candidate.reproduction.stdout_log_path.clone();
+        let mut stderr_member = digest_external_file(&stderr, "stderr").expect("stderr digest");
+        stderr_member.path = candidate.reproduction.stderr_log_path.clone();
+        let mut submission_member =
+            digest_external_file(&candidate_path, "candidate").expect("candidate digest");
+        submission_member.path = "submissions/candidate.json".to_string();
+        let retained_member = MemberDigest {
+            path: "retained.json".to_string(),
+            size_bytes: 1,
+            sha256: sha256_hex(b"x"),
+        };
+        let report = ExternalFlagshipReproductionReport {
+            kind: "rne_external_flagship_reproduction_report".to_string(),
+            schema_version: EXTERNAL_FLAGSHIP_REPRODUCTION_REPORT_SCHEMA_VERSION,
+            status: "passed".to_string(),
+            owner: candidate.evidence_repository.owner.clone(),
+            repository: candidate.evidence_repository.url.clone(),
+            revision: "a".repeat(40),
+            measured_on: candidate.measurement.measured_on.clone(),
+            author_assistance: false,
+            release_version: RELEASE_VERSION.to_string(),
+            release_revision: "b".repeat(40),
+            release_target: candidate.measurement.release_target.clone(),
+            machine_label: candidate.measurement.machine_label.clone(),
+            operating_system: candidate.measurement.operating_system.clone(),
+            architecture: candidate.measurement.architecture.clone(),
+            elapsed_ms: candidate.measurement.elapsed_ms,
+            target_ms: candidate.measurement.target_ms,
+            task_id: "rne.flagship.mobile_lift_shared_aisle.v2".to_string(),
+            physics_execution_paths: vec!["rapier_native".to_string(), "mujoco_native".to_string()],
+            first_violation_step: 240,
+            first_violation_sim_time_ticks: 2_000_000_000,
+            archive: digest_external_file(&archive, "archive").expect("archive digest"),
+            proof_bundle: digest_external_file(&proof_bundle, "proof").expect("proof digest"),
+            submission_candidate: submission_member,
+            stdout_log: stdout_member,
+            stderr_log: stderr_member,
+            release_report: retained_member.clone(),
+            checksum_manifest: retained_member.clone(),
+            producer_executable: retained_member.clone(),
+            installed_proof_report: retained_member.clone(),
+            time_to_proof_report: retained_member.clone(),
+            cross_backend_report: retained_member.clone(),
+            failure_capsule_manifest: retained_member,
+        };
+        let report_bytes = pretty_json_bytes(&report).expect("report");
+        let staged = || StagedExternalFlagshipReproduction {
+            owner: &candidate.evidence_repository.owner,
+            repository: &candidate.evidence_repository.url,
+            revision: &report.revision,
+            measured_on: &candidate.measurement.measured_on,
+            release_archive: &archive,
+            proof_bundle: &proof_bundle,
+            submission_candidate: &candidate_path,
+            stdout_log: &stdout,
+            stderr_log: &stderr,
+        };
+        validate_staged_external_flagship_report(&report_bytes, staged())
+            .expect("complete retained chain");
+
+        fs::write(&stdout, b"tampered").expect("tamper stdout");
+        assert!(validate_staged_external_flagship_report(&report_bytes, staged()).is_err());
+    }
+
     #[test]
     fn release_target_is_bounded_and_cannot_escape() {
         assert!(validate_release_target("x86_64-unknown-linux-gnu").is_ok());
@@ -3312,26 +4342,100 @@ mod tests {
     #[test]
     fn installed_flagship_proof_rehashes_every_declared_artifact() {
         let directory = tempfile::tempdir().expect("temporary proof");
+        let bundle_root = directory.path().join("rne-0.2.0-test-target");
+        fs::create_dir_all(bundle_root.join("bin")).expect("bundle bin");
+        fs::write(bundle_root.join("release-report.json"), b"release\n").expect("release report");
+        let producer = bundle_root.join("bin").join(if cfg!(windows) {
+            "rne-flagship-proof.exe"
+        } else {
+            "rne-flagship-proof"
+        });
+        fs::write(&producer, b"producer").expect("producer");
+        write_sha256_manifest(&bundle_root).expect("bundle manifest");
+        let verification = rne_asset_cli::installed_bundle::verify(&bundle_root)
+            .expect("installed bundle verification");
+        write_pretty_json(
+            &directory.path().join("installed-bundle-verification.json"),
+            &verification,
+        )
+        .expect("bundle verification report");
         let paths = [
             "cross-backend-report.json",
             "failure-capsule/capsule.json",
             "failure-minimized.rne-replay",
             "failure.behavior-report.json",
             "flagship.task.json",
+            "installed-bundle-verification.json",
             "mujoco-failure.behavior-report.json",
             "mujoco-failure.rne-replay",
             "mujoco-success.behavior-report.json",
             "rapier-minimized-failure.behavior-report.json",
+            "recorded-shadow-calibration.json",
+            "recorded-shadow-controller.json",
+            "recorded-shadow-disconnect.report.json",
+            "recorded-shadow-disconnect.session.json",
+            "recorded-shadow-mujoco.trace.json",
+            "recorded-shadow-playback.report.json",
+            "recorded-shadow-playback.session.json",
+            "recorded-shadow-proof.json",
+            "recorded-shadow-rapier.trace.json",
+            "recorded-shadow-requirements.json",
+            "recorded-shadow-shadow.report.json",
+            "recorded-shadow-shadow.session.json",
             "replay-inspector.html",
             "success.behavior-report.json",
             "workflow-report.json",
         ];
-        let artifacts = paths
+        let artifacts: Vec<MemberDigest> = paths
             .into_iter()
             .map(|relative| {
                 let path = directory.path().join(relative);
                 fs::create_dir_all(path.parent().unwrap()).expect("artifact parent");
-                let bytes = format!("stable:{relative}").into_bytes();
+                let bytes = if relative == "installed-bundle-verification.json" {
+                    fs::read(&path).expect("bundle verification report")
+                } else if relative == "recorded-shadow-proof.json" {
+                    serde_json::to_vec(&serde_json::json!({
+                        "kind": "rne_installed_recorded_shadow_proof",
+                        "schema_version": 2,
+                        "status": "passed",
+                        "task_id": "rne.flagship.mobile_lift_shared_aisle.v2",
+                        "controller_id": "rne.ai.portable_ik_mobile_lift_pick_place_controller.v2",
+                        "clock_source": "sim_clock_fixed_step",
+                        "cases": [
+                            {
+                                "id": "playback", "mode": "playback",
+                                "expected_status": "passed", "observed_status": "passed",
+                                "accepted_samples": 512, "violating_elements": 0,
+                                "first_divergence_tensor": null, "suppressed_actions": 512,
+                                "actuator_writes_emitted": false,
+                                "session": "recorded-shadow-playback.session.json",
+                                "report": "recorded-shadow-playback.report.json"
+                            },
+                            {
+                                "id": "shadow", "mode": "shadow",
+                                "expected_status": "failed", "observed_status": "failed",
+                                "accepted_samples": 512, "violating_elements": 174,
+                                "first_divergence_tensor": "lift_position_m",
+                                "suppressed_actions": 512, "actuator_writes_emitted": false,
+                                "session": "recorded-shadow-shadow.session.json",
+                                "report": "recorded-shadow-shadow.report.json"
+                            },
+                            {
+                                "id": "disconnect", "mode": "shadow",
+                                "expected_status": "failed_as_expected",
+                                "observed_status": "failed_as_expected",
+                                "accepted_samples": 128, "violating_elements": 0,
+                                "first_divergence_tensor": null, "suppressed_actions": 128,
+                                "actuator_writes_emitted": false,
+                                "session": "recorded-shadow-disconnect.session.json",
+                                "report": "recorded-shadow-disconnect.report.json"
+                            }
+                        ]
+                    }))
+                    .expect("recorded/shadow proof fixture")
+                } else {
+                    format!("stable:{relative}").into_bytes()
+                };
                 fs::write(&path, &bytes).expect("artifact");
                 MemberDigest {
                     path: relative.to_string(),
@@ -3344,12 +4448,19 @@ mod tests {
             kind: rne_asset_cli::INSTALLED_FLAGSHIP_PROOF_REPORT_KIND.to_string(),
             schema_version: rne_asset_cli::INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION,
             status: "passed".to_string(),
-            task_id: "rne.flagship.mobile_lift_shared_aisle.v1".to_string(),
+            task_id: "rne.flagship.mobile_lift_shared_aisle.v2".to_string(),
             physics_execution_paths: vec!["rapier_native".to_string(), "mujoco_native".to_string()],
             success_status: "passed".to_string(),
             expected_failure_contract: "perception_stream_alive".to_string(),
             first_violation_step: 307,
             capsule_verified: true,
+            recorded_shadow_status: Some("passed".to_string()),
+            recorded_shadow_case_count: 3,
+            installed_bundle_verified: true,
+            bundle_verification_report: artifacts
+                .iter()
+                .find(|artifact| artifact.path == "installed-bundle-verification.json")
+                .cloned(),
             producer_executable: MemberDigest {
                 path: if cfg!(windows) {
                     "bin/rne-flagship-proof.exe"
@@ -3362,18 +4473,41 @@ mod tests {
             },
             artifacts,
         };
-        let producer = directory.path().join(if cfg!(windows) {
-            "rne-flagship-proof.exe"
-        } else {
-            "rne-flagship-proof"
-        });
-        fs::write(&producer, b"producer").expect("producer");
         write_pretty_json(
             &directory.path().join("installed-proof-report.json"),
             &report,
         )
         .expect("proof report");
-        validate_installed_flagship_proof(directory.path(), &producer).expect("valid proof");
+        validate_installed_flagship_proof(directory.path(), &producer, true).expect("valid proof");
+
+        let recorded_proof_path = directory.path().join("recorded-shadow-proof.json");
+        let recorded_proof_bytes = fs::read(&recorded_proof_path).expect("recorded proof");
+        let mut recorded_proof: serde_json::Value =
+            serde_json::from_slice(&recorded_proof_bytes).expect("recorded proof JSON");
+        recorded_proof["cases"][0]["actuator_writes_emitted"] = serde_json::json!(true);
+        write_pretty_json(&recorded_proof_path, &recorded_proof).expect("tampered recorded proof");
+        assert!(validate_installed_recorded_shadow_proof(directory.path()).is_err());
+        fs::write(&recorded_proof_path, recorded_proof_bytes).expect("restore recorded proof");
+
+        assert!(validate_installed_flagship_proof(directory.path(), &producer, false).is_err());
+        let mut assembly_report = report.clone();
+        assembly_report.installed_bundle_verified = false;
+        assembly_report.bundle_verification_report = None;
+        assembly_report
+            .artifacts
+            .retain(|artifact| artifact.path != "installed-bundle-verification.json");
+        write_pretty_json(
+            &directory.path().join("installed-proof-report.json"),
+            &assembly_report,
+        )
+        .expect("assembly-stage proof report");
+        validate_installed_flagship_proof(directory.path(), &producer, false)
+            .expect("valid assembly-stage proof");
+        write_pretty_json(
+            &directory.path().join("installed-proof-report.json"),
+            &report,
+        )
+        .expect("restore installed proof report");
 
         let bound_member = |relative: &str| {
             let bytes = fs::read(directory.path().join(relative)).expect("bound member");
@@ -3387,15 +4521,16 @@ mod tests {
             kind: rne_asset_cli::TIME_TO_PROOF_REPORT_KIND.to_string(),
             schema_version: rne_asset_cli::TIME_TO_PROOF_REPORT_SCHEMA_VERSION,
             status: "passed".to_string(),
-            task_id: "rne.flagship.mobile_lift_shared_aisle.v1".to_string(),
+            task_id: "rne.flagship.mobile_lift_shared_aisle.v2".to_string(),
             machine_label: "test-machine".to_string(),
             operating_system: "test-os".to_string(),
             architecture: "test-arch".to_string(),
-            measurement_scope: "proof_process_start_to_verified_capsule_and_bound_report"
+            measurement_scope: "verified_installed_bundle_to_verified_capsule_and_bound_report"
                 .to_string(),
             elapsed_ms: 12_345,
             target_ms: 15 * 60 * 1_000,
             within_target: true,
+            installed_bundle_verification: bound_member("installed-bundle-verification.json"),
             installed_proof_report: bound_member("installed-proof-report.json"),
             failure_capsule_manifest: bound_member("failure-capsule/capsule.json"),
         };
@@ -3418,7 +4553,7 @@ mod tests {
 
         fs::write(directory.path().join("flagship.task.json"), b"tampered")
             .expect("tamper artifact");
-        assert!(validate_installed_flagship_proof(directory.path(), &producer).is_err());
+        assert!(validate_installed_flagship_proof(directory.path(), &producer, true).is_err());
     }
 
     #[test]
@@ -3470,11 +4605,182 @@ mod tests {
     }
 
     #[test]
+    fn completed_external_submission_is_acyclic_and_fail_closed() {
+        let candidate = valid_external_submission_candidate();
+        validate_external_submission_candidate(&candidate).expect("valid completed candidate");
+
+        let mut embedded_revision = serde_json::to_value(&candidate).expect("candidate JSON");
+        embedded_revision["evidence_repository"]["revision"] = serde_json::json!("0".repeat(40));
+        assert!(
+            serde_json::from_value::<ExternalFlagshipSubmissionCandidate>(embedded_revision)
+                .is_err()
+        );
+
+        let mut nonzero = candidate.clone();
+        nonzero.reproduction.exit_statuses[1] = 1;
+        assert!(validate_external_submission_candidate(&nonzero).is_err());
+
+        let mut self_referential_path = candidate;
+        self_referential_path.reproduction.stdout_log_path = "../candidate.json".to_string();
+        assert!(validate_external_submission_candidate(&self_referential_path).is_err());
+    }
+
+    #[test]
+    fn external_submission_checker_requires_separate_revision_and_artifacts() {
+        let revision = "0123456789abcdef0123456789abcdef01234567";
+        let mut arguments = vec![
+            "--archive",
+            "release.zip",
+            "--bundle-dir",
+            "bundle",
+            "--proof-dir",
+            "flagship-proof",
+            "--proof-bundle",
+            "proof.zip",
+            "--submission",
+            "candidate.json",
+            "--evidence-repo-dir",
+            "external-repo",
+            "--revision",
+            revision,
+            "--output",
+            "accepted.json",
+        ]
+        .into_iter()
+        .map(str::to_string);
+        let options = parse_external_flagship_options(&mut arguments).expect("complete options");
+        assert_eq!(options.revision, revision);
+        assert_eq!(options.proof_bundle, PathBuf::from("proof.zip"));
+        assert_eq!(options.submission, PathBuf::from("candidate.json"));
+        assert_eq!(options.evidence_repo_dir, PathBuf::from("external-repo"));
+
+        let mut legacy = vec!["--owner".to_string(), "external-owner".to_string()].into_iter();
+        assert!(parse_external_flagship_options(&mut legacy).is_err());
+    }
+
+    #[test]
+    fn external_submission_files_must_be_exact_committed_repository_bytes() {
+        let directory = tempfile::tempdir().expect("temporary external repository");
+        let root = directory.path();
+        let run_git = |args: &[&str]| {
+            let output = Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .output()
+                .expect("run git");
+            assert!(
+                output.status.success(),
+                "git {:?}: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        run_git(&["init"]);
+        run_git(&["config", "user.name", "External Operator"]);
+        run_git(&["config", "user.email", "external@example.invalid"]);
+        run_git(&[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/external-owner/rne-reproduction.git",
+        ]);
+        fs::write(root.join("candidate.json"), b"candidate\n").expect("candidate");
+        fs::create_dir(root.join("logs")).expect("logs");
+        fs::write(root.join("logs/stdout.txt"), b"stdout\n").expect("stdout");
+        fs::write(root.join("logs/stderr.txt"), b"stderr\n").expect("stderr");
+        run_git(&["add", "."]);
+        run_git(&["commit", "-m", "retain independent reproduction"]);
+        let revision = git_output(root, &["rev-parse", "HEAD"]).expect("revision");
+        validate_external_repository_checkout(
+            root,
+            "https://github.com/external-owner/rne-reproduction",
+            &revision,
+        )
+        .expect("exact repository checkout");
+        validate_committed_external_file(
+            root,
+            &root.join("candidate.json"),
+            "submission candidate",
+        )
+        .expect("exact candidate bytes");
+
+        fs::write(root.join("candidate.json"), b"tampered\n").expect("tamper candidate");
+        assert!(validate_external_repository_checkout(
+            root,
+            "https://github.com/external-owner/rne-reproduction",
+            &revision
+        )
+        .is_err());
+        assert!(validate_committed_external_file(
+            root,
+            &root.join("candidate.json"),
+            "submission candidate"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn submission_artifact_and_measurement_must_match_downloaded_bytes() {
+        let directory = tempfile::tempdir().expect("temporary submission");
+        let proof_bundle = directory.path().join("proof.zip");
+        fs::write(&proof_bundle, b"proof").expect("proof bundle");
+        let candidate = valid_external_submission_candidate();
+        validate_submission_artifact(&candidate.proof_bundle, &proof_bundle, "proof bundle")
+            .expect("matching proof bundle");
+
+        let mut wrong_digest = candidate.proof_bundle.clone();
+        wrong_digest.sha256 = "0".repeat(64);
+        assert!(
+            validate_submission_artifact(&wrong_digest, &proof_bundle, "proof bundle").is_err()
+        );
+
+        let timing = TimeToProofReport {
+            kind: rne_asset_cli::TIME_TO_PROOF_REPORT_KIND.to_string(),
+            schema_version: rne_asset_cli::TIME_TO_PROOF_REPORT_SCHEMA_VERSION,
+            status: "passed".to_string(),
+            task_id: "rne.flagship.mobile_lift_shared_aisle.v2".to_string(),
+            machine_label: candidate.measurement.machine_label.clone(),
+            operating_system: candidate.measurement.operating_system.clone(),
+            architecture: candidate.measurement.architecture.clone(),
+            measurement_scope: "verified_installed_bundle_to_verified_capsule_and_bound_report"
+                .to_string(),
+            elapsed_ms: candidate.measurement.elapsed_ms,
+            target_ms: candidate.measurement.target_ms,
+            within_target: true,
+            installed_bundle_verification: MemberDigest {
+                path: "installed-bundle-verification.json".to_string(),
+                size_bytes: 1,
+                sha256: "0".repeat(64),
+            },
+            installed_proof_report: MemberDigest {
+                path: "installed-proof-report.json".to_string(),
+                size_bytes: 1,
+                sha256: "0".repeat(64),
+            },
+            failure_capsule_manifest: MemberDigest {
+                path: "failure-capsule/capsule.json".to_string(),
+                size_bytes: 1,
+                sha256: "0".repeat(64),
+            },
+        };
+        validate_submission_measurement(&candidate.measurement, &timing, "x86_64-pc-windows-msvc")
+            .expect("matching measurement");
+        let mut wrong_timing = timing;
+        wrong_timing.elapsed_ms += 1;
+        assert!(validate_submission_measurement(
+            &candidate.measurement,
+            &wrong_timing,
+            "x86_64-pc-windows-msvc"
+        )
+        .is_err());
+    }
+
+    #[test]
     fn external_cross_backend_report_requires_canonical_semantics_and_units() {
         let directory = tempfile::tempdir().expect("temporary report");
         let path = directory.path().join("cross-backend-report.json");
         let tolerances = [
-            ("completion_step_delta", "step", 500.0),
+            ("completion_step_delta", "step", 900.0),
             ("base_planar_position_delta", "m", 0.4),
             ("payload_position_delta", "m", 0.06),
             ("payload_apex_delta", "m", 0.07),
@@ -3507,8 +4813,8 @@ mod tests {
             "kind": rne_asset_cli::FLAGSHIP_CROSS_BACKEND_REPORT_KIND,
             "schema_version": rne_asset_cli::FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION,
             "status": "passed",
-            "task_id": "rne.flagship.mobile_lift_shared_aisle.v1",
-            "controller_id": "rne.ai.ik_mobile_lift_pick_place_policy.v1",
+            "task_id": "rne.flagship.mobile_lift_shared_aisle.v2",
+            "controller_id": "rne.ai.portable_ik_mobile_lift_pick_place_controller.v2",
             "controller_contract": "identical_controller_type_and_configuration_per_backend",
             "exact_outcomes": [
                 "all_behavior_contracts_passed",
@@ -3676,8 +4982,28 @@ mod tests {
             fs::read(output.path().join("release/external-evidence-intake.toml")).unwrap(),
             fs::read(root.join("release/external-evidence-intake.toml")).unwrap()
         );
+        assert_eq!(
+            fs::read(
+                output
+                    .path()
+                    .join("release/external-flagship-submission-template.json")
+            )
+            .unwrap(),
+            fs::read(root.join("release/external-flagship-submission-template.json")).unwrap()
+        );
+        for template in [
+            "external-project-submission-template.json",
+            "external-plugin-submission-template.json",
+            "external-simulator-submission-template.json",
+        ] {
+            assert_eq!(
+                fs::read(output.path().join("release").join(template)).unwrap(),
+                fs::read(root.join("release").join(template)).unwrap()
+            );
+        }
         for guide in [
             "EXTERNAL_EVIDENCE_INTAKE.md",
+            "EXTERNAL_FLAGSHIP_REPRODUCTION.md",
             "EVIDENCE_QUICKSTART.md",
             "FAILURE_CAPSULE.md",
             "PLUGIN_SDK.md",
@@ -3814,5 +5140,63 @@ mod tests {
         write_pretty_json(&install_path, &archive_install).unwrap();
         fs::write(&checksum_path, b"0").unwrap();
         assert!(validate(tag).is_err());
+    }
+
+    #[test]
+    fn release_workflow_accepts_the_current_release_series() {
+        let workflow = format!(
+            "on:\n  push:\n    tags: [\"v0.2.*\"]\nenv:\n  RELEASE_VERSION: \"{RELEASE_VERSION}\"\n"
+        );
+        validate_release_workflow_text(&workflow).unwrap();
+    }
+
+    #[test]
+    fn committed_release_workflow_matches_current_release() {
+        let root = workspace_root().expect("workspace root");
+        validate_release_workflow_contract(&root).unwrap();
+    }
+
+    #[test]
+    fn committed_flagship_guide_matches_current_release_proof() {
+        let root = workspace_root().expect("workspace root");
+        validate_release_documentation_contract(&root).unwrap();
+    }
+
+    #[test]
+    fn flagship_guide_rejects_version_backend_and_physical_claim_drift() {
+        let root = workspace_root().expect("workspace root");
+        let guide = fs::read_to_string(root.join("docs/FLAGSHIP_VALIDATION_WORKFLOW.md"))
+            .expect("flagship workflow guide");
+
+        assert!(validate_release_documentation_text(&guide.replace(
+            &format!("The v{RELEASE_VERSION} release flagship"),
+            "The v0.1.0 release flagship"
+        ))
+        .is_err());
+        assert!(validate_release_documentation_text(
+            &guide.replace("mujoco_native", "second_backend")
+        )
+        .is_err());
+        assert!(validate_release_documentation_text(&guide.replace(
+            "not evidence of physical actuation",
+            "evidence of physical actuation"
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn release_workflow_rejects_a_stale_tag_series() {
+        let workflow = format!(
+            "on:\n  push:\n    tags: [\"v0.1.*\"]\nenv:\n  RELEASE_VERSION: \"{RELEASE_VERSION}\"\n"
+        );
+        let error = validate_release_workflow_text(&workflow).unwrap_err();
+        assert!(error.to_string().contains("v0.2.*"));
+    }
+
+    #[test]
+    fn release_workflow_rejects_a_stale_declared_version() {
+        let workflow = "on:\n  push:\n    tags: [\"v0.2.*\"]\nenv:\n  RELEASE_VERSION: \"0.1.0\"\n";
+        let error = validate_release_workflow_text(workflow).unwrap_err();
+        assert!(error.to_string().contains(RELEASE_VERSION));
     }
 }

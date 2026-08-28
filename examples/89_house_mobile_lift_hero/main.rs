@@ -4,8 +4,9 @@
 //! the headless examples.  The render-only foreground is rebuilt from the
 //! post-physics world transform of each of the ten URDF links, then resolved
 //! through the visual-only manifest and PBR-aware [`rne_render::MeshRenderCache`].
-//! The Dr Johnson scan is calibrated into the same Y-up metric frame as the
-//! physics rollout. The measured floor and invisible pickup support share that frame;
+//! The Dr Johnson scan is aligned with the same Y-up reconstruction frame as the
+//! physics rollout. The registered floor and invisible pickup support share that
+//! frame; physical scale remains unqualified until an independent anchor is retained.
 //! 3DGS remains the appearance layer.
 //!
 //! Headless evidence (no GPU required):
@@ -31,13 +32,16 @@ use rne_assets::{load_visual_manifest, VisualManifest};
 use rne_math::{Quat, Transform3 as MathTransform3, Vec3};
 use rne_physics::hash_physics_state;
 use rne_render::{
-    hash_rgba8, validate_gaussian_splat_manifest_with_override, Camera, HybridRenderScene,
-    MeshRenderCache, PbrMaterial, RenderScene, RenderSceneItem, VisualShape,
+    audit_gaussian_splat_validation_fixture, compare_registered_gaussian_splat_observations,
+    gaussian_splat_observation_tolerances, hash_rgba8,
+    validate_gaussian_splat_manifest_with_override, Camera, GaussianSplatObservationMetrics,
+    GaussianSplatObservationTolerances, HybridRenderScene, MeshRenderCache, PbrMaterial,
+    RenderScene, RenderSceneItem, VisualShape,
 };
 use rne_render_3dgs::{load_gaussian_splat_background, render_hybrid_scene_camera};
 use rne_render_wgpu::WgpuRenderBackend;
 use rne_world::{world_transform_of, Transform3 as WorldTransform3};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
@@ -50,9 +54,9 @@ const FRAME_COUNT: usize = 45;
 const FOV_Y_RAD: f64 = 0.800_689_935_801_928_9;
 const CLEAR_COLOR: [f32; 4] = [0.055, 0.070, 0.085, 1.0];
 const PAYLOAD_NAME: &str = "mobile_lift_cube";
-const TARGET_X_M: f64 = -1.70;
+const TARGET_X_M: f64 = -2.20;
 const TARGET_Y_M: f64 = 0.035;
-const TARGET_Z_M: f64 = -3.30;
+const TARGET_Z_M: f64 = -4.025_096_749_341_726;
 const DRJOHNSON_COLLISION_PROXIES: [&str; 1] = ["mobile_lift_pick_support"];
 const WRIST_WIDTH: u32 = 160;
 const WRIST_HEIGHT: u32 = 120;
@@ -184,6 +188,7 @@ struct HeroMetadata {
     house_ply_path: String,
     house_ply_bytes: u64,
     house_ply_sha256: String,
+    validation: GaussianSplatValidationEvidence,
     visual_manifest_path: String,
     visual_link_count: usize,
     visual_manifest_validated: bool,
@@ -196,6 +201,91 @@ struct HeroMetadata {
     reproduce_smoke: &'static str,
     reproduce_capture: &'static str,
     provenance: [&'static str; 3],
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct GaussianSplatValidationEvidence {
+    fixture_path: String,
+    fixture_sha256: String,
+    qualifying: bool,
+    passed_contracts: Vec<String>,
+    missing_contracts: Vec<String>,
+    failed_contracts: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct CalibrationFixture {
+    camera_calibration: CalibrationCameraSet,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct CalibrationCameraSet {
+    cameras: Vec<CalibrationCamera>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct CalibrationCamera {
+    source_image_name: String,
+    reference_image: CalibrationArtifact,
+    intrinsics: CalibrationIntrinsics,
+    rne_camera_to_world: CalibrationPose,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct CalibrationArtifact {
+    path: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+struct CalibrationIntrinsics {
+    width_px: u32,
+    height_px: u32,
+    fx_px: f64,
+    fy_px: f64,
+    cx_px: f64,
+    cy_px: f64,
+    fov_y_rad: f64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+struct CalibrationPose {
+    translation_m: [f64; 3],
+    rotation_xyzw: [f64; 4],
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ObservationArtifact {
+    path: String,
+    size_bytes: u64,
+    sha256: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct GpuAdapterEvidence {
+    name: String,
+    vendor: u32,
+    device: u32,
+    device_type: String,
+    driver: String,
+    driver_info: String,
+    backend: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct RegisteredObservationReport {
+    kind: &'static str,
+    schema_version: u32,
+    environment_id: String,
+    camera_id: String,
+    renderer_identity: String,
+    gpu_adapter: GpuAdapterEvidence,
+    reference_image: ObservationArtifact,
+    rne_render: ObservationArtifact,
+    intrinsics: CalibrationIntrinsics,
+    metrics: GaussianSplatObservationMetrics,
+    tolerances: GaussianSplatObservationTolerances,
+    status: &'static str,
+    photometric_note: &'static str,
 }
 
 #[derive(Clone, Debug)]
@@ -241,7 +331,11 @@ fn run() -> Result<()> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let smoke = args.iter().any(|argument| argument == "--smoke");
     let probe = args.iter().any(|argument| argument == "--probe");
-    let capture = args.iter().any(|argument| argument == "--capture") || (!smoke && !probe);
+    let calibration_probe = args
+        .iter()
+        .any(|argument| argument == "--calibration-probe");
+    let capture = args.iter().any(|argument| argument == "--capture")
+        || (!smoke && !probe && !calibration_probe);
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let house_manifest_path = repo_root
         .join("assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml");
@@ -250,14 +344,49 @@ fn run() -> Result<()> {
         .find(|window| window[0] == "--ply")
         .map(|window| PathBuf::from(&window[1]));
     anyhow::ensure!(
-        ply_override.is_none() || probe,
-        "--ply is a local visual probe override and requires --probe"
+        ply_override.is_none() || probe || calibration_probe,
+        "--ply is a local visual probe override and requires --probe or --calibration-probe"
     );
     let house = validate_gaussian_splat_manifest_with_override(
         &house_manifest_path,
         ply_override.as_deref(),
     )
     .context("validate real-capture Dr Johnson 3DGS manifest")?;
+    let validation_fixture_path = house
+        .validation_fixture_path
+        .as_ref()
+        .context("Dr Johnson manifest must bind a validation fixture")?;
+    if calibration_probe {
+        render_registered_observation_probe(
+            &repo_root,
+            &house,
+            validation_fixture_path,
+            "IMG_6293.jpg",
+        )?;
+        return Ok(());
+    }
+    let validation_audit = audit_gaussian_splat_validation_fixture(validation_fixture_path)
+        .context("audit real-capture Dr Johnson 3DGS fixture")?;
+    anyhow::ensure!(
+        validation_audit.environment_id == house.environment_id,
+        "3DGS validation fixture environment does not match its manifest"
+    );
+    anyhow::ensure!(
+        validation_audit.failed_contracts.is_empty()
+            && validation_audit.passed_contracts
+                == [
+                    "floor_world_alignment",
+                    "camera_intrinsics_extrinsics",
+                    "semantic_landmark_reprojection",
+                    "collision_semantic_alignment",
+                    "real_sim_observation_comparison",
+                    "sparse_depth_alignment",
+                    "multiview_depth_occlusion_alignment",
+                ]
+            && validation_audit.missing_contracts == ["independent_metric_scale_anchor"]
+            && !validation_audit.qualifying,
+        "Dr Johnson evidence state changed; inspect and update the registered contract instead of silently accepting it: {validation_audit:?}"
+    );
     let drjohnson_scene_path =
         repo_root.join("assets/scenes/mm_mobile_lift_drjohnson.rne.scene.toml");
     let visual_manifest_path =
@@ -370,12 +499,20 @@ fn run() -> Result<()> {
         render_capture(&house, &captured, &capture_dir, &media_dir)?;
     let metadata = HeroMetadata {
         kind: "rne_house_mobile_lift_hero_metadata",
-        schema_version: 1,
+        schema_version: 2,
         environment_id: house.environment_id.clone(),
         renderer_identity: house.renderer_identity.clone(),
         house_ply_path: relative_path(&repo_root, &house.ply_path),
         house_ply_bytes: fs::metadata(&house.ply_path)?.len(),
         house_ply_sha256: sha256_file(&house.ply_path),
+        validation: GaussianSplatValidationEvidence {
+            fixture_path: relative_path(&repo_root, validation_fixture_path),
+            fixture_sha256: validation_audit.fixture_sha256,
+            qualifying: validation_audit.qualifying,
+            passed_contracts: validation_audit.passed_contracts,
+            missing_contracts: validation_audit.missing_contracts,
+            failed_contracts: validation_audit.failed_contracts,
+        },
         visual_manifest_path: relative_path(&repo_root, &visual_manifest_path),
         visual_link_count: visual_manifest.links.len(),
         visual_manifest_validated: true,
@@ -2046,6 +2183,135 @@ fn render_probe(
         HEIGHT,
         &follow_output.color.rgba8,
     )
+}
+
+fn render_registered_observation_probe(
+    repo_root: &Path,
+    house: &rne_render::GaussianSplatEnvironment,
+    fixture_path: &Path,
+    source_image_name: &str,
+) -> Result<()> {
+    let fixture: CalibrationFixture = serde_json::from_slice(
+        &fs::read(fixture_path).with_context(|| format!("read {}", fixture_path.display()))?,
+    )
+    .with_context(|| format!("decode {}", fixture_path.display()))?;
+    let retained_camera = fixture
+        .camera_calibration
+        .cameras
+        .iter()
+        .find(|camera| camera.source_image_name == source_image_name)
+        .with_context(|| format!("fixture camera {source_image_name}"))?;
+    let intrinsics = retained_camera.intrinsics;
+    anyhow::ensure!(
+        (intrinsics.cx_px - f64::from(intrinsics.width_px) / 2.0).abs() < 1.0e-9
+            && (intrinsics.cy_px - f64::from(intrinsics.height_px) / 2.0).abs() < 1.0e-9,
+        "RNE symmetric projection cannot reproduce an off-center calibration"
+    );
+    let rne_fx_px = intrinsics.fy_px;
+    anyhow::ensure!(
+        (rne_fx_px - intrinsics.fx_px).abs() <= 1.0,
+        "RNE square-pixel projection differs from retained fx by more than 1 px"
+    );
+    let pose = retained_camera.rne_camera_to_world;
+    let camera_world = MathTransform3::from_translation_rotation(
+        Vec3::from_array(pose.translation_m),
+        Quat::from_xyzw(
+            pose.rotation_xyzw[0],
+            pose.rotation_xyzw[1],
+            pose.rotation_xyzw[2],
+            pose.rotation_xyzw[3],
+        ),
+    );
+    let camera = Camera::new(
+        intrinsics.width_px,
+        intrinsics.height_px,
+        intrinsics.fov_y_rad,
+    );
+    let mut backend =
+        WgpuRenderBackend::new().context("initialize wgpu for registered 3DGS observation")?;
+    let mut background = load_gaussian_splat_background(backend.device(), house)
+        .context("load registered Dr Johnson Gaussian background")?;
+    let hybrid = HybridRenderScene::new(house.clone(), RenderScene::default());
+    let output = render_hybrid_scene_camera(
+        &mut backend,
+        &mut background,
+        &camera,
+        &camera_world,
+        &hybrid,
+        CLEAR_COLOR,
+    )
+    .context("render registered Dr Johnson observation")?;
+    let output_dir = target_dir(repo_root).join("rne-drjohnson-calibration");
+    fs::create_dir_all(&output_dir).context("create registered observation directory")?;
+    let output_path = output_dir.join("IMG_6293.rne.png");
+    write_png(
+        &output_path,
+        camera.width,
+        camera.height,
+        &output.color.rgba8,
+    )?;
+    let fixture_parent = fixture_path.parent().unwrap_or_else(|| Path::new("."));
+    let reference_path = fixture_parent.join(&retained_camera.reference_image.path);
+    let reference = image::open(&reference_path)
+        .with_context(|| format!("decode {}", reference_path.display()))?
+        .to_rgb8();
+    anyhow::ensure!(
+        reference.width() == camera.width && reference.height() == camera.height,
+        "reference image extent differs from retained camera"
+    );
+    let metrics = compare_registered_gaussian_splat_observations(&reference_path, &output_path)?;
+    let tolerances = gaussian_splat_observation_tolerances();
+    let passed = metrics.rgb_psnr_db >= tolerances.min_rgb_psnr_db
+        && metrics.luminance_pearson >= tolerances.min_luminance_pearson
+        && metrics.gradient_magnitude_pearson >= tolerances.min_gradient_magnitude_pearson;
+    let report = RegisteredObservationReport {
+        kind: "rne_registered_real_sim_observation",
+        schema_version: 1,
+        environment_id: house.environment_id.clone(),
+        camera_id: format!("colmap.{source_image_name}"),
+        renderer_identity: house.renderer_identity.clone(),
+        gpu_adapter: GpuAdapterEvidence {
+            name: backend.adapter_info().name.clone(),
+            vendor: backend.adapter_info().vendor,
+            device: backend.adapter_info().device,
+            device_type: format!("{:?}", backend.adapter_info().device_type),
+            driver: backend.adapter_info().driver.clone(),
+            driver_info: backend.adapter_info().driver_info.clone(),
+            backend: format!("{:?}", backend.adapter_info().backend),
+        },
+        reference_image: ObservationArtifact {
+            path: retained_camera.reference_image.path.clone(),
+            size_bytes: fs::metadata(&reference_path)?.len(),
+            sha256: sha256_file(&reference_path),
+        },
+        rne_render: ObservationArtifact {
+            path: output_path
+                .file_name()
+                .context("registered render filename")?
+                .to_string_lossy()
+                .into_owned(),
+            size_bytes: fs::metadata(&output_path)?.len(),
+            sha256: sha256_file(&output_path),
+        },
+        intrinsics,
+        metrics,
+        tolerances,
+        status: if passed { "verified" } else { "failed" },
+        photometric_note: "Raw PSNR is retained and bounded; luminance and gradient correlation provide exposure-robust structural registration metrics.",
+    };
+    let report_path = output_dir.join("IMG_6293.observation.json");
+    fs::write(&report_path, serde_json::to_vec_pretty(&report)?)
+        .with_context(|| format!("write {}", report_path.display()))?;
+    println!(
+        "registered 3DGS observation: render={} report={} mae={:.3} rmse={:.3} psnr={:.3}dB",
+        output_path.display(),
+        report_path.display(),
+        metrics.rgb_mae_8bit,
+        metrics.rgb_rmse_8bit,
+        metrics.rgb_psnr_db,
+    );
+    anyhow::ensure!(passed, "registered observation failed: {report:?}");
+    Ok(())
 }
 
 fn drjohnson_camera_transform(_index: usize, _scene_transform: &MathTransform3) -> MathTransform3 {

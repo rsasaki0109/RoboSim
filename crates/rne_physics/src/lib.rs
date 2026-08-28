@@ -15,12 +15,13 @@ pub use backend::{
     PHYSICS_TOLERANCE_REGISTRY_VERSION,
 };
 pub use components::{
-    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointActuation, JointMotor,
-    JointState, MultibodyLink, PhysicsMaterial, PrismaticJointDesc, RevoluteJointDesc, RigidBody,
-    RigidBodyType,
+    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointActuation,
+    JointEffortMeasurement, JointMotor, JointMotorGainModel, JointPassiveDynamics, JointState,
+    MultibodyLink, PhysicsMaterial, PrismaticJointDesc, RevoluteJointDesc, RigidBody,
+    RigidBodyInertia, RigidBodyType,
 };
 pub use events::{ContactEvent, RaycastHit, RaycastQuery};
-pub use hash::hash_physics_state;
+pub use hash::{hash_physics_state, hash_physics_state_v2};
 pub use snapshot::{
     capture_physics_snapshot, PhysicsBodySnapshot, PhysicsContactSnapshot, PhysicsSnapshot,
     PhysicsSnapshotError, PHYSICS_SNAPSHOT_SCHEMA_VERSION,

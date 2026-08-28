@@ -1,6 +1,6 @@
 [package]
 name = "rne_physics_conformance_suite"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version.workspace = true
 license.workspace = true
@@ -32,7 +32,7 @@ rne_ecs = { workspace = true }
 rne_math = { workspace = true }
 rne_physics = { workspace = true }
 rne_physics_analytic = { workspace = true }
-rne_physics_mujoco = { version = "=0.1.0", path = "../../crates/rne_physics_mujoco", optional = true }
+rne_physics_mujoco = { version = "=0.2.0", path = "../../crates/rne_physics_mujoco", optional = true }
 rne_physics_rapier = { workspace = true }
 rne_world = { workspace = true }
 serde = { workspace = true }

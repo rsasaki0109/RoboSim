@@ -6,12 +6,21 @@ it is never itself evidence, and opening one cannot change a readiness result.
 Stars, forks, self-authored reference implementations, screenshots, and copied
 JSON reports do not satisfy an external-use gate.
 
+The current campaign accepts only [v0.2.0 official
+assets](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0). Until that
+page contains the native archives and release-level `SHA256SUMS`, prepare the
+external repository and candidate files but do not open an evidence issue.
+The published v0.1.0 prerelease is not qualifying input.
+
 The machine-readable route registry is
-`release/external-evidence-intake.toml`. Registry v3 adds an independently
-measured, archive-bound installed flagship route while continuing to
-distinguish qualifying physics/hardware kinds from audited nonqualifying
-accelerator evidence. Validate the registry, this guide, and all required
-issue-form fields before publishing a release:
+`release/external-evidence-intake.toml`. Registry v10 binds the qualifying
+release identity, archive-only
+installed flagship quickstart and acyclic candidate templates for the
+flagship, external-project, third-party controller-plugin, and simulator
+adapter routes. It
+continues to distinguish qualifying systems from audited nonqualifying
+accelerator evidence. Validate the registry, guides, template, and all
+required issue-form fields before publishing a release:
 
 ```bash
 cargo run --locked -p xtask -- external-intake-check
@@ -35,7 +44,15 @@ not put credentials, private URLs, personal data, robot access tokens, or
 unredistributable vendor files in an issue or artifact. Maintainers download
 fresh copies, review ownership and provenance, stage them into an external
 pack with `xtask readiness-pack stage`, and rerun `xtask release-readiness`.
-The audit rehashes and parses the retained bytes; it does not trust issue text.
+For the installed flagship route, `xtask readiness-pack
+accept-installed-flagship` revalidates and atomically registers the six staged
+files after human independence review. `readiness-pack
+accept-external-simulator` does the same for the complete twelve-file simulator
+chain and its exact ordered arguments. `readiness-pack accept-external-plugin`
+revalidates the complete eight-file controller-plugin chain before registering
+it. `readiness-pack accept-external-project` revalidates the seven primary
+project files plus every artifact bound by the Failure Capsule. The audit
+rehashes and parses the retained bytes; it does not trust issue text.
 
 Compute digests with one of:
 
@@ -61,33 +78,46 @@ it, and run from the extracted bundle root:
 
 ```bash
 ./bin/rne-flagship-proof flagship-proof --cross-backend \
-  --measure-on "community-lab-desktop-a"
+  --measure-on "community-lab-desktop-a" --verify-installed-bundle .
 ```
 
-On Windows use `bin\\rne-flagship-proof.exe`. Preserve the archive, the exact
-extracted bundle, and the complete `flagship-proof` directory without editing
-their contents. From a pinned checkout of the same RNE release, generate the
-versioned external report (PowerShell line continuations are shown):
+On Windows use `bin\\rne-flagship-proof.exe`. The complete archive-only operator
+procedure and candidate JSON are in
+[`EXTERNAL_FLAGSHIP_REPRODUCTION.md`](EXTERNAL_FLAGSHIP_REPRODUCTION.md) and
+`release/external-flagship-submission-template.json`. Preserve the archive, the
+exact extracted bundle, and the complete `flagship-proof` directory without
+editing their contents.
+
+After submission, a maintainer freshly downloads the retained bytes and, from
+a pinned checkout of the same RNE release, generates the versioned external
+report (PowerShell line continuations are shown):
 
 ```powershell
 cargo run --locked -p xtask -- external-flagship-check `
   --archive path/to/rne-RELEASE-TARGET.zip `
   --bundle-dir path/to/rne-RELEASE-TARGET `
-  --proof-dir path/to/rne-RELEASE-TARGET/flagship-proof `
-  --owner external-github-owner `
-  --repository https://github.com/external-github-owner/rne-reproduction `
+  --proof-dir path/to/extracted-proof-bundle/flagship-proof `
+  --proof-bundle path/to/independent-proof-bundle.zip `
+  --evidence-repo-dir path/to/clean-external-evidence-repository `
+  --submission path/to/external-flagship-submission.json `
   --revision 0123456789abcdef0123456789abcdef01234567 `
-  --measured-on YYYY-MM-DD `
   --output external-flagship-reproduction.json
 ```
 
-The checker fails closed unless the release is clean, tagged, reproducible,
-and internally checksum-consistent. It records the release source revision and
-rehashes the archive, checksum manifest, and packaged producer executable,
+The operator never needs an RNE source checkout, and maintainer verification
+does not retroactively provide author assistance to the independent run. The
+checker fails closed unless the release is clean, tagged, reproducible,
+and internally checksum-consistent. Candidate schema v2 keeps the repository
+revision outside the committed JSON and the candidate outside the proof
+bundle, avoiding both content-hash cycles. The checker records the separately
+supplied evidence revision and rehashes the candidate, proof bundle, release
+archive, logs, checksum manifest, and packaged producer executable,
+requires the evidence checkout's clean `HEAD`, origin URL, and committed
+candidate/log bytes to match that revision,
 verifies the proof report and Failure Capsule, requires
 Rapier and bundled MuJoCo success plus intentional failure, checks all named SI
 tolerances and the exact first violation, matches the timing platform to the
-archive, and enforces the 15-minute limit. The emitted schema-v1 report binds
+archive, and enforces the 15-minute limit. The emitted schema-v2 report binds
 the independently owned repository revision and all qualifying artifacts.
 `author_assistance=false` is mandatory.
 
@@ -98,9 +128,11 @@ Use
 uses RNE to define and reproduce its own task. Two distinct external
 repositories are required for 1.0.
 
-The submitted revision must retain a valid `TaskSpec` and a complete
-`Failure Capsule` whose declared failure verifies and reproduces from a clean
-checkout. Retain both exact files or a stable capsule archive. Record
+The submitted revision must retain a valid `TaskSpec`, every member of a
+complete `Failure Capsule`, the acyclic
+`release/external-project-submission-template.json` candidate, and complete
+stdout/stderr logs. The Capsule's `rne_task_spec` member must have the exact
+digest of the separately submitted TaskSpec. Record
 `first_used_on` and `last_verified_on` as explicit `YYYY-MM-DD` dates.
 
 This route uniquely requires `author_assistance=false`. Documentation,
@@ -128,6 +160,31 @@ release root (which retains the release lockfile), or from a locked Rust
 project root. It does not require the RNE source tree. The external project's
 immutable repository revision remains a separate mandatory submission field.
 
+Commit the TaskSpec, complete Capsule directory, candidate, and distinct logs
+to the external repository. Keep the containing 40-character Git revision out
+of the candidate so the candidate does not hash the commit that contains
+itself. After independently downloading the exact official release archive, a
+maintainer verifies and binds the submission without executing project code:
+
+```powershell
+cargo run --locked -p xtask -- external-project-check `
+  --release-archive path/to/rne-0.2.0-TARGET.zip `
+  --task path/to/clean-external-project/evidence/task.json `
+  --capsule-dir path/to/clean-external-project/evidence/failure-capsule `
+  --submission path/to/clean-external-project/external-project-submission.json `
+  --evidence-repo-dir path/to/clean-external-project `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --output external-project-maintainer-report.json
+```
+
+The checker requires a clean `HEAD`, matching public origin, committed bytes,
+three or more successful reproduction commands, no author assistance, valid
+usage dates, the exact official release archive name and digest, a typed
+TaskSpec, and a fully verified Failure Capsule. The readiness audit reparses
+the maintainer report and rehashes the release, TaskSpec, Capsule manifest and
+all Capsule members, candidate, and logs. A copied `capsule.json` or an issue
+claim therefore cannot satisfy either external-project slot.
+
 See [Trust evidence quickstart](EVIDENCE_QUICKSTART.md),
 [TaskSpec v1](task-spec-v1.md), and [Failure Capsule](FAILURE_CAPSULE.md).
 
@@ -152,12 +209,44 @@ The readiness audit validates both typed files, rehashes the exact library,
 checks its file name and size, and requires the negotiated controller identity
 to match the manifest. See [Controller plugin SDK](PLUGIN_SDK.md).
 
+Complete `release/external-plugin-submission-template.json` only after the
+release archive, controller library, manifest, conformance report, and command
+logs have their final digests. Commit the candidate and both logs to the
+external repository; pass the exact 40-character revision separately so the
+candidate does not hash or identify the commit that contains itself. The
+candidate is a review input, never accepted evidence by itself.
+
+After downloading the immutable bytes, a maintainer runs:
+
+```powershell
+cargo run --locked -p xtask -- external-plugin-check `
+  --release-archive path/to/rne-0.2.0-TARGET.zip `
+  --library path/to/controller.dll `
+  --manifest path/to/rne-plugin.json `
+  --report path/to/controller-conformance.json `
+  --submission path/to/external-plugin-submission.json `
+  --evidence-repo-dir path/to/clean-external-plugin-repository `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --output external-controller-plugin-submission.json
+```
+
+The checker rejects dirty or mismatched Git state, origin drift, unknown JSON
+fields, mutable-looking URLs, nonzero commands, path escapes, symlinks,
+oversized files, platform/library mismatches, digest drift, failed or malformed
+conformance reports, and manifest/controller identity drift. It deliberately
+does not load the untrusted shared library on the maintainer workstation;
+maintainers rerun executable conformance only inside an appropriate sandbox.
+The exact checker output is retained as `maintainer_report`; readiness manifest
+v7 reparses it and rehashes all seven submitted artifacts, so the qualifying
+gate cannot silently fall back to the older library/manifest/report-only path.
+
 ## `external_system`
 
 Use
 `.github/ISSUE_TEMPLATE/external-system-evidence.yml` for an independently
-maintained `physics_backend`, `hardware_adapter`, or `accelerator_adapter`.
-Exactly one passing physics backend or hardware adapter is required for 1.0;
+maintained `physics_backend`, `hardware_adapter`, `simulator_adapter`, or
+`accelerator_adapter`. Exactly one passing physics backend, hardware adapter,
+or simulator adapter is required for 1.0;
 an accelerator adapter is audited ecosystem evidence but cannot satisfy that
 gate.
 
@@ -185,6 +274,56 @@ rne-hardware-conformance \
 
 This process-protocol pass is not physical safety certification. See
 [External hardware adapter conformance](HARDWARE_ADAPTER_CONFORMANCE.md).
+
+Simulator submissions include the exact TaskSpec, normalized adapter argument
+list, runtime manifest, and the world, robot-model, and adapter-config bytes in
+manifest order. Run the installed fixed-step kit:
+
+```bash
+rne-simulator-conformance \
+  --adapter path/to/adapter \
+  --subject path/to/tested-subject \
+  --runtime-manifest path/to/runtime.json \
+  --task path/to/task.json \
+  --output path/to/simulator-conformance.json
+```
+
+Then complete `release/external-simulator-submission-template.json` with the
+official RNE release archive, adapter, TaskSpec, runtime manifest, three runtime
+artifacts in manifest order, report, normalized arguments, and successful
+commands. Commit that acyclic candidate and its distinct stdout/stderr logs to
+the clean external repository; provide its 40-character Git revision outside
+the candidate.
+
+After downloading the immutable files, a maintainer runs:
+
+```powershell
+cargo run --locked -p xtask -- external-simulator-check `
+  --release-archive path/to/rne-0.2.0-TARGET.tar.gz `
+  --adapter path/to/adapter.py `
+  --task path/to/task.json `
+  --runtime-manifest path/to/runtime.json `
+  --runtime-artifact path/to/world.sdf `
+  --runtime-artifact path/to/robot.sdf `
+  --runtime-artifact path/to/adapter.json `
+  --report path/to/simulator-conformance.json `
+  --submission path/to/external-simulator-submission.json `
+  --evidence-repo-dir path/to/clean-external-simulator-repository `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --output external-simulator-maintainer-report.json
+```
+
+The checker does not execute the untrusted adapter. It validates clean Git
+provenance and committed logs, rehashes every byte, reparses the TaskSpec,
+runtime manifest and passing conformance report, and rebinds the fixed step,
+vector widths, handshake identity, argument hash, and canonical runtime files.
+Readiness manifest v7 requires this maintainer report and all twelve retained
+digests before a simulator can satisfy the external-system gate.
+
+The readiness audit rehashes every retained file, binds the handshake simulator
+identity and exact fixed step to the TaskSpec and runtime manifest, and reruns
+report validation. See
+[External simulator adapter conformance](EXTERNAL_SIMULATOR_ADAPTER_CONFORMANCE.md).
 
 Accelerator submissions retain the exact adapter subject, TaskSpec,
 `accelerator.toml`, `runtime.toml`, normalized ordered argument list, and the

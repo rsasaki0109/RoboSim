@@ -1,11 +1,12 @@
 kind = "rne_gaussian_splat_environment"
-schema_version = 1
+schema_version = 2
 environment_id = "voxel51.drjohnson.real_capture.v1"
-ply_path = "drjohnson_dc_every10.ply"
+ply_path = "drjohnson_dc_every4.ply"
 standin = false
-translation_m = [0.0, 1.54, 0.0]
+translation_m = [0.0, 1.4536229671489928, 0.0]
 rotation_y_rad = 0.0
 rotation_xyzw = [0.40191308385120356, 0.0, 0.5896453610141602, 0.7005599340982157]
 scale = 1.0
 renderer_identity = "rne.gaussian_splat.v1"
-coordinate_note = "Real Deep Blending Dr Johnson capture; measured COLMAP up is RNE +Y, the dominant wood-floor plane is y=0 m, and units remain metric-scale."
+validation_fixture_path = "drjohnson.validation.json"
+coordinate_note = "Real Deep Blending Dr Johnson capture; measured COLMAP up is RNE +Y and the dominant registered wood-floor plane is aligned to world y=0. Scale remains in COLMAP reconstruction units until an independent physical anchor is retained."

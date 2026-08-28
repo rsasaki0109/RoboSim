@@ -2,7 +2,7 @@
   "kind": "rne_python_api_contract",
   "schema_version": 1,
   "module": "rne_py",
-  "release_version": "0.1.0",
+  "release_version": "0.2.0",
   "exports": [
     {
       "name": "DiffDriveEpisode",

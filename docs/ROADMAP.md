@@ -29,10 +29,20 @@ available.
 | Track | Outcome | Main exit evidence |
 |---|---|---|
 | 0.2 Trust and benchmark | Backend-neutral determinism contracts, audited capability inventory, timing-free benchmark aggregation, and portable Failure Capsules | `xtask capability-report`, `xtask benchmark`, `xtask failure-capsule verify`, workspace/headless CI |
-| 0.3 Interchangeable dynamics | Promote the optional MuJoCo spike into conformance-covered rigid bodies, articulations, actuation, and canonical contact evidence while retaining Rapier and analytic backends | The same fixtures run through each advertised backend; exact same-runtime and registered cross-backend tolerance contracts pass; a deliberately tightened first divergence reproduces from a verified replay/report Failure Capsule on Windows and Linux |
+| 0.3 Interchangeable dynamics | Promote the optional MuJoCo spike into conformance-covered rigid bodies, articulations, actuation, canonical contact evidence, and control-engineering plant/controller validation while retaining Rapier and analytic backends | The same fixtures run through each advertised backend; exact same-runtime and registered cross-backend tolerance contracts pass; OpenArm step/ramp/chirp, plant-model, PID/state-space, and robustness reports retain the first divergent measurement, realization, or plant response in a verified Failure Capsule |
 | 0.4 Scalable learning | Ordered vector environments, deterministic reset streams, batched observations/actions, and accelerator adapters outside core | Single-environment replay matches its lane in a batch; throughput reports name hardware, batch size, and scenario |
-| 0.5 Perception and data | Timestamped RGB-D/LiDAR datasets, renderer-specific capture adapters, dataset manifests, and offline evaluation | Sensor latency/noise/timestamp contracts and dataset hashes reproduce headlessly without making rendering a core requirement |
+| 0.5 Perception and data | Timestamped joint/actuator feedback, IMU, RGB-D/LiDAR datasets, renderer-specific capture adapters, calibration manifests, estimator evidence, and offline evaluation | Sensor timing/calibration/noise/failure contracts and dataset hashes reproduce headlessly; stationary and prescribed-motion IMU fixtures retain nominal and minimized estimator-failure evidence without making rendering a core requirement |
 | 0.7 Flagship robot-native scenario | One manipulation-plus-mobility scenario that combines traffic/world semantics, perception, policy evaluation, replay, and browser inspection | A clean checkout reproduces success and a deliberately injected failure from one capsule on Windows and Linux |
+
+The concrete sensor and control-engineering sequence, report contents, and
+definition of done are tracked in the
+[External product proof plan](PLAN_EXTERNAL_PRODUCT_PROOF.md#sensor-and-control-dynamics-hardening-track).
+
+The promotion gates are measurement integrity, estimation validity, plant
+integrity, identification validity, closed-loop performance, and portability.
+This keeps sensor work focused on calibrated controller-visible observations
+and dynamics work focused on identifiable plants, stability, saturation, and
+robustness—not on adding catalog breadth or accepting terminal-pose-only demos.
 
 Contest scoring starts with the Tsukuba Challenge 2026 confirmation run, not a
 city-scale photoreal clone. See [TSUKUBA_CONFIRMATION_RUN.md](TSUKUBA_CONFIRMATION_RUN.md):
@@ -94,10 +104,14 @@ bridge, shadow-authority, and independent-watchdog tests. A profile-bound host
 runner now turns the actual Open/poll/actuate/zero-stop/Close exchange into one
 validated artifact, distinguishes mock from physical device identity, and
 refuses a clean completion with authority, pending output, or a safety latch.
-A versioned physical-evidence manifest and staged verifier now prevent mock,
-mixed-device, incomplete safety, unverified dataset, or checklist-only output
-from satisfying the exit. A real LeKiwi shadow, HIL safety matrix, and
-low-speed live run remain open.
+A versioned base-only physical-evidence manifest and staged verifier now prevent
+mock, mixed-device, incomplete safety, unverified dataset, or checklist-only
+output from satisfying the reference-device exit. A real LeKiwi shadow, HIL
+safety matrix, and low-speed live run remain open. That reference-device exit
+is necessary but not sufficient for the flagship physical gate: the 30 Hz
+base-velocity TaskSpec is not the release flagship TaskSpec/controller. An
+explicit content-addressed rate/observation/action projection, elevated
+parent-controller shadow, and bounded live success/failure are also required.
 
 The first v0.7 flagship slice is also integrated. `cargo run --locked -p xtask
 -- flagship` coordinates imported mobile-lift assets, RGB-D inspection,
@@ -125,7 +139,7 @@ cryptographic verification against the exact repository, workflow identity,
 tag, source and signer commit, predicate, issuer, runner class, and archive
 digest before accepting a strict schema-v1 receipt. Each platform now also
 signs a separate archive-install report whose digest chain fixes the archive,
-extracted release report, SHA256SUMS member graph, and eleven-check rehearsal;
+extracted release report, SHA256SUMS member graph, and twelve-check rehearsal;
 readiness manifest v4 freshly verifies both signed subjects and audits
 third-party accelerator adapters without weakening the external-system gate.
 The installed accelerator conformance CLI also generates a dependency-free
@@ -157,7 +171,8 @@ certification remains a v0.9 exit gate.
 Readiness manifest v2 now requires that future independent certification retain
 the exact tested subjects rather than only a passing JSON report. It binds
 controller libraries and manifests, physics implementation/source bundles, and
-hardware adapter bytes plus TaskSpec and normalized launch contract back to the
+simulator adapter bytes plus TaskSpec, runtime manifest, and world/model/config
+files, or hardware adapter bytes plus TaskSpec and normalized launch contract back to the
 report's content identity and external source revision.
 The expanded v0.9 compatibility slice adds an installed, content-addressed
 corpus for thirty-six historical/current fixtures spanning TaskSpec identities,
@@ -714,6 +729,13 @@ Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
 - Render skeleton + Python bindings
 - URDF import + ROS 2 Python bridge
 
+## v0.2.0 (CI-native product proof)
+
+- Installed indoor mobile-manipulation TaskSpec proof from native archives
+- Rapier/MuJoCo success and intentional-failure comparison
+- Browser-viewable, replay-bearing Failure Capsule and exact producer binding
+- Named-machine 15-minute measurement and independent evidence intake
+
 ## v0.4 candidates
 
 | Area | Idea | Status |
@@ -748,7 +770,7 @@ After merging release changes, set `RNE_VERSION` to the exact version being
 shipped and run the clean release gate before creating generated release notes:
 
 ```bash
-RNE_VERSION=0.1.0
+RNE_VERSION=0.2.0
 cargo run --locked -p xtask -- ci
 cargo run --locked -p xtask -- release-exit --output artifacts/release-exit/report.json
 git diff --exit-code

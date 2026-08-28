@@ -4,7 +4,89 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Freeze the external-validation campaign to the exact `v0.2.0` release URL
+  across the registry, README, intake guide, and all four issue forms. Forms
+  now reject generic release placeholders and warn contributors not to submit
+  before the official archives and `SHA256SUMS` are public.
+
+- Add `readiness-pack accept-external-project` for independently owned project
+  reproductions. It revalidates seven distinct retained files and the complete
+  Failure Capsule artifact closure before atomically adding the project entry.
+
+- Add `readiness-pack accept-external-plugin` for independently maintained
+  controller plugins. It revalidates eight distinct staged files and the typed
+  maintainer report before atomically adding the third-party plugin entry.
+
+- Add `readiness-pack accept-external-simulator` for independently maintained
+  Gazebo and other simulator adapters. It revalidates twelve distinct staged
+  files, exact ordered adapter arguments, typed conformance identity, and the
+  maintainer report before atomically adding the readiness entry.
+
+- Add a fail-closed `readiness-pack accept-installed-flagship` operation. It
+  rehashes and revalidates all six staged external-run artifacts before
+  atomically appending the schema-v9 readiness entry, eliminating manual digest
+  transcription at the final acceptance boundary.
+
+- Connect the public installed-flagship intake route to the 1.0 readiness
+  tracker. Manifest schema v9 adds a fail-closed gate that rehashes the retained
+  archive, proof bundle, candidate, logs, and maintainer report before one
+  independent reproduction can count.
+
+- Make the installed flagship a genuinely one-command verified path. The
+  packaged runner now rejects any missing, extra, modified, duplicate,
+  escaping, or symlinked bundle member before proof execution and binds the
+  fresh bundle-verification report into installed proof schema v4,
+  time-to-proof schema v2, and the Failure Capsule.
+
+- Publish platform-specific attestation bundles and archive-install rehearsal
+  reports as durable tagged-release assets, together with a release-level
+  `SHA256SUMS`, so independent reproduction evidence survives Actions artifact
+  expiry and can be reverified on another machine.
+
+- Requalify the OpenArm Gazebo adapter after its transmitted-effort change and
+  add dedicated Ubuntu 22.04 / Gazebo Harmonic 8.15.0 CI. The job reruns all
+  ten fixed-step simulator checks, byte-compares fresh and committed reports,
+  and uploads the generated evidence so adapter/report drift cannot remain
+  hidden behind an old passing verdict.
+
+- Prepare the `0.2.0` product-proof minor release. All workspace packages and
+  exact internal dependency requirements now use `0.2.0`; release metadata,
+  native archive/wheel names, provenance identities, Python API checks, and
+  installation instructions advance together. Historical `0.1.0` fixtures
+  remain unchanged and readable. The minor bump is required because installed
+  flagship proof schema v2 adds a mandatory producer-executable identity.
+
 ### Added
+
+- Add a fail-closed `external-project-check` intake path that binds a clean
+  independent Git revision, official release archive, TaskSpec, complete
+  Failure Capsule, reproduction logs, and maintainer report before either
+  external-project readiness slot can count.
+
+- Add an acyclic external simulator-adapter submission contract and
+  `external-simulator-check`. The maintainer checker binds a clean independent
+  Git revision to the official release, adapter, TaskSpec, runtime manifest,
+  ordered world/robot/config files, normalized arguments, typed conformance
+  report, candidate, and logs without executing untrusted adapter code.
+  Readiness manifest v7 requires the resulting complete digest chain.
+
+- Add an acyclic third-party controller-plugin submission contract and
+  `external-plugin-check`. The maintainer checker binds a clean external Git
+  revision to the exact release archive, library, manifest, typed conformance
+  report, candidate, and command logs without loading the untrusted shared
+  library. Readiness manifest v6 now reparses the checker output and requires
+  the complete digest chain instead of accepting report-only plugin evidence.
+
+- Add a process-isolated external simulator adapter protocol and standalone
+  `rne-simulator-conformance` kit. It binds an exact TaskSpec, fixed simulation
+  delta, seeded reset, ordered observations/actions, simulator identity, world,
+  robot model, adapter configuration, launch arguments, and SHA-256 identities.
+  Ten fail-closed checks cover deterministic fixed-step execution. External
+  evidence intake and readiness schema now recognize `simulator_adapter`
+  without misclassifying Gazebo as hardware, and installed rehearsal schema v7
+  adds the kit as the twelfth archive check.
 
 - Add a fail-closed `external-flagship-check` and public intake route for an
   independently operated 15-minute installed flagship reproduction. The

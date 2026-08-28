@@ -1,0 +1,352 @@
+{
+  "schema_version": 1,
+  "kind": "rne_failure_capsule",
+  "failure": {
+    "id": "controller.state.maximum_disturbance_iae_rad_s-step-3303",
+    "contract": "controller.state.maximum_disturbance_iae_rad_s",
+    "message": "OpenArm joint 5 cumulative disturbance IAE reached 0.020015761 rad*s at step 3303, exceeding the fixed 0.020000000 rad*s requirement under a 0.020000 rad joint_position_measurement_bias",
+    "step": 3303,
+    "sim_time_ticks": 55050001101,
+    "state_digest": 4684763979926636747
+  },
+  "run": {
+    "id": "rne.openarm.right.state_feedback.robustness.v1-seed-20260824",
+    "scenario": "rne.openarm.right.state_feedback.robustness.v1",
+    "seed": 20260824,
+    "fixed_delta_ticks": 16666667,
+    "step_count": 3304,
+    "action_count": 3303
+  },
+  "build": {
+    "engine_version": "0.2.0",
+    "git_commit": "a730ccee59bfca6d63cf05ec94d96d587cb691cf",
+    "profile": "debug",
+    "target_triple": "x86_64-unknown-linux-gnu",
+    "rustc_version": "rustc 1.95.0",
+    "cargo_lock_sha256": "c6be1267ebe0afab09cd99f13243df0ed837287333f0f8860c90dd8c1105f8f1"
+  },
+  "backend": {
+    "name": "rne-rapier+mujoco-native+gazebo-sim",
+    "version": "0.22+3.9.0+8.15.0"
+  },
+  "determinism": {
+    "schema_version": 1,
+    "name": "controller.state.maximum_disturbance_iae_rad_s",
+    "scope": {
+      "subject": "rne.openarm.right.state_feedback.robustness.v1",
+      "observables": [
+        "behavior.observation",
+        "world.state"
+      ],
+      "first_step": 0,
+      "step_count": 3304
+    },
+    "guarantee": {
+      "tier": "outcome",
+      "criterion": "controller.state.maximum_disturbance_iae_rad_s"
+    }
+  },
+  "artifacts": [
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/backend.rs",
+      "sha256": "86afe21c5916792dab0d9f6a23f3dd4b6e691feeea5432d7b6524815c6f6a70f"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/build_openarm_controller_report.py",
+      "sha256": "1250b1ca0438703a75945dbd87fdacb04cde32c687cfc6dd87395720c346e7cb"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/build_openarm_controller_suite.py",
+      "sha256": "8bd151fc4c27aa4ed60d978be16ae0956859aa91033a2238a1495b741315038f"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/build_openarm_plant_controller.py",
+      "sha256": "f3be63546afe085822455082d767318bb4ef18defc74dff904ed1e679af1e16b"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/build_openarm_robustness_report.py",
+      "sha256": "33ca0ee9ed4c49b0f3cd752198004b0f8c37f48cb8f9865277ae2d8e9f3e328d"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/build_openarm_robustness_suite.py",
+      "sha256": "036e7cd09368433ba23320de92074ecef80f40bef4d143da17b341cc99c0c13d"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/compiler.rs",
+      "sha256": "305a6f82c786684379a96b7fec3da53372a9c1138d33080c06b15c7b954c7560"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/conformance.report.json",
+      "sha256": "18b822bf0030a76472f154059c701d10512a3c04d655eb357cdcdb0d6455c63e"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-plant-lab-report.json",
+      "sha256": "7cbe59fa79e5e5971ef79730bb3a9741bfcc72bc37a44e3581853c944f7711d4"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-robustness-suite.json",
+      "sha256": "4c3b71a86ae44537c1e3f625ba76001566d3ba4bbec1cd3e887750fb774c4873"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-sensor-bias-robustness-report.html",
+      "sha256": "8b11758673a32c00cfe00781633a073cf4b8c44edecb9fce14275adaac66ac4f"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-sensor-bias-robustness-report.json",
+      "sha256": "ab148b97c04460999bec8de2aa73b14b92da2121fbde7de456527911d9fa119f"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-state-feedback-sensor-bias-000mrad.controller.json",
+      "sha256": "1d3e7e92454535bb50a57e5d446b5d10091e8c1af32bd3503fe2969d6fcf19e3"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-state-feedback-sensor-bias-010mrad.controller.json",
+      "sha256": "4394aae70afdccae0064f44d9bd6ef23283eb5d24db91a9fee255e734a439aa5"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-state-feedback-sensor-bias-020mrad.controller.json",
+      "sha256": "753a7e041979248b3792522d6dcd305121f2c29bc6a399689f9bc026f34ef755"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-state-feedback-sensor-bias-040mrad.controller.json",
+      "sha256": "984c87b1aadc26839ff12b8c7d415cc2ac9b089bcfb16e81a90cc62c8eac06e3"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-state-feedback-sensor-bias-060mrad.controller.json",
+      "sha256": "547c4f3cab26f4764681fa3d28814feb9a53ac58aa7b2d5470db396d9c56e231"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_controller_requirements.json",
+      "sha256": "c5c2af3d5611fbf08ad957e0b847d70ddcd0c60342f4c8a604623b6fa86592f5"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_mujoco_trace.rs",
+      "sha256": "1019d74fe6a78e8fa912f7fe2f85768f656ac999e20c313415aa3195e1afc523"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_plant_experiments.json",
+      "sha256": "ecadeba864e1a290eba67d3eccb345c02437d41e9e90e550facf18c0ac5ef0d5"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_right.adapter.json",
+      "sha256": "e37b53c8d0e3070be2fe581afd12cf21bbc25bf5000747ed30df863e1293d169"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_right.rne_actuation.json",
+      "sha256": "5a83e6f018e5f5da9402f34d4310e71b4e13816c6267afa40289c4c32d6957e4"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_right.world.sdf",
+      "sha256": "5c7c942dec1b39e91fc0f19df5dc3bd7fd61718b78e4475cd5d454d0a2154926"
+    },
+    {
+      "role": "evidence",
+      "kind": "rne_task_spec",
+      "schema_version": 1,
+      "path": "evidence/openarm_right_joint_tracking.task.json",
+      "sha256": "f1d7f575ab843df41210a2902182c132ef565b9b3e08610d093773c001c20e5b"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_right_pose_cycle.controller.json",
+      "sha256": "0db69a85455ee82c9456a84da4724c97e669e2dcb4aa702c1ee10f33f036d2e4"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_robustness_experiments.json",
+      "sha256": "c679d0b4f54b080817b1a2051d907375142e865e1459fa9210691fe99985cffa"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_robustness_failure_replay.rs",
+      "sha256": "6940f1752ef77b0aaab3b557855c04c30800202da83b143366f3c0436e077c26"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_trace.rs",
+      "sha256": "89924fd8abad657b719cd4a053640822bb7a5268536cd031bff3d09f29205448"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_v2_right.rne.robot.toml",
+      "sha256": "78df5a87bf5ca80cdef850d72567eff4cd308c0d2b37032d3e78d47d78041a19"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_v2_right.rne.urdf",
+      "sha256": "1f65aa51542976319bea688332f267a47bd17df48a5860bf23e3f1adb8563994"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_v2_right_validation.rne.scene.toml",
+      "sha256": "fef1a669524c135505b55e5f4c4aad758136dc577e24ef36263d097a872d7a0c"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/rne_gazebo_harmonic_adapter.py",
+      "sha256": "d2776fb3d3613bd9ae57fbb0c94d4d6552fbe5073d8dbd1f79b90d2dd119e63d"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/run_openarm_trace.py",
+      "sha256": "d30dc2717e4ef2825737f847e0eb532877b4383850a804943e37439f92e4b0ee"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/runtime.json",
+      "sha256": "c38682ca39aa45f9c1184c47958d8d300044ff03e0b8a79d788e296d412eb75f"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/sensor-bias-010mrad-controller-actions.json",
+      "sha256": "cea0f84da400b10a7f758acdb5b7ea3654e5ede185534aa625538c1a07e4c6d5"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/sensor-bias-010mrad-gazebo-success-trace.json",
+      "sha256": "2e6811f00f86ada20281bc16b60f3ffcd9c121826d19d0e681ba58a892a2312b"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/sensor-bias-010mrad-mujoco-success-trace.json",
+      "sha256": "2ab6716ca62ec0f28cffd57fc38becee0dde58017856696aa9e188fdeb81a588"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/sensor-bias-010mrad-rapier-success-trace.json",
+      "sha256": "42eb38b39e4a9853be8500d8ef7270f7afa57031cdc81c376877c094c196c327"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/sensor-bias-020mrad-controller-actions.json",
+      "sha256": "4729217d7a2934b592451ecd7ef72d400099b862a19581ceec352768337e2ef8"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/sensor-bias-020mrad-gazebo-success-trace.json",
+      "sha256": "48240f9c3674f96492ca5961ec3451b06ed5b7593cda40c9545831bd3d43587f"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/sensor-bias-020mrad-mujoco-success-trace.json",
+      "sha256": "f590bbe76b2605792da3ea4dafc4c4f1360a6e61de59f8193eed6f4896f2876b"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/sensor-bias-020mrad-rapier-success-trace.json",
+      "sha256": "b4ac2b650735f8526bbaac68c76592ba8659c1775630386cb03c25fb95c9ec64"
+    },
+    {
+      "role": "replay",
+      "kind": "rne_behavior_replay",
+      "schema_version": 1,
+      "path": "replay/minimum-sensor-bias-failure.rne-replay",
+      "sha256": "1b7b115eb93d7795811c37981b97c699489dcdc44c050f0685eca49692f1e0e8"
+    }
+  ]
+}

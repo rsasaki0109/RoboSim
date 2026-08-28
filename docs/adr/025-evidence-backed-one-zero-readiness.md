@@ -37,7 +37,7 @@ to the full LeKiwi verifier rather than a checklist-shaped surrogate.
 `release-check` validates the committed tracker and contract registration, but
 normal 0.x development does not require unavailable external evidence. The
 explicit `--require-eligible` mode is reserved for promotion and fails unless
-all nine checks pass.
+all ten checks pass.
 
 Release commands also contain a version-triggered interlock. Any 1.x or later
 `release-check`, `release-bundle`, or `release-exit` requires an external

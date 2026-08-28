@@ -4,8 +4,9 @@ use rne_core::SimDuration;
 use rne_ecs::{spawn_named, Entity, Parent, World};
 use rne_math::{Hertz, Quat, Vec3};
 use rne_physics::{
-    Collider, JointActuation, JointMotor, JointState, PhysicsBackend, PhysicsError,
-    PhysicsWorldDesc, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
+    Collider, JointActuation, JointEffortMeasurement, JointMotor, JointPassiveDynamics, JointState,
+    PhysicsBackend, PhysicsError, PhysicsWorldDesc, PrismaticJointDesc, RevoluteJointDesc,
+    RigidBody, RigidBodyType,
 };
 use rne_physics_mujoco::{MuJoCoBackend, MuJoCoError};
 use rne_world::{world_transform_of, Transform3};
@@ -280,7 +281,7 @@ fn kinematic_body_fails_with_capability_error_before_model_creation() {
         .expect("failed preflight did not create or lock a native model");
 }
 
-fn run_revolute(command: JointActuation) -> JointState {
+fn run_revolute(command: JointActuation) -> (JointState, JointEffortMeasurement) {
     let dt = SimDuration::from_hertz(Hertz::new(60.0));
     let mut backend = MuJoCoBackend::new(dt).expect("MuJoCo runtime");
     let physics_world = backend
@@ -324,29 +325,181 @@ fn run_revolute(command: JointActuation) -> JointState {
             .sync_to_ecs(&mut world, physics_world)
             .expect("download joint state");
     }
-    *world.get::<JointState>(child).expect("joint state")
+    (
+        *world.get::<JointState>(child).expect("joint state"),
+        *world
+            .get::<JointEffortMeasurement>(child)
+            .expect("realized joint effort"),
+    )
 }
 
 #[test]
 fn revolute_position_velocity_and_effort_modes_move_the_joint() {
-    let position = run_revolute(JointActuation::RevolutePosition {
+    let (position, position_effort) = run_revolute(JointActuation::RevolutePosition {
         target_position_rad: 0.4,
         stiffness_nm_per_rad: 40.0,
         damping_nm_s_per_rad: 4.0,
         max_effort_nm: 20.0,
     });
-    let velocity = run_revolute(JointActuation::RevoluteVelocity {
+    let (velocity, velocity_effort) = run_revolute(JointActuation::RevoluteVelocity {
         target_velocity_rad_s: 1.0,
         gain_nm_s_per_rad: 4.0,
         max_effort_nm: 20.0,
     });
-    let effort = run_revolute(JointActuation::RevoluteEffort {
+    let (effort, direct_effort) = run_revolute(JointActuation::RevoluteEffort {
         effort_nm: 2.0,
         max_effort_nm: 2.0,
     });
     assert!(position.position_rad().unwrap() > 0.1);
     assert!(velocity.position_rad().unwrap() > 0.1);
     assert!(effort.position_rad().unwrap() > 0.01);
+    assert!(position_effort.has_valid_value());
+    assert!(velocity_effort.has_valid_value());
+    assert_eq!(
+        direct_effort,
+        JointEffortMeasurement::Revolute {
+            measured_effort_nm: 2.0
+        }
+    );
+}
+
+#[test]
+fn typed_actuator_measurement_stays_bounded_with_passive_joint_loss() {
+    let dt = SimDuration::from_hertz(Hertz::new(60.0));
+    let mut backend = MuJoCoBackend::new(dt).expect("MuJoCo runtime");
+    let physics_world = backend
+        .create_world(PhysicsWorldDesc {
+            gravity_m_s2: Vec3::ZERO,
+            solver_iterations: 16,
+        })
+        .expect("physics world");
+    let mut world = World::new();
+    let parent = spawn_body(
+        &mut world,
+        "bounded_parent",
+        RigidBodyType::Fixed,
+        Collider::sphere(0.05),
+        Vec3::ZERO,
+    );
+    let child = spawn_body(
+        &mut world,
+        "bounded_child",
+        RigidBodyType::Dynamic,
+        Collider::sphere(0.05),
+        -Vec3::Y,
+    );
+    world.entity_mut(child).insert((
+        RevoluteJointDesc {
+            parent,
+            axis: Vec3::Z,
+            anchor_parent_m: Vec3::ZERO,
+            anchor_child_m: Vec3::Y,
+            lower_rad: None,
+            upper_rad: None,
+        },
+        JointActuation::RevolutePosition {
+            target_position_rad: 1.0,
+            stiffness_nm_per_rad: 100.0,
+            damping_nm_s_per_rad: 20.0,
+            max_effort_nm: 2.0,
+        },
+        JointPassiveDynamics::Revolute {
+            viscous_damping_nm_s_per_rad: 2.5,
+            coulomb_friction_nm: 0.5,
+            coulomb_transition_velocity_rad_s: 0.01,
+        },
+        JointState::Revolute {
+            position_rad: 0.0,
+            velocity_rad_s: 10.0,
+        },
+    ));
+    backend.sync_from_ecs(&mut world, physics_world).unwrap();
+    backend.step(physics_world, dt).unwrap();
+    backend.sync_to_ecs(&mut world, physics_world).unwrap();
+    let JointEffortMeasurement::Revolute { measured_effort_nm } = *world
+        .get::<JointEffortMeasurement>(child)
+        .expect("bounded actuator measurement")
+    else {
+        panic!("expected revolute effort measurement")
+    };
+    assert!(
+        measured_effort_nm.abs() <= 2.0 + 1.0e-12,
+        "actuator effort {measured_effort_nm} escaped the declared 2 N*m limit"
+    );
+}
+
+fn coast_revolute_velocity(passive_dynamics: Option<JointPassiveDynamics>) -> f64 {
+    let dt = SimDuration::from_hertz(Hertz::new(60.0));
+    let mut backend = MuJoCoBackend::new(dt).expect("MuJoCo runtime");
+    let physics_world = backend
+        .create_world(PhysicsWorldDesc {
+            gravity_m_s2: Vec3::ZERO,
+            solver_iterations: 16,
+        })
+        .expect("physics world");
+    let mut world = World::new();
+    let parent = spawn_body(
+        &mut world,
+        "passive_parent",
+        RigidBodyType::Fixed,
+        Collider::sphere(0.05),
+        Vec3::ZERO,
+    );
+    let child = spawn_body(
+        &mut world,
+        "passive_child",
+        RigidBodyType::Dynamic,
+        Collider::sphere(0.05),
+        -Vec3::Y,
+    );
+    world.entity_mut(child).insert((
+        RevoluteJointDesc {
+            parent,
+            axis: Vec3::Z,
+            anchor_parent_m: Vec3::ZERO,
+            anchor_child_m: Vec3::Y,
+            lower_rad: None,
+            upper_rad: None,
+        },
+        JointActuation::Disabled,
+        JointState::Revolute {
+            position_rad: 0.0,
+            velocity_rad_s: 1.0,
+        },
+    ));
+    if let Some(dynamics) = passive_dynamics {
+        world.entity_mut(child).insert(dynamics);
+    }
+    for _ in 0..20 {
+        backend
+            .sync_from_ecs(&mut world, physics_world)
+            .expect("upload passive joint state");
+        backend.step(physics_world, dt).expect("fixed step");
+        backend
+            .sync_to_ecs(&mut world, physics_world)
+            .expect("download passive joint state");
+    }
+    match *world
+        .get::<JointState>(child)
+        .expect("revolute joint state")
+    {
+        JointState::Revolute { velocity_rad_s, .. } => velocity_rad_s.abs(),
+        other => panic!("unexpected joint state {other:?}"),
+    }
+}
+
+#[test]
+fn regularized_coulomb_friction_reduces_native_coast_velocity() {
+    let undamped = coast_revolute_velocity(None);
+    let friction = coast_revolute_velocity(Some(JointPassiveDynamics::Revolute {
+        viscous_damping_nm_s_per_rad: 0.0,
+        coulomb_friction_nm: 0.1,
+        coulomb_transition_velocity_rad_s: 0.01,
+    }));
+    assert!(
+        friction < undamped,
+        "regularized Coulomb loss should reduce coast velocity: undamped={undamped}, friction={friction}"
+    );
 }
 
 fn run_prismatic(command: JointActuation) -> JointState {

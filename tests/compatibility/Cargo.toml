@@ -1,6 +1,6 @@
 [package]
 name = "rne_compatibility_suite"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version.workspace = true
 license.workspace = true
@@ -25,7 +25,7 @@ rne_log = { workspace = true }
 rne_math = { workspace = true }
 rne_openscenario = { workspace = true }
 rne_physics_conformance = { workspace = true }
-rne_physics_conformance_suite = { version = "=0.1.0", path = "../physics_conformance" }
+rne_physics_conformance_suite = { version = "=0.2.0", path = "../physics_conformance" }
 rne_plugin = { workspace = true }
 rne_plugin_sdk = { workspace = true }
 serde = { workspace = true }

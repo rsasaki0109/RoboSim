@@ -4,6 +4,23 @@ Status: selected profile, device bridge, profile-bound evidence runner, and
 machine-verifiable physical-evidence manifest; physical shadow/HIL/live
 evidence has not yet been captured.
 
+This base-only profile is the safety prerequisite for the bounded physical
+flagship, not the flagship proof itself. It runs
+`rne.lekiwi_so101.base_shadow.v1`, whereas the release flagship runs
+`rne.flagship.mobile_lift_shared_aisle.v2` with
+`rne.ai.portable_ik_mobile_lift_pick_place_controller.v2`. The rate,
+observation, and action spaces differ. Gate 4 therefore additionally requires the explicit full-task
+projection, elevated parent-controller shadow, bounded live success/failure,
+and complete artifact closure defined in the
+[external product proof plan](PLAN_EXTERNAL_PRODUCT_PROOF.md#gate-4-bounded-physical-proof).
+
+The original 19-value flagship shadow boundary is now explicitly transitional:
+an audit showed that its v1 TaskSpec omitted dynamic base yaw and place target
+values used by the named controller. The additive v2 TaskSpec and
+`FlagshipMobileLiftControllerV2` remove that hidden simulator-state dependency.
+Physical flagship capture must wait for the LeKiwi fuser and manifest to migrate
+to v2; a valid v1 manifest must not be promoted as same-controller evidence.
+
 ## Selection
 
 RNE v0.6 uses LeKiwi with the SO-101 follower arm as its first affordable
@@ -54,6 +71,75 @@ Close response was followed by a clean local disconnect.
 The front 640 by 480 camera rotated 180 degrees and wrist 480 by 640 camera
 rotated 90 degrees are declared as dataset streams. They are intentionally not
 encoded into the bounded numeric process wire.
+
+## Flagship action projection
+
+`rne_hardware_lekiwi::flagship_projection` schema v2 is the first executable
+same-contract boundary. It validates the complete seven-element flagship
+controller action, converts its left/right wheel velocities from `rad/s` to a
+body-x velocity in `m/s` and yaw rate in `rad/s`, and independently validates
+the resulting three-element LeKiwi base action. The transform uses the
+flagship model's canonical `0.1 m` wheel radius and `0.45 m` track width.
+
+The projection never clamps an unsafe command. It fails closed when either
+TaskSpec envelope is exceeded and records the five arm/lift/gripper elements
+as explicitly suppressed values with a deterministic parent-action hash.
+Registration as `hardware.flagship_lekiwi_action_projection = 2` freezes this
+artifact shape; it does not make the bridge live-ready. Full-file content
+bindings and parent-order observation fusion remain required before elevated
+flagship shadow or actuation; the deterministic rate boundary is defined below.
+
+The next executable boundary is
+`rne_hardware_lekiwi::flagship_rate::FlagshipLeKiwiRateSchedulerV2`. It accepts
+exactly ordered zero-based controller sequences, validates every action through
+the projection above, emits phase-zero even sequences, and records intervening
+odd sequences as explicitly suppressed. Its `33,333,334 ns` write period is
+exactly two `16,666,667 ns` simulation ticks and therefore never exceeds the
+30 Hz device ceiling. Duplicate, missing, out-of-order, invalid, and overflowed
+inputs fail without advancing state. This wall-clock-free rate proof still does
+not supply the parent-order observation required to execute the controller.
+
+`rne_hardware_lekiwi::flagship_observation` schema v2 supplies that parent-order
+boundary without pretending LeKiwi observes the whole task. A stateful fuser
+requires five explicit sources: normalized LeKiwi feedback, metric base
+localization, calibrated payload/wrist perception, task-level traffic state,
+and lift/gripper/policy task state. Every source carries an integer sample tick,
+monotonic sequence, maximum age, stable identity, and `sha256:` source-contract
+label. Held observations are accepted for the intermediate 60 Hz decision only
+when the complete canonical typed encoding is identical; stale, future,
+regressed, mutated, missing-camera, or nonfinite input fails without advancing
+state.
+
+The three flagship arm elements require a named affine morphology calibration;
+the fuser does not assume that SO-101 and the simulation model share joints.
+Unmapped arm positions, physical gripper percentage, and base velocities remain
+explicitly unused evidence. The output is exactly the 24 flattened values and
+14 tensors of the portable v2 TaskSpec, including full base pose and the
+world-frame place target, with a deterministic observation digest.
+The full-content shadow manifest closes that binding slice without adding
+authority. It hashes twelve fixed artifacts: parent TaskSpec, controller
+contract, LeKiwi profile, arm calibration, four observation-source contracts,
+the non-actuating hardware session, and replayable action-projection,
+rate-decision, and observation-fusion streams. Each v2 observation record also
+freezes the portable controller action. Verification rehashes every file,
+replays fusion and controller execution, cross-links that action to projection
+and rate scheduling, and checks the 60 Hz parent decisions against the held
+30 Hz physical samples. Historical v1 manifests remain readable; mock and
+physical-shadow execution classes are distinct and cannot be relabelled.
+
+Create a draft containing those twelve relative artifact references, then seal
+and verify it with:
+
+```bash
+cargo run -p xtask -- flagship-lekiwi-shadow seal DRAFT.json MANIFEST.json
+cargo run -p xtask -- flagship-lekiwi-shadow verify MANIFEST.json
+```
+
+Sealing refuses path escapes, links, missing files, duplicate paths, and an
+existing output. Verification also requires a completed Shadow session and zero
+Actuate frames. A passing mock manifest is tooling evidence only; the elevated
+physical-shadow capture remains required. No physical arm/lift/gripper authority
+is added.
 
 ## Safety case
 
@@ -278,4 +364,6 @@ line after replaying every nested contract.
 
 A profile golden or mock process pass is not physical evidence. Until these
 artifacts exist, roadmap language must say that real-hardware evidence remains
-open.
+open. Even after this base-only manifest passes, the same-contract flagship
+physical gate remains open until the separately hashed projection and
+parent-controller evidence pass; the two claims must not be conflated.

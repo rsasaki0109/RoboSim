@@ -6,6 +6,11 @@ mod capability_report;
 mod dataset;
 mod evidence;
 mod external_intake;
+mod external_plugin;
+mod external_project;
+mod external_simulator;
+mod external_submission;
+mod flagship_shadow;
 mod lekiwi_evidence;
 mod readiness_pack;
 mod release_artifacts;
@@ -30,7 +35,7 @@ use std::{
 
 const HERO_CONTACT_SHEET_FRAMES: [usize; 9] = [0, 6, 12, 18, 24, 30, 36, 42, 47];
 const DEFAULT_BEHAVIOR_SEED_RANGE: &str = "0..10";
-pub(crate) const RELEASE_VERSION: &str = "0.1.0";
+pub(crate) const RELEASE_VERSION: &str = "0.2.0";
 const RELEASE_MSRV: &str = "1.88.0";
 const SUPPLY_CHAIN_POLICY_DATE: &str = "2026-08-12";
 const CARGO_DENY_VERSION: &str = "0.20.2";
@@ -165,6 +170,9 @@ fn run() -> anyhow::Result<()> {
         "release-bundle" => release_artifacts::release_bundle(&mut args),
         "release-install-smoke" => release_artifacts::release_install_smoke(&mut args),
         "external-flagship-check" => release_artifacts::external_flagship_check(&mut args),
+        "external-project-check" => external_project::run(&mut args),
+        "external-plugin-check" => external_plugin::run(&mut args),
+        "external-simulator-check" => external_simulator::run(&mut args),
         "release-exit" => release_exit::release_exit(&mut args),
         "release-readiness" => release_readiness::release_readiness(&mut args),
         "readiness-pack" => readiness_pack::run(&mut args),
@@ -180,6 +188,7 @@ fn run() -> anyhow::Result<()> {
         "external-intake-check" => external_intake::run(&mut args),
         "failure-capsule" => failure_capsule::run(&mut args),
         "lekiwi-evidence" => lekiwi_evidence::run(&mut args),
+        "flagship-lekiwi-shadow" => flagship_shadow::run(&mut args),
         "supply-chain" => supply_chain(&mut args),
         "fuzz-smoke" => fuzz_smoke(&mut args),
         "asset" => asset_command(&mut args),
@@ -223,6 +232,8 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
     );
     rne_compatibility_suite::verify_historical_source_history(&root)?;
     release_exit::validate_exit_matrix(&root)?;
+    release_artifacts::validate_release_workflow_contract(&root)?;
+    release_artifacts::validate_release_documentation_contract(&root)?;
     external_intake::validate_committed(&root)?;
     release_readiness::validate_committed_manifest(&root)?;
     release_readiness::enforce_release_promotion(&root)?;
@@ -834,7 +845,14 @@ fn validate_deny_exceptions(
 }
 
 fn verify_tool_version(program: &str, expected: &str) -> anyhow::Result<()> {
-    let output = Command::new(program).arg("--version").output()?;
+    let output = Command::new(program)
+        .arg("--version")
+        .output()
+        .with_context(|| {
+            format!(
+                "run required release tool {program} --version (install pinned version {expected})"
+            )
+        })?;
     anyhow::ensure!(output.status.success(), "{program} --version failed");
     let version = format!(
         "{}{}",
@@ -854,7 +872,8 @@ fn run_supply_tool(root: &Path, program: &str, args: &[&str]) -> anyhow::Result<
     let status = Command::new(program)
         .current_dir(root)
         .args(args)
-        .status()?;
+        .status()
+        .with_context(|| format!("run required release tool {program}"))?;
     anyhow::ensure!(status.success(), "{program} failed with status {status}");
     Ok(())
 }
@@ -1111,7 +1130,7 @@ fn validate_release_metadata(metadata: &serde_json::Value) -> anyhow::Result<()>
             };
             if expected_public.contains(dependency_name) {
                 anyhow::ensure!(
-                    dependency["req"].as_str() == Some("=0.1.0"),
+                    dependency["req"].as_str() == Some("=0.2.0"),
                     "{name} -> {dependency_name} must use exact requirement ={RELEASE_VERSION}"
                 );
             }
@@ -1401,6 +1420,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "tasks",
+            "flagship_mobile_lift_controller",
+            u64::from(rne_ai::FLAGSHIP_MOBILE_LIFT_CONTROLLER_CONTRACT_SCHEMA_VERSION),
+        ),
+        (
+            "tasks",
             "batch_checkpoint",
             u64::from(rne_ai::PORTABLE_BATCH_CHECKPOINT_VERSION),
         ),
@@ -1518,6 +1542,16 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "hardware",
+            "recorded_shadow_session",
+            u64::from(rne_hardware_gateway::recorded::RECORDED_SHADOW_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
+            "recorded_shadow_report",
+            u64::from(rne_hardware_gateway::recorded::RECORDED_SHADOW_SCHEMA_VERSION),
+        ),
+        (
+            "hardware",
             "mock_conformance",
             u64::from(rne_hardware_gateway::mock::MOCK_CONFORMANCE_SCHEMA_VERSION),
         ),
@@ -1526,6 +1560,27 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "adapter_conformance",
             u64::from(
                 rne_hardware_gateway::conformance::HARDWARE_ADAPTER_CONFORMANCE_REPORT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "simulators",
+            "runtime_manifest",
+            u64::from(
+                rne_hardware_gateway::simulator::SIMULATOR_RUNTIME_MANIFEST_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "simulators",
+            "wire_protocol",
+            u64::from(
+                rne_hardware_gateway::simulator::wire::SIMULATOR_WIRE_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "simulators",
+            "adapter_conformance",
+            u64::from(
+                rne_hardware_gateway::simulator::conformance::SIMULATOR_ADAPTER_CONFORMANCE_REPORT_SCHEMA_VERSION,
             ),
         ),
         (
@@ -1565,6 +1620,69 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             ),
         ),
         (
+            "hardware",
+            "flagship_lekiwi_action_projection",
+            u64::from(
+                rne_hardware_lekiwi::flagship_projection::FLAGSHIP_LEKIWI_ACTION_PROJECTION_CURRENT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "flagship_lekiwi_rate_decision",
+            u64::from(
+                rne_hardware_lekiwi::flagship_rate::FLAGSHIP_LEKIWI_RATE_DECISION_CURRENT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "flagship_lekiwi_observation_fusion",
+            u64::from(
+                rne_hardware_lekiwi::flagship_observation::FLAGSHIP_LEKIWI_OBSERVATION_FUSION_CURRENT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "flagship_lekiwi_shadow_manifest",
+            u64::from(
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_LEKIWI_SHADOW_MANIFEST_CURRENT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "flagship_lekiwi_arm_calibration",
+            u64::from(
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_LEKIWI_ARM_CALIBRATION_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "flagship_observation_source_contract",
+            u64::from(
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_OBSERVATION_SOURCE_CONTRACT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "flagship_action_projection_stream",
+            u64::from(
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_ACTION_PROJECTION_STREAM_CURRENT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "flagship_rate_decision_stream",
+            u64::from(
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_RATE_DECISION_STREAM_CURRENT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "flagship_observation_fusion_stream",
+            u64::from(
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_OBSERVATION_FUSION_STREAM_CURRENT_SCHEMA_VERSION,
+            ),
+        ),
+        (
             "evidence",
             "fuzz_smoke_report",
             u64::from(rne_fuzz_smoke::FUZZ_SMOKE_REPORT_SCHEMA_VERSION),
@@ -1588,8 +1706,27 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "evidence",
+            "external_controller_plugin_submission_report",
+            u64::from(external_plugin::EXTERNAL_PLUGIN_SUBMISSION_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "external_simulator_adapter_submission_report",
+            u64::from(
+                external_simulator::EXTERNAL_SIMULATOR_SUBMISSION_REPORT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "evidence",
             "installed_flagship_proof_report",
             u64::from(rne_asset_cli::INSTALLED_FLAGSHIP_PROOF_REPORT_SCHEMA_VERSION),
+        ),
+        (
+            "evidence",
+            "installed_bundle_verification_report",
+            u64::from(
+                rne_asset_cli::INSTALLED_BUNDLE_VERIFICATION_REPORT_SCHEMA_VERSION,
+            ),
         ),
         (
             "evidence",
@@ -2169,7 +2306,7 @@ fn behavior_replay(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()
     Ok(())
 }
 
-/// Reproduces the v0.7 shared-aisle flagship success, minimized failure, and capsule.
+/// Reproduces the release flagship success, minimized failure, and capsule.
 fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let mut cross_backend = false;
     for argument in args {
@@ -2278,11 +2415,11 @@ fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
                 && cross_report
                     .get("task_id")
                     .and_then(serde_json::Value::as_str)
-                    == Some("rne.flagship.mobile_lift_shared_aisle.v1")
+                    == Some("rne.flagship.mobile_lift_shared_aisle.v2")
                 && cross_report
                     .get("controller_id")
                     .and_then(serde_json::Value::as_str)
-                    == Some("rne.ai.ik_mobile_lift_pick_place_policy.v1")
+                    == Some("rne.ai.portable_ik_mobile_lift_pick_place_controller.v2")
                 && cross_report
                     .get("controller_contract")
                     .and_then(serde_json::Value::as_str)
@@ -2419,7 +2556,7 @@ fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
         "flagship browser inspector is incomplete"
     );
     println!(
-        "v0.7 flagship evidence verified (cross_backend={}): {}",
+        "release flagship evidence verified (cross_backend={}): {}",
         cross_backend,
         output.display()
     );
@@ -3005,7 +3142,7 @@ fn showcase_media_check() -> anyhow::Result<()> {
     let manifest = load_showcase_media_manifest(&root.join(SHOWCASE_MEDIA_MANIFEST_PATH))?;
     let expected_ids = [
         "house-mobile-manipulation",
-        "tsukuba",
+        "openarm",
         "factory",
         "office",
         "uav",
@@ -3362,8 +3499,8 @@ fn validate_house_showcase_metadata(
     anyhow::ensure!(
         metadata["simulation"]["transport_distance_m"]
             .as_f64()
-            .is_some_and(|value| value >= 2.0),
-        "House hero transport distance must be at least 2.0 m"
+            .is_some_and(|value| value >= 1.5),
+        "House hero transport distance must be at least 1.5 m"
     );
     anyhow::ensure!(
         metadata["simulation"]["place_error_m"]
@@ -4136,8 +4273,8 @@ mod tests {
         frame_delta_ratio, hero_contact_sheet_filter, parse_seed_range, parse_smoke_partition,
         parse_utc_date_days, validate_blocker_registry, validate_contract_registry,
         validate_rust_api_baseline, validate_showcase_media_manifest,
-        validate_supply_chain_registry, RustApiBaselineRegistry, ShowcaseMediaEntry,
-        ShowcaseMediaManifest, SmokePartition, SupplyChainExceptionRegistry,
+        validate_supply_chain_registry, verify_tool_version, RustApiBaselineRegistry,
+        ShowcaseMediaEntry, ShowcaseMediaManifest, SmokePartition, SupplyChainExceptionRegistry,
         SUPPLY_CHAIN_POLICY_DATE,
     };
 
@@ -4151,6 +4288,15 @@ mod tests {
     #[test]
     fn default_behavior_ci_covers_ten_seeds() {
         assert_eq!(default_behavior_seeds(), (0_u64..10).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn missing_release_tool_error_names_the_program_and_version() {
+        let program = "rne-definitely-missing-release-tool";
+        let error = verify_tool_version(program, "9.8.7").unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains(program));
+        assert!(message.contains("9.8.7"));
     }
 
     #[test]
@@ -4185,7 +4331,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 "house-mobile-manipulation",
-                "tsukuba",
+                "openarm",
                 "factory",
                 "office",
                 "uav",

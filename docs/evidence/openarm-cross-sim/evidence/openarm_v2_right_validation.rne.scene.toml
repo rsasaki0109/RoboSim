@@ -1,0 +1,9 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 20260824
+
+[ground]
+enabled = false
+
+[[robots]]
+path = "../robots/openarm_v2_right.rne.robot.toml"

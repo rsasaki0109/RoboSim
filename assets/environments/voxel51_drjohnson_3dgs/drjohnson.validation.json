@@ -1,0 +1,531 @@
+{
+  "kind": "rne_gaussian_splat_validation_fixture",
+  "schema_version": 1,
+  "environment_id": "voxel51.drjohnson.real_capture.v1",
+  "renderer_identity": "rne.gaussian_splat.v1",
+  "status": "incomplete",
+  "qualifying": false,
+  "provenance": {
+    "source_archive_url": "https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/datasets/input/tandt_db.zip",
+    "source_archive_size_bytes": 682628995,
+    "source_archive_sha256": "816e62f22a161abbfe841d2a6b10cdf036e297c9fa289b3bfeee9c6ec526d7e1",
+    "colmap_cameras_sha256": "23bbdd44ed6eb004bfdfa3cfa17c01b8ba9abe0edf22fcbbef183b7c03aecf5a",
+    "colmap_images_sha256": "17174cd0bb2ddfa322f3a415c6c6de3c820e9ce796097233c92badfc0b3a2b01",
+    "colmap_points3d_sha256": "9b8ecf96dc829f6a337dae0680ed9d42cb22ed056a44102b857605ba1cad667b",
+    "splat_manifest": {
+      "path": "voxel51_drjohnson.rne.splat.toml",
+      "size_bytes": 679,
+      "sha256": "9a587070a07afae935602f8fba9a938664bb45a26a291df6f06084a99581b8bf"
+    },
+    "splat_ply": {
+      "path": "drjohnson_dc_every4.ply",
+      "size_bytes": 44486146,
+      "sha256": "9e1c89c18b6dd70f3f77ef1463983d86d34d859e118aec56d77394b36a41458f"
+    }
+  },
+  "source_to_world": {
+    "translation_m": [
+      0.0,
+      1.4536229671489929,
+      0.0
+    ],
+    "rotation_xyzw": [
+      0.40191308385120356,
+      0.0,
+      0.5896453610141602,
+      0.7005599340982157
+    ],
+    "scale": 1.0,
+    "source_units": "COLMAP reconstruction units",
+    "world_units_claim": "m"
+  },
+  "metric_scale": {
+    "status": "unverified",
+    "scale_to_m": 1.0,
+    "independent_physical_anchor": null,
+    "reason": "The retained COLMAP model has no independently measured physical length; plausible room scale is not a metric calibration."
+  },
+  "floor_alignment": {
+    "status": "verified",
+    "reference_camera_id": "colmap.IMG_6293.jpg",
+    "manual_floor_region_vertices_pixel_uv": [
+      [
+        0.0,
+        735.0
+      ],
+      [
+        900.0,
+        735.0
+      ],
+      [
+        940.0,
+        875.0
+      ],
+      [
+        0.0,
+        875.0
+      ]
+    ],
+    "registered_candidate_count": 516,
+    "dominant_plane_inlier_count": 337,
+    "dominant_plane_world_y_claimed_m": 0.018935612430564186,
+    "dominant_plane_rmse_claimed_m": 0.016058197664740974,
+    "world_y_tolerance_claimed_m": 0.03,
+    "note": "Lengths remain COLMAP reconstruction units until metric_scale has an independent anchor."
+  },
+  "camera_calibration": {
+    "status": "verified_colmap_reprojection",
+    "cameras": [
+      {
+        "camera_id": "colmap.IMG_6292.jpg",
+        "source_image_name": "IMG_6292.jpg",
+        "reference_image": {
+          "path": "IMG_6292.reference.jpg",
+          "size_bytes": 603709,
+          "sha256": "3b9aae68c29fb2fcb528fe554fa6ecb2f64a091af84875473c1f0d46cc518d43"
+        },
+        "intrinsics": {
+          "model": "PINHOLE",
+          "width_px": 1332,
+          "height_px": 876,
+          "fx_px": 1035.4965990500061,
+          "fy_px": 1034.9718637370904,
+          "cx_px": 666.0,
+          "cy_px": 438.0,
+          "fov_y_rad": 0.8006899358019289
+        },
+        "colmap_world_to_camera": {
+          "qvec_wxyz": [
+            0.6344146554381073,
+            -0.6065711066353383,
+            0.344850274559718,
+            -0.3326677406912426
+          ],
+          "tvec": [
+            3.124420002371587,
+            0.18842233599122887,
+            1.6303488165907067
+          ]
+        },
+        "rne_camera_to_world": {
+          "translation_m": [
+            -3.0931825391041468,
+            1.7659454980051779,
+            -1.6703942672852992
+          ],
+          "rotation_xyzw": [
+            -0.004500635104163675,
+            -0.46853351171850544,
+            -0.017629964025584668,
+            0.88325832973646
+          ]
+        }
+      },
+      {
+        "camera_id": "colmap.IMG_6293.jpg",
+        "source_image_name": "IMG_6293.jpg",
+        "reference_image": {
+          "path": "IMG_6293.reference.jpg",
+          "size_bytes": 622185,
+          "sha256": "278a543e1755beab9cef1ac708c587ffef12f5cc418db7afea91f52205157cca"
+        },
+        "intrinsics": {
+          "model": "PINHOLE",
+          "width_px": 1332,
+          "height_px": 876,
+          "fx_px": 1035.4965990500061,
+          "fy_px": 1034.9718637370904,
+          "cx_px": 666.0,
+          "cy_px": 438.0,
+          "fov_y_rad": 0.8006899358019289
+        },
+        "colmap_world_to_camera": {
+          "qvec_wxyz": [
+            0.6285409095132551,
+            -0.6216228071404817,
+            0.3378640315342164,
+            -0.3230623885667964
+          ],
+          "tvec": [
+            3.1608197681767036,
+            -0.11868367491420065,
+            1.5901130845070022
+          ]
+        },
+        "rne_camera_to_world": {
+          "translation_m": [
+            -3.1177810177525904,
+            1.3349392922347922,
+            -1.6729264041668501
+          ],
+          "rotation_xyzw": [
+            1.3278783118818292e-16,
+            -0.4611488223097617,
+            -4.236869607959736e-17,
+            0.887322806921089
+          ]
+        }
+      }
+    ],
+    "semantic_landmark_count": 6,
+    "reprojection_rmse_px": 1.1382536590540249,
+    "reprojection_max_error_px": 1.7844648807876768,
+    "tolerance_px": 2.0
+  },
+  "semantic_landmarks": [
+    {
+      "landmark_id": "rug_front_left",
+      "semantic_class": "rug",
+      "annotation_source": "manual reference-image target snapped to nearest registered COLMAP point",
+      "camera_id": "colmap.IMG_6293.jpg",
+      "target_pixel_uv": [
+        100.0,
+        842.0
+      ],
+      "observed_pixel_uv": [
+        103.05224819522562,
+        843.3512282825365
+      ],
+      "target_snap_error_px": 3.3379689808002175,
+      "colmap_point3d_id": 69482,
+      "source_position": [
+        -3.978598810107313,
+        -1.5912147153336764,
+        -3.2949446317592694
+      ],
+      "world_position_m": [
+        -1.4591358726338115,
+        0.05145402149098044,
+        -5.0122567413757295
+      ],
+      "optical_depth_source_units": 3.276453076699166,
+      "reprojection_error_px": 0.5157438430536707
+    },
+    {
+      "landmark_id": "rug_front_center",
+      "semantic_class": "rug",
+      "annotation_source": "manual reference-image target snapped to nearest registered COLMAP point",
+      "camera_id": "colmap.IMG_6293.jpg",
+      "target_pixel_uv": [
+        520.0,
+        842.0
+      ],
+      "observed_pixel_uv": [
+        520.6904693989901,
+        838.7744677367202
+      ],
+      "target_snap_error_px": 3.2986067320007244,
+      "colmap_point3d_id": 79492,
+      "source_position": [
+        -3.2822252433875074,
+        -1.7495448191549223,
+        -2.1925316556772345
+      ],
+      "world_position_m": [
+        -0.593675032775816,
+        0.008890882087520424,
+        -4.025096749341726
+      ],
+      "optical_depth_source_units": 3.417420641198282,
+      "reprojection_error_px": 1.7673210530307455
+    },
+    {
+      "landmark_id": "wood_floor_center",
+      "semantic_class": "wood_floor",
+      "annotation_source": "manual reference-image target snapped to nearest registered COLMAP point",
+      "camera_id": "colmap.IMG_6293.jpg",
+      "target_pixel_uv": [
+        650.0,
+        780.0
+      ],
+      "observed_pixel_uv": [
+        639.2542201947588,
+        779.4316427643734
+      ],
+      "target_snap_error_px": 10.760799857353511,
+      "colmap_point3d_id": 83165,
+      "source_position": [
+        -3.0928967896264234,
+        -2.3737306702587606,
+        -1.8877396598845386
+      ],
+      "world_position_m": [
+        0.12414412048283952,
+        0.005174888979873282,
+        -4.080533699396105
+      ],
+      "optical_depth_source_units": 4.03672512023251,
+      "reprojection_error_px": 0.9109819873759676
+    },
+    {
+      "landmark_id": "radiator_lower_left",
+      "semantic_class": "radiator",
+      "annotation_source": "manual reference-image target snapped to nearest registered COLMAP point",
+      "camera_id": "colmap.IMG_6293.jpg",
+      "target_pixel_uv": [
+        255.0,
+        765.0
+      ],
+      "observed_pixel_uv": [
+        259.835449088363,
+        773.9061873283465
+      ],
+      "target_snap_error_px": 10.134186726804998,
+      "colmap_point3d_id": 79909,
+      "source_position": [
+        -3.768830044836065,
+        -2.085036050749824,
+        -3.0791757788387124
+      ],
+      "world_position_m": [
+        -0.8849868081320138,
+        0.11235371401216865,
+        -5.044856178008896
+      ],
+      "optical_depth_source_units": 3.7650570985032603,
+      "reprojection_error_px": 0.2102423102974982
+    },
+    {
+      "landmark_id": "window_sill_center",
+      "semantic_class": "window_sill",
+      "annotation_source": "manual reference-image target snapped to nearest registered COLMAP point",
+      "camera_id": "colmap.IMG_6293.jpg",
+      "target_pixel_uv": [
+        665.0,
+        548.0
+      ],
+      "observed_pixel_uv": [
+        665.2379954452568,
+        550.4406610804883
+      ],
+      "target_snap_error_px": 2.4522374154582676,
+      "colmap_point3d_id": 92676,
+      "source_position": [
+        -2.303694283026941,
+        -2.4773183425298697,
+        -2.3042530039121645
+      ],
+      "world_position_m": [
+        0.2527287358967115,
+        0.8936452329591031,
+        -4.046757782371932
+      ],
+      "optical_depth_source_units": 4.122545186225595,
+      "reprojection_error_px": 1.7844648807876768
+    },
+    {
+      "landmark_id": "right_door_latch",
+      "semantic_class": "door",
+      "annotation_source": "manual reference-image target snapped to nearest registered COLMAP point",
+      "camera_id": "colmap.IMG_6293.jpg",
+      "target_pixel_uv": [
+        1044.0,
+        689.0
+      ],
+      "observed_pixel_uv": [
+        1044.1995684825133,
+        689.0188402548697
+      ],
+      "target_snap_error_px": 0.20045581661858106,
+      "colmap_point3d_id": 84098,
+      "source_position": [
+        -1.9093760012058774,
+        -2.150516072862869,
+        -0.8900476411287882
+      ],
+      "world_position_m": [
+        0.7731546083652994,
+        0.41701404707479584,
+        -2.7185096644094378
+      ],
+      "optical_depth_source_units": 3.7851267783909552,
+      "reprojection_error_px": 0.5708835405216306
+    }
+  ],
+  "collision_semantic_alignment": {
+    "status": "verified_reference_projection",
+    "proxy": {
+      "id": "mobile_lift_pick_support",
+      "semantic_surface": "rug",
+      "center_world_m": [
+        -0.593675032775816,
+        0.015,
+        -4.025096749341726
+      ],
+      "half_extents_m": [
+        0.35,
+        0.015,
+        0.005
+      ]
+    },
+    "camera_id": "colmap.IMG_6293.jpg",
+    "projected_top_center_pixel_uv": [
+      522.2551890373849,
+      833.203164359199
+    ],
+    "projected_optical_depth_source_units": 3.4174206411982824,
+    "expected_semantic_polygon": {
+      "semantic_class": "rug",
+      "vertices_pixel_uv": [
+        [
+          0.0,
+          790.0
+        ],
+        [
+          760.0,
+          790.0
+        ],
+        [
+          895.0,
+          875.0
+        ],
+        [
+          0.0,
+          875.0
+        ]
+      ],
+      "annotation_source": "manual polygon on retained real reference image"
+    },
+    "top_center_inside_expected_semantic_polygon": true
+  },
+  "real_sim_observation_comparison": {
+    "status": "verified",
+    "reference_camera_id": "colmap.IMG_6293.jpg",
+    "reference_image": {
+      "path": "IMG_6293.reference.jpg",
+      "size_bytes": 622185,
+      "sha256": "278a543e1755beab9cef1ac708c587ffef12f5cc418db7afea91f52205157cca"
+    },
+    "rne_render": {
+      "path": "IMG_6293.rne.png",
+      "size_bytes": 1442825,
+      "sha256": "465a433f8334b4d588c0f00e9e646be3d797c5f395c685acb37d588c41dec954"
+    },
+    "report": {
+      "path": "IMG_6293.observation.json",
+      "size_bytes": 1519,
+      "sha256": "52cfef61a90f3ec5f380be3bc314b693f5df92665abcd84796c1099211745ac1"
+    },
+    "metrics": {
+      "rgb_mae_8bit": 53.397328550011196,
+      "rgb_rmse_8bit": 56.78427070466878,
+      "rgb_psnr_db": 13.046242560724968,
+      "luminance_pearson": 0.9266620671360476,
+      "gradient_magnitude_pearson": 0.6879226988132977
+    },
+    "tolerances": {
+      "min_rgb_psnr_db": 12.0,
+      "min_luminance_pearson": 0.9,
+      "min_gradient_magnitude_pearson": 0.65
+    },
+    "photometric_note": "Raw PSNR is retained and bounded; luminance and gradient correlation provide exposure-robust structural registration metrics."
+  },
+  "sparse_depth_alignment": {
+    "status": "verified",
+    "reference_camera_id": "colmap.IMG_6293.jpg",
+    "depth_algorithm_identity": "rne.gaussian_splat.alpha_proxy_depth.v2",
+    "report": {
+      "path": "IMG_6293.depth.json",
+      "size_bytes": 3200,
+      "sha256": "d050eaa136d12867c264aee6a695318ae0166444f0e9834050ab7b63739f1f3a"
+    },
+    "depth_frame_hash": 17887784150483714575,
+    "finite_depth_pixels": 1005237,
+    "finite_depth_fraction": 0.8615096260644206,
+    "matched_landmarks": 6,
+    "mean_absolute_error_source_units": 0.1480057030612072,
+    "max_absolute_error_source_units": 0.6048472850590461,
+    "tolerances": {
+      "min_finite_depth_fraction": 0.75,
+      "min_matched_landmarks": 6,
+      "max_mean_absolute_error_source_units": 0.25,
+      "max_absolute_error_source_units": 0.75
+    },
+    "metric_qualified": false,
+    "units_note": "Depth values remain COLMAP reconstruction units, not metres; metric qualification is owned by the independent physical-scale contract."
+  },
+  "multiview_depth_occlusion_alignment": {
+    "status": "verified",
+    "track_fixture": {
+      "path": "IMG_6292-IMG_6293.multiview-tracks.json",
+      "size_bytes": 35513,
+      "sha256": "4b0aa189e37be3c0420fbf79caf4a72c643af4e04f136badf62ee2555567a496"
+    },
+    "report": {
+      "path": "IMG_6292-IMG_6293.multiview-depth.json",
+      "size_bytes": 40128,
+      "sha256": "cdc5580ee1ded05eb2e92a12db3fe66ced5e6d4eb39a9558809b851405aa05f8"
+    },
+    "depth_algorithm_identity": "rne.gaussian_splat.alpha_proxy_depth.v2",
+    "frames": [
+      {
+        "camera_id": "colmap.IMG_6292.jpg",
+        "width_px": 1332,
+        "height_px": 876,
+        "depth_frame_hash": 4348874904651447855,
+        "finite_depth_pixels": 995848,
+        "finite_depth_fraction": 0.8534630520931891
+      },
+      {
+        "camera_id": "colmap.IMG_6293.jpg",
+        "width_px": 1332,
+        "height_px": 876,
+        "depth_frame_hash": 17887784150483714575,
+        "finite_depth_pixels": 1005237,
+        "finite_depth_fraction": 0.8615096260644206
+      }
+    ],
+    "matched_track_count": 40,
+    "matched_view_count": 80,
+    "mean_absolute_error_source_units": 0.04996857122654062,
+    "max_absolute_error_source_units": 0.5253079228781297,
+    "depth_delta_mae_source_units": 0.03530184380393081,
+    "false_occlusion_view_count": 0,
+    "false_occlusion_fraction": 0.0,
+    "tolerances": {
+      "min_finite_depth_fraction_per_camera": 0.75,
+      "min_matched_tracks": 36,
+      "max_mean_absolute_error_source_units": 0.25,
+      "max_absolute_error_source_units": 0.75,
+      "max_depth_delta_mae_source_units": 0.25,
+      "false_occlusion_margin_source_units": 0.25,
+      "max_false_occlusion_fraction": 0.1
+    },
+    "metric_qualified": false,
+    "units_note": "Depth values are COLMAP reconstruction units, not metres, until an independent physical scale anchor is retained."
+  },
+  "contracts": [
+    {
+      "id": "floor_world_alignment",
+      "status": "passed"
+    },
+    {
+      "id": "camera_intrinsics_extrinsics",
+      "status": "passed"
+    },
+    {
+      "id": "semantic_landmark_reprojection",
+      "status": "passed"
+    },
+    {
+      "id": "collision_semantic_alignment",
+      "status": "passed"
+    },
+    {
+      "id": "independent_metric_scale_anchor",
+      "status": "missing"
+    },
+    {
+      "id": "real_sim_observation_comparison",
+      "status": "passed"
+    },
+    {
+      "id": "sparse_depth_alignment",
+      "status": "passed"
+    },
+    {
+      "id": "multiview_depth_occlusion_alignment",
+      "status": "passed"
+    }
+  ]
+}

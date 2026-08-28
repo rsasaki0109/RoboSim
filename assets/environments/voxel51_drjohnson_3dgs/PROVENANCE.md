@@ -22,26 +22,93 @@ chairs, window, and doors represented by the committed splats.
 
 `tools/prepare_voxel51_drjohnson_3dgs.py` verifies the complete upstream byte
 length and SHA-256. It retains records whose zero-based index is divisible by
-ten and copies position, DC colour, opacity, anisotropic scale, and rotation
-floats byte-for-byte. No splat geometry or colour is synthesized.
+four and copies position, DC colour, opacity, anisotropic scale, and rotation
+floats byte-for-byte. No splat geometry or colour is synthesized. The 4:1
+derivative is the smallest tested density that satisfies the registered
+structural-observation limits; the previous 10:1 derivative did not.
 
-- Derivative: `drjohnson_dc_every10.ply`
-- Derivative Gaussian records: `317,756`
-- Derivative bytes: `17,794,698`
-- Derivative SHA-256: `f357a929801db2be75574c47205479c53a6bf71686af3f4bf8c1641db3688663`
+- Derivative: `drjohnson_dc_every4.ply`
+- Derivative Gaussian records: `794,389`
+- Derivative bytes: `44,486,146`
+- Derivative SHA-256: `9e1c89c18b6dd70f3f77ef1463983d86d34d859e118aec56d77394b36a41458f`
 
 ## Calibration and simulation frame
 
-The published Deep Blending COLMAP bundle supplies measured poses for
-`IMG_6292.jpg` and `IMG_6293.jpg`. The manifest rotates the second camera's
-measured up vector onto RNE `+Y`. The dominant captured wood-floor plane is
-translated to `y = 0 m`; the reconstruction scale is retained because its
-camera-to-floor height is already metric-scale. Robot bodies, task furniture,
-collision proxies, and splats consequently share one world frame.
+The official INRIA Deep Blending source archive supplies the COLMAP camera and
+point reconstruction used to register `IMG_6292.jpg` and `IMG_6293.jpg`:
+
+- Archive: <https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/datasets/input/tandt_db.zip>
+- Archive bytes: `682,628,995`
+- Archive SHA-256: `816e62f22a161abbfe841d2a6b10cdf036e297c9fa289b3bfeee9c6ec526d7e1`
+- Camera model: `PINHOLE`, `1332 x 876`, `fx = 1035.496599 px`,
+  `fy = 1034.971864 px`, `cx = 666 px`, `cy = 438 px`
+
+`drjohnson.validation.json` binds those source hashes, two retained real
+reference frames, their COLMAP intrinsics/extrinsics, six registered semantic
+landmarks, the dominant floor plane, the splat manifest, and the derivative
+PLY. The manifest rotates the registered camera up direction onto RNE `+Y` and
+translates the dominant floor plane to `y = 0` reconstruction units. Its
+337-point inlier plane has a claimed height of `0.01894` and RMSE `0.01606`
+against the declared `0.03` tolerance.
+
+The pickup support and payload are centered at the registered
+`rug_front_center` landmark. The support top center projects to the manually
+retained rug polygon in `IMG_6293.reference.jpg`, so collision geometry no
+longer occupies arbitrary empty room space.
+
+The retained same-camera RNE observation is generated at `1332 x 876` from the
+exact `IMG_6293` pose and intrinsics. The validator re-decodes both images and
+recomputes raw RGB PSNR (`13.046 dB`), luminance Pearson correlation (`0.9267`),
+and gradient-magnitude Pearson correlation (`0.6879`) against fixed limits of
+`12 dB`, `0.90`, and `0.65`. The report and rendered PNG are content-addressed;
+the comparison cannot pass by editing the reported numbers alone.
+The retained render identifies its execution adapter as an NVIDIA GeForce GTX
+1660 Ti using Vulkan and NVIDIA driver `596.36`; GPU byte-level output is not
+claimed portable, while the registered metric limits are.
+
+`IMG_6293.depth.json` independently runs the checked-in Gaussian PLY through
+RNE's deterministic anisotropic, front-to-back alpha-composited proxy-depth
+path at the same registered camera. It binds the PLY and camera calibration
+hashes plus the full `1332 x 876` depth-frame hash. Proxy depth covers `86.15%`
+of the image and matches all six semantic COLMAP landmarks with `0.148006` mean
+and `0.604847` maximum absolute error in reconstruction units.
+
+`IMG_6292-IMG_6293.multiview-tracks.json` deterministically selects 42 occupied
+cells from an `8 x 6` grid after filtering 823 shared real COLMAP tracks to 756
+with at most `2 px` reprojection error in both cameras. The corresponding
+multi-view report matches 40 tracks in both RNE depth frames, retains `0.035302`
+source-unit depth-delta MAE, and reports zero false occlusions across 80 matched
+real-visible observations. Neither report stores a duplicate full depth image,
+and both explicitly reject a metre claim before physical scale exists.
+
+This is deliberately **not yet a qualifying metric calibration**. COLMAP
+reconstruction units are only defined up to scale, and the archive contains no
+independently measured physical length. Plausible camera height is not accepted
+as a scale anchor. The fixture therefore passes seven of eight contracts and
+reports one as missing:
+
+- `independent_metric_scale_anchor`
+
+The original Deep Blending reconstruction archive was also inspected by its
+ZIP central directory: its 1,865 entries contain COLMAP inputs/outputs, source
+images, refined depth maps, and a RealityCapture mesh, but no survey, control
+point, GPS/XMP, measurement, or scale record. The missing result is therefore
+explicit rather than inferred from an unavailable file.
+
+`docs/3DGS_METRIC_ANCHOR.md` defines the field procedure and the fail-closed
+intake path. `--metric-anchor` accepts only an independently authored record
+whose two endpoints exactly match retained COLMAP observations, whose evidence
+files are content-addressed, and whose measured scale agrees with the manifest
+inside declared uncertainty. No placeholder anchor is committed.
 
 ## Reproduction
 
 ```text
 python tools/prepare_voxel51_drjohnson_3dgs.py
 python tools/prepare_voxel51_drjohnson_3dgs.py --check
+cargo run -p rne_render_3dgs --example registered_splat_depth -- --manifest assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml --camera colmap.IMG_6293.jpg --output assets/environments/voxel51_drjohnson_3dgs/IMG_6293.depth.json
+python tools/prepare_drjohnson_multiview_tracks.py --source-archive E:\RNE-tools\tandt_db.zip
+cargo run -p rne_render_3dgs --example registered_splat_multiview_depth -- --manifest assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml --tracks assets/environments/voxel51_drjohnson_3dgs/IMG_6292-IMG_6293.multiview-tracks.json --output assets/environments/voxel51_drjohnson_3dgs/IMG_6292-IMG_6293.multiview-depth.json
+python tools/prepare_drjohnson_validation_fixture.py --source-archive E:\RNE-tools\tandt_db.zip
+python tools/prepare_drjohnson_validation_fixture.py --source-archive E:\RNE-tools\tandt_db.zip --check
 ```

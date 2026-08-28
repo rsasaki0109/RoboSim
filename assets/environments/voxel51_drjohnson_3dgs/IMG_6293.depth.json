@@ -1,0 +1,83 @@
+{
+  "kind": "rne_registered_splat_sparse_depth_report",
+  "schema_version": 1,
+  "environment_id": "voxel51.drjohnson.real_capture.v1",
+  "camera_id": "colmap.IMG_6293.jpg",
+  "camera_calibration_sha256": "07e642ea16d1f128307c87e2074ef2352e6be4c769e6ead9d353d49bdf6771e4",
+  "depth_algorithm_identity": "rne.gaussian_splat.alpha_proxy_depth.v2",
+  "ply_sha256": "9e1c89c18b6dd70f3f77ef1463983d86d34d859e118aec56d77394b36a41458f",
+  "width_px": 1332,
+  "height_px": 876,
+  "depth_frame_hash": 17887784150483714575,
+  "finite_depth_pixels": 1005237,
+  "finite_depth_fraction": 0.8615096260644206,
+  "patch_radius_px": 2,
+  "landmarks": [
+    {
+      "landmark_id": "rug_front_left",
+      "semantic_class": "rug",
+      "pixel_u_px": 103.05224819522562,
+      "pixel_v_px": 843.3512282825365,
+      "reference_depth_source_units": 3.276453076699166,
+      "rne_proxy_depth_source_units": 3.352144241333008,
+      "absolute_error_source_units": 0.07569116463384162
+    },
+    {
+      "landmark_id": "rug_front_center",
+      "semantic_class": "rug",
+      "pixel_u_px": 520.6904693989901,
+      "pixel_v_px": 838.7744677367202,
+      "reference_depth_source_units": 3.417420641198282,
+      "rne_proxy_depth_source_units": 3.500338077545166,
+      "absolute_error_source_units": 0.08291743634688409
+    },
+    {
+      "landmark_id": "wood_floor_center",
+      "semantic_class": "wood_floor",
+      "pixel_u_px": 639.2542201947588,
+      "pixel_v_px": 779.4316427643734,
+      "reference_depth_source_units": 4.03672512023251,
+      "rne_proxy_depth_source_units": 4.142165184020996,
+      "absolute_error_source_units": 0.10544006378848625
+    },
+    {
+      "landmark_id": "radiator_lower_left",
+      "semantic_class": "radiator",
+      "pixel_u_px": 259.835449088363,
+      "pixel_v_px": 773.9061873283465,
+      "reference_depth_source_units": 3.76505709850326,
+      "rne_proxy_depth_source_units": 3.773293972015381,
+      "absolute_error_source_units": 0.00823687351212099
+    },
+    {
+      "landmark_id": "window_sill_center",
+      "semantic_class": "window_sill",
+      "pixel_u_px": 665.2379954452568,
+      "pixel_v_px": 550.4406610804883,
+      "reference_depth_source_units": 4.122545186225595,
+      "rne_proxy_depth_source_units": 4.1116437911987305,
+      "absolute_error_source_units": 0.010901395026864158
+    },
+    {
+      "landmark_id": "right_door_latch",
+      "semantic_class": "door",
+      "pixel_u_px": 1044.199568482513,
+      "pixel_v_px": 689.0188402548697,
+      "reference_depth_source_units": 3.7851267783909552,
+      "rne_proxy_depth_source_units": 3.180279493331909,
+      "absolute_error_source_units": 0.6048472850590461
+    }
+  ],
+  "matched_landmarks": 6,
+  "mean_absolute_error_source_units": 0.1480057030612072,
+  "max_absolute_error_source_units": 0.6048472850590461,
+  "tolerances": {
+    "min_finite_depth_fraction": 0.75,
+    "min_matched_landmarks": 6,
+    "max_mean_absolute_error_source_units": 0.25,
+    "max_absolute_error_source_units": 0.75
+  },
+  "passed": true,
+  "metric_qualified": false,
+  "units_note": "Depth values remain COLMAP reconstruction units, not metres; metric qualification is owned by the independent physical-scale contract."
+}

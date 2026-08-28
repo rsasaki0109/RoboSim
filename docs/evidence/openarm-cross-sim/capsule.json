@@ -1,0 +1,268 @@
+{
+  "schema_version": 1,
+  "kind": "rne_failure_capsule",
+  "failure": {
+    "id": "controller_action_width_matches_task-step-307",
+    "contract": "controller_action_width_matches_task",
+    "message": "controller emitted 8 action elements but TaskSpec requires 9; rejected before simulator state advance",
+    "step": 307,
+    "sim_time_ticks": 5116666769,
+    "state_digest": 12953134223845235756
+  },
+  "run": {
+    "id": "rne.openarm.right_joint_tracking.controller_contract.v1-seed-20260824",
+    "scenario": "rne.openarm.right_joint_tracking.controller_contract.v1",
+    "seed": 20260824,
+    "fixed_delta_ticks": 16666667,
+    "step_count": 308,
+    "action_count": 307
+  },
+  "build": {
+    "engine_version": "0.2.0",
+    "git_commit": "a168a4c9186e3159104592e7fa7741b979292f87",
+    "profile": "debug",
+    "target_triple": "x86_64-unknown-linux-gnu",
+    "rustc_version": "rustc 1.95.0",
+    "cargo_lock_sha256": "c6be1267ebe0afab09cd99f13243df0ed837287333f0f8860c90dd8c1105f8f1"
+  },
+  "backend": {
+    "name": "rne-rapier+mujoco-native+gazebo-sim",
+    "version": "0.22+3.9.0+8.15.0"
+  },
+  "determinism": {
+    "schema_version": 1,
+    "name": "controller_action_width_matches_task",
+    "scope": {
+      "subject": "rne.openarm.right_joint_tracking.controller_contract.v1",
+      "observables": [
+        "behavior.observation",
+        "world.state"
+      ],
+      "first_step": 0,
+      "step_count": 308
+    },
+    "guarantee": {
+      "tier": "outcome",
+      "criterion": "controller_action_width_matches_task"
+    }
+  },
+  "artifacts": [
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/backend.rs",
+      "sha256": "86afe21c5916792dab0d9f6a23f3dd4b6e691feeea5432d7b6524815c6f6a70f"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/compiler.rs",
+      "sha256": "305a6f82c786684379a96b7fec3da53372a9c1138d33080c06b15c7b954c7560"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/conformance.report.json",
+      "sha256": "18b822bf0030a76472f154059c701d10512a3c04d655eb357cdcdb0d6455c63e"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/control-dynamics-report.html",
+      "sha256": "4f631e8be3d0fd223a64a0b4ef5fa3c5a2f0e1501d608f38c1dd67543b958718"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/control-dynamics-report.json",
+      "sha256": "21cfcf08236b94af02177053c4c6a680ace5cdb15377295774bedf23e3393a72"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/controller-actions.json",
+      "sha256": "95301ebce9c0f9091f08e8f398b0a3898871d2f24c6b83688198c1cc0e8319d7"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/cross-sim-report.json",
+      "sha256": "0f1ef187be32bc123b65b40a65d3584908c2d537bbfb9cab5eef13584a9fce4c"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/gazebo-intentional-failure.json",
+      "sha256": "71b37adfb6c843a81308b5c09a0afa4f80cd0e7379f6ece62f2b05b3bbaa39bd"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/gazebo-success-trace.json",
+      "sha256": "af3cb2ad8687aa2f15c9a5aef397b71335d2403eea312a82c581b65322f33288"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/intentional-failure.json",
+      "sha256": "31df378efec4709af8eb92240b2d1ce9cad09f17f9d336246a7a506739da14cd"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/mujoco-intentional-failure.json",
+      "sha256": "d1ee6a5b4b43e8b4a10d63aa8721d33a1958d17ff29dc9af39c011a0612b2d8a"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/mujoco-success-trace.json",
+      "sha256": "eea12d87bceab37895722567e458d5bed08983355b881e33bff89775adebf07a"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_mujoco_trace.rs",
+      "sha256": "4f0b6232c6c6a703b25cc313e82e2f5582d32c2c98c7d5aa99a3a6d074f794a3"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_right.adapter.json",
+      "sha256": "e37b53c8d0e3070be2fe581afd12cf21bbc25bf5000747ed30df863e1293d169"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_right.rne_actuation.json",
+      "sha256": "5a83e6f018e5f5da9402f34d4310e71b4e13816c6267afa40289c4c32d6957e4"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_right.world.sdf",
+      "sha256": "5c7c942dec1b39e91fc0f19df5dc3bd7fd61718b78e4475cd5d454d0a2154926"
+    },
+    {
+      "role": "evidence",
+      "kind": "rne_task_spec",
+      "schema_version": 1,
+      "path": "evidence/openarm_right_joint_tracking.task.json",
+      "sha256": "f1d7f575ab843df41210a2902182c132ef565b9b3e08610d093773c001c20e5b"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_right_pose_cycle.controller.json",
+      "sha256": "0db69a85455ee82c9456a84da4724c97e669e2dcb4aa702c1ee10f33f036d2e4"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_trace.rs",
+      "sha256": "8d897a80f0fabff9c41558be739f807b46463b9e345a02201ec8b472f8f9db93"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_v2_right.rne.robot.toml",
+      "sha256": "78df5a87bf5ca80cdef850d72567eff4cd308c0d2b37032d3e78d47d78041a19"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_v2_right.rne.urdf",
+      "sha256": "1f65aa51542976319bea688332f267a47bd17df48a5860bf23e3f1adb8563994"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_v2_right_validation.rne.scene.toml",
+      "sha256": "fef1a669524c135505b55e5f4c4aad758136dc577e24ef36263d097a872d7a0c"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/rapier-success-trace.json",
+      "sha256": "d02df461e19764a1c5c0a5081c67c6865b7daa9d52990a09896ffdd3386ea4a5"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/replay-inspector.html",
+      "sha256": "e756002a5be500d24a553cc182b3670aceb979e89e0ea64c20bee5f0f02ec89e"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/rne_gazebo_harmonic_adapter.py",
+      "sha256": "d2776fb3d3613bd9ae57fbb0c94d4d6552fbe5073d8dbd1f79b90d2dd119e63d"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/runtime.json",
+      "sha256": "c38682ca39aa45f9c1184c47958d8d300044ff03e0b8a79d788e296d412eb75f"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/sensor-dropout-trace.json",
+      "sha256": "5896143b98caa2996628f37457db22b1d38d5ed3e652f73ad180c8d8ee9ceb11"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/sensor-stuck-trace.json",
+      "sha256": "3d3921c43cacf60b15572d3ea003b0d63a7e071745b1ceaae0e02e618ac81104"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/sensor-validation-report.html",
+      "sha256": "753c2d4f344dc44e1bcd27ad7b07c0a28f88c0b4b1621536cd96a1c26fc973bb"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/sensor-validation-report.json",
+      "sha256": "5e8495a16caee722dc9edd147fbb924a6901916804d51a4ae2eb90712468edb4"
+    },
+    {
+      "role": "replay",
+      "kind": "rne_behavior_replay",
+      "schema_version": 1,
+      "path": "replay/controller-failure.rne-replay",
+      "sha256": "caf13d7646a65ca65085afee6adbad31ebb771a4d95a7375b6ea8a1f9ae759da"
+    }
+  ]
+}

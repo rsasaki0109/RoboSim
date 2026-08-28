@@ -64,6 +64,8 @@ pub struct GaussianSplatEnvironment {
     pub standin: bool,
     /// Optional authoring note from the manifest.
     pub coordinate_note: Option<String>,
+    /// Optional content-addressed metric/camera/semantic validation fixture.
+    pub validation_fixture_path: Option<PathBuf>,
 }
 
 /// Hybrid scene: optional splat background plus mesh foreground.
@@ -222,6 +224,8 @@ struct RawGaussianSplatManifest {
     standin: bool,
     #[serde(default)]
     coordinate_note: Option<String>,
+    #[serde(default)]
+    validation_fixture_path: Option<String>,
 }
 
 fn default_scale() -> f64 {
@@ -245,10 +249,16 @@ impl RawGaussianSplatManifest {
                 message: format!("unsupported kind `{}`", self.kind),
             });
         }
-        if self.schema_version != 1 {
+        if !matches!(self.schema_version, 1 | 2) {
             return Err(GaussianSplatError::Invalid {
                 path,
                 message: format!("unsupported schema_version {}", self.schema_version),
+            });
+        }
+        if self.schema_version == 2 && self.validation_fixture_path.is_none() {
+            return Err(GaussianSplatError::Invalid {
+                path,
+                message: "schema_version 2 requires validation_fixture_path".into(),
             });
         }
         if self.environment_id.trim().is_empty() {
@@ -306,6 +316,16 @@ impl RawGaussianSplatManifest {
             (resolve(&self.ply_path), self.standin)
         };
 
+        let validation_fixture_path = self.validation_fixture_path.as_deref().map(resolve);
+        if let Some(fixture) = &validation_fixture_path {
+            if !fixture.is_file() {
+                return Err(GaussianSplatError::Invalid {
+                    path,
+                    message: format!("validation fixture is missing: {}", fixture.display()),
+                });
+            }
+        }
+
         Ok(GaussianSplatEnvironment {
             environment_id: self.environment_id,
             ply_path,
@@ -317,6 +337,7 @@ impl RawGaussianSplatManifest {
             renderer_identity: self.renderer_identity,
             standin,
             coordinate_note: self.coordinate_note,
+            validation_fixture_path,
         })
     }
 }
@@ -377,6 +398,7 @@ mod tests {
             renderer_identity: GAUSSIAN_SPLAT_RENDERER_ID_V1.into(),
             standin: false,
             coordinate_note: None,
+            validation_fixture_path: None,
         };
         let environment = raw
             .into_environment(Path::new("fixture.rne.splat.toml"), None)

@@ -26,17 +26,17 @@ The quantitative gates and exact regeneration commands are in
         <img src="docs/media/house-mobile-manipulation.gif" alt="PBR mobile manipulator grasping, lifting, carrying, and placing an object in a real captured indoor 3DGS environment with live wrist RGB-D and a 2D task trace" width="900">
       </picture>
       <br><b>Real indoor 3DGS · mobile manipulation</b><br>
-      <sub>Voxel51 Dr Johnson is a real photo-derived interior 3DGS. Its measured COLMAP frame, captured rug, and robot bodies share one metric transform without synthetic room furniture. The detailed 10-link PBR robot completes a floor-level friction grasp, lift, 2.128 m transport, and placement. During final pickup alignment, rendered wrist RGB-D segments the payload, self-masks the known robot, back-projects depth, and drives analytic IK without payload truth; the live RGB/depth inset shows the detected reticle and the 2D task trace exposes base motion. <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
+      <sub>Voxel51 Dr Johnson is a real photo-derived interior 3DGS. A fail-closed fixture binds two real frames, COLMAP cameras, six registered landmarks, the floor plane, the pickup collision proxy, a same-camera real-versus-RNE RGB observation, and deterministic single-/multi-view depth evidence; the proxy projects onto the captured rug instead of arbitrary room space. The detailed 10-link PBR robot completes a floor-level friction grasp, 0.401 m lift, 1.559 m transport, and placement within 0.049 m. The fixture passes 7/8 geometric-sensor contracts. Its RGB observation records 13.05 dB raw PSNR, 0.927 luminance correlation, and 0.688 gradient correlation; alpha-composited source-unit depth matches 6/6 semantic landmarks at 0.148 mean absolute error, and 40/42 two-camera tracks at 0.0353 depth-delta MAE with 0/80 false occlusions. It remains explicitly non-qualifying—and does not call reconstruction-unit depths metres—until an independent physical scale anchor is retained. During final pickup alignment, rendered wrist RGB-D segments the payload, self-masks the known robot, back-projects depth, and drives analytic IK without payload truth; the live RGB/depth inset shows the detected reticle and the 2D task trace exposes base motion. <a href="assets/environments/voxel51_drjohnson_3dgs/drjohnson.validation.json">validation fixture</a> · <a href="assets/environments/voxel51_drjohnson_3dgs/IMG_6292-IMG_6293.multiview-depth.json">multi-view depth evidence</a> · <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
     </td>
   </tr>
   <tr>
     <td width="50%" align="center">
       <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-tsukuba.png">
-        <img src="docs/media/showcase-tsukuba.gif" alt="Mobile robot completing stop-line and signal tasks on a Tsukuba Challenge sidewalk" width="460">
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-openarm.png">
+        <img src="docs/media/showcase-openarm.gif" alt="Official OpenArm v2 bimanual robot executing synchronized arm and gripper control" width="460">
       </picture>
-      <br><b>Tsukuba Challenge</b><br>
-      <sub>Three stop lines, three signal waits, no roadway entry, and exact replay over 1,253 fixed steps. <a href="docs/media/showcase-tsukuba.json">metadata</a></sub>
+      <br><b>OpenArm v2 · bimanual control</b><br>
+      <sub>Official multi-part geometry, 18 force-limited actuators, synchronized pinch grippers, and exact Rapier replay over 1,400 fixed steps. <a href="docs/media/showcase-openarm.json">metadata</a> · <a href="examples/90_showcase_captures/openarm.rs">source</a></sub>
     </td>
     <td width="50%" align="center">
       <picture>
@@ -86,15 +86,23 @@ tasks and independently maintained extensions pass the shipped conformance
 kits. Native release bundles include the required tools; cloning the RNE
 source tree is not required to submit evidence.
 
+The current campaign accepts only [v0.2.0 official
+assets](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0). If that
+release page does not yet contain the native archives and `SHA256SUMS`, prepare
+the repository and checklist but do not open an evidence issue. The published
+v0.1.0 prerelease does not qualify for this campaign.
+
 - [Reproduce an external project task and Failure Capsule](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-project-evidence.yml)
 - [Measure the installed flagship from an official release archive](https://github.com/rsasaki0109/RoboSim/issues/new?template=installed-flagship-reproduction.yml)
 - [Conform a third-party controller plugin](https://github.com/rsasaki0109/RoboSim/issues/new?template=third-party-plugin-evidence.yml)
-- [Conform an external physics backend, hardware adapter, or accelerator adapter](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-system-evidence.yml)
+- [Conform an external physics backend, simulator adapter, hardware adapter, or accelerator adapter](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-system-evidence.yml)
 
 Read the [external evidence intake guide](docs/EXTERNAL_EVIDENCE_INTAKE.md)
 before running a qualifying test. Opening an issue is only the start of review:
 it does not imply acceptance, and in-repository reference implementations do
-not count as independent evidence.
+not count as independent evidence. Tagged releases retain a release-level
+`SHA256SUMS`, platform attestation bundles, and attested install reports beside
+the native archives so another machine can audit the exact operator input.
 
 ## Vehicle dynamics at the grip limit
 
@@ -190,7 +198,7 @@ The native release archive includes a one-command installed product proof:
 
 ```bash
 ./bin/rne-flagship-proof flagship-proof --cross-backend \
-  --measure-on "lab-workstation-a"
+  --measure-on "lab-workstation-a" --verify-installed-bundle .
 ```
 
 It runs the unchanged indoor mobile-manipulation TaskSpec and controller through
@@ -199,25 +207,30 @@ deterministic perception blackout. It compares named SI-unit tolerances and the
 first violation, verifies both replays and the Failure Capsule, and writes a
 self-contained browser inspector plus a SHA-256-bound
 `installed-proof-report.json`. The report also binds the exact packaged
-`rne-flagship-proof` executable that produced it. No source checkout, renderer,
+`rne-flagship-proof` executable that produced it. Before creating output, the
+same command verifies the exact regular-file graph declared by the extracted
+bundle's `SHA256SUMS` and binds that result into the proof and Failure Capsule.
+No source checkout, renderer,
 ROS 2, separate MuJoCo installation, or network connection is required after
 extraction.
 The explicit hardware label also writes a separate
-`time-to-proof-report.json`; it measures command start through verified capsule
-and bound proof report against the 15-minute target without contaminating
+`time-to-proof-report.json`; it measures full installed-bundle verification
+through verified capsule and bound proof report against the 15-minute target without contaminating
 deterministic correctness evidence.
 An independent operator can bind those outputs to the exact clean tagged
 archive with `xtask external-flagship-check`; CI and placeholder machine labels
 are rejected as external evidence.
 
-Third-party controller plugins, physics backends, hardware adapters, and real
+Third-party controller plugins, physics backends, simulator adapters, hardware adapters, and real
 external task reproductions can be submitted through the fixed
 [external evidence intake](docs/EXTERNAL_EVIDENCE_INTAKE.md). The repository
 validates all required issue-form fields with `xtask external-intake-check`;
 submission never implies acceptance or 1.0 readiness. Native bundles expose
 `rne-asset failure-capsule create|verify`, so an independent project can retain
 its required replay evidence from the extracted release without cloning the
-RNE source tree.
+RNE source tree. Maintainers use `xtask external-project-check` to rebind the
+clean external Git revision, official release archive, TaskSpec, every Capsule
+member, and committed command logs before either adoption slot can count.
 
 ## Selected demos
 
@@ -339,6 +352,8 @@ ROS 2 is optional and isolated under [adapters/ros2](adapters/ros2). See the
 - [Controller plugin SDK](docs/PLUGIN_SDK.md)
 - [External physics backend conformance](docs/EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md)
 - [External hardware adapter conformance](docs/HARDWARE_ADAPTER_CONFORMANCE.md)
+- [External simulator adapter conformance](docs/EXTERNAL_SIMULATOR_ADAPTER_CONFORMANCE.md)
+- [OpenArm Rapier / native MuJoCo / Gazebo proof](docs/OPENARM_CROSS_SIM_PROOF.md), including official arm-only versus pinch-gripper coupled-inertia evidence, seven-joint held-out MIMO identification, and typed-sensor dropout, stale-age, recovery, repeated-burst re-arm, position-quantization, position-saturation, and stuck-value boundaries
 - [Compatibility fixture corpus](docs/COMPATIBILITY_CORPUS.md)
 - [Support policy and 1.0 commitment](docs/SUPPORT.md)
 - [Evidence-backed 1.0 readiness](docs/ONE_ZERO_READINESS.md)

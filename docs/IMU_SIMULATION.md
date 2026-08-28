@@ -27,6 +27,28 @@ Two consequences are easy to get wrong and are worth stating explicitly:
 Proper acceleration is derived from the change in world velocity across the sample
 interval, using explicit `SimClock` time. No wall-clock time is read anywhere.
 
+## Mount and timestamp contract
+
+The validation path uses an explicit `ImuMount`. Its `body_from_sensor` transform
+defines both sensor-axis orientation and the physical offset from the rigid-body
+origin. At an offset `r`, the sampled acceleration includes the complete rigid
+mount contribution
+
+```text
+a_sensor = a_origin + alpha x r + omega x (omega x r)
+```
+
+so a rotating body cannot silently treat an off-axis sensor as if it were at the
+origin. Missing, scaled, non-finite, or non-unit mounts fail before any due frame
+or sensor state is published.
+
+`ImuFeedback` is the versioned raw observation contract. It names gyroscope units
+as `rad/s` and accelerometer **specific force** as `m/s^2`, retains scheduled and
+actual capture timing plus DataBus availability latency, and exposes per-axis
+saturation. Sequence gaps and `stuck_value` status make injected failures
+observable. Orientation is intentionally absent: it is estimator output or
+separately labeled validation truth, not a raw IMU measurement.
+
 ## Error model
 
 Errors follow the decomposition used for Allan-variance characterization of MEMS parts
@@ -82,6 +104,12 @@ Replaying the same sample sequence reproduces the same drift exactly.
 acceleration and no bias evolution, which is the right answer for a static probe.
 `sample_imu_stateful` runs the full model.
 
+`sample_imu_stateful_diagnostic` adds mount-aware truth for validation without
+placing truth into the raw payload. `sample_imu_feedback_sensors` applies the
+typed schedule, latency, dropout, and stuck-value contract in deterministic
+entity order. A dropped sample still advances the physical bias and kinematic
+state; a stuck sample freezes only the published values.
+
 `ImuSpec::default()` is an ideal sensor: every error term is zero and measurements pass
 through untouched.
 
@@ -116,3 +144,24 @@ numerical rather than physical. Stable hash of the modeled measurement stream is
 The acceptance tests require the ideal run to integrate back onto the truth, the modeled
 run to drift further, the error to more than double between the first quarter and the
 end, and two runs with the same key sequence to be bit-identical.
+
+## Headless measurement and estimator validation
+
+The CI-native IMU lab runs four seconds stationary and eight seconds of prescribed
+roll motion at 100 Hz. A small reference complementary filter consumes only
+`ImuFeedback`; truth is used afterward for scoring. The JSON and self-contained
+HTML reports include stationary/motion RMSE, maximum error, normalized innovation
+squared, the fraction inside a declared three-sigma band, timestamp mismatches,
+trace hashes, and the first sequence/kind of an intentional failure.
+
+```bash
+cargo run -p showcase_captures --bin rne-imu-validation -- \
+  --output target/imu-validation
+```
+
+The nominal trace is run twice and must hash identically. Registered gates are
+`0.01 rad` stationary RMSE and `0.025 rad` prescribed-motion RMSE. The fixture
+also injects one missing sequence and one stuck-value failure at sequence 650;
+both must be localized at that exact observation boundary. This lab is the
+sensor-side input to the OpenArm step/ramp/chirp, plant-identification, PID/state-
+space, and robustness slices in the product-proof plan.

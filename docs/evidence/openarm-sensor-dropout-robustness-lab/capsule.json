@@ -1,0 +1,408 @@
+{
+  "schema_version": 1,
+  "kind": "rne_failure_capsule",
+  "failure": {
+    "id": "controller.sensor.maximum_consecutive_dropout_frames-step-3242",
+    "contract": "controller.sensor.maximum_consecutive_dropout_frames",
+    "message": "OpenArm joint-feedback publication reached 3 consecutive dropped frames at step 3242, exceeding the fixed 2-frame requirement",
+    "step": 3242,
+    "sim_time_ticks": 54033334414,
+    "state_digest": 6912725979366669611
+  },
+  "run": {
+    "id": "rne.openarm.right.state_feedback.robustness.v1-seed-20260824",
+    "scenario": "rne.openarm.right.state_feedback.robustness.v1",
+    "seed": 20260824,
+    "fixed_delta_ticks": 16666667,
+    "step_count": 3243,
+    "action_count": 3242
+  },
+  "build": {
+    "engine_version": "0.2.0",
+    "git_commit": "12e361fa488797d428e54e516560b63afcdfaba0",
+    "profile": "debug",
+    "target_triple": "x86_64-unknown-linux-gnu",
+    "rustc_version": "rustc 1.95.0",
+    "cargo_lock_sha256": "c6be1267ebe0afab09cd99f13243df0ed837287333f0f8860c90dd8c1105f8f1"
+  },
+  "backend": {
+    "name": "rne_rapier",
+    "version": "0.22"
+  },
+  "determinism": {
+    "schema_version": 1,
+    "name": "controller.sensor.maximum_consecutive_dropout_frames",
+    "scope": {
+      "subject": "rne.openarm.right.state_feedback.robustness.v1",
+      "observables": [
+        "behavior.observation",
+        "world.state"
+      ],
+      "first_step": 0,
+      "step_count": 3243
+    },
+    "guarantee": {
+      "tier": "outcome",
+      "criterion": "controller.sensor.maximum_consecutive_dropout_frames"
+    }
+  },
+  "artifacts": [
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/build_openarm_robustness_report.py",
+      "sha256": "4d34b8e235e1df72383505ece7212d7c8aeb882281c833471eb744fca853ab84"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/build_openarm_robustness_suite.py",
+      "sha256": "42aa85a0be717695a9e0510dbe3f3abab54a8449cbeaf4eac0f47c734f7a32de"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-000frames-controller-actions.json",
+      "sha256": "92ca3eb9f5e1dc510dac4ffedf1e15f52db5934f6fb4c58bc3a7cba42e8a1797"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-000frames-rapier-intentional-failure.json",
+      "sha256": "7aab289741eae0cacf0e2fea467158f0acb3bdc748f9bfe681bd2f5faade66c0"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-000frames-rapier-success-trace.json",
+      "sha256": "b241a4ab8eca074dcb2221f8d737f2863ed6e4689573bb2ab95b4f7766c833bb"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-001frames-controller-actions.json",
+      "sha256": "9fb8266030e16f94480ad43b1c03d676efc2874c8db952c01b9c5b60586724b1"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-001frames-rapier-intentional-failure.json",
+      "sha256": "3cd0411e32181bdad6b596f9240526bcb0a0e7adf230418b57510bac90aa0ea4"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-001frames-rapier-success-trace.json",
+      "sha256": "1d7ca873539b9f2cbb1e68ecbfed3f00674938b50ef85e665f26a300fdc2ed58"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-002frames-controller-actions.json",
+      "sha256": "d22f20d95b9bacdc414f6e6111774b1f73fa60b277d5f9af6cd951ffc7b391b4"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-002frames-gazebo-intentional-failure.json",
+      "sha256": "394359e6f302055420a15f0ce5a18a16fad45e0fbf06ffa114256dc9ff2a8ba6"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-002frames-gazebo-success-trace.json",
+      "sha256": "4959663272af90f6cfbf8e4e1b34b85399f281d9b5f9e2ffd0c5cddca84f3f9e"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-002frames-mujoco-intentional-failure.json",
+      "sha256": "53524e07f7d763854433fb435b269607695a1080c3886dd4dbb30c8fa3f5f7d8"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-002frames-mujoco-success-trace.json",
+      "sha256": "23670ecb0ecde5d64f122e8b56149405240fff16d442584b5210df6713577ac0"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-002frames-rapier-intentional-failure.json",
+      "sha256": "9a69ad44c80b47e034ee827096ebd4825e524afbe8d5afec498f10f50d61b2bf"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-002frames-rapier-success-trace.json",
+      "sha256": "2d52676b5ab6f59a75e0a7563999774dda1c33bbc58f9e1a36949896f611c334"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-003frames-controller-actions.json",
+      "sha256": "74613b2114248d29f1753dc47e18059c3c854eb5dfdcf71516eaef94848353c6"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-003frames-gazebo-intentional-failure.json",
+      "sha256": "c09764dc6dbfa2c5af3e5eb6f7d8019add7f333e99a80f0b2d5ccfe5b40cba3d"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-003frames-gazebo-success-trace.json",
+      "sha256": "aac96a2d6e74f7f7c9e1093c91d178559bb696f77dacb42a024d162037653bbf"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-003frames-mujoco-intentional-failure.json",
+      "sha256": "67c673e47a0f8c1e8a13305071f7f6f97d5de1b0bd73ea6994559a2623e8d250"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-003frames-mujoco-success-trace.json",
+      "sha256": "47b5bab2c0181360ffff41d751670f9f8e03f3c34c2a7d8a05334f73b045e4a2"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-003frames-rapier-intentional-failure.json",
+      "sha256": "d7e017a1c8584952da68fc83173e8141799842994ee911562e2576ad5128dc04"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-003frames-rapier-success-trace.json",
+      "sha256": "7ba8b4f85e802214a7f34ec547d9dc49524f2787cbfafe02e99e78774b6962d4"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-004frames-controller-actions.json",
+      "sha256": "fe98a587e7582f4d036f9194851f893e212f23a3606e46b2a06a0737730696a8"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-004frames-rapier-intentional-failure.json",
+      "sha256": "d78e3800d5f9d2eaf8b8b7a10553091b9151c43d4dab8b7a060aae4e1ea465be"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/dropout-004frames-rapier-success-trace.json",
+      "sha256": "315441ad226521360fbd5f8ef98d430c1cd4a25fc09b38f1812462e8b199251b"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/gazebo-run-openarm-trace.py",
+      "sha256": "f65a9bc5fcd74a2ec23e12a6419e445b225c4e7cead082b159636b7733f8c2e1"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/gazebo-runtime.json",
+      "sha256": "c38682ca39aa45f9c1184c47958d8d300044ff03e0b8a79d788e296d412eb75f"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/mujoco-openarm-trace.rs",
+      "sha256": "13c17fdd5b2de3a629fb04b706baf403ce3f3b72f3a9b74c5733d5e968ae7b60"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-plant-lab-report.json",
+      "sha256": "7cbe59fa79e5e5971ef79730bb3a9741bfcc72bc37a44e3581853c944f7711d4"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-robustness-suite.json",
+      "sha256": "4efef1b530d8ad755d559184ca3265b24fe5968edbc2494e134daed84b36dbc3"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-sensor-dropout-robustness-report.html",
+      "sha256": "f0f04a168090f721f731e3913592ac39e5cfead9156760f62d69858623d8ab1e"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-sensor-dropout-robustness-report.json",
+      "sha256": "adf74b92528c49f8c0c9a5289d08ff8752807f3532d0edda9b57b22ec79c831b"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-state-feedback-dropout-000frames.controller.json",
+      "sha256": "2a0e6021176e4802b13c02767dae174bb4c2ddd085c9b747290c0109c00e9b11"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-state-feedback-dropout-001frames.controller.json",
+      "sha256": "ab9a0e540dbb856b3db7d81140c55c5443deb3588998992b0b2206768607b7b3"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-state-feedback-dropout-002frames.controller.json",
+      "sha256": "e3e14b8480b365dca888ddf63bbe52e8af02d0baa8a8e08b9dce143114f8ce49"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-state-feedback-dropout-003frames.controller.json",
+      "sha256": "5463bfaf3b3272a33be549d84d6fe34c70d9c7b60fc7cba5303d395ea4991f27"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm-state-feedback-dropout-004frames.controller.json",
+      "sha256": "cec399ed91db72ec424ca9b01577cb132665a73c6d1cce3c5d9914070c6148c3"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_controller_requirements.json",
+      "sha256": "ff2b572a61691f817641a341e8ff3be9c18e59bce80221a79439c6771987792e"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_plant_experiments.json",
+      "sha256": "ecadeba864e1a290eba67d3eccb345c02437d41e9e90e550facf18c0ac5ef0d5"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_right.adapter.json",
+      "sha256": "e37b53c8d0e3070be2fe581afd12cf21bbc25bf5000747ed30df863e1293d169"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_right.rne_actuation.json",
+      "sha256": "5a83e6f018e5f5da9402f34d4310e71b4e13816c6267afa40289c4c32d6957e4"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_right.world.sdf",
+      "sha256": "5c7c942dec1b39e91fc0f19df5dc3bd7fd61718b78e4475cd5d454d0a2154926"
+    },
+    {
+      "role": "evidence",
+      "kind": "rne_task_spec",
+      "schema_version": 1,
+      "path": "evidence/openarm_right_joint_tracking.task.json",
+      "sha256": "f1d7f575ab843df41210a2902182c132ef565b9b3e08610d093773c001c20e5b"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_robustness_experiments.json",
+      "sha256": "1deb3362203de113e4136af2a0261efd2f06a95b4a6ff37d50efd5a4160dc255"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_robustness_failure_replay.rs",
+      "sha256": "a5315c2c7daca162fc0dcd17e64717652d21968f327b92249c0e31c710815af7"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_v2_right.rne.robot.toml",
+      "sha256": "78df5a87bf5ca80cdef850d72567eff4cd308c0d2b37032d3e78d47d78041a19"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_v2_right.rne.urdf",
+      "sha256": "1f65aa51542976319bea688332f267a47bd17df48a5860bf23e3f1adb8563994"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/openarm_v2_right_validation.rne.scene.toml",
+      "sha256": "fef1a669524c135505b55e5f4c4aad758136dc577e24ef36263d097a872d7a0c"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/rapier-openarm-trace.rs",
+      "sha256": "f35d94ce0c2b144bfa265cd667add94085ec6cd85cdc0f130905111a4f176fe0"
+    },
+    {
+      "role": "evidence",
+      "kind": "evidence",
+      "schema_version": 1,
+      "path": "evidence/rne_gazebo_harmonic_adapter.py",
+      "sha256": "d2776fb3d3613bd9ae57fbb0c94d4d6552fbe5073d8dbd1f79b90d2dd119e63d"
+    },
+    {
+      "role": "replay",
+      "kind": "rne_behavior_replay",
+      "schema_version": 1,
+      "path": "replay/openarm-sensor-dropout-failure.rne-replay",
+      "sha256": "a0c88f3cf77d9fe8b326555774cd16943fd82eef2b347f9190fa003928cf6a67"
+    }
+  ]
+}
