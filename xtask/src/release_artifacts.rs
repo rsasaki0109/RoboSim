@@ -1357,7 +1357,7 @@ pub(crate) fn external_flagship_check(
     let producer = bundle_dir
         .join("bin")
         .join(native_binary_name("rne-flagship-proof", &release.target));
-    let proof = validate_installed_flagship_proof(&proof_dir, &producer)?;
+    let proof = validate_installed_flagship_proof(&proof_dir, &producer, true)?;
     let timing_path = proof_dir.join("time-to-proof-report.json");
     let timing: TimeToProofReport = serde_json::from_slice(&fs::read(&timing_path)?)?;
     validate_external_machine_label(&timing.machine_label)?;
@@ -2723,31 +2723,41 @@ fn run_install_rehearsal(
 
     let flagship_output = output_dir.join("flagship-proof");
     let flagship_machine_label = format!("github-hosted-release-rehearsal-{target}");
-    let flagship_passed = run_check_command(
-        "installed flagship proof",
-        bundle_dir,
-        &flagship_proof,
-        &[
-            flagship_output.clone().into_os_string(),
-            OsString::from("--cross-backend"),
+    let mut flagship_args = vec![
+        flagship_output.clone().into_os_string(),
+        OsString::from("--cross-backend"),
+    ];
+    if verify_checksums {
+        flagship_args.extend([
             OsString::from("--measure-on"),
             OsString::from(&flagship_machine_label),
             OsString::from("--verify-installed-bundle"),
             bundle_dir.to_path_buf().into_os_string(),
-        ],
-        &[],
-    ) && validate_installed_flagship_proof(&flagship_output, &flagship_proof)
-        .map_err(|error| {
-            eprintln!("installed flagship proof validation failed: {error:#}");
-            error
-        })
-        .is_ok()
-        && validate_time_to_proof_report(&flagship_output, &flagship_machine_label)
+        ]);
+    }
+    let flagship_passed =
+        run_check_command(
+            "installed flagship proof",
+            bundle_dir,
+            &flagship_proof,
+            &flagship_args,
+            &[],
+        ) && validate_installed_flagship_proof(&flagship_output, &flagship_proof, verify_checksums)
             .map_err(|error| {
-                eprintln!("time-to-proof report validation failed: {error:#}");
+                eprintln!("installed flagship proof validation failed: {error:#}");
                 error
             })
-            .is_ok();
+            .is_ok()
+            && if verify_checksums {
+                validate_time_to_proof_report(&flagship_output, &flagship_machine_label)
+                    .map_err(|error| {
+                        eprintln!("time-to-proof report validation failed: {error:#}");
+                        error
+                    })
+                    .is_ok()
+            } else {
+                !flagship_output.join("time-to-proof-report.json").exists()
+            };
 
     let scenario_replay = output_dir.join("scenario.rne-replay");
     let scenario_run = run_check_command(
@@ -3305,6 +3315,7 @@ fn check(id: &str, passed: bool) -> InstallCheck {
 fn validate_installed_flagship_proof(
     root: &Path,
     producer: &Path,
+    require_installed_bundle: bool,
 ) -> anyhow::Result<InstalledFlagshipProofReport> {
     let report_path = root.join("installed-proof-report.json");
     let report: InstalledFlagshipProofReport = serde_json::from_slice(
@@ -3337,10 +3348,13 @@ fn validate_installed_flagship_proof(
             && report.first_violation_step > 0
             && report.capsule_verified
             && report.recorded_shadow_status.as_deref() == Some("passed")
-            && report.recorded_shadow_case_count == 3
-            && report.installed_bundle_verified
-            && report.bundle_verification_report.is_some(),
+            && report.recorded_shadow_case_count == 3,
         "installed flagship proof omitted required success/failure evidence"
+    );
+    anyhow::ensure!(
+        report.installed_bundle_verified == require_installed_bundle
+            && report.bundle_verification_report.is_some() == require_installed_bundle,
+        "installed flagship proof bundle-verification state does not match the rehearsal stage"
     );
     let producer_name = producer
         .file_name()
@@ -3360,13 +3374,12 @@ fn validate_installed_flagship_proof(
         &fs::read(producer).with_context(|| format!("read {}", producer.display()))?,
     )?;
 
-    let expected_paths = [
+    let mut expected_paths = vec![
         "cross-backend-report.json",
         "failure-capsule/capsule.json",
         "failure-minimized.rne-replay",
         "failure.behavior-report.json",
         "flagship.task.json",
-        "installed-bundle-verification.json",
         "mujoco-failure.behavior-report.json",
         "mujoco-failure.rne-replay",
         "mujoco-success.behavior-report.json",
@@ -3387,6 +3400,9 @@ fn validate_installed_flagship_proof(
         "success.behavior-report.json",
         "workflow-report.json",
     ];
+    if require_installed_bundle {
+        expected_paths.insert(5, "installed-bundle-verification.json");
+    }
     anyhow::ensure!(
         report
             .artifacts
@@ -3398,20 +3414,22 @@ fn validate_installed_flagship_proof(
     for artifact in &report.artifacts {
         validate_proof_member(root, artifact, &artifact.path)?;
     }
-    let bundle_verification = report
-        .bundle_verification_report
-        .as_ref()
-        .context("installed flagship proof omitted bundle verification identity")?;
-    let retained = report
-        .artifacts
-        .iter()
-        .find(|artifact| artifact.path == "installed-bundle-verification.json")
-        .context("installed flagship proof omitted bundle verification artifact")?;
-    anyhow::ensure!(
-        bundle_verification == retained,
-        "installed flagship proof bundle-verification identities differ"
-    );
-    validate_installed_bundle_verification(root, producer)?;
+    if require_installed_bundle {
+        let bundle_verification = report
+            .bundle_verification_report
+            .as_ref()
+            .context("installed flagship proof omitted bundle verification identity")?;
+        let retained = report
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.path == "installed-bundle-verification.json")
+            .context("installed flagship proof omitted bundle verification artifact")?;
+        anyhow::ensure!(
+            bundle_verification == retained,
+            "installed flagship proof bundle-verification identities differ"
+        );
+        validate_installed_bundle_verification(root, producer)?;
+    }
     validate_installed_recorded_shadow_proof(root)?;
     Ok(report)
 }
@@ -4457,7 +4475,7 @@ mod tests {
             &report,
         )
         .expect("proof report");
-        validate_installed_flagship_proof(directory.path(), &producer).expect("valid proof");
+        validate_installed_flagship_proof(directory.path(), &producer, true).expect("valid proof");
 
         let recorded_proof_path = directory.path().join("recorded-shadow-proof.json");
         let recorded_proof_bytes = fs::read(&recorded_proof_path).expect("recorded proof");
@@ -4467,6 +4485,26 @@ mod tests {
         write_pretty_json(&recorded_proof_path, &recorded_proof).expect("tampered recorded proof");
         assert!(validate_installed_recorded_shadow_proof(directory.path()).is_err());
         fs::write(&recorded_proof_path, recorded_proof_bytes).expect("restore recorded proof");
+
+        assert!(validate_installed_flagship_proof(directory.path(), &producer, false).is_err());
+        let mut assembly_report = report.clone();
+        assembly_report.installed_bundle_verified = false;
+        assembly_report.bundle_verification_report = None;
+        assembly_report
+            .artifacts
+            .retain(|artifact| artifact.path != "installed-bundle-verification.json");
+        write_pretty_json(
+            &directory.path().join("installed-proof-report.json"),
+            &assembly_report,
+        )
+        .expect("assembly-stage proof report");
+        validate_installed_flagship_proof(directory.path(), &producer, false)
+            .expect("valid assembly-stage proof");
+        write_pretty_json(
+            &directory.path().join("installed-proof-report.json"),
+            &report,
+        )
+        .expect("restore installed proof report");
 
         let bound_member = |relative: &str| {
             let bytes = fs::read(directory.path().join(relative)).expect("bound member");
@@ -4512,7 +4550,7 @@ mod tests {
 
         fs::write(directory.path().join("flagship.task.json"), b"tampered")
             .expect("tamper artifact");
-        assert!(validate_installed_flagship_proof(directory.path(), &producer).is_err());
+        assert!(validate_installed_flagship_proof(directory.path(), &producer, true).is_err());
     }
 
     #[test]
