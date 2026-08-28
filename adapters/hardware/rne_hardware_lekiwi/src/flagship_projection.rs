@@ -8,7 +8,8 @@
 use crate::{lekiwi_base_task_spec, LEKIWI_BASE_TASK_ID, LEKIWI_REFERENCE_PROFILE_ID};
 use rne_ai::{
     flagship_mobile_lift_task_spec, mm_mobile_wheel_velocities_to_twist, TaskSpec, TensorBounds,
-    TensorSpec, FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID, FLAGSHIP_MOBILE_LIFT_TASK_ID,
+    TensorSpec, FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID, FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS,
+    FLAGSHIP_MOBILE_LIFT_TASK_ID,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -87,7 +88,7 @@ pub struct FlagshipLeKiwiActionProjection {
 pub fn project_flagship_action_to_lekiwi(
     parent_action: &[f64],
 ) -> Result<FlagshipLeKiwiActionProjection, FlagshipLeKiwiProjectionError> {
-    let parent_task = flagship_mobile_lift_task_spec(16_666_667);
+    let parent_task = flagship_mobile_lift_task_spec(FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS);
     validate_action(&parent_task, parent_action, true)?;
 
     let (linear_x_m_s, angular_z_rad_s) =

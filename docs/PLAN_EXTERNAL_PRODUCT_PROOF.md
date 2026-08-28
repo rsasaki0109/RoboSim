@@ -244,8 +244,16 @@ commands without clamping. Commands outside the `0.1 m/s` or `pi/6 rad/s`
 physical envelope fail closed. The five arm/lift/gripper values are retained as
 explicitly suppressed evidence beside a deterministic parent-action SHA-256.
 This is not yet a live-ready bridge: content bindings for the complete
-TaskSpec/controller/profile files, 60-to-30 Hz scheduling, and parent-order
-observation fusion remain open portions of slices 1, 2, and 4.
+TaskSpec/controller/profile files and parent-order observation fusion remain
+open portions of slices 1 and 4; the rate boundary is defined below.
+
+The rate-boundary portion of slice 2 is now implemented as the wall-clock-free
+`FlagshipLeKiwiRateScheduler`. It consumes exact zero-based parent sequences,
+emits phase-zero even actions at an integer-exact `33,333,334 ns` period, and
+retains intervening validated actions as explicit suppression evidence.
+Missing, duplicate, reordered, overflowing, or invalid inputs fail without
+advancing state. Parent-order observation fusion and complete file-content
+bindings remain open; the scheduler alone does not authorize a live run.
 
 ### Gate 5: independent adoption
 

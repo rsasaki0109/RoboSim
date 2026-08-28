@@ -79,8 +79,18 @@ TaskSpec envelope is exceeded and records the five arm/lift/gripper elements
 as explicitly suppressed values with a deterministic parent-action hash.
 Registration as `hardware.flagship_lekiwi_action_projection = 1` freezes this
 artifact shape; it does not make the bridge live-ready. Full-file content
-bindings, deterministic 60-to-30 Hz scheduling, and parent-order observation
-fusion remain required before elevated flagship shadow or actuation.
+bindings and parent-order observation fusion remain required before elevated
+flagship shadow or actuation; the deterministic rate boundary is defined below.
+
+The next executable boundary is
+`rne_hardware_lekiwi::flagship_rate::FlagshipLeKiwiRateScheduler`. It accepts
+exactly ordered zero-based controller sequences, validates every action through
+the projection above, emits phase-zero even sequences, and records intervening
+odd sequences as explicitly suppressed. Its `33,333,334 ns` write period is
+exactly two `16,666,667 ns` simulation ticks and therefore never exceeds the
+30 Hz device ceiling. Duplicate, missing, out-of-order, invalid, and overflowed
+inputs fail without advancing state. This wall-clock-free rate proof still does
+not supply the parent-order observation required to execute the controller.
 
 ## Safety case
 

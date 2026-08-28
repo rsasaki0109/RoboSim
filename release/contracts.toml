@@ -91,6 +91,7 @@ lekiwi_physical_evidence = 1
 lekiwi_power_isolation_diagnostic = 1
 lekiwi_host_termination_diagnostic = 1
 flagship_lekiwi_action_projection = 1
+flagship_lekiwi_rate_decision = 1
 
 [simulators]
 runtime_manifest = 1

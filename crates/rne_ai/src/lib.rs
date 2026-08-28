@@ -168,8 +168,9 @@ pub use env::{
 pub use episode::{Episode, EpisodeRandomSnapshot, EpisodeStep, TerminationReason};
 pub use flagship::{
     flagship_mobile_lift_task_spec, FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID,
-    FLAGSHIP_MOBILE_LIFT_MAX_WORKFLOW_STEPS, FLAGSHIP_MOBILE_LIFT_TASK_ID,
-    FLAGSHIP_TRAFFIC_DEPARTURE_DIMENSION, FLAGSHIP_TRAFFIC_SPEED_DIMENSION,
+    FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS, FLAGSHIP_MOBILE_LIFT_MAX_WORKFLOW_STEPS,
+    FLAGSHIP_MOBILE_LIFT_TASK_ID, FLAGSHIP_TRAFFIC_DEPARTURE_DIMENSION,
+    FLAGSHIP_TRAFFIC_SPEED_DIMENSION,
 };
 pub use goal::{
     goal_x_from_observation, GoalConditionedAdapter, GoalConditionedPolicy, GoalCurriculum,

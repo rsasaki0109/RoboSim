@@ -249,6 +249,12 @@ action hash. It proves only the action boundary. Observation fusion, rate
 conversion, full-file content binding, and physical execution remain separate
 gates.
 
+Flagship-to-LeKiwi rate-decision schema v1 freezes phase-zero decimation from
+one `16,666,667 ns` simulation-tick action stream to one `33,333,334 ns`
+physical write stream. Every source action is projection-validated, including
+explicitly suppressed odd sequences. Sequence gaps, duplicates, reordering,
+overflow, or invalid projections fail without advancing scheduler state.
+
 LeKiwi physical-evidence manifest schema v1 indexes every required v0.6 exit
 artifact by explicit kind/schema, a unique canonical relative path, and a
 `sha256:` digest. It binds one

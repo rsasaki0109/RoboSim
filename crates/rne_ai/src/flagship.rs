@@ -12,6 +12,9 @@ pub const FLAGSHIP_MOBILE_LIFT_TASK_ID: &str = "rne.flagship.mobile_lift_shared_
 /// Stable controller identity used by the installed mobile-lift flagship.
 pub const FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID: &str = "rne.ai.ik_mobile_lift_pick_place_policy.v1";
 
+/// Integer nanosecond period used by the installed flagship controller.
+pub const FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS: u64 = 16_666_667;
+
 /// Maximum controller decisions in one flagship episode.
 pub const FLAGSHIP_MOBILE_LIFT_MAX_WORKFLOW_STEPS: u64 = 8_000;
 
@@ -102,7 +105,7 @@ mod tests {
 
     #[test]
     fn flagship_contract_is_valid_ordered_and_tick_exact() {
-        let task = flagship_mobile_lift_task_spec(16_666_667);
+        let task = flagship_mobile_lift_task_spec(FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS);
         task.validate().unwrap();
 
         assert_eq!(task.task_id, FLAGSHIP_MOBILE_LIFT_TASK_ID);
