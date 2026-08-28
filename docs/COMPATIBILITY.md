@@ -242,6 +242,13 @@ device identity to equal the Ready handshake. Mock and physical bridge
 identities are distinct. A Completed outcome additionally requires a clean,
 unlatched, disconnected gateway with no pending actuation.
 
+Flagship-to-LeKiwi action-projection schema v1 validates both bound TaskSpec
+envelopes, applies the versioned differential-drive geometry without clamping,
+and preserves denied arm/lift/gripper authority plus a deterministic parent
+action hash. It proves only the action boundary. Observation fusion, rate
+conversion, full-file content binding, and physical execution remain separate
+gates.
+
 LeKiwi physical-evidence manifest schema v1 indexes every required v0.6 exit
 artifact by explicit kind/schema, a unique canonical relative path, and a
 `sha256:` digest. It binds one

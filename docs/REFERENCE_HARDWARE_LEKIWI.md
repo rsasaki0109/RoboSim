@@ -65,6 +65,23 @@ The front 640 by 480 camera rotated 180 degrees and wrist 480 by 640 camera
 rotated 90 degrees are declared as dataset streams. They are intentionally not
 encoded into the bounded numeric process wire.
 
+## Flagship action projection
+
+`rne_hardware_lekiwi::flagship_projection` schema v1 is the first executable
+same-contract boundary. It validates the complete seven-element flagship
+controller action, converts its left/right wheel velocities from `rad/s` to a
+body-x velocity in `m/s` and yaw rate in `rad/s`, and independently validates
+the resulting three-element LeKiwi base action. The transform uses the
+flagship model's canonical `0.1 m` wheel radius and `0.45 m` track width.
+
+The projection never clamps an unsafe command. It fails closed when either
+TaskSpec envelope is exceeded and records the five arm/lift/gripper elements
+as explicitly suppressed values with a deterministic parent-action hash.
+Registration as `hardware.flagship_lekiwi_action_projection = 1` freezes this
+artifact shape; it does not make the bridge live-ready. Full-file content
+bindings, deterministic 60-to-30 Hz scheduling, and parent-order observation
+fusion remain required before elevated flagship shadow or actuation.
+
 ## Safety case
 
 The initial physical profile does not grant arm actuation. A normal base

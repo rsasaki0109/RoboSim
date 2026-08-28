@@ -1613,6 +1613,13 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             ),
         ),
         (
+            "hardware",
+            "flagship_lekiwi_action_projection",
+            u64::from(
+                rne_hardware_lekiwi::flagship_projection::FLAGSHIP_LEKIWI_ACTION_PROJECTION_SCHEMA_VERSION,
+            ),
+        ),
+        (
             "evidence",
             "fuzz_smoke_report",
             u64::from(rne_fuzz_smoke::FUZZ_SMOKE_REPORT_SCHEMA_VERSION),

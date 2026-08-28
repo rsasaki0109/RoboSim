@@ -235,6 +235,18 @@ Gate 4 proceeds through these ordered implementation slices:
    closure. The existing base-only `reference_hardware` artifact cannot satisfy
    this flagship-specific gate by itself.
 
+The first action-boundary portion of slice 1 is now implemented as
+`rne_hardware_lekiwi::flagship_projection`. It consumes all seven flattened
+parent action elements, independently validates the parent and physical
+TaskSpec limits, converts the two semantic wheel speeds through the canonical
+mobile-manipulator radius and track width, and emits LeKiwi body-x/body-y/yaw
+commands without clamping. Commands outside the `0.1 m/s` or `pi/6 rad/s`
+physical envelope fail closed. The five arm/lift/gripper values are retained as
+explicitly suppressed evidence beside a deterministic parent-action SHA-256.
+This is not yet a live-ready bridge: content bindings for the complete
+TaskSpec/controller/profile files, 60-to-30 Hz scheduling, and parent-order
+observation fusion remain open portions of slices 1, 2, and 4.
+
 ### Gate 5: independent adoption
 
 The product hypothesis is accepted only after independent use.

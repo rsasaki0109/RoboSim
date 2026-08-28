@@ -8,6 +8,7 @@
 
 #![deny(missing_docs)]
 
+pub mod flagship_projection;
 pub mod physical_evidence;
 pub mod session;
 
