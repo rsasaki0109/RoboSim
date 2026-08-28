@@ -235,7 +235,7 @@ Gate 4 proceeds through these ordered implementation slices:
    closure. The existing base-only `reference_hardware` artifact cannot satisfy
    this flagship-specific gate by itself.
 
-The first action-boundary portion of slice 1 is now implemented as
+The action-boundary portion of slice 1 is implemented as
 `rne_hardware_lekiwi::flagship_projection`. It consumes all seven flattened
 parent action elements, independently validates the parent and physical
 TaskSpec limits, converts the two semantic wheel speeds through the canonical
@@ -243,17 +243,15 @@ mobile-manipulator radius and track width, and emits LeKiwi body-x/body-y/yaw
 commands without clamping. Commands outside the `0.1 m/s` or `pi/6 rad/s`
 physical envelope fail closed. The five arm/lift/gripper values are retained as
 explicitly suppressed evidence beside a deterministic parent-action SHA-256.
-This is not yet a live-ready bridge: content bindings for the complete
-TaskSpec/controller/profile files and parent-order observation fusion remain
-open portions of slices 1 and 4; the rate boundary is defined below.
+This is not yet a live-ready bridge; the rate and observation boundaries are
+defined below and the full-content shadow closure is now mechanically verified.
 
 The rate-boundary portion of slice 2 is now implemented as the wall-clock-free
 `FlagshipLeKiwiRateScheduler`. It consumes exact zero-based parent sequences,
 emits phase-zero even actions at an integer-exact `33,333,334 ns` period, and
 retains intervening validated actions as explicit suppression evidence.
 Missing, duplicate, reordered, overflowing, or invalid inputs fail without
-advancing state. Parent-order observation fusion and complete file-content
-bindings remain open; the scheduler alone does not authorize a live run.
+advancing state. The scheduler alone does not authorize a live run.
 
 The parent-order portion of slice 1 is now implemented as the stateful
 `FlagshipLeKiwiObservationFuser`. It requires separately identified and
@@ -262,10 +260,20 @@ sources; validates freshness and monotonic continuity; applies an explicit
 three-joint morphology calibration; and emits the exact 19-value release
 observation with source-age, unused-physical-value, and deterministic-hash
 evidence. It refuses zero-filled perception and never assumes SO-101 matches
-the simulation arm. The remaining closure is to hash and rehash the actual
-TaskSpec, controller, profile, calibration, localization, perception, traffic,
-and task-state configuration files and bind these three boundary artifacts into
-one shadow-run manifest. No actuation is authorized by fusion alone.
+the simulation arm.
+
+The full-content portion of slices 1 and 4 is now implemented by the versioned
+`FlagshipLeKiwiShadowManifest` and `xtask flagship-lekiwi-shadow`. The manifest
+binds twelve exact files: TaskSpec, controller, profile, morphology calibration,
+four source contracts, non-actuating session, and replayable action, rate, and
+observation streams. Seal and verify reject links and path escapes, rehash every
+byte, replay all three stateful boundaries, cross-check each 60 Hz controller
+sample against the 30 Hz physical session, and reject any Actuate frame. Mock
+fixtures prove the closure tooling but are explicitly not physical evidence.
+The remaining Gate 4 work begins at slice 5: capture an elevated physical shadow
+with this manifest, then perform the separately authorized bounded live success
+and intentional safety-stop runs. No actuation is authorized by fusion or the
+shadow manifest alone.
 
 ### Gate 5: independent adoption
 

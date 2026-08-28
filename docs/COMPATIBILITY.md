@@ -264,6 +264,16 @@ Future/stale samples, source mutation under a reused sequence, identity changes,
 sequence/tick regressions, invalid calibration, missing camera/depth, and
 nonfinite values fail without advancing fuser state.
 
+Flagship LeKiwi shadow-manifest schema v1 binds twelve content-addressed files:
+the parent TaskSpec/controller, physical profile, morphology calibration, four
+source contracts, non-actuating session, and the three replayable boundary
+streams. Its arm-calibration, source-contract, action-stream, rate-stream, and
+observation-stream schemas are independently registered at v1. The verifier
+rehashes the complete tree, replays every decision, checks exact 60-to-30 Hz
+sample holding, rejects any actuator write, and keeps mock distinct from
+physical-shadow evidence. `xtask flagship-lekiwi-shadow seal` creates the
+self-digested index and `verify` performs the full semantic replay.
+
 LeKiwi physical-evidence manifest schema v1 indexes every required v0.6 exit
 artifact by explicit kind/schema, a unique canonical relative path, and a
 `sha256:` digest. It binds one

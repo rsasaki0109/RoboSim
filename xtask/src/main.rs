@@ -10,6 +10,7 @@ mod external_plugin;
 mod external_project;
 mod external_simulator;
 mod external_submission;
+mod flagship_shadow;
 mod lekiwi_evidence;
 mod readiness_pack;
 mod release_artifacts;
@@ -187,6 +188,7 @@ fn run() -> anyhow::Result<()> {
         "external-intake-check" => external_intake::run(&mut args),
         "failure-capsule" => failure_capsule::run(&mut args),
         "lekiwi-evidence" => lekiwi_evidence::run(&mut args),
+        "flagship-lekiwi-shadow" => flagship_shadow::run(&mut args),
         "supply-chain" => supply_chain(&mut args),
         "fuzz-smoke" => fuzz_smoke(&mut args),
         "asset" => asset_command(&mut args),
@@ -1631,6 +1633,48 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
             "flagship_lekiwi_observation_fusion",
             u64::from(
                 rne_hardware_lekiwi::flagship_observation::FLAGSHIP_LEKIWI_OBSERVATION_FUSION_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "flagship_lekiwi_shadow_manifest",
+            u64::from(
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_LEKIWI_SHADOW_MANIFEST_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "flagship_lekiwi_arm_calibration",
+            u64::from(
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_LEKIWI_ARM_CALIBRATION_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "flagship_observation_source_contract",
+            u64::from(
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_OBSERVATION_SOURCE_CONTRACT_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "flagship_action_projection_stream",
+            u64::from(
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_ACTION_PROJECTION_STREAM_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "flagship_rate_decision_stream",
+            u64::from(
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_RATE_DECISION_STREAM_SCHEMA_VERSION,
+            ),
+        ),
+        (
+            "hardware",
+            "flagship_observation_fusion_stream",
+            u64::from(
+                rne_hardware_lekiwi::flagship_shadow::FLAGSHIP_OBSERVATION_FUSION_STREAM_SCHEMA_VERSION,
             ),
         ),
         (

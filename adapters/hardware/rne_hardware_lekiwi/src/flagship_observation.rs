@@ -134,6 +134,19 @@ pub struct FlagshipLeKiwiArmCalibration {
     pub channels: [FlagshipArmChannelCalibration; 3],
 }
 
+impl FlagshipLeKiwiArmCalibration {
+    /// Validates identity, source indices, uniqueness, scale, and offset.
+    pub fn validate(&self) -> Result<(), FlagshipLeKiwiObservationError> {
+        validate_calibration(self)
+    }
+
+    /// Computes the deterministic digest embedded in fusion evidence.
+    pub fn computed_sha256(&self) -> Result<String, FlagshipLeKiwiObservationError> {
+        self.validate()?;
+        Ok(arm_calibration_sha256(self))
+    }
+}
+
 /// Source identity and freshness retained in fusion evidence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

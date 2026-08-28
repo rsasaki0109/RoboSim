@@ -108,9 +108,28 @@ the fuser does not assume that SO-101 and the simulation model share joints.
 Unmapped arm positions, physical gripper percentage, and base velocities remain
 explicitly unused evidence. The output is exactly the 19 flattened values and
 12 tensors of the release TaskSpec, with a deterministic observation digest.
-Source-contract digest labels are checked structurally here, but hashing and
-rehashing the actual source/configuration files remains part of the following
-full-content binding slice. No physical arm/lift/gripper authority is added.
+The full-content shadow manifest closes that binding slice without adding
+authority. It hashes twelve fixed artifacts: parent TaskSpec, controller
+contract, LeKiwi profile, arm calibration, four observation-source contracts,
+the non-actuating hardware session, and replayable action-projection,
+rate-decision, and observation-fusion streams. Verification rehashes every file,
+replays all three streams, and cross-checks the 60 Hz parent decisions against
+the held 30 Hz physical samples. Mock and physical-shadow execution classes are
+distinct and cannot be relabelled.
+
+Create a draft containing those twelve relative artifact references, then seal
+and verify it with:
+
+```bash
+cargo run -p xtask -- flagship-lekiwi-shadow seal DRAFT.json MANIFEST.json
+cargo run -p xtask -- flagship-lekiwi-shadow verify MANIFEST.json
+```
+
+Sealing refuses path escapes, links, missing files, duplicate paths, and an
+existing output. Verification also requires a completed Shadow session and zero
+Actuate frames. A passing mock manifest is tooling evidence only; the elevated
+physical-shadow capture remains required. No physical arm/lift/gripper authority
+is added.
 
 ## Safety case
 
