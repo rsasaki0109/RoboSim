@@ -4,13 +4,15 @@ use rne_math::Vec3;
 use std::collections::BTreeMap;
 
 /// Parsed URDF document with optional extended properties kept outside the
-/// compatibility-stable [`UrdfRobot`] and [`UrdfLink`] layouts.
+/// compatibility-stable [`UrdfRobot`], [`UrdfLink`], and [`UrdfJoint`] layouts.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UrdfDocument {
     /// Robot topology, geometry, joints, and legacy inertial mass fields.
     pub robot: UrdfRobot,
     /// Complete inertial properties keyed by link name.
     pub inertials: BTreeMap<String, UrdfInertial>,
+    /// Passive dynamics keyed by joint name.
+    pub joint_dynamics: BTreeMap<String, UrdfJointDynamics>,
 }
 
 /// Parsed URDF robot description.
@@ -184,6 +186,4 @@ pub struct UrdfJoint {
     pub limit: Option<UrdfJointLimit>,
     /// Optional mimic coupling from `<mimic>` (parse-only; not simulated).
     pub mimic: Option<UrdfJointMimic>,
-    /// Optional passive joint dynamics from `<dynamics>`.
-    pub dynamics: Option<UrdfJointDynamics>,
 }

@@ -158,11 +158,22 @@ pub struct ImuState {
     pub accel_rate_walk_m_s2: Vec3,
     /// World-frame linear velocity at the previous sample, in meters per second.
     pub previous_linear_velocity_m_s: Vec3,
-    /// World-frame angular velocity at the previous sample, in radians per second.
-    pub previous_angular_velocity_rad_s: Vec3,
     /// Simulation ticks of the previous sample.
     pub previous_sample_ticks: u64,
     /// Whether a previous sample has been taken.
+    pub initialized: bool,
+}
+
+/// Angular-kinematics history used by lever-arm-aware IMU sampling.
+///
+/// This state is kept separate from [`ImuState`] so the compatibility-stable
+/// error-state layout remains constructible by downstream crates. Attach it to
+/// the same sensor entity when angular acceleration at an offset mount matters.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ImuKinematicState {
+    /// World-frame angular velocity at the previous sample, in radians per second.
+    pub previous_angular_velocity_rad_s: Vec3,
+    /// Whether a previous angular-velocity sample has been recorded.
     pub initialized: bool,
 }
 
@@ -270,6 +281,8 @@ pub struct ImuFeedbackSensorState {
     pub emitted_frames: u64,
     /// Time-correlated physical error and kinematic differentiation state.
     pub imu_state: ImuState,
+    /// Angular-velocity history used for mount lever-arm acceleration.
+    pub kinematic_state: ImuKinematicState,
     /// Last emitted payload used by deterministic stuck-value injection.
     pub last_emitted: Option<ImuFeedback>,
 }

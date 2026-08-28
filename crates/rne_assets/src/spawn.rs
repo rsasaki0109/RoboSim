@@ -1,7 +1,7 @@
 //! Spawn ECS entities from parsed assets.
 
 use crate::error::AssetError;
-use crate::robot::{LidarRobotAsset, RobotAsset, RobotKind};
+use crate::robot::{load_robot_asset_passive_dynamics, LidarRobotAsset, RobotAsset, RobotKind};
 use crate::scene::{
     ObstacleBodyType, SceneAsset, SceneCollisionAsset, SceneDeformableAsset,
     SceneDeformableMaterialAsset, SceneObjectAsset, SceneObstacleAsset, SceneTaskMarkerAsset,
@@ -17,8 +17,9 @@ use rne_render::{Visual, VisualShape};
 use rne_robot::{spawn_diff_drive_robot, DiffDriveSpawned, Link};
 use rne_sensor::{Sensor, SensorKind, SensorState};
 use rne_urdf_import::{
-    attach_urdf_articulation, attach_urdf_visuals, parse_urdf_document, parse_urdf_document_file,
-    parse_urdf_file, spawn_urdf_document_with_config, SpawnedUrdfRobot, UrdfDocument,
+    attach_urdf_document_articulation, attach_urdf_visuals, parse_urdf_document,
+    parse_urdf_document_file, parse_urdf_file, spawn_urdf_document_with_config, SpawnedUrdfRobot,
+    UrdfDocument,
 };
 use rne_world::{
     spawn_world, world_transform_of, Gravity, TaskMarker, Transform3, WorldEntity, WorldRandom,
@@ -160,6 +161,11 @@ pub fn spawn_robot_asset_with_sources(
                 .as_ref()
                 .ok_or_else(|| AssetError::invalid("robot", "missing urdf section"))?;
             let base_dir = asset_path.parent().unwrap_or_else(|| Path::new("."));
+            let passive_dynamics_overrides = if asset_path.is_file() {
+                load_robot_asset_passive_dynamics(asset_path)?
+            } else {
+                Vec::new()
+            };
             let urdf_path = section.resolve_path(base_dir);
             let document = load_urdf_document(&urdf_path, urdf_sources).map_err(|error| {
                 AssetError::invalid(
@@ -183,9 +189,9 @@ pub fn spawn_robot_asset_with_sources(
             )?;
 
             if wire_articulation && section.articulation {
-                attach_urdf_articulation(
+                attach_urdf_document_articulation(
                     world,
-                    &document.robot,
+                    &document,
                     &spawned,
                     section.to_articulation_config(),
                 )
@@ -201,7 +207,7 @@ pub fn spawn_robot_asset_with_sources(
                     asset_path,
                     &document,
                     &spawned,
-                    &section.joint_passive_dynamics,
+                    &passive_dynamics_overrides,
                 )?;
             }
 

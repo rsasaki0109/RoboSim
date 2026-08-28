@@ -47,7 +47,7 @@
 //! proper acceleration and no bias evolution, which is the right answer for a static
 //! probe and keeps existing callers working.
 
-use crate::components::{ImuMount, ImuState};
+use crate::components::{ImuKinematicState, ImuMount, ImuState};
 use crate::noise::{gaussian_pair, NoiseModel, SensorNoiseKey};
 use rne_core::{mix64, KeyedRandom, SimDuration, SimTime};
 use rne_data::ImuSample;
@@ -287,7 +287,39 @@ pub fn sample_imu_stateful(
         spec,
         noise_key,
         sim_time,
-        state,
+        ImuStatefulStates {
+            error_state: state,
+            kinematic_state: None,
+        },
+    )
+    .measurement
+}
+
+/// Samples an IMU while retaining angular history for offset-mount acceleration.
+///
+/// This is the lever-arm-aware counterpart to [`sample_imu_stateful`]. The
+/// separate kinematic state preserves the compatibility-stable [`ImuState`]
+/// layout while allowing deterministic angular acceleration to span samples.
+pub fn sample_imu_stateful_with_kinematics(
+    world: &World,
+    entity: Entity,
+    spec: &ImuSpec,
+    noise_key: SensorNoiseKey,
+    sim_time: SimTime,
+    state: &mut ImuState,
+    kinematic_state: &mut ImuKinematicState,
+) -> ImuSample {
+    sample_imu_stateful_impl(
+        world,
+        entity,
+        Transform3::IDENTITY,
+        spec,
+        noise_key,
+        sim_time,
+        ImuStatefulStates {
+            error_state: state,
+            kinematic_state: Some(kinematic_state),
+        },
     )
     .measurement
 }
@@ -304,6 +336,42 @@ pub fn sample_imu_stateful_diagnostic(
     noise_key: SensorNoiseKey,
     sim_time: SimTime,
     state: &mut ImuState,
+) -> Result<ImuDiagnosticSample, ImuSampleError> {
+    sample_imu_stateful_diagnostic_impl(world, entity, spec, noise_key, sim_time, state, None)
+}
+
+/// Samples a mounted IMU with diagnostic evidence and angular history.
+///
+/// Use this entry point for a non-zero mount translation when tangential
+/// acceleration from changing angular velocity must be represented.
+pub fn sample_imu_stateful_diagnostic_with_kinematics(
+    world: &World,
+    entity: Entity,
+    spec: &ImuSpec,
+    noise_key: SensorNoiseKey,
+    sim_time: SimTime,
+    state: &mut ImuState,
+    kinematic_state: &mut ImuKinematicState,
+) -> Result<ImuDiagnosticSample, ImuSampleError> {
+    sample_imu_stateful_diagnostic_impl(
+        world,
+        entity,
+        spec,
+        noise_key,
+        sim_time,
+        state,
+        Some(kinematic_state),
+    )
+}
+
+fn sample_imu_stateful_diagnostic_impl(
+    world: &World,
+    entity: Entity,
+    spec: &ImuSpec,
+    noise_key: SensorNoiseKey,
+    sim_time: SimTime,
+    state: &mut ImuState,
+    kinematic_state: Option<&mut ImuKinematicState>,
 ) -> Result<ImuDiagnosticSample, ImuSampleError> {
     let mount = world.get::<ImuMount>(entity).copied().unwrap_or(ImuMount {
         body_entity: entity,
@@ -325,8 +393,16 @@ pub fn sample_imu_stateful_diagnostic(
         spec,
         noise_key,
         sim_time,
-        state,
+        ImuStatefulStates {
+            error_state: state,
+            kinematic_state,
+        },
     ))
+}
+
+struct ImuStatefulStates<'a> {
+    error_state: &'a mut ImuState,
+    kinematic_state: Option<&'a mut ImuKinematicState>,
 }
 
 fn sample_imu_stateful_impl(
@@ -336,8 +412,12 @@ fn sample_imu_stateful_impl(
     spec: &ImuSpec,
     noise_key: SensorNoiseKey,
     sim_time: SimTime,
-    state: &mut ImuState,
+    states: ImuStatefulStates<'_>,
 ) -> ImuDiagnosticSample {
+    let ImuStatefulStates {
+        error_state: state,
+        kinematic_state,
+    } = states;
     let world_from_body = world
         .get::<Transform3>(body_entity)
         .copied()
@@ -357,8 +437,12 @@ fn sample_imu_stateful_impl(
     } else {
         Vec3::ZERO
     };
-    let angular_acceleration_world = if state.initialized && dt_s > 0.0 {
-        (angular_world - state.previous_angular_velocity_rad_s) / dt_s
+    let angular_acceleration_world = if let Some(kinematic_state) = kinematic_state.as_ref() {
+        if kinematic_state.initialized && dt_s > 0.0 {
+            (angular_world - kinematic_state.previous_angular_velocity_rad_s) / dt_s
+        } else {
+            Vec3::ZERO
+        }
     } else {
         Vec3::ZERO
     };
@@ -418,9 +502,12 @@ fn sample_imu_stateful_impl(
     let (angular, linear) = spec.noise.apply_imu_keyed(angular, linear, noise_key);
 
     state.previous_linear_velocity_m_s = linear_velocity_world;
-    state.previous_angular_velocity_rad_s = angular_world;
     state.previous_sample_ticks = sim_time.ticks();
     state.initialized = true;
+    if let Some(kinematic_state) = kinematic_state {
+        kinematic_state.previous_angular_velocity_rad_s = angular_world;
+        kinematic_state.initialized = true;
+    }
 
     ImuDiagnosticSample {
         measurement: ImuSample {
@@ -662,23 +749,26 @@ mod tests {
         let mount = Transform3::from_translation_rotation(Vec3::new(0.5, 0.0, 0.0), Quat::IDENTITY);
         let (mut world, body_entity, sensor) = mounted_imu_world(RigidBody::default(), mount);
         let mut state = ImuState::default();
-        sample_imu_stateful_diagnostic(
+        let mut kinematic_state = ImuKinematicState::default();
+        sample_imu_stateful_diagnostic_with_kinematics(
             &world,
             sensor,
             &ImuSpec::default(),
             SensorNoiseKey::new(1, 2, 3, 1),
             at(0.0),
             &mut state,
+            &mut kinematic_state,
         )
         .unwrap();
         world.entity_mut(body_entity).insert(body);
-        let sample = sample_imu_stateful_diagnostic(
+        let sample = sample_imu_stateful_diagnostic_with_kinematics(
             &world,
             sensor,
             &ImuSpec::default(),
             SensorNoiseKey::new(1, 2, 3, 2),
             at(0.5),
             &mut state,
+            &mut kinematic_state,
         )
         .unwrap();
 

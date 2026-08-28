@@ -15,12 +15,13 @@ pub use camera::{
     CameraDistortion, CameraRgbdSample, CameraSpec, CameraSweep,
 };
 pub use components::{
-    ImuFeedbackFault, ImuFeedbackSensor, ImuFeedbackSensorState, ImuMount, ImuState,
-    JointFeedbackChannelSpec, JointFeedbackFault, JointFeedbackSensor, JointFeedbackSensorState,
-    LidarMaterial, Sensor, SensorKind, SensorState,
+    ImuFeedbackFault, ImuFeedbackSensor, ImuFeedbackSensorState, ImuKinematicState, ImuMount,
+    ImuState, JointFeedbackChannelSpec, JointFeedbackFault, JointFeedbackSensor,
+    JointFeedbackSensorState, LidarMaterial, Sensor, SensorKind, SensorState,
 };
 pub use imu::{
     sample_imu, sample_imu_keyed, sample_imu_stateful, sample_imu_stateful_diagnostic,
+    sample_imu_stateful_diagnostic_with_kinematics, sample_imu_stateful_with_kinematics,
     ImuAxisErrors, ImuDiagnosticSample, ImuSampleError, ImuSpec, ImuTruth, GRAVITY_M_S2,
 };
 pub use lidar::{

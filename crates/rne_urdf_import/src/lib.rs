@@ -9,7 +9,8 @@ pub mod schema;
 pub mod spawn;
 
 pub use articulation::{
-    attach_urdf_articulation, UrdfArticulationAttached, UrdfArticulationConfig,
+    attach_urdf_articulation, attach_urdf_document_articulation, UrdfArticulationAttached,
+    UrdfArticulationConfig,
 };
 pub use parse::{
     parse_urdf, parse_urdf_document, parse_urdf_document_file, parse_urdf_file, rpy_to_quat,

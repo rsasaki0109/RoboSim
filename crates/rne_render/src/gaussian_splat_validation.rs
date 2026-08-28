@@ -1403,12 +1403,25 @@ fn validate_multiview_depth_occlusion_alignment(
                 ],
                 "multi-view report view",
             )?;
+            let source_pixel = finite_vector(
+                field(source_view, "observed_pixel_uv")?,
+                2,
+                "multi-view source observed_pixel_uv",
+            )?;
+            let report_pixel = finite_vector(
+                field(report_view, "observed_pixel_uv")?,
+                2,
+                "multi-view report observed_pixel_uv",
+            )?;
+            let source_reference = finite(source_view, "reference_depth_source_units")?;
+            let report_reference = finite(report_view, "reference_depth_source_units")?;
             ensure!(
                 field(source_view, "camera_id")? == field(report_view, "camera_id")?
-                    && field(source_view, "observed_pixel_uv")?
-                        == field(report_view, "observed_pixel_uv")?
-                    && field(source_view, "reference_depth_source_units")?
-                        == field(report_view, "reference_depth_source_units")?,
+                    && source_pixel
+                        .iter()
+                        .zip(&report_pixel)
+                        .all(|(source, report)| within_tolerance(*source, *report, 1.0e-9))
+                    && within_tolerance(source_reference, report_reference, 1.0e-9),
                 "multi-view source and report observation drifted"
             );
             let reference = finite(report_view, "reference_depth_source_units")?;

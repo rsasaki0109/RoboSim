@@ -1,7 +1,7 @@
 //! URDF joint wiring for Rapier impulse articulations.
 
 use crate::parse::rpy_to_quat;
-use crate::schema::{UrdfJointType, UrdfRobot};
+use crate::schema::{UrdfDocument, UrdfJointDynamics, UrdfJointType, UrdfRobot};
 use crate::spawn::{SpawnedUrdfRobot, UrdfSpawnError};
 use rne_ecs::{Entity, Name, World};
 use rne_math::Vec3;
@@ -10,7 +10,7 @@ use rne_physics::{
     RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_robot::{Actuator, ActuatorLimits, ActuatorTarget, ControlMode, Joint};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 /// Explicit regularization velocity assigned to URDF revolute-joint friction.
 pub const URDF_COULOMB_TRANSITION_VELOCITY_RAD_S: f64 = 0.01;
@@ -56,6 +56,32 @@ pub struct UrdfArticulationAttached {
 pub fn attach_urdf_articulation(
     world: &mut World,
     urdf: &UrdfRobot,
+    spawned: &SpawnedUrdfRobot,
+    config: UrdfArticulationConfig,
+) -> Result<UrdfArticulationAttached, UrdfSpawnError> {
+    attach_urdf_articulation_impl(world, urdf, &BTreeMap::new(), spawned, config)
+}
+
+/// Attaches an articulation while applying extended joint dynamics from a URDF document.
+pub fn attach_urdf_document_articulation(
+    world: &mut World,
+    document: &UrdfDocument,
+    spawned: &SpawnedUrdfRobot,
+    config: UrdfArticulationConfig,
+) -> Result<UrdfArticulationAttached, UrdfSpawnError> {
+    attach_urdf_articulation_impl(
+        world,
+        &document.robot,
+        &document.joint_dynamics,
+        spawned,
+        config,
+    )
+}
+
+fn attach_urdf_articulation_impl(
+    world: &mut World,
+    urdf: &UrdfRobot,
+    joint_dynamics: &BTreeMap<String, UrdfJointDynamics>,
     spawned: &SpawnedUrdfRobot,
     config: UrdfArticulationConfig,
 ) -> Result<UrdfArticulationAttached, UrdfSpawnError> {
@@ -116,7 +142,7 @@ pub fn attach_urdf_articulation(
                     },
                     JointMotor::default(),
                 ));
-                if let Some(dynamics) = joint.dynamics {
+                if let Some(dynamics) = joint_dynamics.get(&joint.name) {
                     world
                         .entity_mut(child)
                         .insert(JointPassiveDynamics::Revolute {
@@ -146,7 +172,7 @@ pub fn attach_urdf_articulation(
                     },
                     JointMotor::default(),
                 ));
-                if let Some(dynamics) = joint.dynamics {
+                if let Some(dynamics) = joint_dynamics.get(&joint.name) {
                     world
                         .entity_mut(child)
                         .insert(JointPassiveDynamics::Prismatic {
@@ -271,7 +297,7 @@ fn revolute_limits_rad(joint: &crate::schema::UrdfJoint) -> (Option<f64>, Option
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::parse_urdf;
+    use crate::parse::{parse_urdf, parse_urdf_document};
     use crate::spawn::{spawn_urdf_robot_with_config, UrdfSpawnConfig};
     use rne_core::SimDuration;
     use rne_math::Hertz;
@@ -356,7 +382,7 @@ mod tests {
 
     #[test]
     fn attach_articulation_preserves_unit_explicit_passive_dynamics() {
-        let urdf = parse_urdf(
+        let document = parse_urdf_document(
             r#"
             <robot name="lossy_slider">
               <link name="base"/>
@@ -372,19 +398,20 @@ mod tests {
             "#,
         )
         .unwrap();
+        let urdf = &document.robot;
         let mut world = World::new();
         let spawned = spawn_urdf_robot_with_config(
             &mut world,
-            &urdf,
+            urdf,
             UrdfSpawnConfig {
                 base_body_type: RigidBodyType::Fixed,
                 ..UrdfSpawnConfig::default()
             },
         )
         .unwrap();
-        attach_urdf_articulation(
+        attach_urdf_document_articulation(
             &mut world,
-            &urdf,
+            &document,
             &spawned,
             UrdfArticulationConfig::default(),
         )

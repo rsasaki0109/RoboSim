@@ -2,11 +2,14 @@
 
 use crate::camera::sample_camera_rgbd_keyed;
 use crate::components::{
-    ImuFeedbackFault, ImuFeedbackSensor, ImuFeedbackSensorState, ImuMount, ImuState,
-    JointFeedbackFault, JointFeedbackSensor, JointFeedbackSensorState, Sensor, SensorKind,
-    SensorState,
+    ImuFeedbackFault, ImuFeedbackSensor, ImuFeedbackSensorState, ImuKinematicState, ImuMount,
+    ImuState, JointFeedbackFault, JointFeedbackSensor, JointFeedbackSensorState, Sensor,
+    SensorKind, SensorState,
 };
-use crate::imu::{sample_imu_stateful, sample_imu_stateful_diagnostic, ImuSampleError};
+use crate::imu::{
+    sample_imu_stateful_diagnostic_with_kinematics, sample_imu_stateful_with_kinematics,
+    ImuSampleError,
+};
 use crate::lidar::sample_lidar_at_entity_keyed;
 use crate::noise::SensorNoiseKey;
 use crate::wheel_encoder::sample_wheel_encoder;
@@ -50,7 +53,7 @@ pub fn sample_sensors<B: PhysicsBackend>(
 ) -> usize {
     let mut published = 0_usize;
     let mut updates: Vec<(rne_ecs::Entity, SensorState)> = Vec::new();
-    let mut imu_updates: Vec<(rne_ecs::Entity, ImuState)> = Vec::new();
+    let mut imu_updates: Vec<(rne_ecs::Entity, ImuState, ImuKinematicState)> = Vec::new();
     let mut headless_render = HeadlessRenderBackend::new();
     let empty_scene = RenderScene::new();
     let world_seed = ctx
@@ -91,7 +94,12 @@ pub fn sample_sensors<B: PhysicsBackend>(
                     .get::<ImuState>(entity)
                     .copied()
                     .unwrap_or_default();
-                let sample = sample_imu_stateful(
+                let mut kinematic_state = ctx
+                    .world
+                    .get::<ImuKinematicState>(entity)
+                    .copied()
+                    .unwrap_or_default();
+                let sample = sample_imu_stateful_with_kinematics(
                     ctx.world,
                     entity,
                     spec,
@@ -103,8 +111,9 @@ pub fn sample_sensors<B: PhysicsBackend>(
                     ),
                     ctx.sim_time,
                     &mut imu_state,
+                    &mut kinematic_state,
                 );
-                imu_updates.push((entity, imu_state));
+                imu_updates.push((entity, imu_state, kinematic_state));
                 publish_frame(
                     bus,
                     Frame::new(
@@ -222,8 +231,10 @@ pub fn sample_sensors<B: PhysicsBackend>(
         }
     }
 
-    for (entity, state) in imu_updates {
-        ctx.world.entity_mut(entity).insert(state);
+    for (entity, state, kinematic_state) in imu_updates {
+        ctx.world
+            .entity_mut(entity)
+            .insert((state, kinematic_state));
     }
 
     published
@@ -348,13 +359,14 @@ pub fn sample_imu_feedback_sensors(
                 .ok_or(ImuFeedbackError::ScheduleOverflow {
                     sensor_entity_index: sensor_entity.index(),
                 })?;
-        let diagnostic = sample_imu_stateful_diagnostic(
+        let diagnostic = sample_imu_stateful_diagnostic_with_kinematics(
             world,
             sensor_entity,
             &sensor.spec,
             SensorNoiseKey::new(world_seed, sensor.spec.seed, sensor.stream_id.0, sequence),
             sim_time,
             &mut state.imu_state,
+            &mut state.kinematic_state,
         )
         .map_err(|source| ImuFeedbackError::Sampling {
             sensor_entity_index: sensor_entity.index(),
@@ -1267,7 +1279,7 @@ mod tests {
             world
                 .get::<ImuFeedbackSensorState>(sensor)
                 .unwrap()
-                .imu_state
+                .kinematic_state
                 .previous_angular_velocity_rad_s,
             Vec3::Z
         );

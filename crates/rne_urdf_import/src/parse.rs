@@ -38,7 +38,7 @@ pub fn parse_urdf(xml: &str) -> Result<UrdfRobot, UrdfParseError> {
     parse_urdf_impl(xml, false).map(|document| document.robot)
 }
 
-/// Parses a URDF document and retains complete link inertial properties.
+/// Parses a URDF document and retains extended inertial and joint properties.
 ///
 /// The extended properties live outside [`UrdfRobot`] so existing callers that
 /// construct [`UrdfLink`] values continue to use the compatibility-stable
@@ -67,6 +67,7 @@ fn parse_urdf_impl(
     let mut links = Vec::new();
     let mut joints = Vec::new();
     let mut inertials = BTreeMap::new();
+    let mut joint_dynamics = BTreeMap::new();
 
     for child in robot.children().filter(|node| node.is_element()) {
         match child.tag_name().name() {
@@ -77,7 +78,13 @@ fn parse_urdf_impl(
                 }
                 links.push(link);
             }
-            "joint" => joints.push(parse_joint(child)?),
+            "joint" => {
+                let (joint, dynamics) = parse_joint(child)?;
+                if let Some(dynamics) = dynamics {
+                    joint_dynamics.insert(joint.name.clone(), dynamics);
+                }
+                joints.push(joint);
+            }
             _ => {}
         }
     }
@@ -93,6 +100,7 @@ fn parse_urdf_impl(
             joints,
         },
         inertials,
+        joint_dynamics,
     })
 }
 
@@ -344,7 +352,9 @@ fn parse_geometry(node: roxmltree::Node<'_, '_>) -> Result<UrdfGeometry, UrdfPar
     }
 }
 
-fn parse_joint(node: roxmltree::Node<'_, '_>) -> Result<UrdfJoint, UrdfParseError> {
+fn parse_joint(
+    node: roxmltree::Node<'_, '_>,
+) -> Result<(UrdfJoint, Option<UrdfJointDynamics>), UrdfParseError> {
     let name = node
         .attribute("name")
         .ok_or_else(|| UrdfParseError::Missing("joint@name".into()))?
@@ -384,18 +394,20 @@ fn parse_joint(node: roxmltree::Node<'_, '_>) -> Result<UrdfJoint, UrdfParseErro
         .map(parse_joint_dynamics)
         .transpose()?;
 
-    Ok(UrdfJoint {
-        name,
-        joint_type,
-        parent,
-        child,
-        origin_xyz,
-        origin_rpy,
-        axis,
-        limit,
-        mimic,
+    Ok((
+        UrdfJoint {
+            name,
+            joint_type,
+            parent,
+            child,
+            origin_xyz,
+            origin_rpy,
+            axis,
+            limit,
+            mimic,
+        },
         dynamics,
-    })
+    ))
 }
 
 fn parse_joint_dynamics(
@@ -747,7 +759,7 @@ mod tests {
 
     #[test]
     fn parses_non_negative_joint_passive_dynamics() {
-        let robot = parse_urdf(
+        let document = parse_urdf_document(
             r#"
             <robot name="lossy_arm">
               <link name="base_link"/>
@@ -761,7 +773,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        let dynamics = robot.joints[0].dynamics.expect("dynamics");
+        let dynamics = document.joint_dynamics["shoulder"];
         assert_eq!(dynamics.damping, 2.5);
         assert_eq!(dynamics.friction, 0.4);
     }

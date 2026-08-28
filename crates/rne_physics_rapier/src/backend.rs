@@ -841,7 +841,7 @@ fn apply_joint_motors(world: &World, state: &mut RapierWorldState) -> Result<(),
         let Some(axis) = motor_axis_for_entity(world, *entity) else {
             continue;
         };
-        if passive_viscous_damping(world, *entity)? != 0.0 {
+        if passive_viscous_damping(world, *entity)?.is_some_and(|damping| damping != 0.0) {
             return Err(invalid_passive_dynamics(
                 *entity,
                 "viscous damping requires a multibody articulation",
@@ -874,8 +874,9 @@ fn apply_joint_motors(world: &World, state: &mut RapierWorldState) -> Result<(),
                 "supported articulated joints must have exactly one degree of freedom",
             ));
         }
-        let damping = passive_viscous_damping(world, *entity)? as f32;
-        multibody.damping_mut()[assembly_id] = damping;
+        if let Some(damping) = passive_viscous_damping(world, *entity)? {
+            multibody.damping_mut()[assembly_id] = damping as f32;
+        }
         let Some(link) = multibody.link_mut(link_id) else {
             continue;
         };
@@ -1165,11 +1166,12 @@ fn apply_generalized_effort(
     measured.ok_or_else(|| invalid_actuation(entity, "dynamic child did not accept joint effort"))
 }
 
-fn passive_viscous_damping(world: &World, entity: Entity) -> Result<f64, PhysicsError> {
+fn passive_viscous_damping(world: &World, entity: Entity) -> Result<Option<f64>, PhysicsError> {
     let Some(dynamics) = world.get::<JointPassiveDynamics>(entity).copied() else {
-        // Rapier installs a numerical 0.1 damping on angular multibody DOFs by
-        // default. RNE's plant contract is explicit, so absence means zero.
-        return Ok(0.0);
+        // Preserve Rapier's historical numerical damping for pre-contract
+        // articulations. An explicit component, including explicit zero, owns
+        // the plant-loss value and replaces the backend default.
+        return Ok(None);
     };
     if !dynamics.has_valid_values() {
         return Err(invalid_passive_dynamics(
@@ -1181,11 +1183,15 @@ fn passive_viscous_damping(world: &World, entity: Entity) -> Result<f64, Physics
         JointPassiveDynamics::Revolute {
             viscous_damping_nm_s_per_rad,
             ..
-        } if world.get::<RevoluteJointDesc>(entity).is_some() => Ok(viscous_damping_nm_s_per_rad),
+        } if world.get::<RevoluteJointDesc>(entity).is_some() => {
+            Ok(Some(viscous_damping_nm_s_per_rad))
+        }
         JointPassiveDynamics::Prismatic {
             viscous_damping_n_s_per_m,
             ..
-        } if world.get::<PrismaticJointDesc>(entity).is_some() => Ok(viscous_damping_n_s_per_m),
+        } if world.get::<PrismaticJointDesc>(entity).is_some() => {
+            Ok(Some(viscous_damping_n_s_per_m))
+        }
         JointPassiveDynamics::Revolute { .. } => Err(invalid_passive_dynamics(
             entity,
             "revolute dynamics on non-revolute joint",
