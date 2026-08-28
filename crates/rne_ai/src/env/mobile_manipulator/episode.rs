@@ -353,9 +353,11 @@ impl MobileManipulatorEpisodeConfig {
 
     /// Navigate, friction-grasp from a low table, lift, transport, and place on
     /// the ground with the built-in lift-capable mobile manipulator.
+    /// The episode budget covers the portable controller's full phase budget,
+    /// including convergence margin for physics backends and host platforms.
     pub fn mobile_lift_pick_place() -> Self {
         Self {
-            max_steps: 6_000,
+            max_steps: 10_000,
             scene_path: crate::mm_mobile_lift_pick_place_scene_path(),
             task: MobileManipulatorTask::Place {
                 object_name: "mobile_lift_cube".into(),
@@ -2090,9 +2092,13 @@ mod tests {
         use crate::{IkMobileLiftPickPlacePolicy, Policy};
         use rne_physics::{FixedJointDesc, RigidBody, RigidBodyType};
 
-        let mut episode =
-            MobileManipulatorEpisode::new(MobileManipulatorEpisodeConfig::mobile_lift_pick_place());
+        let config = MobileManipulatorEpisodeConfig::mobile_lift_pick_place();
         let mut policy = IkMobileLiftPickPlacePolicy::new();
+        assert!(
+            config.max_steps >= policy.total_steps(),
+            "episode budget must cover the portable controller phase budget"
+        );
+        let mut episode = MobileManipulatorEpisode::new(config);
         let mut step = episode.reset();
         episode.set_grasp_mode(crate::GraspMode::Friction);
         let resting_y = episode
