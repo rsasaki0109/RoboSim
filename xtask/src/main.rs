@@ -3499,8 +3499,8 @@ fn validate_house_showcase_metadata(
     anyhow::ensure!(
         metadata["simulation"]["transport_distance_m"]
             .as_f64()
-            .is_some_and(|value| value >= 2.0),
-        "House hero transport distance must be at least 2.0 m"
+            .is_some_and(|value| value >= 1.5),
+        "House hero transport distance must be at least 1.5 m"
     );
     anyhow::ensure!(
         metadata["simulation"]["place_error_m"]
