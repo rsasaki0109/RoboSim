@@ -8,17 +8,18 @@ use anyhow::{bail, Context, Result};
 use bevy_ecs::prelude::{Entity, World};
 #[cfg(feature = "mujoco")]
 use rne_ai::MobileManipulatorPhysicsFactory;
+#[cfg(feature = "mujoco")]
+use rne_ai::FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID;
 use rne_ai::{
-    minimize_behavior_failure, run_behavior_scenarios_with_replays, stable_behavior_digest,
-    verify_behavior_replay, ActionSpec, BehaviorContract, BehaviorContractError, BehaviorDimension,
-    BehaviorDimensionValue, BehaviorFailureCase, BehaviorReplayArtifact, BehaviorReport,
-    BehaviorRun, BehaviorScenario, BehaviorScenarioStep, Episode, GraspMode,
-    IkMobileLiftPickPlacePolicy, MobileLiftFailureClass, MobileLiftPickPlacePhase,
-    MobileManipulatorAction, MobileManipulatorEpisode, MobileManipulatorEpisodeConfig,
-    MobileManipulatorObservation, ObservationSpec, Policy, RandomDistributionSpec,
-    RandomizationParameterSpec, RandomizationSpec, ResetSpec, RewardSpec, RewardTermSpec, TaskSpec,
-    TensorBounds, TensorDType, TensorSpec, TerminationConditionSpec, TerminationKind,
-    TerminationSpec,
+    flagship_mobile_lift_task_spec as flagship_task_spec, minimize_behavior_failure,
+    run_behavior_scenarios_with_replays, stable_behavior_digest, verify_behavior_replay,
+    BehaviorContract, BehaviorContractError, BehaviorDimension, BehaviorDimensionValue,
+    BehaviorFailureCase, BehaviorReplayArtifact, BehaviorReport, BehaviorRun, BehaviorScenario,
+    BehaviorScenarioStep, Episode, GraspMode, IkMobileLiftPickPlacePolicy, MobileLiftFailureClass,
+    MobileLiftPickPlacePhase, MobileManipulatorAction, MobileManipulatorEpisode,
+    MobileManipulatorEpisodeConfig, MobileManipulatorObservation, Policy,
+    FLAGSHIP_MOBILE_LIFT_MAX_WORKFLOW_STEPS, FLAGSHIP_MOBILE_LIFT_TASK_ID,
+    FLAGSHIP_TRAFFIC_DEPARTURE_DIMENSION, FLAGSHIP_TRAFFIC_SPEED_DIMENSION,
 };
 use rne_asset_cli::{
     failure_capsule, installed_bundle, INSTALLED_FLAGSHIP_PROOF_REPORT_KIND,
@@ -55,17 +56,17 @@ mod recorded_proof;
 const SCENARIO: &str = "mobile_lift_shared_aisle_inspection_pick_place";
 const REPORT_KIND: &str = "rne_flagship_workflow_report";
 const REPORT_SCHEMA_VERSION: u32 = 1;
-const TASK_ID: &str = "rne.flagship.mobile_lift_shared_aisle.v1";
+const TASK_ID: &str = FLAGSHIP_MOBILE_LIFT_TASK_ID;
 const SEED: u64 = 7;
 const SIGNAL_RELEASE_STEP: u64 = 60;
 const REQUIRED_INSPECTION_FRAMES: u32 = 3;
-const MAX_WORKFLOW_STEPS: u64 = 8_000;
+const MAX_WORKFLOW_STEPS: u64 = FLAGSHIP_MOBILE_LIFT_MAX_WORKFLOW_STEPS;
 const BLACKOUT_DIMENSION: &str = "perception_blackout";
-const DEPARTURE_DIMENSION: &str = "traffic_departure_delay_s";
-const SPEED_DIMENSION: &str = "traffic_speed_delta_m_s";
+const DEPARTURE_DIMENSION: &str = FLAGSHIP_TRAFFIC_DEPARTURE_DIMENSION;
+const SPEED_DIMENSION: &str = FLAGSHIP_TRAFFIC_SPEED_DIMENSION;
 const EXPECTED_FAILURE_CONTRACT: &str = "perception_stream_alive";
 #[cfg(feature = "mujoco")]
-const CONTROLLER_ID: &str = "rne.ai.ik_mobile_lift_pick_place_policy.v1";
+const CONTROLLER_ID: &str = FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID;
 const TIME_TO_PROOF_TARGET_MS: u64 = 15 * 60 * 1_000;
 const ROBOT_NAME: &str = "mm_mobile_lift";
 const PAYLOAD_NAME: &str = "mobile_lift_cube";
@@ -1616,75 +1617,6 @@ fn seeded_dimensions(seed: u64, perception_blackout: bool) -> Result<Vec<Behavio
         BehaviorDimension::number(DEPARTURE_DIMENSION, 0.15 + (seed % 3) as f64 * 0.05, 0.0)?,
         BehaviorDimension::number(SPEED_DIMENSION, 0.10 + ((seed / 3) % 4) as f64 * 0.05, 0.0)?,
     ])
-}
-
-fn flagship_task_spec(fixed_delta_ticks: u64) -> TaskSpec {
-    TaskSpec::new(
-        TASK_ID,
-        fixed_delta_ticks as f64 / 1_000_000_000.0,
-        ObservationSpec::new(vec![
-            TensorSpec::new("base_position_m", TensorDType::F64, vec![2], "m"),
-            TensorSpec::new("arm_joint_position_rad", TensorDType::F64, vec![3], "rad"),
-            TensorSpec::new("lift_position_m", TensorDType::F64, vec![], "m"),
-            TensorSpec::new("gripper_position_m", TensorDType::F64, vec![], "m"),
-            TensorSpec::new("payload_position_m", TensorDType::F64, vec![3], "m"),
-            TensorSpec::new("wrist_camera_pixel_count", TensorDType::I64, vec![], "1")
-                .with_bounds(TensorBounds::broadcast(0.0, i64::MAX as f64)),
-            TensorSpec::new("wrist_depth_min_m", TensorDType::F64, vec![], "m")
-                .with_bounds(TensorBounds::broadcast(0.0, f64::MAX)),
-            TensorSpec::new("traffic_actor_position_m", TensorDType::F64, vec![3], "m"),
-            TensorSpec::new("traffic_signal_green", TensorDType::Bool, vec![], "1"),
-            TensorSpec::new("traffic_clear", TensorDType::Bool, vec![], "1"),
-            TensorSpec::new("grasped", TensorDType::Bool, vec![], "1"),
-            TensorSpec::new("policy_phase", TensorDType::I32, vec![], "1")
-                .with_bounds(TensorBounds::broadcast(0.0, 9.0)),
-        ]),
-        ActionSpec::new(vec![
-            TensorSpec::new("wheel_velocity_rad_s", TensorDType::F64, vec![2], "rad/s")
-                .with_bounds(TensorBounds::broadcast(-10.0, 10.0)),
-            TensorSpec::new("arm_joint_target_rad", TensorDType::F64, vec![3], "rad").with_bounds(
-                TensorBounds::broadcast(-std::f64::consts::PI, std::f64::consts::PI),
-            ),
-            TensorSpec::new("lift_target_m", TensorDType::F64, vec![], "m")
-                .with_bounds(TensorBounds::broadcast(-0.5, 0.5)),
-            TensorSpec::new("gripper_velocity_m_s", TensorDType::F64, vec![], "m/s")
-                .with_bounds(TensorBounds::broadcast(-0.1, 0.1)),
-        ]),
-        RewardSpec::weighted_sum(vec![
-            RewardTermSpec::new("task_progress_m", 1.0, "m"),
-            RewardTermSpec::new("step", -0.001, "1"),
-            RewardTermSpec::new("task_completed", 10.0, "1"),
-        ]),
-        TerminationSpec::new(
-            vec![
-                TerminationConditionSpec::new(
-                    "inspection_pick_place_completed",
-                    TerminationKind::Success,
-                ),
-                TerminationConditionSpec::new("perception_stream_lost", TerminationKind::Failure),
-            ],
-            Some(MAX_WORKFLOW_STEPS),
-        ),
-        ResetSpec::splitmix64(false),
-    )
-    .with_randomization(RandomizationSpec::new(vec![
-        RandomizationParameterSpec::new(
-            DEPARTURE_DIMENSION,
-            "s",
-            RandomDistributionSpec::Uniform {
-                minimum: 0.0,
-                maximum: 0.25,
-            },
-        ),
-        RandomizationParameterSpec::new(
-            SPEED_DIMENSION,
-            "m/s",
-            RandomDistributionSpec::Uniform {
-                minimum: 0.0,
-                maximum: 0.25,
-            },
-        ),
-    ]))
 }
 
 fn decode_dimensions(dimensions: &[BehaviorDimension]) -> Result<ScenarioOverrides> {

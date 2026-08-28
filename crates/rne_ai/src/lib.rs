@@ -13,6 +13,7 @@ pub mod control_eval;
 pub mod domain_randomization;
 pub mod env;
 pub mod episode;
+pub mod flagship;
 pub mod goal;
 pub mod grasp;
 pub mod joint_trajectory;
@@ -165,6 +166,11 @@ pub use env::{
     TSUKUBA_ROAD_EDGE_BEFORE_M, TSUKUBA_STOP_LINE_AFTER_M, TSUKUBA_STOP_LINE_BEFORE_M,
 };
 pub use episode::{Episode, EpisodeRandomSnapshot, EpisodeStep, TerminationReason};
+pub use flagship::{
+    flagship_mobile_lift_task_spec, FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID,
+    FLAGSHIP_MOBILE_LIFT_MAX_WORKFLOW_STEPS, FLAGSHIP_MOBILE_LIFT_TASK_ID,
+    FLAGSHIP_TRAFFIC_DEPARTURE_DIMENSION, FLAGSHIP_TRAFFIC_SPEED_DIMENSION,
+};
 pub use goal::{
     goal_x_from_observation, GoalConditionedAdapter, GoalConditionedPolicy, GoalCurriculum,
     GoalCurriculumConfig, GoalCurriculumSnapshot, GoalCurriculumSnapshotError, GoalCurriculumStage,

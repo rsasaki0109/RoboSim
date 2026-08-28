@@ -111,6 +111,11 @@ pass the registered tolerances with explicit units. The Failure Capsule binds
 the task, model, configuration, reports, replay, browser inspector, producer,
 and installed-bundle verification by size and SHA-256.
 
+The backend-neutral source of that exact contract is
+`rne_ai::flagship_mobile_lift_task_spec`; the stable TaskSpec/controller IDs are
+exported beside it. Release, recorded/shadow, simulator-adapter, and bounded
+hardware paths must call that generator rather than copy its tensor schema.
+
 The recorded proof exercises the same typed contract as bounded playback and
 non-actuating shadow traffic, plus an expected process-disconnect case. It is
 not evidence of physical actuation. Gazebo qualification remains a separate
