@@ -255,6 +255,18 @@ Missing, duplicate, reordered, overflowing, or invalid inputs fail without
 advancing state. Parent-order observation fusion and complete file-content
 bindings remain open; the scheduler alone does not authorize a live run.
 
+The parent-order portion of slice 1 is now implemented as the stateful
+`FlagshipLeKiwiObservationFuser`. It requires separately identified and
+tick-stamped physical, localization, perception, traffic, and task-state
+sources; validates freshness and monotonic continuity; applies an explicit
+three-joint morphology calibration; and emits the exact 19-value release
+observation with source-age, unused-physical-value, and deterministic-hash
+evidence. It refuses zero-filled perception and never assumes SO-101 matches
+the simulation arm. The remaining closure is to hash and rehash the actual
+TaskSpec, controller, profile, calibration, localization, perception, traffic,
+and task-state configuration files and bind these three boundary artifacts into
+one shadow-run manifest. No actuation is authorized by fusion alone.
+
 ### Gate 5: independent adoption
 
 The product hypothesis is accepted only after independent use.

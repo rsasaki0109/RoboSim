@@ -255,6 +255,15 @@ physical write stream. Every source action is projection-validated, including
 explicitly suppressed odd sequences. Sequence gaps, duplicates, reordering,
 overflow, or invalid projections fail without advancing scheduler state.
 
+Flagship-to-LeKiwi observation-fusion schema v1 requires five independently
+identified, content-labelled, simulation-tick sources plus an explicit
+three-channel morphology calibration. It emits exactly 19 values in the 12
+parent TaskSpec tensors, records source ages and unused physical observations,
+and hashes the result. It never fills unavailable task state with defaults.
+Future/stale samples, source mutation under a reused sequence, identity changes,
+sequence/tick regressions, invalid calibration, missing camera/depth, and
+nonfinite values fail without advancing fuser state.
+
 LeKiwi physical-evidence manifest schema v1 indexes every required v0.6 exit
 artifact by explicit kind/schema, a unique canonical relative path, and a
 `sha256:` digest. It binds one

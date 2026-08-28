@@ -92,6 +92,26 @@ exactly two `16,666,667 ns` simulation ticks and therefore never exceeds the
 inputs fail without advancing state. This wall-clock-free rate proof still does
 not supply the parent-order observation required to execute the controller.
 
+`rne_hardware_lekiwi::flagship_observation` schema v1 supplies that parent-order
+boundary without pretending LeKiwi observes the whole task. A stateful fuser
+requires five explicit sources: normalized LeKiwi feedback, metric base
+localization, calibrated payload/wrist perception, task-level traffic state,
+and lift/gripper/policy task state. Every source carries an integer sample tick,
+monotonic sequence, maximum age, stable identity, and `sha256:` source-contract
+label. Held observations are accepted for the intermediate 60 Hz decision only
+when the complete canonical typed encoding is identical; stale, future,
+regressed, mutated, missing-camera, or nonfinite input fails without advancing
+state.
+
+The three flagship arm elements require a named affine morphology calibration;
+the fuser does not assume that SO-101 and the simulation model share joints.
+Unmapped arm positions, physical gripper percentage, and base velocities remain
+explicitly unused evidence. The output is exactly the 19 flattened values and
+12 tensors of the release TaskSpec, with a deterministic observation digest.
+Source-contract digest labels are checked structurally here, but hashing and
+rehashing the actual source/configuration files remains part of the following
+full-content binding slice. No physical arm/lift/gripper authority is added.
+
 ## Safety case
 
 The initial physical profile does not grant arm actuation. A normal base
