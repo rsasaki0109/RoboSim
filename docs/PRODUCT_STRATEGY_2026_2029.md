@@ -439,7 +439,9 @@ artifacts and atomically adds the schema-v9 entry without trusting copied
 digests. The external-simulator acceptance command applies the same operation
 to the adapter's twelve-file chain and ordered launch arguments. The
 external-plugin acceptance command applies it to the release archive, library,
-manifest, conformance report, candidate, logs, and maintainer report.
+manifest, conformance report, candidate, logs, and maintainer report. The
+external-project acceptance command additionally revalidates the complete
+Failure Capsule artifact closure before the manifest swap.
 The companion external-intake registry fixes four public submission routes
 for the installed flagship, task reproductions, controller plugins, and
 backend/hardware/accelerator systems. Readiness manifest v4 audits accelerator subjects, TaskSpecs,

@@ -43,8 +43,9 @@ files after human independence review. `readiness-pack
 accept-external-simulator` does the same for the complete twelve-file simulator
 chain and its exact ordered arguments. `readiness-pack accept-external-plugin`
 revalidates the complete eight-file controller-plugin chain before registering
-it. The audit rehashes and parses the retained bytes; it does not trust issue
-text.
+it. `readiness-pack accept-external-project` revalidates the seven primary
+project files plus every artifact bound by the Failure Capsule. The audit
+rehashes and parses the retained bytes; it does not trust issue text.
 
 Compute digests with one of:
 

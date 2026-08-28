@@ -1,7 +1,8 @@
 //! Safe authoring helpers for an external RNE 1.0 readiness evidence pack.
 
 use super::{
-    external_plugin, external_simulator, release_artifacts, release_readiness, workspace_root,
+    external_plugin, external_project, external_simulator, release_artifacts, release_readiness,
+    workspace_root,
 };
 use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
@@ -29,7 +30,7 @@ pub(crate) fn run(args: &mut impl Iterator<Item = String>) -> Result<()> {
     let command = args
         .next()
         .context(
-            "readiness-pack requires a command: init, stage, accept-installed-flagship, accept-external-plugin, or accept-external-simulator; use readiness-pack --help",
+            "readiness-pack requires a command: init, stage, accept-installed-flagship, accept-external-project, accept-external-plugin, or accept-external-simulator; use readiness-pack --help",
         )?;
     match command.as_str() {
         "init" => {
@@ -73,6 +74,16 @@ pub(crate) fn run(args: &mut impl Iterator<Item = String>) -> Result<()> {
             accept_external_plugin(&root, &options)?;
             println!(
                 "external controller plugin evidence accepted: id={} manifest={}",
+                options.id,
+                options.pack.join(MANIFEST_NAME).display()
+            );
+            Ok(())
+        }
+        "accept-external-project" => {
+            let options = parse_accept_external_project_options(args, &root)?;
+            accept_external_project(&root, &options)?;
+            println!(
+                "external project evidence accepted: id={} manifest={}",
                 options.id,
                 options.pack.join(MANIFEST_NAME).display()
             );
@@ -182,6 +193,35 @@ struct AcceptedExternalPluginEvidence {
     submission_report: StagedEvidence,
 }
 
+#[derive(Debug)]
+struct AcceptExternalProjectOptions {
+    pack: PathBuf,
+    id: String,
+    owner: String,
+    repository: String,
+    revision: String,
+    first_used_on: String,
+    last_verified_on: String,
+    release_archive: String,
+    task_spec: String,
+    failure_capsule: String,
+    submission_candidate: String,
+    stdout_log: String,
+    stderr_log: String,
+    submission_report: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct AcceptedExternalProjectEvidence {
+    release_archive: StagedEvidence,
+    task_spec: StagedEvidence,
+    failure_capsule: StagedEvidence,
+    submission_candidate: StagedEvidence,
+    stdout_log: StagedEvidence,
+    stderr_log: StagedEvidence,
+    submission_report: StagedEvidence,
+}
+
 fn print_usage() {
     println!("readiness-pack init --output DIR");
     println!("readiness-pack stage --pack DIR --source FILE --path FORWARD/SLASH/PATH");
@@ -193,6 +233,9 @@ fn print_usage() {
     );
     println!(
         "readiness-pack accept-external-plugin --pack DIR --id ID --owner OWNER \\\n         --repository URL --revision COMMIT --release-archive PATH --library PATH \\\n         --manifest PATH --conformance-report PATH --submission-candidate PATH \\\n         --stdout-log PATH --stderr-log PATH --submission-report PATH"
+    );
+    println!(
+        "readiness-pack accept-external-project --pack DIR --id ID --owner OWNER \\\n         --repository URL --revision COMMIT --first-used-on YYYY-MM-DD \\\n         --last-verified-on YYYY-MM-DD --release-archive PATH --task-spec PATH \\\n         --failure-capsule PATH --submission-candidate PATH --stdout-log PATH \\\n         --stderr-log PATH --submission-report PATH"
     );
 }
 
@@ -495,6 +538,92 @@ fn parse_accept_external_plugin_options(
         stderr_log: stderr_log.context("accept-external-plugin requires --stderr-log PATH")?,
         submission_report: submission_report
             .context("accept-external-plugin requires --submission-report PATH")?,
+    })
+}
+
+fn parse_accept_external_project_options(
+    args: &mut impl Iterator<Item = String>,
+    root: &Path,
+) -> Result<AcceptExternalProjectOptions> {
+    let mut pack = None;
+    let mut id = None;
+    let mut owner = None;
+    let mut repository = None;
+    let mut revision = None;
+    let mut first_used_on = None;
+    let mut last_verified_on = None;
+    let mut release_archive = None;
+    let mut task_spec = None;
+    let mut failure_capsule = None;
+    let mut submission_candidate = None;
+    let mut stdout_log = None;
+    let mut stderr_log = None;
+    let mut submission_report = None;
+    while let Some(argument) = args.next() {
+        anyhow::ensure!(
+            matches!(
+                argument.as_str(),
+                "--pack"
+                    | "--id"
+                    | "--owner"
+                    | "--repository"
+                    | "--revision"
+                    | "--first-used-on"
+                    | "--last-verified-on"
+                    | "--release-archive"
+                    | "--task-spec"
+                    | "--failure-capsule"
+                    | "--submission-candidate"
+                    | "--stdout-log"
+                    | "--stderr-log"
+                    | "--submission-report"
+            ),
+            "unknown readiness-pack accept-external-project argument: {argument}"
+        );
+        let value = next_value(args, &argument)?;
+        match argument.as_str() {
+            "--pack" => set_once(&mut pack, absolute_from(root, value), "--pack")?,
+            "--id" => set_once(&mut id, value, "--id")?,
+            "--owner" => set_once(&mut owner, value, "--owner")?,
+            "--repository" => set_once(&mut repository, value, "--repository")?,
+            "--revision" => set_once(&mut revision, value, "--revision")?,
+            "--first-used-on" => set_once(&mut first_used_on, value, "--first-used-on")?,
+            "--last-verified-on" => set_once(&mut last_verified_on, value, "--last-verified-on")?,
+            "--release-archive" => set_once(&mut release_archive, value, "--release-archive")?,
+            "--task-spec" => set_once(&mut task_spec, value, "--task-spec")?,
+            "--failure-capsule" => set_once(&mut failure_capsule, value, "--failure-capsule")?,
+            "--submission-candidate" => {
+                set_once(&mut submission_candidate, value, "--submission-candidate")?
+            }
+            "--stdout-log" => set_once(&mut stdout_log, value, "--stdout-log")?,
+            "--stderr-log" => set_once(&mut stderr_log, value, "--stderr-log")?,
+            "--submission-report" => {
+                set_once(&mut submission_report, value, "--submission-report")?
+            }
+            _ => unreachable!("accepted argument was matched above"),
+        }
+    }
+    Ok(AcceptExternalProjectOptions {
+        pack: pack.context("accept-external-project requires --pack DIR")?,
+        id: id.context("accept-external-project requires --id ID")?,
+        owner: owner.context("accept-external-project requires --owner OWNER")?,
+        repository: repository.context("accept-external-project requires --repository URL")?,
+        revision: revision.context("accept-external-project requires --revision COMMIT")?,
+        first_used_on: first_used_on
+            .context("accept-external-project requires --first-used-on YYYY-MM-DD")?,
+        last_verified_on: last_verified_on
+            .context("accept-external-project requires --last-verified-on YYYY-MM-DD")?,
+        release_archive: release_archive
+            .context("accept-external-project requires --release-archive PATH")?,
+        task_spec: task_spec.context("accept-external-project requires --task-spec PATH")?,
+        failure_capsule: failure_capsule
+            .context("accept-external-project requires --failure-capsule PATH")?,
+        submission_candidate: submission_candidate
+            .context("accept-external-project requires --submission-candidate PATH")?,
+        stdout_log: stdout_log.context("accept-external-project requires --stdout-log PATH")?,
+        stderr_log: stderr_log.context("accept-external-project requires --stderr-log PATH")?,
+        submission_report: submission_report
+            .context("accept-external-project requires --submission-report PATH")?,
     })
 }
 
@@ -982,6 +1111,130 @@ fn manifest_with_external_plugin_entry(
     Ok(updated)
 }
 
+fn accept_external_project(root: &Path, options: &AcceptExternalProjectOptions) -> Result<()> {
+    let manifest_path = options.pack.join(MANIFEST_NAME);
+    release_readiness::validate_manifest_path(root, &manifest_path)?;
+    let evidence = verify_external_project_evidence(options)?;
+    let unique_paths = [
+        &evidence.release_archive.relative_path,
+        &evidence.task_spec.relative_path,
+        &evidence.failure_capsule.relative_path,
+        &evidence.submission_candidate.relative_path,
+        &evidence.stdout_log.relative_path,
+        &evidence.stderr_log.relative_path,
+        &evidence.submission_report.relative_path,
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>();
+    anyhow::ensure!(
+        unique_paths.len() == 7,
+        "external project evidence roles must reference seven distinct files"
+    );
+    validate_external_project_submission(options, &evidence)?;
+
+    let current = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("read readiness manifest {}", manifest_path.display()))?;
+    let updated = manifest_with_external_project_entry(&current, options, &evidence)?;
+    atomically_replace_manifest(root, &options.pack, &current, &updated, || {
+        let revalidated = verify_external_project_evidence(options)?;
+        anyhow::ensure!(
+            revalidated == evidence,
+            "external project primary evidence changed during acceptance"
+        );
+        validate_external_project_submission(options, &revalidated)
+    })
+}
+
+fn verify_external_project_evidence(
+    options: &AcceptExternalProjectOptions,
+) -> Result<AcceptedExternalProjectEvidence> {
+    Ok(AcceptedExternalProjectEvidence {
+        release_archive: verify_staged_file(&options.pack, &options.release_archive)?,
+        task_spec: verify_staged_file(&options.pack, &options.task_spec)?,
+        failure_capsule: verify_staged_file(&options.pack, &options.failure_capsule)?,
+        submission_candidate: verify_staged_file(&options.pack, &options.submission_candidate)?,
+        stdout_log: verify_staged_file(&options.pack, &options.stdout_log)?,
+        stderr_log: verify_staged_file(&options.pack, &options.stderr_log)?,
+        submission_report: verify_staged_file(&options.pack, &options.submission_report)?,
+    })
+}
+
+fn validate_external_project_submission(
+    options: &AcceptExternalProjectOptions,
+    evidence: &AcceptedExternalProjectEvidence,
+) -> Result<()> {
+    let staged_path = |reference: &StagedEvidence| options.pack.join(&reference.relative_path);
+    let submission_report_path = staged_path(&evidence.submission_report);
+    let report_bytes = fs::read(&submission_report_path).with_context(|| {
+        format!(
+            "read staged external project report {}",
+            submission_report_path.display()
+        )
+    })?;
+    external_project::validate_staged_submission_report(
+        &report_bytes,
+        external_project::StagedSubmission {
+            owner: &options.owner,
+            repository: &options.repository,
+            revision: &options.revision,
+            first_used_on: &options.first_used_on,
+            last_verified_on: &options.last_verified_on,
+            release_archive: &staged_path(&evidence.release_archive),
+            task_spec: &staged_path(&evidence.task_spec),
+            failure_capsule: &staged_path(&evidence.failure_capsule),
+            submission_candidate: &staged_path(&evidence.submission_candidate),
+            stdout_log: &staged_path(&evidence.stdout_log),
+            stderr_log: &staged_path(&evidence.stderr_log),
+        },
+    )
+}
+
+fn manifest_with_external_project_entry(
+    current: &str,
+    options: &AcceptExternalProjectOptions,
+    evidence: &AcceptedExternalProjectEvidence,
+) -> Result<String> {
+    anyhow::ensure!(
+        !current.contains('\r') || !current.replace("\r\n", "").contains('\r'),
+        "readiness manifest contains a non-canonical carriage return"
+    );
+    let mut updated = current.replace("\r\n", "\n");
+    if !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push('\n');
+    updated.push_str("[[external_project]]\n");
+    for (key, value) in [
+        ("id", options.id.as_str()),
+        ("owner", options.owner.as_str()),
+        ("repository", options.repository.as_str()),
+        ("revision", options.revision.as_str()),
+        ("first_used_on", options.first_used_on.as_str()),
+        ("last_verified_on", options.last_verified_on.as_str()),
+    ] {
+        updated.push_str(key);
+        updated.push_str(" = ");
+        updated.push_str(&toml_string(value));
+        updated.push('\n');
+    }
+    updated.push_str("author_assistance = false\n");
+    for (key, reference) in [
+        ("release_archive", &evidence.release_archive),
+        ("task_spec", &evidence.task_spec),
+        ("failure_capsule", &evidence.failure_capsule),
+        ("submission_candidate", &evidence.submission_candidate),
+        ("stdout_log", &evidence.stdout_log),
+        ("stderr_log", &evidence.stderr_log),
+        ("submission_report", &evidence.submission_report),
+    ] {
+        updated.push_str(key);
+        updated.push_str(" = ");
+        updated.push_str(&inline_reference(reference));
+        updated.push('\n');
+    }
+    Ok(updated)
+}
+
 fn verify_staged_file(pack: &Path, path: &str) -> Result<StagedEvidence> {
     let canonical_pack = fs::canonicalize(pack)
         .with_context(|| format!("resolve readiness pack {}", pack.display()))?;
@@ -1343,6 +1596,37 @@ mod tests {
         }
     }
 
+    fn external_project_options(pack: PathBuf) -> AcceptExternalProjectOptions {
+        AcceptExternalProjectOptions {
+            pack,
+            id: "external-project-a".to_string(),
+            owner: "external-owner".to_string(),
+            repository: "https://github.com/external-owner/mobile-manipulation".to_string(),
+            revision: "d".repeat(40),
+            first_used_on: "2026-08-16".to_string(),
+            last_verified_on: "2026-08-16".to_string(),
+            release_archive: "projects/a/release.tar.gz".to_string(),
+            task_spec: "projects/a/task.json".to_string(),
+            failure_capsule: "projects/a/capsule/capsule.json".to_string(),
+            submission_candidate: "projects/a/submission.json".to_string(),
+            stdout_log: "projects/a/stdout.txt".to_string(),
+            stderr_log: "projects/a/stderr.txt".to_string(),
+            submission_report: "projects/a/maintainer-report.json".to_string(),
+        }
+    }
+
+    fn external_project_evidence() -> AcceptedExternalProjectEvidence {
+        AcceptedExternalProjectEvidence {
+            release_archive: accepted_reference("projects/a/release.tar.gz", 1),
+            task_spec: accepted_reference("projects/a/task.json", 2),
+            failure_capsule: accepted_reference("projects/a/capsule/capsule.json", 3),
+            submission_candidate: accepted_reference("projects/a/submission.json", 4),
+            stdout_log: accepted_reference("projects/a/stdout.txt", 5),
+            stderr_log: accepted_reference("projects/a/stderr.txt", 6),
+            submission_report: accepted_reference("projects/a/maintainer-report.json", 7),
+        }
+    }
+
     #[test]
     fn initializes_an_external_pack_from_the_honest_baseline() {
         let root = workspace_root().unwrap();
@@ -1635,6 +1919,41 @@ mod tests {
     }
 
     #[test]
+    fn external_project_entry_is_complete_independent_and_duplicate_safe() {
+        let root = workspace_root().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let pack = temp.path().join("readiness");
+        init_pack(&root, &pack).unwrap();
+        let manifest_path = pack.join(MANIFEST_NAME);
+        let current = fs::read_to_string(&manifest_path).unwrap();
+        let options = external_project_options(pack.clone());
+        let evidence = external_project_evidence();
+
+        let updated = manifest_with_external_project_entry(&current, &options, &evidence)
+            .expect("external project entry");
+        let value = updated.parse::<toml::Value>().expect("valid TOML");
+        let entries = value["external_project"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["id"].as_str(), Some("external-project-a"));
+        assert_eq!(entries[0]["author_assistance"].as_bool(), Some(false));
+        assert_eq!(
+            entries[0]["failure_capsule"]["path"].as_str(),
+            Some("projects/a/capsule/capsule.json")
+        );
+        assert_eq!(
+            entries[0]["submission_report"]["path"].as_str(),
+            Some("projects/a/maintainer-report.json")
+        );
+        fs::write(&manifest_path, &updated).unwrap();
+        release_readiness::validate_manifest_path(&root, &manifest_path).unwrap();
+
+        let duplicate =
+            manifest_with_external_project_entry(&updated, &options, &evidence).unwrap();
+        fs::write(&manifest_path, duplicate).unwrap();
+        assert!(release_readiness::validate_manifest_path(&root, &manifest_path).is_err());
+    }
+
+    #[test]
     fn rejects_unsafe_destinations_and_oversized_sources() {
         let root = workspace_root().unwrap();
         let temp = tempfile::tempdir().unwrap();
@@ -1837,5 +2156,49 @@ mod tests {
         assert_eq!(parsed.pack, root.join("pack"));
         assert_eq!(parsed.id, "controller-a");
         assert_eq!(parsed.library, "plugins/libcontroller.so");
+
+        assert!(parse_accept_external_project_options(
+            &mut ["--pack", "pack", "--id", "only-partial"]
+                .map(str::to_string)
+                .into_iter(),
+            root
+        )
+        .is_err());
+        let mut project = [
+            "--pack",
+            "pack",
+            "--id",
+            "project-a",
+            "--owner",
+            "external-owner",
+            "--repository",
+            "https://github.com/external-owner/mobile-manipulation",
+            "--revision",
+            "dddddddddddddddddddddddddddddddddddddddd",
+            "--first-used-on",
+            "2026-08-16",
+            "--last-verified-on",
+            "2026-08-16",
+            "--release-archive",
+            "projects/a/release.tar.gz",
+            "--task-spec",
+            "projects/a/task.json",
+            "--failure-capsule",
+            "projects/a/capsule/capsule.json",
+            "--submission-candidate",
+            "projects/a/submission.json",
+            "--stdout-log",
+            "projects/a/stdout.txt",
+            "--stderr-log",
+            "projects/a/stderr.txt",
+            "--submission-report",
+            "projects/a/maintainer.json",
+        ]
+        .map(str::to_string)
+        .into_iter();
+        let parsed = parse_accept_external_project_options(&mut project, root).unwrap();
+        assert_eq!(parsed.pack, root.join("pack"));
+        assert_eq!(parsed.id, "project-a");
+        assert_eq!(parsed.failure_capsule, "projects/a/capsule/capsule.json");
     }
 }

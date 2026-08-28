@@ -6,6 +6,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Add `readiness-pack accept-external-project` for independently owned project
+  reproductions. It revalidates seven distinct retained files and the complete
+  Failure Capsule artifact closure before atomically adding the project entry.
+
 - Add `readiness-pack accept-external-plugin` for independently maintained
   controller plugins. It revalidates eight distinct staged files and the typed
   maintainer report before atomically adding the third-party plugin entry.

@@ -154,6 +154,33 @@ and rehashes every file again immediately before the atomic manifest swap.
 Ownership and independence remain human-reviewed facts rather than inferred
 claims.
 
+An accepted external project uses the full Failure Capsule closure rather than
+registering only its `capsule.json` digest:
+
+```powershell
+cargo run --locked -p xtask -- readiness-pack accept-external-project `
+  --pack E:/RoboSim-readiness `
+  --id independent-project-a `
+  --owner external-owner `
+  --repository https://github.com/external-owner/mobile-manipulation `
+  --revision 0123456789abcdef0123456789abcdef01234567 `
+  --first-used-on 2026-08-16 `
+  --last-verified-on 2026-08-27 `
+  --release-archive projects/a/rne-0.2.0-x86_64-pc-windows-msvc.zip `
+  --task-spec projects/a/task.json `
+  --failure-capsule projects/a/capsule/capsule.json `
+  --submission-candidate projects/a/submission.json `
+  --stdout-log projects/a/stdout.txt `
+  --stderr-log projects/a/stderr.txt `
+  --submission-report projects/a/maintainer-report.json
+```
+
+The command requires seven distinct contained primary files. It reruns the
+typed external-project validator both before staging the updated manifest and
+immediately before the atomic swap, so every artifact named by `capsule.json`
+is rehashed and matched to the independent maintainer report. It does not run
+the external project or infer ownership.
+
 Independent projects and extension authors submit the complete metadata and
 artifact checklist through the fixed
 [external evidence intake](EXTERNAL_EVIDENCE_INTAKE.md). Its issue forms are a
@@ -243,8 +270,13 @@ revision = "<40-lowercase-hex-commit>"
 first_used_on = "2026-08-16"
 last_verified_on = "2027-02-15"
 author_assistance = false
+release_archive = { path = "projects/a/rne-0.2.0-x86_64-pc-windows-msvc.zip", sha256 = "sha256:<64-lowercase-hex>" }
 task_spec = { path = "projects/a/task.json", sha256 = "sha256:<64-lowercase-hex>" }
 failure_capsule = { path = "projects/a/capsule/capsule.json", sha256 = "sha256:<64-lowercase-hex>" }
+submission_candidate = { path = "projects/a/submission.json", sha256 = "sha256:<64-lowercase-hex>" }
+stdout_log = { path = "projects/a/stdout.txt", sha256 = "sha256:<64-lowercase-hex>" }
+stderr_log = { path = "projects/a/stderr.txt", sha256 = "sha256:<64-lowercase-hex>" }
+submission_report = { path = "projects/a/maintainer-report.json", sha256 = "sha256:<64-lowercase-hex>" }
 
 [[third_party_plugin]]
 id = "external-controller"
