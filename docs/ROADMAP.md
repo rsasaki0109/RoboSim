@@ -104,10 +104,14 @@ bridge, shadow-authority, and independent-watchdog tests. A profile-bound host
 runner now turns the actual Open/poll/actuate/zero-stop/Close exchange into one
 validated artifact, distinguishes mock from physical device identity, and
 refuses a clean completion with authority, pending output, or a safety latch.
-A versioned physical-evidence manifest and staged verifier now prevent mock,
-mixed-device, incomplete safety, unverified dataset, or checklist-only output
-from satisfying the exit. A real LeKiwi shadow, HIL safety matrix, and
-low-speed live run remain open.
+A versioned base-only physical-evidence manifest and staged verifier now prevent
+mock, mixed-device, incomplete safety, unverified dataset, or checklist-only
+output from satisfying the reference-device exit. A real LeKiwi shadow, HIL
+safety matrix, and low-speed live run remain open. That reference-device exit
+is necessary but not sufficient for the flagship physical gate: the 30 Hz
+base-velocity TaskSpec is not the release flagship TaskSpec/controller. An
+explicit content-addressed rate/observation/action projection, elevated
+parent-controller shadow, and bounded live success/failure are also required.
 
 The first v0.7 flagship slice is also integrated. `cargo run --locked -p xtask
 -- flagship` coordinates imported mobile-lift assets, RGB-D inspection,

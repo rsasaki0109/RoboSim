@@ -4,6 +4,16 @@ Status: selected profile, device bridge, profile-bound evidence runner, and
 machine-verifiable physical-evidence manifest; physical shadow/HIL/live
 evidence has not yet been captured.
 
+This base-only profile is the safety prerequisite for the bounded physical
+flagship, not the flagship proof itself. It runs
+`rne.lekiwi_so101.base_shadow.v1`, whereas the release flagship runs
+`rne.flagship.mobile_lift_shared_aisle.v1` with
+`rne.ai.ik_mobile_lift_pick_place_policy.v1`. The rate, observation, and action
+spaces differ. Gate 4 therefore additionally requires the explicit full-task
+projection, elevated parent-controller shadow, bounded live success/failure,
+and complete artifact closure defined in the
+[external product proof plan](PLAN_EXTERNAL_PRODUCT_PROOF.md#gate-4-bounded-physical-proof).
+
 ## Selection
 
 RNE v0.6 uses LeKiwi with the SO-101 follower arm as its first affordable
@@ -278,4 +288,6 @@ line after replaying every nested contract.
 
 A profile golden or mock process pass is not physical evidence. Until these
 artifacts exist, roadmap language must say that real-hardware evidence remains
-open.
+open. Even after this base-only manifest passes, the same-contract flagship
+physical gate remains open until the separately hashed projection and
+parent-controller evidence pass; the two claims must not be conflated.

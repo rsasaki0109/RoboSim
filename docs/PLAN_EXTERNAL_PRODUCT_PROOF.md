@@ -194,6 +194,47 @@ Acceptance criteria:
   inspectable;
 - no claim extends beyond the measured robot, adapter, and environment.
 
+This gate is currently open for a semantic reason, not only because physical
+bytes have not yet been captured. The existing LeKiwi reference runner is bound
+to `rne.lekiwi_so101.base_shadow.v1` at 30 Hz, while the installed flagship is
+bound to `rne.flagship.mobile_lift_shared_aisle.v1` and its unchanged
+`rne.ai.ik_mobile_lift_pick_place_policy.v1` controller at the simulation
+control period. The former uses base velocity actions in `m/s` and `rad/s`; the
+latter emits wheel velocity in `rad/s` plus arm, lift, and gripper actions. A
+passing base-only LeKiwi physical-evidence manifest is therefore necessary
+reference-device safety evidence, but it is not the same-contract Gate 4 proof
+and must never be relabelled as such.
+
+Gate 4 proceeds through these ordered implementation slices:
+
+1. Define a versioned, content-addressed hardware projection contract that
+   binds the full parent TaskSpec and controller bytes, the physical TaskSpec
+   and profile bytes, every observation source, every action destination, and
+   the exact transform configuration.
+2. Make control-rate adaptation explicit. The retained report must name input
+   and output rates, timestamp domains, hold/interpolation policy, maximum age,
+   and the first dropped or stale sample; an implicit 60-to-30 Hz conversion is
+   forbidden.
+3. Make the wheel-to-kiwi realization explicit. Wheel radius, geometry,
+   coordinate convention, unit conversion, saturation, and independently
+   recomputed command residuals are hashed evidence rather than hidden adapter
+   constants.
+4. Assemble controller-visible observations in the unchanged parent TaskSpec
+   order. Every element is classified as physical, calibrated physical,
+   simulated, or unavailable; physical camera and joint channels retain their
+   calibration and latency. Unavailable controller-required data fails closed.
+5. Run an elevated physical shadow with the parent controller and zero actuator
+   writes, then a low-speed live projection in which only predeclared base
+   authority is enabled. Arm, lift, and gripper outputs remain explicitly
+   suppressed until their own physical safety evidence exists.
+6. Retain one passing bounded run and one intentional safety stop in a verified
+   Failure Capsule. The capsule binds both TaskSpecs, controller, projection,
+   profile, calibration, model/configuration hashes, wire trace, first contract
+   violation, SI-unit tolerances, replay, and browser inspector.
+7. Extend readiness acceptance only after the verifier replays that complete
+   closure. The existing base-only `reference_hardware` artifact cannot satisfy
+   this flagship-specific gate by itself.
+
 ### Gate 5: independent adoption
 
 The product hypothesis is accepted only after independent use.
