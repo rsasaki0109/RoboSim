@@ -64,6 +64,13 @@ report, and the complete inner schema-v7 rehearsal. Validation reconstructs the
 checksum graph and requires the staged and independently extracted verdict maps
 to be identical. Schema v1 remains historical archive-bound evidence but lacks
 the timing-report identity required by the current gate.
+Bundle assembly is deliberately two-stage. The pre-manifest rehearsal executes
+the packaged flagship proof without installed-bundle verification or a
+time-to-proof report, because `release-report.json` and `SHA256SUMS` do not exist
+yet. After those files are written and verified, `release-install-smoke` runs
+from a fresh extraction and requires the full checksum graph, retained
+installed-bundle verification, and the 15-minute timing report. The two stages
+must produce identical twelve-check verdict maps.
 After all twelve checks pass, including the installed flagship and external simulator proofs, xtask deletes the tool-owned wheel virtual
 environment and controller and accelerator scaffolds. `release-bundle`
 additionally deletes its
