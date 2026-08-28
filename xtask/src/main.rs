@@ -1420,6 +1420,11 @@ fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
         ),
         (
             "tasks",
+            "flagship_mobile_lift_controller",
+            u64::from(rne_ai::FLAGSHIP_MOBILE_LIFT_CONTROLLER_CONTRACT_SCHEMA_VERSION),
+        ),
+        (
+            "tasks",
             "batch_checkpoint",
             u64::from(rne_ai::PORTABLE_BATCH_CHECKPOINT_VERSION),
         ),

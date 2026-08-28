@@ -49,6 +49,7 @@ contract = 1
 
 [tasks]
 task_spec = 1
+flagship_mobile_lift_controller = 1
 batch_checkpoint = 2
 vectorized_episode_checkpoint = 1
 

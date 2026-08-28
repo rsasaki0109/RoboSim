@@ -14,6 +14,13 @@ projection, elevated parent-controller shadow, bounded live success/failure,
 and complete artifact closure defined in the
 [external product proof plan](PLAN_EXTERNAL_PRODUCT_PROOF.md#gate-4-bounded-physical-proof).
 
+The original 19-value flagship shadow boundary is now explicitly transitional:
+an audit showed that its v1 TaskSpec omitted dynamic base yaw and place target
+values used by the named controller. The additive v2 TaskSpec and
+`FlagshipMobileLiftControllerV2` remove that hidden simulator-state dependency.
+Physical flagship capture must wait for the LeKiwi fuser and manifest to migrate
+to v2; a valid v1 manifest must not be promoted as same-controller evidence.
+
 ## Selection
 
 RNE v0.6 uses LeKiwi with the SO-101 follower arm as its first affordable

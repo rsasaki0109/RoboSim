@@ -270,10 +270,25 @@ observation streams. Seal and verify reject links and path escapes, rehash every
 byte, replay all three stateful boundaries, cross-check each 60 Hz controller
 sample against the 30 Hz physical session, and reject any Actuate frame. Mock
 fixtures prove the closure tooling but are explicitly not physical evidence.
-The remaining Gate 4 work begins at slice 5: capture an elevated physical shadow
-with this manifest, then perform the separately authorized bounded live success
-and intentional safety-stop runs. No actuation is authorized by fusion or the
-shadow manifest alone.
+
+A controller-input audit subsequently found that the historical v1 TaskSpec is
+not sufficient to execute its named `IkMobileLiftPickPlacePolicy`: base yaw and
+the dynamic place target were read from simulator-private observation fields.
+Therefore the v1 shadow manifest is a valid verifier for its declared 19-value
+stream, but cannot qualify as the final same-TaskSpec/same-controller Gate 4
+proof. The additive v2 TaskSpec now supplies a 24-value, 14-tensor observation
+with full base pose and place target. Its serializable built-in controller
+contract binds tensor order, mobile-lift geometry, and the `0.1 m/s` and
+`pi/6 rad/s` proportional output bounds. `FlagshipMobileLiftControllerV2`
+consumes only those flattened values, derives geometric features from the bound
+model, holds without state advance on red/uncleared traffic, and rejects missing
+RGB-D or phase disagreement without state advance.
+
+The remaining Gate 4 implementation work is to migrate the LeKiwi fuser,
+projection streams, manifest, installed Rapier/MuJoCo runner, and recorded path
+to this v2 identity before any elevated capture. Only then may an elevated
+physical shadow, separately authorized bounded live success, and intentional
+safety-stop run count. No actuation is authorized by either manifest version.
 
 ### Gate 5: independent adoption
 

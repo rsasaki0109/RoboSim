@@ -122,6 +122,17 @@ unsupported constructs remain explicit import errors.
 TaskSpec schema v1 rejects unknown fields and validates fixed tensor shape,
 dtype, row-major order, units, bounds, reward terms, termination, reset,
 curriculum, and randomization before execution. Ordered arrays are semantic.
+The flagship mobile-lift TaskSpec identity v2 is an additive task contract on
+that same generic schema. It expands the controller-visible observation from
+the historical 19-value v1 shape to 24 values by supplying full XYZ base
+position, base yaw, and the world-frame place target. The registered flagship
+controller-contract artifact schema v1 binds that exact 14-tensor order, the
+four action tensors, numeric mobile-lift geometry, and explicit `0.1 m/s` and
+`pi/6 rad/s` output limits. `FlagshipMobileLiftControllerV2` accepts only the
+flattened TaskSpec observation; it derives end-effector and relative-target
+features from the bound kinematics instead of reading simulator-private state.
+The older flagship task/controller identities remain readable compatibility
+artifacts but do not prove a hidden-state-free controller boundary.
 Portable batch checkpoint schema v2 embeds its TaskSpec and chronological
 step/partial-reset operations. The legacy `VectorizedEpisode` API and its
 checkpoint remain unchanged for patch compatibility; new portable execution
