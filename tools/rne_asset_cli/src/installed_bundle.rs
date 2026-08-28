@@ -232,7 +232,8 @@ fn hash_member(path: &Path) -> Result<ActualMember> {
         .with_context(|| format!("open installed bundle member {}", path.display()))?;
     let size_bytes = file.metadata()?.len();
     let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    // Keep the hashing buffer off the main thread's comparatively small Windows stack.
+    let mut buffer = vec![0_u8; 1024 * 1024];
     let mut hashed_bytes = 0_u64;
     loop {
         let read = file

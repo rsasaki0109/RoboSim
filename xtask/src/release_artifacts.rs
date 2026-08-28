@@ -2124,10 +2124,13 @@ fn build_archive_install_report(
     validate_archive_subject(&archive, archive_path, &archive_sha256, &release.target)?;
     let release_bytes = fs::read(bundle_dir.join(RELEASE_REPORT))?;
     let checksum_bytes = fs::read(bundle_dir.join(SHA256_MANIFEST))?;
+    let staged_rehearsal_bytes = fs::read(bundle_dir.join(INSTALL_REPORT))?;
+    let staged_rehearsal: InstallRehearsalReport = serde_json::from_slice(&staged_rehearsal_bytes)?;
     validate_release_members(&release.members)?;
-    validate_release_checksum_chain(release, &release_bytes, &checksum_bytes, rehearsal)?;
+    validate_release_checksum_chain(release, &release_bytes, &checksum_bytes, &staged_rehearsal)?;
     anyhow::ensure!(
-        release.installed_workflows == rehearsal.verdicts(),
+        release.installed_workflows == staged_rehearsal.verdicts()
+            && release.installed_workflows == rehearsal.verdicts(),
         "independent rehearsal verdicts differ from the staged release report"
     );
     let release_report = MemberDigest {
