@@ -3,15 +3,19 @@
 use crate::actuator::ControlMode;
 use crate::commands::{ActuatorCommand, ActuatorCommandBuffer};
 use crate::components::{
-    AckermannDrive, Actuator, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
-    MultirotorFlight, TransmissionSpec, VehicleDynamics, WheelAssemblySpec,
+    AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState, DcMotorFailureMode,
+    DcMotorSpec, DcMotorState, Joint, JointKind, MultirotorFlight, TransmissionSpec,
+    VehicleDynamics, WheelAssemblySpec,
 };
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
 use bevy_ecs::prelude::{Entity, World};
 use rne_core::SimDuration;
 use rne_math::{Quat, Vec3};
-use rne_physics::{Collider, ColliderShape, JointActuation, JointMotor, RigidBody, RigidBodyType};
+use rne_physics::{
+    Collider, ColliderShape, ContactPointSample, ExternalBodyWrench, JointActuation, JointMotor,
+    RigidBody, RigidBodyType,
+};
 use rne_world::Transform3;
 use thiserror::Error;
 
@@ -61,6 +65,287 @@ pub struct TransmissionEvaluation {
     pub reflected_rotor_inertia_kg_m2: f64,
     /// Efficiency selected from the direction of mechanical power flow.
     pub applied_efficiency_ratio: f64,
+}
+
+/// Load-weighted contact patch reconstructed from completed backend contact evidence.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WheelContactPatch {
+    /// Wheel entity represented by this patch.
+    pub wheel_entity: Entity,
+    /// Load-weighted application point in world coordinates, in meters.
+    pub point_world_m: Vec3,
+    /// Load-weighted unit normal pointing from the road toward the wheel.
+    pub normal_road_to_wheel_world: Vec3,
+    /// Wheel-surface velocity relative to the road at the patch, in meters per second.
+    pub wheel_relative_to_road_world_m_s: Vec3,
+    /// Total step-average normal load carried by the patch, in newtons.
+    pub normal_load_n: f64,
+}
+
+/// Completed force and state from one transient combined-slip tire step.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CombinedSlipTireEvaluation {
+    /// State to retain for the next completed tire step.
+    pub state: CombinedSlipTireState,
+    /// Longitudinal force on the wheel in its positive-forward direction, in newtons.
+    pub longitudinal_force_n: f64,
+    /// Lateral force on the wheel in its positive-lateral direction, in newtons.
+    pub lateral_force_n: f64,
+    /// Load-sensitive longitudinal force limit after road scaling, in newtons.
+    pub longitudinal_peak_force_n: f64,
+    /// Load-sensitive lateral force limit after road scaling, in newtons.
+    pub lateral_peak_force_n: f64,
+    /// Combined utilization of the friction ellipse, bounded by one.
+    pub friction_utilization: f64,
+}
+
+/// Completed contact and wheel-frame inputs for one combined-slip tire step.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CombinedSlipTireInput {
+    /// Aggregated completed-step contact, or `None` when the wheel is lifted.
+    pub patch: Option<WheelContactPatch>,
+    /// Positive wheel-forward unit axis in world coordinates.
+    pub forward_world: Vec3,
+    /// Positive wheel-lateral unit axis in world coordinates.
+    pub lateral_world: Vec3,
+    /// Signed wheel circumference speed from its completed angular coordinate, in meters per second.
+    pub wheel_circumferential_speed_m_s: f64,
+    /// Non-negative road friction multiplier for this patch.
+    pub road_friction_scale: f64,
+}
+
+/// Aggregates deterministic point-contact evidence for one wheel.
+///
+/// `forward_world` and `lateral_world` must be finite, unit length, and orthogonal.
+/// Samples not containing `wheel_entity`, non-positive loads, and non-finite samples are
+/// ignored. The returned surface velocity and normal always use the road-to-wheel
+/// convention, independently of canonical entity ordering.
+pub fn aggregate_wheel_contact_patch(
+    wheel_entity: Entity,
+    samples: &[ContactPointSample],
+    forward_world: Vec3,
+    lateral_world: Vec3,
+) -> Result<Option<WheelContactPatch>, MobilityPlantEvaluationError> {
+    const AXIS_TOLERANCE: f64 = 1.0e-6;
+    if !forward_world.is_finite()
+        || !lateral_world.is_finite()
+        || (forward_world.length() - 1.0).abs() > AXIS_TOLERANCE
+        || (lateral_world.length() - 1.0).abs() > AXIS_TOLERANCE
+        || forward_world.dot(lateral_world).abs() > AXIS_TOLERANCE
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+
+    let mut normal_load_n = 0.0;
+    let mut weighted_point = Vec3::ZERO;
+    let mut weighted_normal = Vec3::ZERO;
+    let mut weighted_velocity = Vec3::ZERO;
+    for sample in samples {
+        if sample.normal_force_n <= 0.0
+            || !sample.normal_force_n.is_finite()
+            || !sample.point_world_m.is_finite()
+            || !sample.normal_a_to_b.is_finite()
+            || !sample.velocity_b_relative_to_a_world_m_s.is_finite()
+        {
+            continue;
+        }
+        let (normal_road_to_wheel, wheel_relative_to_road) = if sample.entity_a == wheel_entity {
+            (
+                -sample.normal_a_to_b,
+                -sample.velocity_b_relative_to_a_world_m_s,
+            )
+        } else if sample.entity_b == wheel_entity {
+            (
+                sample.normal_a_to_b,
+                sample.velocity_b_relative_to_a_world_m_s,
+            )
+        } else {
+            continue;
+        };
+        let weight = sample.normal_force_n;
+        normal_load_n += weight;
+        weighted_point += sample.point_world_m * weight;
+        weighted_normal += normal_road_to_wheel * weight;
+        weighted_velocity += wheel_relative_to_road * weight;
+    }
+    if normal_load_n == 0.0 {
+        return Ok(None);
+    }
+    let normal = weighted_normal.normalize_or_zero();
+    if normal == Vec3::ZERO {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    Ok(Some(WheelContactPatch {
+        wheel_entity,
+        point_world_m: weighted_point / normal_load_n,
+        normal_road_to_wheel_world: normal,
+        wheel_relative_to_road_world_m_s: weighted_velocity / normal_load_n,
+        normal_load_n,
+    }))
+}
+
+/// Evaluates one deterministic, identifiable transient combined-slip tire force.
+///
+/// The contact velocity already includes wheel rotation. Positive longitudinal slip is
+/// therefore `-surface_velocity / (abs(circumferential_speed) + v_num)`, matching the
+/// low-speed-safe convention used by handling-oriented tire models. `road_friction_scale`
+/// enables spatial or randomized road friction without changing the identified tire spec.
+pub fn evaluate_combined_slip_tire(
+    spec: CombinedSlipTireSpec,
+    state: CombinedSlipTireState,
+    input: CombinedSlipTireInput,
+    dt_s: f64,
+) -> Result<CombinedSlipTireEvaluation, MobilityPlantEvaluationError> {
+    if !spec.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    if !state.longitudinal_slip_ratio.is_finite()
+        || !state.lateral_slip_tangent.is_finite()
+        || !input.wheel_circumferential_speed_m_s.is_finite()
+        || !input.road_friction_scale.is_finite()
+        || input.road_friction_scale < 0.0
+        || !input.forward_world.is_finite()
+        || !input.lateral_world.is_finite()
+        || (input.forward_world.length() - 1.0).abs() > 1.0e-6
+        || (input.lateral_world.length() - 1.0).abs() > 1.0e-6
+        || input.forward_world.dot(input.lateral_world).abs() > 1.0e-6
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    if !dt_s.is_finite() || dt_s <= 0.0 {
+        return Err(MobilityPlantEvaluationError::InvalidTimeStep);
+    }
+    let Some(patch) = input.patch else {
+        return Ok(zero_tire_evaluation());
+    };
+    if !patch.point_world_m.is_finite()
+        || !patch.normal_road_to_wheel_world.is_finite()
+        || !patch.wheel_relative_to_road_world_m_s.is_finite()
+        || !patch.normal_load_n.is_finite()
+        || patch.normal_load_n <= 0.0
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+
+    let transport_speed_m_s =
+        input.wheel_circumferential_speed_m_s.abs() + spec.low_speed_regularization_m_s;
+    let longitudinal_surface_speed_m_s = patch
+        .wheel_relative_to_road_world_m_s
+        .dot(input.forward_world);
+    let lateral_surface_speed_m_s = patch
+        .wheel_relative_to_road_world_m_s
+        .dot(input.lateral_world);
+    let target_longitudinal_slip_ratio = -longitudinal_surface_speed_m_s / transport_speed_m_s;
+    let target_lateral_slip_tangent = -lateral_surface_speed_m_s / transport_speed_m_s;
+    let next_longitudinal_slip = relax_slip(
+        state.longitudinal_slip_ratio,
+        target_longitudinal_slip_ratio,
+        spec.longitudinal_relaxation_length_m,
+        transport_speed_m_s,
+        dt_s,
+    );
+    let next_lateral_slip = relax_slip(
+        state.lateral_slip_tangent,
+        target_lateral_slip_tangent,
+        spec.lateral_relaxation_length_m,
+        transport_speed_m_s,
+        dt_s,
+    );
+
+    let uncapped_load_ratio = patch.normal_load_n / spec.reference_load_n;
+    let load_ratio = uncapped_load_ratio.min(spec.maximum_load_ratio);
+    let friction_ratio = (1.0 - spec.load_sensitivity_per_load_ratio * (load_ratio - 1.0))
+        .max(spec.minimum_friction_ratio);
+    let longitudinal_peak_force_n = spec.longitudinal_peak_friction
+        * friction_ratio
+        * patch.normal_load_n
+        * input.road_friction_scale;
+    let lateral_peak_force_n = spec.lateral_peak_friction
+        * friction_ratio
+        * patch.normal_load_n
+        * input.road_friction_scale;
+    let raw_longitudinal_force_n =
+        spec.longitudinal_stiffness_n * load_ratio * next_longitudinal_slip;
+    let raw_lateral_force_n = spec.lateral_stiffness_n * load_ratio * next_lateral_slip;
+    let normalized_longitudinal = if longitudinal_peak_force_n > 0.0 {
+        raw_longitudinal_force_n / longitudinal_peak_force_n
+    } else {
+        0.0
+    };
+    let normalized_lateral = if lateral_peak_force_n > 0.0 {
+        raw_lateral_force_n / lateral_peak_force_n
+    } else {
+        0.0
+    };
+    let demand = normalized_longitudinal.hypot(normalized_lateral);
+    let force_scale = if demand > 1.0e-12 {
+        demand.tanh() / demand
+    } else {
+        1.0
+    };
+    let force_scale = if input.road_friction_scale == 0.0 {
+        0.0
+    } else {
+        force_scale
+    };
+    Ok(CombinedSlipTireEvaluation {
+        state: CombinedSlipTireState {
+            longitudinal_slip_ratio: next_longitudinal_slip,
+            lateral_slip_tangent: next_lateral_slip,
+        },
+        longitudinal_force_n: raw_longitudinal_force_n * force_scale,
+        lateral_force_n: raw_lateral_force_n * force_scale,
+        longitudinal_peak_force_n,
+        lateral_peak_force_n,
+        friction_utilization: demand.tanh(),
+    })
+}
+
+/// Converts a tire evaluation into the backend-neutral one-step wrench boundary.
+pub fn combined_slip_tire_wrench(
+    patch: WheelContactPatch,
+    evaluation: CombinedSlipTireEvaluation,
+    forward_world: Vec3,
+    lateral_world: Vec3,
+) -> Result<ExternalBodyWrench, MobilityPlantEvaluationError> {
+    if !forward_world.is_finite()
+        || !lateral_world.is_finite()
+        || !evaluation.longitudinal_force_n.is_finite()
+        || !evaluation.lateral_force_n.is_finite()
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let wrench = ExternalBodyWrench {
+        entity: patch.wheel_entity,
+        point_world_m: patch.point_world_m,
+        force_world_n: forward_world * evaluation.longitudinal_force_n
+            + lateral_world * evaluation.lateral_force_n,
+        torque_world_nm: Vec3::ZERO,
+    };
+    if !wrench.is_finite() {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    Ok(wrench)
+}
+
+fn relax_slip(current: f64, target: f64, length_m: f64, speed_m_s: f64, dt_s: f64) -> f64 {
+    if length_m == 0.0 {
+        target
+    } else {
+        let fraction = 1.0 - (-speed_m_s * dt_s / length_m).exp();
+        current + fraction * (target - current)
+    }
+}
+
+fn zero_tire_evaluation() -> CombinedSlipTireEvaluation {
+    CombinedSlipTireEvaluation {
+        state: CombinedSlipTireState::default(),
+        longitudinal_force_n: 0.0,
+        lateral_force_n: 0.0,
+        longitudinal_peak_force_n: 0.0,
+        lateral_peak_force_n: 0.0,
+        friction_utilization: 0.0,
+    }
 }
 
 /// Evaluates one DC motor from terminal voltage and completed rotor velocity.
@@ -1689,5 +1974,213 @@ mod tests {
         let across = (body.linear_velocity_m_s - forward * along).length();
         assert!(dynamics.lateral_velocity_m_s.abs() > 0.01);
         assert!((across - dynamics.lateral_velocity_m_s.abs()).abs() < 0.05);
+    }
+
+    fn test_patch(wheel_entity: Entity, velocity_m_s: Vec3, load_n: f64) -> WheelContactPatch {
+        WheelContactPatch {
+            wheel_entity,
+            point_world_m: Vec3::new(0.0, 0.0, 0.0),
+            normal_road_to_wheel_world: Vec3::Y,
+            wheel_relative_to_road_world_m_s: velocity_m_s,
+            normal_load_n: load_n,
+        }
+    }
+
+    fn test_tire_input(
+        patch: Option<WheelContactPatch>,
+        wheel_circumferential_speed_m_s: f64,
+        road_friction_scale: f64,
+    ) -> CombinedSlipTireInput {
+        CombinedSlipTireInput {
+            patch,
+            forward_world: Vec3::X,
+            lateral_world: Vec3::Z,
+            wheel_circumferential_speed_m_s,
+            road_friction_scale,
+        }
+    }
+
+    #[test]
+    fn contact_patch_normalizes_canonical_entity_orientation() {
+        let mut world = World::new();
+        let road = world.spawn_empty().id();
+        let wheel = world.spawn_empty().id();
+        let samples = [
+            ContactPointSample {
+                entity_a: road,
+                entity_b: wheel,
+                point_world_m: Vec3::new(-0.1, 0.0, 0.0),
+                normal_a_to_b: Vec3::Y,
+                velocity_b_relative_to_a_world_m_s: Vec3::new(-2.0, 0.0, 0.5),
+                normal_force_n: 300.0,
+            },
+            ContactPointSample {
+                entity_a: road,
+                entity_b: wheel,
+                point_world_m: Vec3::new(0.1, 0.0, 0.0),
+                normal_a_to_b: Vec3::Y,
+                velocity_b_relative_to_a_world_m_s: Vec3::new(-1.0, 0.0, 0.5),
+                normal_force_n: 100.0,
+            },
+        ];
+        let patch = aggregate_wheel_contact_patch(wheel, &samples, Vec3::X, Vec3::Z)
+            .unwrap()
+            .unwrap();
+        assert_eq!(patch.normal_load_n, 400.0);
+        assert_eq!(patch.point_world_m, Vec3::new(-0.05, 0.0, 0.0));
+        assert_eq!(patch.normal_road_to_wheel_world, Vec3::Y);
+        assert_eq!(
+            patch.wheel_relative_to_road_world_m_s,
+            Vec3::new(-1.75, 0.0, 0.5)
+        );
+
+        let inverted = [ContactPointSample {
+            entity_a: wheel,
+            entity_b: road,
+            point_world_m: Vec3::ZERO,
+            normal_a_to_b: Vec3::NEG_Y,
+            velocity_b_relative_to_a_world_m_s: Vec3::new(2.0, 0.0, -0.5),
+            normal_force_n: 400.0,
+        }];
+        let inverted_patch = aggregate_wheel_contact_patch(wheel, &inverted, Vec3::X, Vec3::Z)
+            .unwrap()
+            .unwrap();
+        assert_eq!(inverted_patch.normal_road_to_wheel_world, Vec3::Y);
+        assert_eq!(
+            inverted_patch.wheel_relative_to_road_world_m_s,
+            Vec3::new(-2.0, 0.0, 0.5)
+        );
+    }
+
+    #[test]
+    fn combined_slip_force_has_physical_sign_and_bounded_ellipse() {
+        let mut world = World::new();
+        let wheel = world.spawn_empty().id();
+        let spec = CombinedSlipTireSpec {
+            longitudinal_relaxation_length_m: 0.0,
+            lateral_relaxation_length_m: 0.0,
+            ..CombinedSlipTireSpec::default()
+        };
+        let evaluation = evaluate_combined_slip_tire(
+            spec,
+            CombinedSlipTireState::default(),
+            test_tire_input(
+                Some(test_patch(wheel, Vec3::new(-5.0, 0.0, 3.0), 1_000.0)),
+                10.0,
+                1.0,
+            ),
+            0.01,
+        )
+        .unwrap();
+        assert!(evaluation.longitudinal_force_n > 0.0);
+        assert!(evaluation.lateral_force_n < 0.0);
+        assert!(evaluation.friction_utilization <= 1.0);
+        let ellipse = (evaluation.longitudinal_force_n / evaluation.longitudinal_peak_force_n)
+            .hypot(evaluation.lateral_force_n / evaluation.lateral_peak_force_n);
+        assert!(ellipse <= 1.0);
+
+        let repeat = evaluate_combined_slip_tire(
+            spec,
+            CombinedSlipTireState::default(),
+            test_tire_input(
+                Some(test_patch(wheel, Vec3::new(-5.0, 0.0, 3.0), 1_000.0)),
+                10.0,
+                1.0,
+            ),
+            0.01,
+        )
+        .unwrap();
+        assert_eq!(evaluation, repeat);
+    }
+
+    #[test]
+    fn road_scale_and_load_sensitivity_change_available_force() {
+        let mut world = World::new();
+        let wheel = world.spawn_empty().id();
+        let spec = CombinedSlipTireSpec {
+            longitudinal_relaxation_length_m: 0.0,
+            lateral_relaxation_length_m: 0.0,
+            ..CombinedSlipTireSpec::default()
+        };
+        let evaluate = |load_n, road_scale| {
+            evaluate_combined_slip_tire(
+                spec,
+                CombinedSlipTireState::default(),
+                test_tire_input(
+                    Some(test_patch(wheel, Vec3::new(-20.0, 0.0, 0.0), load_n)),
+                    10.0,
+                    road_scale,
+                ),
+                0.01,
+            )
+            .unwrap()
+        };
+        let dry = evaluate(1_000.0, 1.0);
+        let split_low = evaluate(1_000.0, 0.4);
+        assert!(split_low.longitudinal_force_n < dry.longitudinal_force_n);
+        assert_eq!(
+            split_low.longitudinal_peak_force_n,
+            dry.longitudinal_peak_force_n * 0.4
+        );
+        let double_load = evaluate(2_000.0, 1.0);
+        assert!(double_load.longitudinal_peak_force_n < dry.longitudinal_peak_force_n * 2.0);
+    }
+
+    #[test]
+    fn low_speed_relaxation_and_lift_off_are_explicit() {
+        let mut world = World::new();
+        let wheel = world.spawn_empty().id();
+        let spec = CombinedSlipTireSpec::default();
+        let first = evaluate_combined_slip_tire(
+            spec,
+            CombinedSlipTireState::default(),
+            test_tire_input(
+                Some(test_patch(wheel, Vec3::new(-0.01, 0.0, 0.0), 800.0)),
+                0.0,
+                1.0,
+            ),
+            0.01,
+        )
+        .unwrap();
+        assert!(first.state.longitudinal_slip_ratio.is_finite());
+        assert!(first.state.longitudinal_slip_ratio > 0.0);
+        assert!(first.state.longitudinal_slip_ratio < 0.1);
+
+        let second = evaluate_combined_slip_tire(
+            spec,
+            first.state,
+            test_tire_input(
+                Some(test_patch(wheel, Vec3::new(-0.01, 0.0, 0.0), 800.0)),
+                0.0,
+                1.0,
+            ),
+            0.01,
+        )
+        .unwrap();
+        assert!(second.state.longitudinal_slip_ratio > first.state.longitudinal_slip_ratio);
+
+        let lifted =
+            evaluate_combined_slip_tire(spec, second.state, test_tire_input(None, 0.0, 1.0), 0.01)
+                .unwrap();
+        assert_eq!(lifted, zero_tire_evaluation());
+    }
+
+    #[test]
+    fn tire_wrench_preserves_patch_point_and_world_axes() {
+        let mut world = World::new();
+        let wheel = world.spawn_empty().id();
+        let patch = WheelContactPatch {
+            point_world_m: Vec3::new(1.0, 2.0, 3.0),
+            ..test_patch(wheel, Vec3::ZERO, 100.0)
+        };
+        let evaluation = CombinedSlipTireEvaluation {
+            longitudinal_force_n: 20.0,
+            lateral_force_n: -5.0,
+            ..zero_tire_evaluation()
+        };
+        let wrench = combined_slip_tire_wrench(patch, evaluation, Vec3::X, Vec3::Z).unwrap();
+        assert_eq!(wrench.entity, wheel);
+        assert_eq!(wrench.point_world_m, patch.point_world_m);
+        assert_eq!(wrench.force_world_n, Vec3::new(20.0, 0.0, -5.0));
     }
 }

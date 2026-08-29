@@ -332,6 +332,101 @@ impl WheelAssemblySpec {
     }
 }
 
+/// Identifiable low-order combined-slip tire parameters.
+///
+/// This is a force-element model, not a generic collider material. Longitudinal
+/// and lateral small-slip stiffnesses are identified at [`Self::reference_load_n`].
+/// Peak friction decreases linearly with normalized load, bounded by
+/// [`Self::minimum_friction_ratio`], and the resulting uncoupled forces share one
+/// smooth friction ellipse. Relaxation lengths retain transient tread response.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CombinedSlipTireSpec {
+    /// Reference normal load used for parameter identification, in newtons.
+    pub reference_load_n: f64,
+    /// Longitudinal small-slip stiffness at reference load, in newtons.
+    pub longitudinal_stiffness_n: f64,
+    /// Lateral small-slip stiffness at reference load, in newtons per unit tangent of slip angle.
+    pub lateral_stiffness_n: f64,
+    /// Peak longitudinal friction coefficient at reference load.
+    pub longitudinal_peak_friction: f64,
+    /// Peak lateral friction coefficient at reference load.
+    pub lateral_peak_friction: f64,
+    /// Fractional friction loss per unit increase in `load / reference_load`.
+    pub load_sensitivity_per_load_ratio: f64,
+    /// Lower bound on load-sensitive friction as a ratio of reference friction.
+    pub minimum_friction_ratio: f64,
+    /// Maximum `load / reference_load` admitted by this model's validity envelope.
+    pub maximum_load_ratio: f64,
+    /// Positive speed used to regularize slip coordinates near standstill, in meters per second.
+    pub low_speed_regularization_m_s: f64,
+    /// Longitudinal relaxation length in meters; zero selects instantaneous response.
+    pub longitudinal_relaxation_length_m: f64,
+    /// Lateral relaxation length in meters; zero selects instantaneous response.
+    pub lateral_relaxation_length_m: f64,
+}
+
+impl Default for CombinedSlipTireSpec {
+    fn default() -> Self {
+        Self {
+            reference_load_n: 1_000.0,
+            longitudinal_stiffness_n: 8_000.0,
+            lateral_stiffness_n: 7_000.0,
+            longitudinal_peak_friction: 0.9,
+            lateral_peak_friction: 0.9,
+            load_sensitivity_per_load_ratio: 0.1,
+            minimum_friction_ratio: 0.5,
+            maximum_load_ratio: 3.0,
+            low_speed_regularization_m_s: 0.1,
+            longitudinal_relaxation_length_m: 0.05,
+            lateral_relaxation_length_m: 0.08,
+        }
+    }
+}
+
+impl CombinedSlipTireSpec {
+    /// Returns whether all parameters are finite and inside the declared physical domain.
+    pub fn is_valid(&self) -> bool {
+        [
+            self.reference_load_n,
+            self.longitudinal_stiffness_n,
+            self.lateral_stiffness_n,
+            self.longitudinal_peak_friction,
+            self.lateral_peak_friction,
+            self.load_sensitivity_per_load_ratio,
+            self.minimum_friction_ratio,
+            self.maximum_load_ratio,
+            self.low_speed_regularization_m_s,
+            self.longitudinal_relaxation_length_m,
+            self.lateral_relaxation_length_m,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+            && self.reference_load_n > 0.0
+            && self.longitudinal_stiffness_n > 0.0
+            && self.lateral_stiffness_n > 0.0
+            && self.longitudinal_peak_friction > 0.0
+            && self.lateral_peak_friction > 0.0
+            && (0.0..1.0).contains(&self.load_sensitivity_per_load_ratio)
+            && (0.0..=1.0).contains(&self.minimum_friction_ratio)
+            && self.minimum_friction_ratio > 0.0
+            && self.maximum_load_ratio >= 1.0
+            && self.low_speed_regularization_m_s > 0.0
+            && self.longitudinal_relaxation_length_m >= 0.0
+            && self.lateral_relaxation_length_m >= 0.0
+    }
+}
+
+/// Relaxed combined-slip coordinates retained between completed tire steps.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CombinedSlipTireState {
+    /// Relaxed longitudinal slip ratio, positive for driving traction.
+    pub longitudinal_slip_ratio: f64,
+    /// Relaxed tangent of lateral slip angle, signed in the wheel lateral frame.
+    pub lateral_slip_tangent: f64,
+}
+
 /// Deterministic kinematic Ackermann drive state and safety limits.
 ///
 /// The drive uses the entity's local `+X` axis as its forward direction. Commands
