@@ -54,6 +54,30 @@ pub struct ContactEvent {
     pub impulse: f32,
 }
 
+/// Backend-neutral evidence for one solved contact point from the last step.
+///
+/// Entities are stored in ascending stable entity-index order. The normal points
+/// from A to B, and [`Self::velocity_b_relative_to_a_world_m_s`] is the velocity
+/// of B's surface minus A's surface at [`Self::point_world_m`]. The reported
+/// normal force is a non-negative step-average magnitude; for impulse-based
+/// solvers it is the solved normal impulse divided by the completed fixed-step
+/// duration. Sensor overlaps are intentionally excluded.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ContactPointSample {
+    /// Canonically ordered first colliding entity.
+    pub entity_a: Entity,
+    /// Canonically ordered second colliding entity.
+    pub entity_b: Entity,
+    /// Contact point in world coordinates, in meters.
+    pub point_world_m: Vec3,
+    /// Unit contact normal pointing from A to B.
+    pub normal_a_to_b: Vec3,
+    /// Velocity of B relative to A at the contact point, in world coordinates.
+    pub velocity_b_relative_to_a_world_m_s: Vec3,
+    /// Non-negative average normal-force magnitude over the completed step, in newtons.
+    pub normal_force_n: f64,
+}
+
 /// Raycast query definition.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RaycastQuery {

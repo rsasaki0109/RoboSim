@@ -34,6 +34,7 @@ pub fn backend_manifest() -> PhysicsBackendManifest {
             PhysicsCapability::RaycastBatch,
             PhysicsCapability::JointEffortMeasurement,
             PhysicsCapability::ExternalBodyWrench,
+            PhysicsCapability::ContactPointKinematics,
         ],
         PhysicsBackendRepeatability::ToleranceBounded,
     )
@@ -70,6 +71,7 @@ mod tests {
                 PhysicsCapability::RaycastBatch,
                 PhysicsCapability::JointEffortMeasurement,
                 PhysicsCapability::ExternalBodyWrench,
+                PhysicsCapability::ContactPointKinematics,
             ]
         );
         assert_eq!(

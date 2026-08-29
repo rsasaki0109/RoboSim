@@ -13,7 +13,7 @@ use rne_ecs::{Entity, World};
 use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
 use rne_physics::{
-    Collider, ContactEvent, ExternalBodyWrench, FixedJointDesc, JointActuation,
+    Collider, ContactEvent, ContactPointSample, ExternalBodyWrench, FixedJointDesc, JointActuation,
     JointEffortMeasurement, JointMotor, JointMotorGainModel, JointPassiveDynamics, JointState,
     MultibodyLink, PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability,
     PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc,
@@ -31,6 +31,7 @@ const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::KinematicBody,
     PhysicsCapability::JointEffortMeasurement,
     PhysicsCapability::ExternalBodyWrench,
+    PhysicsCapability::ContactPointKinematics,
 ];
 
 /// Rapier-backed physics simulation.
@@ -59,6 +60,7 @@ struct RapierWorldState {
     entity_to_joint: HashMap<Entity, ImpulseJointHandle>,
     entity_to_multibody_joint: HashMap<Entity, MultibodyJointHandle>,
     contacts: Vec<ContactEvent>,
+    contact_points: Vec<ContactPointSample>,
     /// Bodies carrying a one-step disturbance force, cleared after the next step.
     impulse_forced: Vec<RigidBodyHandle>,
     /// Native force/torque increments accepted for the upcoming step.
@@ -263,6 +265,7 @@ impl PhysicsBackend for RapierBackend {
                 entity_to_joint: HashMap::new(),
                 entity_to_multibody_joint: HashMap::new(),
                 contacts: Vec::new(),
+                contact_points: Vec::new(),
                 impulse_forced: Vec::new(),
                 pending_joint_efforts: HashMap::new(),
                 completed_joint_efforts: HashMap::new(),
@@ -368,6 +371,7 @@ impl PhysicsBackend for RapierBackend {
         let state = self.world_mut(physics_world)?;
         state.integration_parameters.dt = dt.as_seconds().value() as f32;
         state.contacts.clear();
+        state.contact_points.clear();
 
         state.physics_pipeline.step(
             &state.gravity,
@@ -424,6 +428,55 @@ impl PhysicsBackend for RapierBackend {
                 .unwrap_or(Vec3::Y);
             let impulse = contact_pair.total_impulse_magnitude();
 
+            let Some(collider_a) = state.colliders.get(contact_pair.collider1) else {
+                continue;
+            };
+            let Some(collider_b) = state.colliders.get(contact_pair.collider2) else {
+                continue;
+            };
+            let body_a = collider_a
+                .parent()
+                .and_then(|handle| state.bodies.get(handle));
+            let body_b = collider_b
+                .parent()
+                .and_then(|handle| state.bodies.get(handle));
+            let dt_s = f64::from(state.integration_parameters.dt);
+            for manifold in &contact_pair.manifolds {
+                let native_normal = vec3_from_rapier(manifold.data.normal);
+                for point in &manifold.points {
+                    let normal_impulse_n_s = f64::from(point.data.impulse.max(0.0));
+                    if normal_impulse_n_s == 0.0 || dt_s <= 0.0 {
+                        continue;
+                    }
+                    let point_a = collider_a.position() * point.local_p1;
+                    let point_b = collider_b.position() * point.local_p2;
+                    let point_world = Point::from((point_a.coords + point_b.coords) * 0.5);
+                    let velocity_a = body_a
+                        .map(|body| body.velocity_at_point(&point_world))
+                        .unwrap_or_else(Vector::zeros);
+                    let velocity_b = body_b
+                        .map(|body| body.velocity_at_point(&point_world))
+                        .unwrap_or_else(Vector::zeros);
+                    let canonical = entity_a.index() <= entity_b.index();
+                    state.contact_points.push(ContactPointSample {
+                        entity_a: if canonical { entity_a } else { entity_b },
+                        entity_b: if canonical { entity_b } else { entity_a },
+                        point_world_m: vec3_from_point(point_world),
+                        normal_a_to_b: if canonical {
+                            native_normal
+                        } else {
+                            -native_normal
+                        },
+                        velocity_b_relative_to_a_world_m_s: if canonical {
+                            vec3_from_rapier(velocity_b - velocity_a)
+                        } else {
+                            vec3_from_rapier(velocity_a - velocity_b)
+                        },
+                        normal_force_n: normal_impulse_n_s / dt_s,
+                    });
+                }
+            }
+
             state.contacts.push(ContactEvent {
                 entity_a,
                 entity_b,
@@ -431,6 +484,16 @@ impl PhysicsBackend for RapierBackend {
                 impulse,
             });
         }
+
+        state.contact_points.sort_by(|left, right| {
+            left.entity_a
+                .index()
+                .cmp(&right.entity_a.index())
+                .then_with(|| left.entity_b.index().cmp(&right.entity_b.index()))
+                .then_with(|| left.point_world_m.x.total_cmp(&right.point_world_m.x))
+                .then_with(|| left.point_world_m.y.total_cmp(&right.point_world_m.y))
+                .then_with(|| left.point_world_m.z.total_cmp(&right.point_world_m.z))
+        });
 
         for (collider_a, collider_b, intersecting) in state.narrow_phase.intersection_pairs() {
             if !intersecting {
@@ -641,6 +704,13 @@ impl PhysicsBackend for RapierBackend {
 
     fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError> {
         Ok(&self.world(physics_world)?.contacts)
+    }
+
+    fn contact_points(
+        &self,
+        physics_world: PhysicsWorldId,
+    ) -> Result<&[ContactPointSample], PhysicsError> {
+        Ok(&self.world(physics_world)?.contact_points)
     }
 
     fn capabilities(&self) -> &[PhysicsCapability] {

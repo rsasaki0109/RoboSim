@@ -1,8 +1,8 @@
 {
   "kind": "rne_external_physics_backend_conformance_report",
   "schema_version": 1,
-  "catalog_version": 3,
-  "tolerance_registry_version": 2,
+  "catalog_version": 4,
+  "tolerance_registry_version": 3,
   "subject": {
     "label": "reference-external-backend-source.tar.zst",
     "sha256": "sha256:61ff506e88ae5bec62c03b23d22bf13be83e21990c8c50bd9488055bf007f4e0"
@@ -177,6 +177,14 @@
     {
       "id": "external_body_wrench.one_step_force_at_point",
       "capability": "external_body_wrench",
+      "status": "not_advertised",
+      "snapshot_hash": null,
+      "metrics": [],
+      "detail": "capability not advertised by the backend manifest"
+    },
+    {
+      "id": "contact_point_kinematics.resting_load",
+      "capability": "contact_point_kinematics",
       "status": "not_advertised",
       "snapshot_hash": null,
       "metrics": [],
