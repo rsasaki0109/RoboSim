@@ -11,9 +11,10 @@ use rne_core::SimDuration;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Hertz, Quat, Vec3};
 use rne_physics::{
-    capture_physics_snapshot, Collider, JointEffortMeasurement, JointState, MultibodyLink,
-    PhysicsBackend, PhysicsBackendManifest, PhysicsCapability, PhysicsMaterial, PhysicsSnapshot,
-    PhysicsWorldDesc, PhysicsWorldId, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyType,
+    capture_physics_snapshot, Collider, ExternalBodyWrench, JointEffortMeasurement, JointState,
+    MultibodyLink, PhysicsBackend, PhysicsBackendManifest, PhysicsCapability, PhysicsMaterial,
+    PhysicsSnapshot, PhysicsWorldDesc, PhysicsWorldId, RaycastQuery, RevoluteJointDesc, RigidBody,
+    RigidBodyInertia, RigidBodyType,
 };
 use rne_world::Transform3;
 use serde::{Deserialize, Serialize};
@@ -32,7 +33,7 @@ pub const EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_KIND: &str =
 pub const EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_SCHEMA_VERSION: u16 = 1;
 
 /// Current immutable external capability-case catalog.
-pub const EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_CATALOG_VERSION: u16 = 2;
+pub const EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_CATALOG_VERSION: u16 = 3;
 
 /// Current named, unit-bearing tolerance registry used by the external catalog.
 pub const EXTERNAL_PHYSICS_BACKEND_TOLERANCE_REGISTRY_VERSION: u16 = 2;
@@ -42,7 +43,7 @@ const FREE_FALL_STEPS: u64 = 60;
 const GRAVITY_M_S2: f64 = -9.81;
 const FREE_FALL_INITIAL_Y_M: f64 = 5.0;
 
-const CHECK_IDS: [&str; 10] = [
+const CHECK_IDS: [&str; 11] = [
     "manifest_identity",
     "rigid_body.free_fall",
     "articulation.revolute_limit",
@@ -53,6 +54,7 @@ const CHECK_IDS: [&str; 10] = [
     "raycast_batch.ordered_hits",
     "kinematic_body.external_pose",
     "joint_effort_measurement.direct_revolute_effort",
+    "external_body_wrench.one_step_force_at_point",
 ];
 
 /// Invalid conformance configuration, report, or serialized artifact.
@@ -415,6 +417,9 @@ where
             PhysicsCapability::KinematicBody => case_result(capability, run_kinematic(factory())),
             PhysicsCapability::JointEffortMeasurement => {
                 case_result(capability, run_joint_effort_measurement(factory()))
+            }
+            PhysicsCapability::ExternalBodyWrench => {
+                case_result(capability, run_external_body_wrench(factory()))
             }
         };
         checks.push(check);
@@ -821,6 +826,123 @@ fn run_joint_effort_measurement<B: PhysicsBackend>(
     ))
 }
 
+fn run_external_body_wrench<B: PhysicsBackend>(
+    mut backend: B,
+) -> Result<ExternalPhysicsBackendCheck, String> {
+    let physics_world = backend
+        .create_world(PhysicsWorldDesc {
+            gravity_m_s2: Vec3::ZERO,
+            solver_iterations: 16,
+        })
+        .map_err(|error| error.to_string())?;
+    let mut world = World::new();
+    let body = spawn_named(&mut world, "external_wrench_body");
+    world.entity_mut(body).insert((
+        RigidBody {
+            mass_kg: 2.0,
+            ..RigidBody::default()
+        },
+        RigidBodyInertia {
+            center_of_mass_local_m: Vec3::ZERO,
+            ixx_kg_m2: 1.0,
+            ixy_kg_m2: 0.0,
+            ixz_kg_m2: 0.0,
+            iyy_kg_m2: 1.0,
+            iyz_kg_m2: 0.0,
+            izz_kg_m2: 1.0,
+        },
+        Collider::cuboid(Vec3::splat(0.5)),
+        Transform3::IDENTITY,
+    ));
+    backend
+        .sync_from_ecs(&mut world, physics_world)
+        .map_err(|error| error.to_string())?;
+    backend
+        .apply_external_body_wrench(
+            physics_world,
+            ExternalBodyWrench {
+                entity: body,
+                point_world_m: Vec3::Y,
+                force_world_n: Vec3::X * 120.0,
+                torque_world_nm: Vec3::Z * 60.0,
+            },
+        )
+        .map_err(|error| error.to_string())?;
+    backend
+        .step(physics_world, fixed_dt())
+        .map_err(|error| error.to_string())?;
+    backend
+        .sync_to_ecs(&mut world, physics_world)
+        .map_err(|error| error.to_string())?;
+    let forced = *world
+        .get::<RigidBody>(body)
+        .ok_or_else(|| "wrench body state missing after forced step".to_string())?;
+
+    backend
+        .sync_from_ecs(&mut world, physics_world)
+        .map_err(|error| error.to_string())?;
+    backend
+        .step(physics_world, fixed_dt())
+        .map_err(|error| error.to_string())?;
+    backend
+        .sync_to_ecs(&mut world, physics_world)
+        .map_err(|error| error.to_string())?;
+    let unforced = *world
+        .get::<RigidBody>(body)
+        .ok_or_else(|| "wrench body state missing after unforced step".to_string())?;
+
+    let metrics = vec![
+        metric(
+            "forced_linear_velocity_x_m_s",
+            "m/s",
+            forced.linear_velocity_m_s.x,
+            1.0,
+            "external_wrench_linear_velocity_m_s_v1",
+            1e-5,
+            1e-5,
+            "120 N applied for 1/60 s to a 2 kg body produces 1 m/s",
+        ),
+        metric(
+            "forced_angular_velocity_z_rad_s",
+            "rad/s",
+            forced.angular_velocity_rad_s.z,
+            -1.0,
+            "external_wrench_angular_velocity_rad_s_v1",
+            1e-5,
+            1e-5,
+            "the -120 N*m lever-arm moment plus 60 N*m free moment acts for 1/60 s on 1 kg*m^2",
+        ),
+        metric(
+            "unforced_linear_velocity_x_m_s",
+            "m/s",
+            unforced.linear_velocity_m_s.x,
+            1.0,
+            "external_wrench_one_step_linear_velocity_m_s_v1",
+            1e-5,
+            1e-5,
+            "the accepted wrench is cleared after one completed step",
+        ),
+        metric(
+            "unforced_angular_velocity_z_rad_s",
+            "rad/s",
+            unforced.angular_velocity_rad_s.z,
+            -1.0,
+            "external_wrench_one_step_angular_velocity_rad_s_v1",
+            1e-5,
+            1e-5,
+            "the accepted free and lever-arm moments are cleared after one completed step",
+        ),
+    ];
+    let snapshot = snapshot(&backend, &world, physics_world, 2)?;
+    Ok(completed_case(
+        PhysicsCapability::ExternalBodyWrench,
+        metrics.iter().all(|metric| metric.passed),
+        Some(snapshot.stable_hash()),
+        metrics,
+        "world-frame force-at-point and free moment affect exactly one fixed step",
+    ))
+}
+
 fn run_contact<B: PhysicsBackend>(mut backend: B) -> Result<ExternalPhysicsBackendCheck, String> {
     let physics_world = backend
         .create_world(PhysicsWorldDesc::default())
@@ -1046,6 +1168,7 @@ fn capability_check_id(capability: PhysicsCapability) -> &'static str {
         PhysicsCapability::RaycastBatch => CHECK_IDS[7],
         PhysicsCapability::KinematicBody => CHECK_IDS[8],
         PhysicsCapability::JointEffortMeasurement => CHECK_IDS[9],
+        PhysicsCapability::ExternalBodyWrench => CHECK_IDS[10],
     }
 }
 
@@ -1260,7 +1383,7 @@ mod tests {
         )
         .expect("conformance report");
         assert!(report.passed());
-        assert_eq!(report.checks.len(), 10);
+        assert_eq!(report.checks.len(), 11);
         assert_eq!(
             report.covered_capabilities,
             external_manifest().capabilities

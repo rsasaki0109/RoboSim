@@ -45,6 +45,7 @@ one required case:
 | Rapier | `ContactForce` | a resting body's reported impulse matches `mass * g * dt` within tolerance |
 | Rapier | `RaycastBatch` | repeated queries return bounded hits in distance/entity order |
 | Rapier | `JointEffortMeasurement` | the native accepted force/torque increment for direct effort actuation is retained after the step |
+| Rapier | `ExternalBodyWrench` | a world-frame force-at-point plus free moment produces the declared linear/angular response and is cleared after one step |
 | MuJoCo | `JointEffortMeasurement` | a direct 2 N*m revolute command is retained as completed-step native actuator effort |
 
 `GpuRigidBody` and `SoftBody` remain unadvertised. A coverage test fails when a

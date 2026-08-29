@@ -1,27 +1,76 @@
 {
   "kind": "rne_physics_conformance_report",
   "schema_version": 2,
-  "catalog_version": 4,
-  "tolerance_registry_version": 2,
+  "catalog_version": 5,
+  "tolerance_registry_version": 3,
   "backends": [
     {
       "manifest": {
         "schema_version": 3,
-        "backend_id": "fixture",
-        "adapter_version": "0.1.0",
-        "engine_id": "fixture_engine",
-        "engine_version": "1",
+        "backend_id": "analytic",
+        "adapter_version": "0.2.0",
+        "engine_id": "rne_analytic",
+        "engine_version": "semi_implicit_euler_v1",
         "capabilities": [
-          "rigid_body"
+          "rigid_body",
+          "deterministic_step",
+          "kinematic_body"
         ],
-        "repeatability": "tolerance_bounded"
+        "repeatability": "same_runtime_exact"
       },
       "runtime_capabilities": [
-        "rigid_body"
+        "rigid_body",
+        "deterministic_step",
+        "kinematic_body"
       ],
       "manifest_passed": true,
       "covered_capabilities": [
-        "rigid_body"
+        "rigid_body",
+        "deterministic_step",
+        "kinematic_body"
+      ],
+      "coverage_passed": true,
+      "detail": "manifest and runtime capability declarations match"
+    },
+    {
+      "manifest": {
+        "schema_version": 3,
+        "backend_id": "rapier",
+        "adapter_version": "0.2.0",
+        "engine_id": "rapier3d",
+        "engine_version": "0.22",
+        "capabilities": [
+          "rigid_body",
+          "articulation",
+          "deterministic_step",
+          "contact_force",
+          "raycast_batch",
+          "kinematic_body",
+          "joint_effort_measurement",
+          "external_body_wrench"
+        ],
+        "repeatability": "same_runtime_exact"
+      },
+      "runtime_capabilities": [
+        "rigid_body",
+        "articulation",
+        "deterministic_step",
+        "contact_force",
+        "raycast_batch",
+        "kinematic_body",
+        "joint_effort_measurement",
+        "external_body_wrench"
+      ],
+      "manifest_passed": true,
+      "covered_capabilities": [
+        "rigid_body",
+        "articulation",
+        "deterministic_step",
+        "contact_force",
+        "raycast_batch",
+        "kinematic_body",
+        "joint_effort_measurement",
+        "external_body_wrench"
       ],
       "coverage_passed": true,
       "detail": "manifest and runtime capability declarations match"
@@ -29,29 +78,422 @@
   ],
   "cases": [
     {
-      "id": "fixture.rigid_body.free_fall",
-      "backend": "fixture",
-      "capability": "rigid_body",
+      "id": "analytic.deterministic_step.repeat_snapshot",
+      "backend": "analytic",
+      "capability": "deterministic_step",
       "passed": true,
-      "snapshot_hash": 7,
+      "snapshot_hash": 10009984827222298416,
+      "metrics": [],
+      "detail": "two fresh executions produced identical canonical snapshots"
+    },
+    {
+      "id": "analytic.kinematic_body.external_pose",
+      "backend": "analytic",
+      "capability": "kinematic_body",
+      "passed": true,
+      "snapshot_hash": 17761308803428809447,
       "metrics": [
         {
-          "id": "position_y_m",
+          "id": "translation_error_m",
           "unit": "m",
-          "measured": 0.1,
-          "expected": 0.1,
+          "measured": 0.0,
+          "expected": 0.0,
           "absolute_error": 0.0,
           "tolerance": {
-            "id": "fixture_position_m_v1",
-            "absolute": 0.001,
+            "id": "kinematic_translation_m_v1",
+            "absolute": 1e-6,
             "relative": 0.0,
-            "allowed_error": 0.001,
-            "rationale": "schema fixture"
+            "allowed_error": 1e-6,
+            "rationale": "externally supplied kinematic translation permits only f32 conversion rounding"
+          },
+          "passed": true
+        },
+        {
+          "id": "rotation_error_rad",
+          "unit": "rad",
+          "measured": 2.9802322387695312e-8,
+          "expected": 0.0,
+          "absolute_error": 2.9802322387695312e-8,
+          "tolerance": {
+            "id": "kinematic_rotation_rad_v1",
+            "absolute": 1e-6,
+            "relative": 0.0,
+            "allowed_error": 1e-6,
+            "rationale": "externally supplied kinematic rotation permits only normalized f32 conversion rounding"
           },
           "passed": true
         }
       ],
-      "detail": "schema fixture"
+      "detail": "externally supplied pose remains authoritative across a fixed step"
+    },
+    {
+      "id": "analytic.rigid_body.free_fall",
+      "backend": "analytic",
+      "capability": "rigid_body",
+      "passed": true,
+      "snapshot_hash": 10009984827222298416,
+      "metrics": [
+        {
+          "id": "position_y_m",
+          "unit": "m",
+          "measured": 0.013250398939986585,
+          "expected": 0.01325039893999147,
+          "absolute_error": 4.884981308350689e-15,
+          "tolerance": {
+            "id": "analytic_free_fall_position_m_v1",
+            "absolute": 1e-10,
+            "relative": 0.0,
+            "allowed_error": 1e-10,
+            "rationale": "f64 semi-implicit Euler vector has a closed discrete reference"
+          },
+          "passed": true
+        },
+        {
+          "id": "velocity_y_m_s",
+          "unit": "m/s",
+          "measured": -9.80999960760001,
+          "expected": -9.81,
+          "absolute_error": 3.9239998983475743e-7,
+          "tolerance": {
+            "id": "free_fall_velocity_m_s_v1",
+            "absolute": 0.001,
+            "relative": 0.0,
+            "allowed_error": 0.001,
+            "rationale": "one second of constant gravity permits only f32 pipeline rounding"
+          },
+          "passed": true
+        }
+      ],
+      "detail": "shared 60 Hz free-fall vector"
+    },
+    {
+      "id": "analytic_vs_rapier.free_fall",
+      "backend": "analytic_vs_rapier",
+      "capability": "rigid_body",
+      "passed": true,
+      "snapshot_hash": null,
+      "metrics": [
+        {
+          "id": "position_delta_m",
+          "unit": "m",
+          "measured": 0.061313730174164416,
+          "expected": 0.0,
+          "absolute_error": 0.061313730174164416,
+          "tolerance": {
+            "id": "backend_free_fall_position_delta_m_v1",
+            "absolute": 0.1,
+            "relative": 0.0,
+            "allowed_error": 0.1,
+            "rationale": "analytic semi-implicit and Rapier integration differ by one O(dt) position term"
+          },
+          "passed": true
+        },
+        {
+          "id": "velocity_delta_m_s",
+          "unit": "m/s",
+          "measured": 0.000013209782801837378,
+          "expected": 0.0,
+          "absolute_error": 0.000013209782801837378,
+          "tolerance": {
+            "id": "backend_free_fall_velocity_delta_m_s_v1",
+            "absolute": 0.001,
+            "relative": 0.0,
+            "allowed_error": 0.001,
+            "rationale": "both solvers integrate the same constant acceleration for the velocity state"
+          },
+          "passed": true
+        }
+      ],
+      "detail": "same input vector; approximate solver comparison"
+    },
+    {
+      "id": "rapier.articulation.revolute_limit",
+      "backend": "rapier",
+      "capability": "articulation",
+      "passed": true,
+      "snapshot_hash": 13795144852807488159,
+      "metrics": [
+        {
+          "id": "anchor_error_m",
+          "unit": "m",
+          "measured": 7.219940074616746e-8,
+          "expected": 0.0,
+          "absolute_error": 7.219940074616746e-8,
+          "tolerance": {
+            "id": "revolute_anchor_m_v1",
+            "absolute": 0.01,
+            "relative": 0.0,
+            "allowed_error": 0.01,
+            "rationale": "iterative constraint stabilization may leave millimetre anchor error"
+          },
+          "passed": true
+        },
+        {
+          "id": "joint_angle_abs_rad",
+          "unit": "rad",
+          "measured": 0.19999999229114368,
+          "expected": 0.2,
+          "absolute_error": 7.70885633105678e-9,
+          "tolerance": {
+            "id": "revolute_limit_rad_v1",
+            "absolute": 0.03,
+            "relative": 0.0,
+            "allowed_error": 0.03,
+            "rationale": "motor load and discrete limit stabilization permit 0.03 rad slack"
+          },
+          "passed": true
+        }
+      ],
+      "detail": "revolute motor pushes against a bounded joint limit"
+    },
+    {
+      "id": "rapier.contact_force.resting_impulse",
+      "backend": "rapier",
+      "capability": "contact_force",
+      "passed": true,
+      "snapshot_hash": 3156249424508582229,
+      "metrics": [
+        {
+          "id": "mean_normal_impulse_n_s",
+          "unit": "N*s",
+          "measured": 0.4342968761920929,
+          "expected": 0.3474374861025,
+          "absolute_error": 0.08685939008959287,
+          "tolerance": {
+            "id": "resting_impulse_n_s_v1",
+            "absolute": 0.015,
+            "relative": 0.35,
+            "allowed_error": 0.121603120135875,
+            "rationale": "TGS contact stabilization biases manifold impulse above mass times gravity times dt"
+          },
+          "passed": true
+        }
+      ],
+      "detail": "60 of 60 settled steps reported the canonical load-bearing pair; effective_mass_kg=2.125"
+    },
+    {
+      "id": "rapier.deterministic_step.repeat_snapshot",
+      "backend": "rapier",
+      "capability": "deterministic_step",
+      "passed": true,
+      "snapshot_hash": 9766736716516808571,
+      "metrics": [],
+      "detail": "two fresh executions produced identical canonical snapshots"
+    },
+    {
+      "id": "rapier.external_body_wrench.one_step_force_at_point",
+      "backend": "rapier",
+      "capability": "external_body_wrench",
+      "passed": true,
+      "snapshot_hash": 12710253008367487674,
+      "metrics": [
+        {
+          "id": "forced_linear_velocity_x_m_s",
+          "unit": "m/s",
+          "measured": 0.9999999403953552,
+          "expected": 1.0,
+          "absolute_error": 5.960464477539063e-8,
+          "tolerance": {
+            "id": "external_wrench_linear_velocity_m_s_v1",
+            "absolute": 0.00001,
+            "relative": 0.00001,
+            "allowed_error": 0.00001,
+            "rationale": "force integration permits only backend numeric conversion rounding"
+          },
+          "passed": true
+        },
+        {
+          "id": "forced_angular_velocity_z_rad_s",
+          "unit": "rad/s",
+          "measured": -0.9999999403953552,
+          "expected": -1.0,
+          "absolute_error": 5.960464477539063e-8,
+          "tolerance": {
+            "id": "external_wrench_angular_velocity_rad_s_v1",
+            "absolute": 0.00001,
+            "relative": 0.00001,
+            "allowed_error": 0.00001,
+            "rationale": "lever-arm and free-moment integration permits only backend numeric conversion rounding"
+          },
+          "passed": true
+        },
+        {
+          "id": "unforced_linear_velocity_x_m_s",
+          "unit": "m/s",
+          "measured": 0.9999999403953552,
+          "expected": 1.0,
+          "absolute_error": 5.960464477539063e-8,
+          "tolerance": {
+            "id": "external_wrench_one_step_linear_velocity_m_s_v1",
+            "absolute": 0.00001,
+            "relative": 0.00001,
+            "allowed_error": 0.00001,
+            "rationale": "one-step loads must not accelerate the body during the following step"
+          },
+          "passed": true
+        },
+        {
+          "id": "unforced_angular_velocity_z_rad_s",
+          "unit": "rad/s",
+          "measured": -0.9999999403953552,
+          "expected": -1.0,
+          "absolute_error": 5.960464477539063e-8,
+          "tolerance": {
+            "id": "external_wrench_one_step_angular_velocity_rad_s_v1",
+            "absolute": 0.00001,
+            "relative": 0.00001,
+            "allowed_error": 0.00001,
+            "rationale": "one-step moments must not accelerate the body during the following step"
+          },
+          "passed": true
+        }
+      ],
+      "detail": "world-frame force-at-point and free moment affect exactly one fixed step"
+    },
+    {
+      "id": "rapier.joint_effort_measurement.direct_revolute_effort",
+      "backend": "rapier",
+      "capability": "joint_effort_measurement",
+      "passed": true,
+      "snapshot_hash": null,
+      "metrics": [
+        {
+          "id": "measured_effort_nm",
+          "unit": "N*m",
+          "measured": 2.0,
+          "expected": 2.0,
+          "absolute_error": 0.0,
+          "tolerance": {
+            "id": "direct_revolute_effort_nm_v1",
+            "absolute": 1e-6,
+            "relative": 1e-6,
+            "allowed_error": 2e-6,
+            "rationale": "direct native actuator effort retains the commanded SI value within backend numeric conversion rounding"
+          },
+          "passed": true
+        }
+      ],
+      "detail": "completed-step native actuator effort is retained as a revolute N*m measurement"
+    },
+    {
+      "id": "rapier.kinematic_body.external_pose",
+      "backend": "rapier",
+      "capability": "kinematic_body",
+      "passed": true,
+      "snapshot_hash": 17761308803428809447,
+      "metrics": [
+        {
+          "id": "translation_error_m",
+          "unit": "m",
+          "measured": 0.0,
+          "expected": 0.0,
+          "absolute_error": 0.0,
+          "tolerance": {
+            "id": "kinematic_translation_m_v1",
+            "absolute": 1e-6,
+            "relative": 0.0,
+            "allowed_error": 1e-6,
+            "rationale": "externally supplied kinematic translation permits only f32 conversion rounding"
+          },
+          "passed": true
+        },
+        {
+          "id": "rotation_error_rad",
+          "unit": "rad",
+          "measured": 2.9802322387695312e-8,
+          "expected": 0.0,
+          "absolute_error": 2.9802322387695312e-8,
+          "tolerance": {
+            "id": "kinematic_rotation_rad_v1",
+            "absolute": 1e-6,
+            "relative": 0.0,
+            "allowed_error": 1e-6,
+            "rationale": "externally supplied kinematic rotation permits only normalized f32 conversion rounding"
+          },
+          "passed": true
+        }
+      ],
+      "detail": "externally supplied pose remains authoritative across a fixed step"
+    },
+    {
+      "id": "rapier.raycast_batch.ordered_hits",
+      "backend": "rapier",
+      "capability": "raycast_batch",
+      "passed": true,
+      "snapshot_hash": null,
+      "metrics": [
+        {
+          "id": "hit_distance_m",
+          "unit": "m",
+          "measured": 4.5,
+          "expected": 4.5,
+          "absolute_error": 0.0,
+          "tolerance": {
+            "id": "raycast_distance_m_v1",
+            "absolute": 0.00001,
+            "relative": 0.0,
+            "allowed_error": 0.00001,
+            "rationale": "axis-aligned cuboid intersections are exact up to f32 conversion"
+          },
+          "passed": true
+        },
+        {
+          "id": "hit_distance_m",
+          "unit": "m",
+          "measured": 6.5,
+          "expected": 6.5,
+          "absolute_error": 0.0,
+          "tolerance": {
+            "id": "raycast_distance_m_v1",
+            "absolute": 0.00001,
+            "relative": 0.0,
+            "allowed_error": 0.00001,
+            "rationale": "axis-aligned cuboid intersections are exact up to f32 conversion"
+          },
+          "passed": true
+        }
+      ],
+      "detail": "query_shape_ok=true ordering_ok=true repeat_ok=true"
+    },
+    {
+      "id": "rapier.rigid_body.free_fall",
+      "backend": "rapier",
+      "capability": "rigid_body",
+      "passed": true,
+      "snapshot_hash": 9766736716516808571,
+      "metrics": [
+        {
+          "id": "position_y_m",
+          "unit": "m",
+          "measured": 0.074564129114151,
+          "expected": 0.09500039239999225,
+          "absolute_error": 0.02043626328584125,
+          "tolerance": {
+            "id": "rapier_free_fall_position_m_v1",
+            "absolute": 0.03,
+            "relative": 0.0,
+            "allowed_error": 0.03,
+            "rationale": "Rapier f32 integration is within 3 cm of continuous free fall at 60 Hz"
+          },
+          "passed": true
+        },
+        {
+          "id": "velocity_y_m_s",
+          "unit": "m/s",
+          "measured": -9.810012817382812,
+          "expected": -9.81,
+          "absolute_error": 0.00001281738281200262,
+          "tolerance": {
+            "id": "free_fall_velocity_m_s_v1",
+            "absolute": 0.001,
+            "relative": 0.0,
+            "allowed_error": 0.001,
+            "rationale": "one second of constant gravity permits only f32 pipeline rounding"
+          },
+          "passed": true
+        }
+      ],
+      "detail": "shared 60 Hz free-fall vector"
     }
   ],
   "all_passed": true
