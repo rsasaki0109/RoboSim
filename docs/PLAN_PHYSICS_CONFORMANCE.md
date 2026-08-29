@@ -47,6 +47,7 @@ one required case:
 | Rapier | `JointEffortMeasurement` | the native accepted force/torque increment for direct effort actuation is retained after the step |
 | Rapier | `ExternalBodyWrench` | a world-frame force-at-point plus free moment produces the declared linear/angular response and is cleared after one step |
 | MuJoCo | `JointEffortMeasurement` | a direct 2 N*m revolute command is retained as completed-step native actuator effort |
+| MuJoCo | `ExternalBodyWrench` | the same world-frame wrench vector is shifted to the body COM, integrated, and cleared within the same named tolerances |
 
 `GpuRigidBody` and `SoftBody` remain unadvertised. A coverage test fails when a
 backend adds a capability without adding a catalog case.

@@ -10,8 +10,8 @@ use rne_core::SimDuration;
 use rne_ecs::{Entity, Parent, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
-    ColliderShape, ContactEvent, JointActuation, JointEffortMeasurement, JointMotor,
-    JointPassiveDynamics, JointState, PhysicsBackend, PhysicsCapability, PhysicsError,
+    ColliderShape, ContactEvent, ExternalBodyWrench, JointActuation, JointEffortMeasurement,
+    JointMotor, JointPassiveDynamics, JointState, PhysicsBackend, PhysicsCapability, PhysicsError,
     PhysicsWorldDesc, PhysicsWorldId, RaycastHit, RaycastQuery, RigidBody, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
@@ -29,6 +29,7 @@ const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::ContactForce,
     PhysicsCapability::RaycastBatch,
     PhysicsCapability::JointEffortMeasurement,
+    PhysicsCapability::ExternalBodyWrench,
 ];
 
 /// Errors specific to the optional MuJoCo adapter.
@@ -147,6 +148,7 @@ struct MuJoCoWorld {
     geom_entities: Vec<Option<Entity>>,
     sensor_geoms: Vec<bool>,
     contacts: Vec<ContactEvent>,
+    one_step_wrench_bodies: Vec<String>,
 }
 
 impl MuJoCoWorld {
@@ -943,6 +945,7 @@ impl PhysicsBackend for MuJoCoBackend {
                 geom_entities: Vec::new(),
                 sensor_geoms: Vec::new(),
                 contacts: Vec::new(),
+                one_step_wrench_bodies: Vec::new(),
             },
         );
         Ok(id)
@@ -1029,12 +1032,19 @@ impl PhysicsBackend for MuJoCoBackend {
                 actual_s,
             }));
         }
+        let wrench_bodies = std::mem::take(&mut world_state.one_step_wrench_bodies);
         let contacts = {
             let mut data_guard = world_state.lock_data();
             let data = data_guard
                 .as_mut()
                 .ok_or(PhysicsError::InitializationFailed)?;
             data.step();
+            for body_name in wrench_bodies {
+                let body = data
+                    .body(&body_name)
+                    .ok_or(PhysicsError::InitializationFailed)?;
+                body.view_mut(data).xfrc_applied.fill(0.0);
+            }
             if !data
                 .qpos()
                 .iter()
@@ -1251,6 +1261,68 @@ impl PhysicsBackend for MuJoCoBackend {
                 .then_with(|| left.entity.index().cmp(&right.entity.index()))
         });
         Ok(hits)
+    }
+
+    fn apply_external_body_wrench(
+        &mut self,
+        physics_world: PhysicsWorldId,
+        wrench: ExternalBodyWrench,
+    ) -> Result<(), PhysicsError> {
+        if !wrench.is_finite() {
+            return Err(PhysicsError::InvalidExternalBodyWrench {
+                entity_index: wrench.entity.index(),
+                reason: "point, force, and torque must be finite",
+            });
+        }
+        let world_state = self.world_mut(physics_world)?;
+        let binding = world_state
+            .bindings
+            .iter()
+            .find(|binding| binding.entity == wrench.entity)
+            .ok_or(PhysicsError::InvalidExternalBodyWrench {
+                entity_index: wrench.entity.index(),
+                reason: "entity has no rigid body in this physics world",
+            })?;
+        if binding.body_type != RigidBodyType::Dynamic {
+            return Err(PhysicsError::InvalidExternalBodyWrench {
+                entity_index: wrench.entity.index(),
+                reason: "external wrenches require a dynamic rigid body",
+            });
+        }
+        let body_name = binding.body_name.clone();
+        {
+            let mut data_guard = world_state.lock_data();
+            let data = data_guard
+                .as_mut()
+                .ok_or(PhysicsError::InitializationFailed)?;
+            let body = data
+                .body(&body_name)
+                .ok_or(PhysicsError::InitializationFailed)?;
+            let center_of_mass_world_m = Vec3::from_slice(&body.view(data).xipos);
+            if !center_of_mass_world_m.is_finite() {
+                return Err(PhysicsError::InitializationFailed);
+            }
+            let lever_arm_m = wrench.point_world_m - center_of_mass_world_m;
+            let torque_at_com_world_nm =
+                wrench.torque_world_nm + lever_arm_m.cross(wrench.force_world_n);
+            let mut next = [0.0; 6];
+            let current = body.view(data).xfrc_applied;
+            for axis in 0..3 {
+                next[axis] = current[axis] + wrench.force_world_n[axis];
+                next[axis + 3] = current[axis + 3] + torque_at_com_world_nm[axis];
+            }
+            if !next.iter().all(|value| value.is_finite()) {
+                return Err(PhysicsError::InvalidExternalBodyWrench {
+                    entity_index: wrench.entity.index(),
+                    reason: "accumulated force or torque exceeds the backend numeric range",
+                });
+            }
+            body.view_mut(data).xfrc_applied.copy_from_slice(&next);
+        }
+        if !world_state.one_step_wrench_bodies.contains(&body_name) {
+            world_state.one_step_wrench_bodies.push(body_name);
+        }
+        Ok(())
     }
 
     fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError> {

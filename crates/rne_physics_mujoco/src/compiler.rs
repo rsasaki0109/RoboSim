@@ -47,6 +47,7 @@ pub(crate) struct JointDynamics {
 pub(crate) struct BodyBinding {
     pub(crate) entity: Entity,
     pub(crate) body_name: String,
+    pub(crate) body_type: RigidBodyType,
     pub(crate) joint: JointBinding,
 }
 
@@ -551,6 +552,7 @@ fn write_body(
     bindings.push(BodyBinding {
         entity: body.entity,
         body_name,
+        body_type: body.rigid_body.body_type,
         joint,
     });
     topology.push(BodyTopology {
