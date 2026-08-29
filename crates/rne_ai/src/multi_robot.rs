@@ -71,7 +71,10 @@ pub fn robots_in_contact(sim: &DiffDriveSim, robot_a: Entity, robot_b: Entity) -
     })
 }
 
-/// Computes peer-relative observation data for the nearest other robot.
+/// Computes privileged peer-relative diagnostic data for the nearest other robot.
+///
+/// This helper reads exact ECS transforms and is intended for metrics, tests, and
+/// diagnostics. Actor policies must use an explicitly declared sensor or estimator stream.
 pub fn nearest_peer_observation(sim: &DiffDriveSim, robot: Entity) -> Option<PeerObservation> {
     let self_transform = base_transform(sim, robot)?;
     let mut best: Option<(f64, PeerObservation)> = None;

@@ -200,8 +200,9 @@ pub use mm_minimal_kinematics::{
     MM_MOBILE_CLUTTER_PLACE_Y_M, MM_MOBILE_CLUTTER_PLACE_Z_M,
 };
 pub use mobility_observation::{
-    diff_drive_actor_observation, ActorFrameMetadata, DiffDriveActorObservationError,
-    DiffDriveActorObservationFrame, DiffDriveActorStreams,
+    diff_drive_actor_observation, stable_diff_drive_actor_observation_digest, ActorFrameMetadata,
+    DiffDriveActorObservationError, DiffDriveActorObservationFrame, DiffDriveActorStreams,
+    DIFF_DRIVE_ACTOR_OBSERVATION_DIGEST_SCHEMA,
 };
 pub use multi_robot::{
     head_on_collision_configs, head_on_collision_sim, inter_robot_contacts, last_contacts,

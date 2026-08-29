@@ -15,12 +15,19 @@ Implemented M0 evidence:
   wheel-encoder, IMU, and LiDAR streams; mutating the live ECS pose cannot change its
   policy observation;
 - sensor frames are captured after a completed physics tick with the completed tick's
-  simulation timestamp, while the initial state is explicitly sampled at time zero.
+  simulation timestamp, while the initial state is explicitly sampled at time zero;
+- shared-world agents now use the same strict DataBus actor boundary for spawn, policy
+  attachment, refresh, single-agent stepping, and multi-agent stepping. Exact ECS peer
+  transforms remain available only through APIs documented as privileged diagnostics;
+- a versioned canonical actor-input digest covers policy-visible values plus stream,
+  sequence, capture, availability, and age metadata; identical seeded rollouts produce
+  identical evidence digests.
 
-Remaining M0 work is to migrate the shared-agent path and replace optional peer truth with
-explicitly declared observation sources. The current localization stream is a simulated
-measurement boundary backed by pose truth; M2 replaces it with a sensor-only estimator and
-must prove stale, delayed, or missing inputs affect estimates without leaking ECS state.
+Remaining M0 work is a final policy-access inventory and exit-gate audit. Any future peer
+feature must be declared as a sensor or estimator stream rather than silently restoring
+exact peer truth. The current localization stream is a simulated measurement boundary backed
+by pose truth; M2 replaces it with a sensor-only estimator and must prove stale, delayed, or
+missing inputs affect estimates without leaking ECS state.
 
 ## North-star outcome
 
@@ -76,6 +83,20 @@ Actor policies and production controllers may consume measurement and estimate s
 They must not read ECS transforms, rigid-body velocities, contact impulses, noise state, or
 randomized truth. A privileged critic may consume explicitly declared truth tensors during
 training. Evaluation reports both actor-visible and privileged schemas.
+
+M0 policy-access inventory:
+
+| execution path | actor input authority |
+| --- | --- |
+| `DiffDriveEpisode` and standalone diff-drive agents | strict localization, encoder, IMU, and LiDAR DataBus frame |
+| vectorized diff-drive episodes | strict frame through each contained `DiffDriveEpisode` |
+| shared-world single and multi-agent runners | strict frame refreshed only after available sensor publication |
+| `DiffDriveSim::observe*`, peer helpers, contacts, separation, renderer | privileged diagnostic APIs; forbidden as actor input |
+| SSL scripted behavior scenario | privileged task oracle outside the Mobility Physical AI benchmark; not a sensor-only policy claim |
+
+The inventory is enforced by truth-mutation regressions for the built-in episode and
+shared-world runner. Future policy-bearing paths must name their actor stream contract in
+this table or fail review.
 
 ## Architecture boundaries
 

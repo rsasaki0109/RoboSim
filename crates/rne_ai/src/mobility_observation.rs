@@ -60,6 +60,34 @@ pub struct DiffDriveActorObservationFrame {
     pub lidar: ActorFrameMetadata,
 }
 
+/// Schema domain used by [`stable_diff_drive_actor_observation_digest`].
+pub const DIFF_DRIVE_ACTOR_OBSERVATION_DIGEST_SCHEMA: &str = "rne.diff_drive.actor_observation.v1";
+
+/// Computes a stable FNV-1a digest of exactly one actor-visible observation frame.
+///
+/// The canonical byte stream includes every policy-visible value and the stream,
+/// sequence, capture, availability, and age metadata for every required input. Integer
+/// fields use little-endian `u64`; floating-point fields use their exact IEEE-754 bits;
+/// optional values include an explicit presence byte. This digest deliberately excludes
+/// privileged simulator state and is suitable for deterministic replay evidence.
+pub fn stable_diff_drive_actor_observation_digest(frame: &DiffDriveActorObservationFrame) -> u64 {
+    let mut bytes = Vec::with_capacity(320);
+    bytes.extend_from_slice(DIFF_DRIVE_ACTOR_OBSERVATION_DIGEST_SCHEMA.as_bytes());
+    bytes.push(0);
+    push_u64(&mut bytes, frame.controller_time_ticks);
+    push_observation(&mut bytes, &frame.observation);
+    for metadata in [
+        frame.localization,
+        frame.left_wheel_encoder,
+        frame.right_wheel_encoder,
+        frame.imu,
+        frame.lidar,
+    ] {
+        push_metadata(&mut bytes, metadata);
+    }
+    stable_fnv1a(&bytes)
+}
+
 /// Failure to assemble a complete actor observation at a decision time.
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum DiffDriveActorObservationError {
@@ -148,6 +176,60 @@ fn metadata<T: FramePayload>(frame: &Frame<T>, controller_time_ticks: u64) -> Ac
         available_ticks: frame.available_time.ticks(),
         age_ticks: controller_time_ticks.saturating_sub(frame.capture_time.ticks()),
     }
+}
+
+fn push_observation(bytes: &mut Vec<u8>, observation: &DiffDriveObservation) {
+    for value in [
+        observation.base_x_m,
+        observation.base_y_m,
+        observation.base_z_m,
+        observation.base_yaw_rad,
+        observation.left_wheel_velocity_rad_s,
+        observation.right_wheel_velocity_rad_s,
+        observation.imu_ay_m_s2,
+    ] {
+        push_u64(bytes, value.to_bits());
+    }
+    push_u64(bytes, observation.lidar_points as u64);
+    for value in [
+        observation.goal_delta_x_m,
+        observation.peer_delta_x_m,
+        observation.peer_delta_z_m,
+        observation.peer_separation_m,
+    ] {
+        match value {
+            Some(value) => {
+                bytes.push(1);
+                push_u64(bytes, value.to_bits());
+            }
+            None => bytes.push(0),
+        }
+    }
+}
+
+fn push_metadata(bytes: &mut Vec<u8>, metadata: ActorFrameMetadata) {
+    for value in [
+        metadata.stream_id.0,
+        metadata.sequence,
+        metadata.capture_ticks,
+        metadata.available_ticks,
+        metadata.age_ticks,
+    ] {
+        push_u64(bytes, value);
+    }
+}
+
+fn push_u64(bytes: &mut Vec<u8>, value: u64) {
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn stable_fnv1a(bytes: &[u8]) -> u64 {
+    let mut digest = 0xcbf29ce484222325_u64;
+    for byte in bytes {
+        digest ^= u64::from(*byte);
+        digest = digest.wrapping_mul(0x100000001b3);
+    }
+    digest
 }
 
 #[cfg(test)]
@@ -308,6 +390,26 @@ mod tests {
                 payload: "localization",
                 stream_id: 10,
             })
+        );
+    }
+
+    #[test]
+    fn actor_observation_digest_is_canonical_and_sensitive_to_actor_input() {
+        let mut bus = InMemoryDataBus::new();
+        publish_complete_set(&mut bus, 10);
+        let frame = diff_drive_actor_observation(&bus, STREAMS, SimTime::from_ticks(12), Some(2.0))
+            .unwrap();
+        let digest = stable_diff_drive_actor_observation_digest(&frame);
+
+        assert_eq!(digest, 10_906_356_641_843_652_636);
+        assert_eq!(digest, stable_diff_drive_actor_observation_digest(&frame));
+
+        let changed_goal =
+            diff_drive_actor_observation(&bus, STREAMS, SimTime::from_ticks(12), Some(2.5))
+                .unwrap();
+        assert_ne!(
+            digest,
+            stable_diff_drive_actor_observation_digest(&changed_goal)
         );
     }
 }
