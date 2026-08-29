@@ -2,6 +2,20 @@
 
 Status: active, M0 in progress
 
+Implemented M0 evidence:
+
+- wheel encoder payloads now read completed joint coordinates instead of actuator targets;
+- kinematic wheels retain a realized integrated coordinate and restore it deterministically;
+- `DiffDriveSim` installs per-wheel 60 Hz encoder streams and its observation/joint-state
+  paths consume the latest available measurement rather than the newest command;
+- `rne_ai::diff_drive_actor_observation` is a DataBus-only policy boundary that retains
+  capture, availability, age, stream, and sequence metadata and fails closed when a
+  required frame has not arrived.
+
+Remaining M0 work is to route pose through an explicit localization/estimator stream,
+adopt the strict actor frame in the built-in episode, and replace optional peer truth with
+an explicitly declared observation source.
+
 ## North-star outcome
 
 RNE must evaluate a policy through the same closed loop that exists on a real mobile
