@@ -10,11 +10,17 @@ Implemented M0 evidence:
   paths consume the latest available measurement rather than the newest command;
 - `rne_ai::diff_drive_actor_observation` is a DataBus-only policy boundary that retains
   capture, availability, age, stream, and sequence metadata and fails closed when a
-  required frame has not arrived.
+  required frame has not arrived;
+- `DiffDriveEpisode` now consumes that strict actor frame from explicit localization,
+  wheel-encoder, IMU, and LiDAR streams; mutating the live ECS pose cannot change its
+  policy observation;
+- sensor frames are captured after a completed physics tick with the completed tick's
+  simulation timestamp, while the initial state is explicitly sampled at time zero.
 
-Remaining M0 work is to route pose through an explicit localization/estimator stream,
-adopt the strict actor frame in the built-in episode, and replace optional peer truth with
-an explicitly declared observation source.
+Remaining M0 work is to migrate the shared-agent path and replace optional peer truth with
+explicitly declared observation sources. The current localization stream is a simulated
+measurement boundary backed by pose truth; M2 replaces it with a sensor-only estimator and
+must prove stale, delayed, or missing inputs affect estimates without leaking ECS state.
 
 ## North-star outcome
 
@@ -181,15 +187,18 @@ and cross-backend results.
 
 1. M0-A: make legacy wheel encoder read realized coordinates and integrate kinematic wheel
    position; add stalled-wheel regression and this plan.
-2. M0-B: migrate the differential-drive example to `JointFeedback`; add actor-access audit.
-3. M1-A: backend-neutral motor/transmission/wheel types and pure deterministic unit tests.
-4. M1-B: contact/wrench contract plus Rapier implementation and conformance fixture.
-5. M1-C: MuJoCo implementation of the same contract and cross-backend fixture.
-6. M1-D: transient combined-slip force law, split-friction and low-speed tests.
-7. M2-A: encoder/steering/current payloads, calibration and fault pipeline.
-8. M2-B: wheel/IMU estimator and sensor-only mobile TaskSpec.
-9. M3: benchmark matrix, tolerances, evidence bundle, and Failure Capsules.
-10. M4/M5: batched Physical AI observations/randomization, then real-log identification,
+2. M0-B: add the strict DataBus actor-observation contract and measured wheel feedback.
+3. M0-C: route the built-in episode through explicit localization, encoder, IMU, and LiDAR
+   streams; align capture timestamps with completed ticks and add truth-mutation tests.
+4. M0-D: migrate shared agents and peer observations, then add stable DataBus replay hashes.
+5. M1-A: backend-neutral motor/transmission/wheel types and pure deterministic unit tests.
+6. M1-B: contact/wrench contract plus Rapier implementation and conformance fixture.
+7. M1-C: MuJoCo implementation of the same contract and cross-backend fixture.
+8. M1-D: transient combined-slip force law, split-friction and low-speed tests.
+9. M2-A: encoder/steering/current payloads, calibration and fault pipeline.
+10. M2-B: wheel/IMU estimator and sensor-only mobile TaskSpec.
+11. M3: benchmark matrix, tolerances, evidence bundle, and Failure Capsules.
+12. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.
 
 Every PR is independently headless-testable, documents new public contracts, runs format,

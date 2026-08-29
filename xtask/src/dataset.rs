@@ -59,8 +59,8 @@ pub(crate) fn dataset_reference_smoke() -> Result<()> {
     let verification = verification?;
     anyhow::ensure!(
         verification.stream_count == 8
-            && verification.record_count == 470
-            && verification.sample_count == 470
+            && verification.record_count == 471
+            && verification.sample_count == 471
             && verification.dropped_count == 0,
         "reference capture counts changed: {verification:?}"
     );

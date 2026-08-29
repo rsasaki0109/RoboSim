@@ -1,14 +1,20 @@
 //! Headless differential drive simulation.
 
 use crate::action::DiffDriveAction;
-use crate::lidar::{lidar_mounts_from_spawned, sync_lidar_mounts, LidarMount};
+use crate::lidar::{
+    lidar_mounts_from_spawned, lidar_stream_for_index, sync_lidar_mounts, LidarMount,
+};
+use crate::mobility_observation::{
+    diff_drive_actor_observation, DiffDriveActorObservationError, DiffDriveActorObservationFrame,
+    DiffDriveActorStreams,
+};
 use crate::observation::DiffDriveObservation;
 use bevy_ecs::prelude::{Component, Mut};
 use rne_assets::{load_and_spawn_scene, load_scene_bundle, mesh_package_roots, AssetError};
 use rne_core::{SimDuration, SimTime};
 use rne_data::DataBus;
 use rne_data::{
-    Frame, FramePayload, ImuSample, InMemoryDataBus, JointState, PointCloud, StreamId,
+    Frame, FramePayload, ImuSample, InMemoryDataBus, JointState, PointCloud, PoseSample, StreamId,
     WheelEncoderSample,
 };
 use rne_ecs::{spawn_named, Entity, World};
@@ -35,6 +41,7 @@ use std::any::type_name;
 use std::path::{Path, PathBuf};
 
 const IMU_STREAM_BASE: u32 = 100;
+const LOCALIZATION_STREAM_BASE: u64 = 300;
 const WHEEL_ENCODER_STREAM_BASE: u64 = 400;
 /// Bumped to 2 when the IMU error-model state joined the payload.
 const DIFF_DRIVE_SIM_SNAPSHOT_VERSION: u32 = 2;
@@ -231,6 +238,7 @@ pub struct DiffDriveSim {
     command_buffer: ActuatorCommandBuffer,
     data_bus: InMemoryDataBus,
     lidar_mounts: Vec<LidarMount>,
+    actor_streams: Vec<DiffDriveActorStreams>,
     sim_time: SimTime,
     dt: SimDuration,
     step_count: u64,
@@ -552,6 +560,7 @@ impl DiffDriveSim {
         }
         self.restore_kinematic_wheel_coordinates(&snapshot.wheel_encoder_frames);
         self.rebuild_physics_from_ecs()?;
+        self.publish_localization_frames();
         Ok(())
     }
 
@@ -592,6 +601,32 @@ impl DiffDriveSim {
     /// Provides read access to the simulation DataBus (sensor frames).
     pub fn data_bus(&self) -> &InMemoryDataBus {
         &self.data_bus
+    }
+
+    /// Returns the controller-visible stream contract for one robot.
+    pub fn actor_streams(&self, robot: Entity) -> Option<DiffDriveActorStreams> {
+        self.robots
+            .iter()
+            .position(|candidate| candidate.robot == robot)
+            .and_then(|index| self.actor_streams.get(index).copied())
+    }
+
+    /// Builds a strict controller observation from available DataBus frames only.
+    ///
+    /// The returned frame retains input timestamps and cannot access ECS transforms,
+    /// actuator targets, or physics state. The optional goal is TaskSpec data.
+    pub fn observe_actor_with_goal(
+        &self,
+        robot: Entity,
+        goal_x_m: Option<f64>,
+    ) -> Result<DiffDriveActorObservationFrame, DiffDriveActorObservationError> {
+        let streams = self.actor_streams(robot).ok_or(
+            DiffDriveActorObservationError::MissingAvailableFrame {
+                payload: "robot stream contract",
+                stream_id: u64::from(robot.index()),
+            },
+        )?;
+        diff_drive_actor_observation(&self.data_bus, streams, self.sim_time, goal_x_m)
     }
 
     /// Returns tracked LiDAR mounts loaded from scene robot assets.
@@ -668,12 +703,21 @@ impl DiffDriveSim {
         world_seed: u64,
         drive_mode: DiffDriveDriveMode,
         mesh_package_roots: Vec<PathBuf>,
-        lidar_mounts: Vec<LidarMount>,
+        mut lidar_mounts: Vec<LidarMount>,
     ) -> Self {
+        ensure_lidar_mounts(&mut world, &robots, &mut lidar_mounts);
         for (index, robot) in robots.iter().enumerate() {
             attach_imu(&mut world, robot.base_link, imu_stream_for_index(index));
             attach_wheel_encoders(&mut world, robot, index);
         }
+        let actor_streams = robots
+            .iter()
+            .enumerate()
+            .map(|(index, robot)| {
+                actor_streams_for_robot(&world, &lidar_mounts, robot, index)
+                    .expect("diff-drive actor sensor streams")
+            })
+            .collect();
 
         let mut backend = RapierBackend::new();
         let physics_world = backend
@@ -681,7 +725,7 @@ impl DiffDriveSim {
             .expect("physics world");
         backend.sync_from_ecs(&mut world, physics_world).unwrap();
 
-        Self {
+        let mut sim = Self {
             scene_path,
             world_seed,
             world,
@@ -691,12 +735,16 @@ impl DiffDriveSim {
             command_buffer: ActuatorCommandBuffer::new(),
             data_bus: InMemoryDataBus::new(),
             lidar_mounts,
+            actor_streams,
             sim_time: SimTime::ZERO,
             dt: SimDuration::from_hertz(Hertz::new(60.0)),
             step_count: 0,
             drive_mode,
             mesh_package_roots,
-        }
+        };
+        sim.capture_sensor_frames();
+        sim.publish_localization_frames();
+        sim
     }
 
     /// Resets the simulation to its initial state.
@@ -893,6 +941,13 @@ impl DiffDriveSim {
         )
         .unwrap();
 
+        self.sim_time = self.sim_time + self.dt;
+        self.step_count += 1;
+        self.capture_sensor_frames();
+        self.publish_localization_frames();
+    }
+
+    fn capture_sensor_frames(&mut self) {
         sync_lidar_mounts(&mut self.world, &self.lidar_mounts);
         sample_sensors(
             &mut SensorSampleContext {
@@ -905,9 +960,26 @@ impl DiffDriveSim {
             },
             &mut self.data_bus,
         );
+    }
 
-        self.sim_time = self.sim_time + self.dt;
-        self.step_count += 1;
+    fn publish_localization_frames(&mut self) {
+        for (index, robot) in self.robots.iter().enumerate() {
+            let transform = self
+                .world
+                .get::<Transform3>(robot.base_link)
+                .copied()
+                .unwrap_or_default();
+            self.data_bus.publish(Frame::new(
+                localization_stream_for_index(index),
+                robot.base_link,
+                self.step_count + 1,
+                self.sim_time,
+                PoseSample {
+                    position_m: transform.translation,
+                    yaw_rad: yaw_rad(transform.rotation),
+                },
+            ));
+        }
     }
 
     fn rebuild_physics_from_ecs(&mut self) -> Result<(), PhysicsError> {
@@ -1009,9 +1081,34 @@ fn imu_stream_for_index(index: usize) -> StreamId {
     StreamId::new(IMU_STREAM_BASE as u64 + index as u64)
 }
 
+fn localization_stream_for_index(index: usize) -> StreamId {
+    StreamId::new(LOCALIZATION_STREAM_BASE + index as u64)
+}
+
 fn wheel_encoder_streams_for_index(index: usize) -> (StreamId, StreamId) {
     let base = WHEEL_ENCODER_STREAM_BASE + index as u64 * 2;
     (StreamId::new(base), StreamId::new(base + 1))
+}
+
+fn actor_streams_for_robot(
+    world: &World,
+    lidar_mounts: &[LidarMount],
+    robot: &DiffDriveSpawned,
+    index: usize,
+) -> Option<DiffDriveActorStreams> {
+    let lidar = lidar_mounts
+        .iter()
+        .find(|mount| mount.base_link == robot.base_link)
+        .and_then(|mount| world.get::<Sensor>(mount.lidar))?
+        .stream_id;
+    let (left_wheel_encoder, right_wheel_encoder) = wheel_encoder_streams_for_index(index);
+    Some(DiffDriveActorStreams {
+        localization: localization_stream_for_index(index),
+        left_wheel_encoder,
+        right_wheel_encoder,
+        imu: imu_stream_for_index(index),
+        lidar,
+    })
 }
 
 fn collect_drives(world: &mut World) -> Vec<rne_robot::DifferentialDrive> {
@@ -1113,6 +1210,43 @@ fn attach_wheel_encoders(world: &mut World, robot: &DiffDriveSpawned, index: usi
             },
             SensorState::default(),
         ));
+    }
+}
+
+fn ensure_lidar_mounts(
+    world: &mut World,
+    robots: &[DiffDriveSpawned],
+    lidar_mounts: &mut Vec<LidarMount>,
+) {
+    for (index, robot) in robots.iter().enumerate() {
+        if lidar_mounts
+            .iter()
+            .any(|mount| mount.base_link == robot.base_link)
+        {
+            continue;
+        }
+        let lidar = spawn_named(world, format!("actor_lidar_{index}"));
+        world.entity_mut(lidar).insert((
+            Sensor {
+                kind: SensorKind::Lidar(LidarSpec {
+                    ray_count: 64,
+                    max_range_m: 10.0,
+                    ..LidarSpec::default()
+                }),
+                update_rate_hz: 10.0,
+                latency_ticks: 0,
+                frame_id: 0,
+                enabled: true,
+                stream_id: lidar_stream_for_index(index),
+            },
+            SensorState::default(),
+            Transform3::default(),
+        ));
+        lidar_mounts.push(LidarMount {
+            base_link: robot.base_link,
+            lidar,
+            offset_m: Vec3::new(0.0, 0.2, 0.0),
+        });
     }
 }
 
@@ -1256,6 +1390,31 @@ mod tests {
             measured.left_wheel_velocity_rad_s
         );
         assert_ne!(observed_again.left_wheel_velocity_rad_s, 99.0);
+    }
+
+    #[test]
+    fn strict_actor_frame_retains_sensor_age_and_ignores_live_ecs_pose() {
+        let mut sim = DiffDriveSim::new();
+        sim.step(4.0, 2.0);
+        let robot = sim.robot().robot;
+        let base_link = sim.robot().base_link;
+        let before = sim
+            .observe_actor_with_goal(robot, Some(3.0))
+            .expect("strict actor observation");
+
+        sim.world_mut()
+            .get_mut::<Transform3>(base_link)
+            .unwrap()
+            .translation
+            .x = 99.0;
+
+        let after = sim
+            .observe_actor_with_goal(robot, Some(3.0))
+            .expect("strict actor observation after truth mutation");
+        assert_eq!(after, before);
+        assert_eq!(before.localization.capture_ticks, sim.sim_time().ticks());
+        assert_eq!(before.localization.age_ticks, 0);
+        assert!(before.lidar.age_ticks <= sim.fixed_delta().ticks());
     }
 
     #[test]
