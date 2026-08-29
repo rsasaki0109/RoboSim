@@ -828,17 +828,25 @@ impl DiffDriveSim {
         self.step_count
     }
 
-    /// Builds an observation from the primary robot state.
+    /// Builds a privileged diagnostic observation from the primary robot state.
+    ///
+    /// Controllers should use [`Self::observe_actor_with_goal`] instead; this legacy
+    /// diagnostic path includes live ECS pose and peer truth.
     pub fn observe(&self) -> DiffDriveObservation {
         self.observe_robot(self.robots[0].robot)
     }
 
-    /// Builds an observation for a specific diff-drive robot in this world.
+    /// Builds a privileged diagnostic observation for one robot in this world.
+    ///
+    /// Controllers should use [`Self::observe_actor_with_goal`] instead.
     pub fn observe_robot(&self, robot: Entity) -> DiffDriveObservation {
         self.observe_robot_with_goal(robot, None)
     }
 
-    /// Builds an observation for a robot, optionally including goal-relative features.
+    /// Builds a privileged diagnostic observation with optional goal-relative features.
+    ///
+    /// This legacy helper reads live ECS pose and exact peer transforms. It must not be
+    /// used as a policy input; use [`Self::observe_actor_with_goal`] for that boundary.
     pub fn observe_robot_with_goal(
         &self,
         robot: Entity,
@@ -1415,6 +1423,28 @@ mod tests {
         assert_eq!(before.localization.capture_ticks, sim.sim_time().ticks());
         assert_eq!(before.localization.age_ticks, 0);
         assert!(before.lidar.age_ticks <= sim.fixed_delta().ticks());
+    }
+
+    #[test]
+    fn identical_rollouts_have_identical_actor_input_digests() {
+        let mut left = DiffDriveSim::new();
+        let mut right = DiffDriveSim::new();
+        let commands = [(4.0, 4.0), (5.0, 3.0), (0.0, 0.0), (-2.0, -2.0)];
+
+        for (left_rad_s, right_rad_s) in commands {
+            left.step(left_rad_s, right_rad_s);
+            right.step(left_rad_s, right_rad_s);
+            let left_frame = left
+                .observe_actor_with_goal(left.robot().robot, Some(3.0))
+                .expect("left actor frame");
+            let right_frame = right
+                .observe_actor_with_goal(right.robot().robot, Some(3.0))
+                .expect("right actor frame");
+            assert_eq!(
+                crate::stable_diff_drive_actor_observation_digest(&left_frame),
+                crate::stable_diff_drive_actor_observation_digest(&right_frame)
+            );
+        }
     }
 
     #[test]

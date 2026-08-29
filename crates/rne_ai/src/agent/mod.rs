@@ -141,6 +141,32 @@ mod tests {
     }
 
     #[test]
+    fn shared_agent_observation_does_not_read_mutated_ecs_pose_truth() {
+        let mut sim = DiffDriveSim::new();
+        let robot = sim.robot().robot;
+        let base_link = sim.robot().base_link;
+        let agent = spawn_shared_diff_drive_agent_for_robot(
+            &mut sim,
+            "sensor_only_agent",
+            AgentKind::Policy,
+            robot,
+            Some(2.0),
+        );
+        let before = observe_shared_diff_drive_agent(&mut sim, agent);
+
+        sim.world_mut()
+            .get_mut::<rne_world::Transform3>(base_link)
+            .expect("base transform")
+            .translation
+            .x = 99.0;
+
+        let after = observe_shared_diff_drive_agent(&mut sim, agent);
+        assert_eq!(after, before);
+        assert_ne!(after.base_x_m, 99.0);
+        assert_eq!(after.goal_delta_x_m, Some(2.0 - after.base_x_m));
+    }
+
+    #[test]
     fn multi_robot_shared_agents_advance_in_one_tick() {
         use rne_math::Vec3;
         use rne_robot::{DiffDriveConfig, DiffDriveDriveMode};

@@ -59,6 +59,16 @@ fn robot_for_agent(sim: &DiffDriveSim, agent: Entity) -> Entity {
         .unwrap_or_else(|| sim.robot().robot)
 }
 
+fn actor_observation(
+    sim: &DiffDriveSim,
+    robot: Entity,
+    goal_x_m: Option<f64>,
+) -> DiffDriveObservation {
+    sim.observe_actor_with_goal(robot, goal_x_m)
+        .expect("shared diff-drive agent requires a complete actor sensor set")
+        .observation
+}
+
 /// Spawns an agent entity bound to the primary simulation robot.
 pub fn spawn_shared_diff_drive_agent(
     sim: &mut DiffDriveSim,
@@ -76,7 +86,7 @@ pub fn spawn_shared_diff_drive_agent_for_robot(
     robot: Entity,
     goal_x_m: Option<f64>,
 ) -> Entity {
-    let observation = sim.observe_robot_with_goal(robot, goal_x_m);
+    let observation = actor_observation(sim, robot, goal_x_m);
     let entity = spawn_named(sim.world_mut(), name);
     sim.world_mut().entity_mut(entity).insert((
         Agent { kind },
@@ -106,7 +116,7 @@ where
 {
     let robot = robot_for_agent(sim, agent);
     let goal_x_m = goal_for_agent(sim, agent);
-    let observation = sim.observe_robot_with_goal(robot, goal_x_m);
+    let observation = actor_observation(sim, robot, goal_x_m);
 
     let mut entity = sim
         .world_mut()
@@ -120,14 +130,14 @@ where
     entity.insert(AttachedPolicy);
 }
 
-/// Refreshes an agent observation from the live simulation world.
+/// Refreshes an agent observation from controller-visible DataBus frames.
 pub fn observe_shared_diff_drive_agent(
     sim: &mut DiffDriveSim,
     agent: Entity,
 ) -> DiffDriveObservation {
     let robot = robot_for_agent(sim, agent);
     let goal_x_m = goal_for_agent(sim, agent);
-    let observation = sim.observe_robot_with_goal(robot, goal_x_m);
+    let observation = actor_observation(sim, robot, goal_x_m);
     sim.world_mut()
         .get_mut::<SharedDiffDriveAgentState>(agent)
         .expect("shared-world agent must have SharedDiffDriveAgentState")
@@ -161,7 +171,8 @@ pub fn step_shared_diff_drive_action(
 ) -> DiffDriveObservation {
     let robot = robot_for_agent(sim, agent);
     let goal_x_m = goal_for_agent(sim, agent);
-    let observation = sim.step_robot_action(robot, action, goal_x_m);
+    sim.step_robot_action(robot, action, goal_x_m);
+    let observation = actor_observation(sim, robot, goal_x_m);
     sim.world_mut()
         .get_mut::<SharedDiffDriveAgentState>(agent)
         .expect("shared-world agent must have SharedDiffDriveAgentState")
@@ -203,7 +214,7 @@ pub fn step_shared_diff_drive_agents(sim: &mut DiffDriveSim) {
 
     for (agent, robot, _) in planned {
         let goal_x_m = goal_for_agent(sim, agent);
-        let observation = sim.observe_robot_with_goal(robot, goal_x_m);
+        let observation = actor_observation(sim, robot, goal_x_m);
         sim.world_mut()
             .get_mut::<SharedDiffDriveAgentState>(agent)
             .expect("shared-world agent must have SharedDiffDriveAgentState")
