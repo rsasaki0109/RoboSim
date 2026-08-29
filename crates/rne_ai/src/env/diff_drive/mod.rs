@@ -405,7 +405,9 @@ impl DiffDriveEpisode {
 
     fn observe_with_current_goal(&self) -> DiffDriveObservation {
         self.sim
-            .observe_robot_with_goal(self.sim.robot().robot, Some(self.goal_x_m))
+            .observe_actor_with_goal(self.sim.robot().robot, Some(self.goal_x_m))
+            .expect("complete diff-drive actor sensor set")
+            .observation
     }
 
     fn queue_primary_action(&mut self, action: DiffDriveAction) {
@@ -862,6 +864,24 @@ mod tests {
         });
         let step = env.reset();
         assert_eq!(step.observation.goal_delta_x_m, Some(2.0));
+    }
+
+    #[test]
+    fn episode_policy_observation_does_not_read_mutated_ecs_pose_truth() {
+        let mut env = DiffDriveEpisode::new(DiffDriveEpisodeConfig::default());
+        let reset = env.reset();
+        let base_link = env.sim.robot().base_link;
+        env.sim
+            .world_mut()
+            .get_mut::<rne_world::Transform3>(base_link)
+            .unwrap()
+            .translation
+            .x = 99.0;
+
+        let observed = env.observe_with_current_goal();
+        assert_eq!(observed.base_x_m, reset.observation.base_x_m);
+        assert_eq!(observed.goal_delta_x_m, reset.observation.goal_delta_x_m);
+        assert_ne!(observed.base_x_m, 99.0);
     }
 
     #[test]
