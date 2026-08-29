@@ -11,9 +11,9 @@ pub struct DiffDriveObservation {
     pub base_z_m: f64,
     /// Base link yaw around world Y in radians.
     pub base_yaw_rad: f64,
-    /// Commanded left wheel velocity in radians per second.
+    /// Measured left wheel velocity in radians per second.
     pub left_wheel_velocity_rad_s: f64,
-    /// Commanded right wheel velocity in radians per second.
+    /// Measured right wheel velocity in radians per second.
     pub right_wheel_velocity_rad_s: f64,
     /// IMU linear acceleration Y in meters per second squared.
     pub imu_ay_m_s2: f64,

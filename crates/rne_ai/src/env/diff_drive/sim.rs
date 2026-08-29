@@ -23,11 +23,11 @@ use rne_robot::{
     apply_actuator_commands, differential_drive_kinematics, spawn_diff_drive_robot,
     sync_joint_motors_from_actuators, Actuator, ActuatorCommand, ActuatorCommandBuffer,
     ActuatorTarget, ControlMode, DiffDriveComponent, DiffDriveConfig, DiffDriveDriveMode,
-    DiffDriveSpawned, Link,
+    DiffDriveSpawned, Joint, Link,
 };
 use rne_sensor::{
-    sample_sensors, ImuSpec, ImuState, LidarSpec, Sensor, SensorKind, SensorSampleContext,
-    SensorState,
+    sample_sensors, sample_wheel_encoder, ImuSpec, ImuState, LidarSpec, Sensor, SensorKind,
+    SensorSampleContext, SensorState, WheelEncoderSpec,
 };
 use rne_world::{world_transform_of, Transform3, WorldEntity, WorldRandom, WorldRandomSnapshot};
 use serde::{Deserialize, Serialize};
@@ -35,6 +35,7 @@ use std::any::type_name;
 use std::path::{Path, PathBuf};
 
 const IMU_STREAM_BASE: u32 = 100;
+const WHEEL_ENCODER_STREAM_BASE: u64 = 400;
 /// Bumped to 2 when the IMU error-model state joined the payload.
 const DIFF_DRIVE_SIM_SNAPSHOT_VERSION: u32 = 2;
 
@@ -549,6 +550,7 @@ impl DiffDriveSim {
         for frame in &snapshot.wheel_encoder_frames {
             self.data_bus.publish(frame.to_frame());
         }
+        self.restore_kinematic_wheel_coordinates(&snapshot.wheel_encoder_frames);
         self.rebuild_physics_from_ecs()?;
         Ok(())
     }
@@ -625,8 +627,18 @@ impl DiffDriveSim {
     /// Returns wheel joint positions and velocities for ROS `/joint_states`.
     pub fn joint_state(&self) -> JointState {
         let robot = self.robot();
-        let left = wheel_joint_sample(&self.world, robot.left_wheel, robot.left_actuator);
-        let right = wheel_joint_sample(&self.world, robot.right_wheel, robot.right_actuator);
+        let left = sample_wheel_encoder(
+            &self.world,
+            &WheelEncoderSpec {
+                actuator: robot.left_actuator,
+            },
+        );
+        let right = sample_wheel_encoder(
+            &self.world,
+            &WheelEncoderSpec {
+                actuator: robot.right_actuator,
+            },
+        );
         JointState {
             names: vec!["left_wheel_joint".into(), "right_wheel_joint".into()],
             positions_rad: vec![left.position_rad, right.position_rad],
@@ -660,6 +672,7 @@ impl DiffDriveSim {
     ) -> Self {
         for (index, robot) in robots.iter().enumerate() {
             attach_imu(&mut world, robot.base_link, imu_stream_for_index(index));
+            attach_wheel_encoders(&mut world, robot, index);
         }
 
         let mut backend = RapierBackend::new();
@@ -794,16 +807,17 @@ impl DiffDriveSim {
             .get::<Transform3>(base_link)
             .copied()
             .unwrap_or_default();
-        let left_wheel_velocity_rad_s = self
-            .world
-            .get::<Actuator>(spawned.left_actuator)
-            .map(|actuator| actuator.target.velocity_rad_s)
-            .unwrap_or(0.0);
-        let right_wheel_velocity_rad_s = self
-            .world
-            .get::<Actuator>(spawned.right_actuator)
-            .map(|actuator| actuator.target.velocity_rad_s)
-            .unwrap_or(0.0);
+        let robot_index = self
+            .robots
+            .iter()
+            .position(|candidate| candidate.robot == spawned.robot)
+            .unwrap_or(0);
+        let (left_encoder_stream, right_encoder_stream) =
+            wheel_encoder_streams_for_index(robot_index);
+        let left_wheel_velocity_rad_s =
+            measured_wheel_velocity(&self.data_bus, left_encoder_stream, self.sim_time);
+        let right_wheel_velocity_rad_s =
+            measured_wheel_velocity(&self.data_bus, right_encoder_stream, self.sim_time);
         let imu = imu_ay_for_base(&self.world, &self.data_bus, base_link);
         let lidar_points =
             lidar_point_count_for_robot(&self.world, &self.data_bus, spawned, &self.lidar_mounts);
@@ -904,6 +918,38 @@ impl DiffDriveSim {
         self.physics_world = physics_world;
         Ok(())
     }
+
+    fn restore_kinematic_wheel_coordinates(
+        &mut self,
+        frames: &[DiffDriveFrameSnapshot<WheelEncoderSample>],
+    ) {
+        for (index, robot) in self.robots.iter().enumerate() {
+            let (left_stream, right_stream) = wheel_encoder_streams_for_index(index);
+            for (actuator_entity, stream_id) in [
+                (robot.left_actuator, left_stream),
+                (robot.right_actuator, right_stream),
+            ] {
+                let Some(sample) = frames
+                    .iter()
+                    .find(|frame| frame.stream_id == stream_id)
+                    .map(|frame| frame.payload)
+                else {
+                    continue;
+                };
+                let Some(joint_entity) = self
+                    .world
+                    .get::<Actuator>(actuator_entity)
+                    .and_then(|actuator| actuator.joint)
+                else {
+                    continue;
+                };
+                if let Some(mut joint) = self.world.get_mut::<Joint>(joint_entity) {
+                    joint.position = sample.position_rad;
+                    joint.velocity = sample.velocity_rad_s;
+                }
+            }
+        }
+    }
 }
 
 impl From<PhysicsError> for DiffDriveSimSnapshotError {
@@ -963,6 +1009,11 @@ fn imu_stream_for_index(index: usize) -> StreamId {
     StreamId::new(IMU_STREAM_BASE as u64 + index as u64)
 }
 
+fn wheel_encoder_streams_for_index(index: usize) -> (StreamId, StreamId) {
+    let base = WHEEL_ENCODER_STREAM_BASE + index as u64 * 2;
+    (StreamId::new(base), StreamId::new(base + 1))
+}
+
 fn collect_drives(world: &mut World) -> Vec<rne_robot::DifferentialDrive> {
     let mut query = world.query::<&DiffDriveComponent>();
     query.iter(world).map(|component| component.0).collect()
@@ -978,6 +1029,17 @@ fn imu_ay_for_base(world: &World, data_bus: &InMemoryDataBus, base_link: Entity)
     data_bus
         .latest::<rne_data::ImuSample>(sensor.stream_id)
         .map(|frame| frame.payload.linear_acceleration_m_s2.y)
+        .unwrap_or(0.0)
+}
+
+fn measured_wheel_velocity(
+    data_bus: &InMemoryDataBus,
+    stream_id: StreamId,
+    controller_time: SimTime,
+) -> f64 {
+    data_bus
+        .latest_available::<WheelEncoderSample>(stream_id, controller_time)
+        .map(|frame| frame.payload.velocity_rad_s)
         .unwrap_or(0.0)
 }
 
@@ -1033,32 +1095,33 @@ fn attach_imu(world: &mut World, base_link: rne_ecs::Entity, stream_id: StreamId
     ));
 }
 
+fn attach_wheel_encoders(world: &mut World, robot: &DiffDriveSpawned, index: usize) {
+    let (left_stream, right_stream) = wheel_encoder_streams_for_index(index);
+    for (name, actuator, stream_id) in [
+        ("left_wheel_encoder", robot.left_actuator, left_stream),
+        ("right_wheel_encoder", robot.right_actuator, right_stream),
+    ] {
+        let sensor_entity = spawn_named(world, format!("{name}_{index}"));
+        world.entity_mut(sensor_entity).insert((
+            Sensor {
+                kind: SensorKind::WheelEncoder(WheelEncoderSpec { actuator }),
+                update_rate_hz: 60.0,
+                latency_ticks: 0,
+                frame_id: 0,
+                enabled: true,
+                stream_id,
+            },
+            SensorState::default(),
+        ));
+    }
+}
+
 fn find_robot_link(world: &mut World, robot: Entity, link_name: &str) -> Option<Entity> {
     let mut query = world.query::<(Entity, &Link)>();
     query
         .iter(world)
         .find(|(_, link)| link.robot == robot && link.name == link_name)
         .map(|(entity, _)| entity)
-}
-
-struct WheelJointSample {
-    position_rad: f64,
-    velocity_rad_s: f64,
-}
-
-fn wheel_joint_sample(world: &World, wheel: Entity, actuator: Entity) -> WheelJointSample {
-    let position_rad = world
-        .get::<Transform3>(wheel)
-        .map(|transform| 2.0 * f64::atan2(transform.rotation.z, transform.rotation.w))
-        .unwrap_or(0.0);
-    let velocity_rad_s = world
-        .get::<Actuator>(actuator)
-        .map(|actuator| actuator.target.velocity_rad_s)
-        .unwrap_or(0.0);
-    WheelJointSample {
-        position_rad,
-        velocity_rad_s,
-    }
 }
 
 fn build_diff_drive_spawned(
@@ -1134,6 +1197,65 @@ mod tests {
         assert!(obs.left_wheel_velocity_rad_s.abs() > 0.0);
         assert!(obs.right_wheel_velocity_rad_s.abs() > 0.0);
         assert!(obs.base_yaw_rad.abs() < 0.5);
+    }
+
+    #[test]
+    fn observation_wheel_velocity_is_a_measurement_not_a_later_command_target() {
+        let mut sim = DiffDriveSim::new();
+        let measured = sim.step(4.0, 2.0);
+        let left_measured_rad_s = measured.left_wheel_velocity_rad_s;
+        let right_measured_rad_s = measured.right_wheel_velocity_rad_s;
+        let left_actuator = sim.robot().left_actuator;
+        let right_actuator = sim.robot().right_actuator;
+
+        sim.world_mut()
+            .get_mut::<Actuator>(left_actuator)
+            .unwrap()
+            .target
+            .velocity_rad_s = -9.0;
+        sim.world_mut()
+            .get_mut::<Actuator>(right_actuator)
+            .unwrap()
+            .target
+            .velocity_rad_s = 9.0;
+
+        let observed_again = sim.observe();
+        assert_eq!(
+            observed_again.left_wheel_velocity_rad_s,
+            left_measured_rad_s
+        );
+        assert_eq!(
+            observed_again.right_wheel_velocity_rad_s,
+            right_measured_rad_s
+        );
+    }
+
+    #[test]
+    fn observation_cannot_consume_encoder_frame_before_availability() {
+        let mut sim = DiffDriveSim::new();
+        let measured = sim.step(4.0, 2.0);
+        let controller_time = sim.sim_time();
+        let (left_stream, _) = wheel_encoder_streams_for_index(0);
+        sim.data_bus.publish(
+            Frame::new(
+                left_stream,
+                Entity::PLACEHOLDER,
+                999,
+                controller_time,
+                WheelEncoderSample {
+                    position_rad: 99.0,
+                    velocity_rad_s: 99.0,
+                },
+            )
+            .with_latency(SimDuration::from_ticks(sim.fixed_delta().ticks() * 10)),
+        );
+
+        let observed_again = sim.observe();
+        assert_eq!(
+            observed_again.left_wheel_velocity_rad_s,
+            measured.left_wheel_velocity_rad_s
+        );
+        assert_ne!(observed_again.left_wheel_velocity_rad_s, 99.0);
     }
 
     #[test]

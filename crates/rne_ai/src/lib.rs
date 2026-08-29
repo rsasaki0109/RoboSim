@@ -20,6 +20,7 @@ pub mod joint_trajectory;
 pub mod lidar;
 pub mod mm_lift_kinematics;
 pub mod mm_minimal_kinematics;
+pub mod mobility_observation;
 pub mod multi_robot;
 pub mod observation;
 pub mod policy;
@@ -197,6 +198,10 @@ pub use mm_minimal_kinematics::{
     MmMinimalIkError, MmMinimalJointTarget, MmMinimalKinematics, MM_MINIMAL_CLUTTER_PLACE_X_M,
     MM_MINIMAL_CLUTTER_PLACE_Y_M, MM_MINIMAL_CLUTTER_PLACE_Z_M, MM_MOBILE_CLUTTER_PLACE_X_M,
     MM_MOBILE_CLUTTER_PLACE_Y_M, MM_MOBILE_CLUTTER_PLACE_Z_M,
+};
+pub use mobility_observation::{
+    diff_drive_actor_observation, ActorFrameMetadata, DiffDriveActorObservationError,
+    DiffDriveActorObservationFrame, DiffDriveActorStreams,
 };
 pub use multi_robot::{
     head_on_collision_configs, head_on_collision_sim, inter_robot_contacts, last_contacts,
