@@ -3,15 +3,15 @@
   "schema_version": 1,
   "environment_id": "openarm",
   "subject": "Official OpenArm v2 bimanual control",
-  "visual_state_sync": "Official OpenArm link visuals are rebuilt from the post-Rapier ECS world after every sampled fixed step.",
+  "visual_state_sync": "Official OpenArm link visuals and the latency/error/effort control panel are rebuilt from the same post-Rapier fixed-step state.",
   "simulation": {
-    "scenario": "OpenArm v2 bimanual force-limited position-control cycle",
+    "scenario": "OpenArm v2 bimanual delayed joint-feedback and portable PD-effort cycle",
     "steps": 1400,
     "initial_state_digest": 2539824101460789923,
-    "final_state_digest": 3397633380677300770,
-    "replay_final_state_digest": 3397633380677300770,
+    "final_state_digest": 470641459062386090,
+    "replay_final_state_digest": 470641459062386090,
     "replay_match": true,
-    "outcome": "actuators=18; left_ee_travel_m=0.7340; right_ee_travel_m=0.7366; left_gripper_aperture_change_m=0.0918; right_gripper_aperture_change_m=0.0918; max_final_proximal_joint_error_rad=0.00000; visual_mesh_parts=59"
+    "outcome": "actuators=18; typed_feedback_decisions=1398; sensor_samples=1400; feedback_latency_ticks=16666666; max_tracking_error_rad=1.49278; saturated_channel_samples=12791; left_ee_travel_m=0.7293; right_ee_travel_m=0.7294; left_gripper_aperture_change_m=0.0591; right_gripper_aperture_change_m=0.0591; max_final_proximal_joint_error_rad=0.09312; visual_mesh_parts=59"
   },
   "capture": {
     "gpu_rendered": true,
@@ -20,11 +20,11 @@
     "frame_count": 46,
     "frame_pattern": "target/rne-showcase-openarm/frame-%03d.png",
     "gif_path": "docs/media/showcase-openarm.gif",
-    "gif_bytes": 2426451,
-    "gif_sha256": "80f2a170ff79bfa21f16948d7e6d2c00487543ce0aedb617e8142b23616e1db9",
+    "gif_bytes": 2369682,
+    "gif_sha256": "d54ff4fe65d213f7fc8d1590dcbf2ba754428b94fbec859c37496ea3204fd717",
     "poster_path": "docs/media/showcase-openarm.png",
-    "poster_bytes": 26777,
-    "poster_sha256": "c8c23fbf53f46da7982b7fbcf3c7c2326c7bc55a5ed24809071a8e2618182ffe",
+    "poster_bytes": 29014,
+    "poster_sha256": "542209feb6fbde94e1fb150aff50cdf5814b60bd1520761165116e1ef8edd091",
     "poster_frame": 26,
     "sampled_sim_steps": [
       30,

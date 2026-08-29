@@ -581,6 +581,21 @@ coulomb_transition_velocity_rad_s = 0.04
     }
 
     #[test]
+    fn shipped_openarm_pair_uses_declared_inertial_masses() {
+        let manifests = [
+            include_str!("../../../assets/robots/openarm_v2_left.rne.robot.toml"),
+            include_str!("../../../assets/robots/openarm_v2_right.rne.robot.toml"),
+        ];
+
+        for manifest in manifests {
+            let asset = parse_robot_asset(manifest, Path::new("openarm.rne.robot.toml")).unwrap();
+            let urdf = asset.urdf.expect("OpenArm URDF section");
+            assert!(urdf.use_declared_inertial_masses);
+            assert!(urdf.to_spawn_config().use_declared_inertial_masses);
+        }
+    }
+
+    #[test]
     fn rejects_missing_diff_drive_section() {
         let text = r#"
 kind = "diff_drive"
