@@ -386,7 +386,9 @@ jobs:
       - name: Generate and verify v0.2 trust evidence
         run: cargo run --locked -p xtask -- evidence
       - name: Capture and verify the headless reference dataset
+        shell: bash
         run: |
+          set -euo pipefail
           cargo run --locked -p diff_drive_dataset_capture --example 73_diff_drive_dataset_capture -- artifacts/datasets/diff-drive-reference.rne-dataset --verify-golden
           cargo run --locked -p xtask -- dataset-check artifacts/datasets/diff-drive-reference.rne-dataset
           cargo run --locked -p xtask -- dataset-evaluate-depth artifacts/datasets/diff-drive-reference.rne-dataset 401 402 0.01 artifacts/datasets/diff-drive-depth-evaluation.json
