@@ -118,6 +118,220 @@ pub struct Actuator {
     pub limits: crate::actuator::ActuatorLimits,
 }
 
+/// Electrical failure applied to a DC motor model.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DcMotorFailureMode {
+    /// Normal voltage-driven operation.
+    #[default]
+    Nominal,
+    /// Disconnected terminals: no armature current or electromagnetic torque.
+    OpenCircuit,
+    /// Shorted terminals: command voltage is zero and back-EMF produces bounded braking current.
+    ShortCircuit,
+}
+
+/// Identifiable brushed or brushless-DC equivalent-circuit parameters.
+///
+/// The default fidelity tier is quasi-static: set [`Self::inductance_h`] to `None` and
+/// identify resistance, motor constants, losses, and current limits from a datasheet,
+/// locked-rotor test, free-spin test, and coast-down trace. Supplying an inductance enables
+/// explicit forward-Euler current dynamics and therefore requires a timestep small enough
+/// for the electrical time constant. Thermal state, commutation ripple, saturation, and
+/// cogging are outside this v1 model and must not be inferred from its output.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DcMotorSpec {
+    /// Terminal-to-terminal armature resistance in ohms.
+    pub resistance_ohm: f64,
+    /// Torque constant in newton-meters per ampere.
+    pub torque_constant_nm_a: f64,
+    /// Back-EMF constant in volt-seconds per radian.
+    pub back_emf_constant_v_s_rad: f64,
+    /// Maximum absolute command voltage at the motor terminals in volts.
+    pub supply_voltage_v: f64,
+    /// Maximum absolute armature current in amperes.
+    pub current_limit_a: f64,
+    /// Rotor inertia about the shaft in kilogram square meters.
+    pub rotor_inertia_kg_m2: f64,
+    /// Viscous shaft-loss coefficient in newton-meter-seconds per radian.
+    pub viscous_friction_nm_s_rad: f64,
+    /// Coulomb shaft-loss magnitude in newton-meters.
+    pub coulomb_friction_nm: f64,
+    /// Optional armature inductance in henries; `None` selects the quasi-static tier.
+    pub inductance_h: Option<f64>,
+    /// Explicit electrical failure behavior.
+    pub failure_mode: DcMotorFailureMode,
+}
+
+impl Default for DcMotorSpec {
+    fn default() -> Self {
+        Self {
+            resistance_ohm: 0.5,
+            torque_constant_nm_a: 0.08,
+            back_emf_constant_v_s_rad: 0.08,
+            supply_voltage_v: 24.0,
+            current_limit_a: 20.0,
+            rotor_inertia_kg_m2: 0.000_1,
+            viscous_friction_nm_s_rad: 0.001,
+            coulomb_friction_nm: 0.01,
+            inductance_h: None,
+            failure_mode: DcMotorFailureMode::Nominal,
+        }
+    }
+}
+
+impl DcMotorSpec {
+    /// Returns whether all parameters are finite and physically valid for evaluation.
+    pub fn is_valid(&self) -> bool {
+        [
+            self.resistance_ohm,
+            self.torque_constant_nm_a,
+            self.back_emf_constant_v_s_rad,
+            self.supply_voltage_v,
+            self.current_limit_a,
+            self.rotor_inertia_kg_m2,
+            self.viscous_friction_nm_s_rad,
+            self.coulomb_friction_nm,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+            && self.resistance_ohm > 0.0
+            && self.torque_constant_nm_a > 0.0
+            && self.back_emf_constant_v_s_rad > 0.0
+            && self.supply_voltage_v > 0.0
+            && self.current_limit_a > 0.0
+            && self.rotor_inertia_kg_m2 >= 0.0
+            && self.viscous_friction_nm_s_rad >= 0.0
+            && self.coulomb_friction_nm >= 0.0
+            && self
+                .inductance_h
+                .is_none_or(|inductance_h| inductance_h.is_finite() && inductance_h > 0.0)
+    }
+}
+
+/// Dynamic electrical state retained by a DC motor evaluator.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DcMotorState {
+    /// Armature current at the end of the latest completed step in amperes.
+    pub current_a: f64,
+}
+
+/// Backend-neutral motor-to-wheel transmission parameters.
+///
+/// Positive ratio preserves coordinate sign and negative ratio reverses it. Backlash and
+/// torsional compliance are declared here for later stateful driveline integration; the M1-A
+/// static torque map reports them but does not pretend to simulate their transient response.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TransmissionSpec {
+    /// Motor radians per wheel radian, including coordinate direction.
+    pub ratio_motor_rad_per_wheel_rad: f64,
+    /// Efficiency ratio when mechanical power flows from motor to wheel, in `[0, 1]`.
+    pub drive_efficiency_ratio: f64,
+    /// Efficiency ratio when mechanical power flows from wheel to motor, in `[0, 1]`.
+    pub backdrive_efficiency_ratio: f64,
+    /// Total wheel-side angular backlash in radians.
+    pub backlash_rad: f64,
+    /// Optional wheel-side torsional stiffness in newton-meters per radian.
+    pub torsional_stiffness_nm_rad: Option<f64>,
+    /// Wheel-side torsional damping in newton-meter-seconds per radian.
+    pub torsional_damping_nm_s_rad: f64,
+}
+
+impl Default for TransmissionSpec {
+    fn default() -> Self {
+        Self {
+            ratio_motor_rad_per_wheel_rad: 20.0,
+            drive_efficiency_ratio: 0.9,
+            backdrive_efficiency_ratio: 0.75,
+            backlash_rad: 0.0,
+            torsional_stiffness_nm_rad: None,
+            torsional_damping_nm_s_rad: 0.0,
+        }
+    }
+}
+
+impl TransmissionSpec {
+    /// Returns whether all parameters are finite and physically valid.
+    pub fn is_valid(&self) -> bool {
+        self.ratio_motor_rad_per_wheel_rad.is_finite()
+            && self.ratio_motor_rad_per_wheel_rad != 0.0
+            && self.drive_efficiency_ratio.is_finite()
+            && (0.0..=1.0).contains(&self.drive_efficiency_ratio)
+            && self.backdrive_efficiency_ratio.is_finite()
+            && (0.0..=1.0).contains(&self.backdrive_efficiency_ratio)
+            && self.backlash_rad.is_finite()
+            && self.backlash_rad >= 0.0
+            && self
+                .torsional_stiffness_nm_rad
+                .is_none_or(|stiffness_nm_rad| {
+                    stiffness_nm_rad.is_finite() && stiffness_nm_rad > 0.0
+                })
+            && self.torsional_damping_nm_s_rad.is_finite()
+            && self.torsional_damping_nm_s_rad >= 0.0
+    }
+}
+
+/// Geometry and inertia for one steerable or fixed wheel assembly.
+///
+/// `forward_axis` and `axle_axis` form the wheel contact frame in the wheel link's local
+/// coordinates. They must be unit length and orthogonal. Surface and tire-force laws are
+/// intentionally not embedded here so physics backends can share the same assembly spec.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WheelAssemblySpec {
+    /// Unloaded rolling radius in meters.
+    pub radius_m: f64,
+    /// Physical tread width in meters.
+    pub width_m: f64,
+    /// Wheel rotational inertia about its axle in kilogram square meters.
+    pub inertia_kg_m2: f64,
+    /// Dimensionless rolling-resistance coefficient.
+    pub rolling_resistance_coefficient: f64,
+    /// Local unit vector pointing in the free-rolling direction.
+    pub forward_axis: Vec3,
+    /// Local unit vector along the positive wheel axle.
+    pub axle_axis: Vec3,
+}
+
+impl Default for WheelAssemblySpec {
+    fn default() -> Self {
+        Self {
+            radius_m: 0.1,
+            width_m: 0.04,
+            inertia_kg_m2: 0.01,
+            rolling_resistance_coefficient: 0.015,
+            forward_axis: Vec3::X,
+            axle_axis: Vec3::Z,
+        }
+    }
+}
+
+impl WheelAssemblySpec {
+    /// Returns whether dimensions, inertia, and the declared contact frame are valid.
+    pub fn is_valid(&self) -> bool {
+        const AXIS_TOLERANCE: f64 = 1.0e-6;
+        [
+            self.radius_m,
+            self.width_m,
+            self.inertia_kg_m2,
+            self.rolling_resistance_coefficient,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+            && self.radius_m > 0.0
+            && self.width_m > 0.0
+            && self.inertia_kg_m2 >= 0.0
+            && self.rolling_resistance_coefficient >= 0.0
+            && self.forward_axis.is_finite()
+            && self.axle_axis.is_finite()
+            && (self.forward_axis.length() - 1.0).abs() <= AXIS_TOLERANCE
+            && (self.axle_axis.length() - 1.0).abs() <= AXIS_TOLERANCE
+            && self.forward_axis.dot(self.axle_axis).abs() <= AXIS_TOLERANCE
+    }
+}
+
 /// Deterministic kinematic Ackermann drive state and safety limits.
 ///
 /// The drive uses the entity's local `+X` axis as its forward direction. Commands

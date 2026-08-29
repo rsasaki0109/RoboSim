@@ -3,7 +3,8 @@
 use crate::actuator::ControlMode;
 use crate::commands::{ActuatorCommand, ActuatorCommandBuffer};
 use crate::components::{
-    AckermannDrive, Actuator, Joint, JointKind, MultirotorFlight, VehicleDynamics,
+    AckermannDrive, Actuator, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
+    MultirotorFlight, TransmissionSpec, VehicleDynamics, WheelAssemblySpec,
 };
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
@@ -12,6 +13,184 @@ use rne_core::SimDuration;
 use rne_math::{Quat, Vec3};
 use rne_physics::{Collider, ColliderShape, JointActuation, JointMotor, RigidBody, RigidBodyType};
 use rne_world::Transform3;
+use thiserror::Error;
+
+/// Invalid configuration or input supplied to a mobility-plant evaluator.
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
+pub enum MobilityPlantEvaluationError {
+    /// A model specification failed its physical validity checks.
+    #[error("invalid mobility plant specification")]
+    InvalidSpec,
+    /// A command or completed-state input was non-finite or outside its physical domain.
+    #[error("invalid mobility plant input")]
+    InvalidInput,
+    /// The fixed step was zero, negative, or non-finite.
+    #[error("mobility plant timestep must be finite and positive")]
+    InvalidTimeStep,
+}
+
+/// Completed DC motor electrical and shaft-torque evaluation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DcMotorEvaluation {
+    /// State to retain for the next completed step.
+    pub state: DcMotorState,
+    /// Voltage actually applied after supply limits and failure behavior, in volts.
+    pub terminal_voltage_v: f64,
+    /// Back-EMF at the supplied rotor speed, in volts.
+    pub back_emf_v: f64,
+    /// Electromagnetic torque before shaft losses, in newton-meters.
+    pub electromagnetic_torque_nm: f64,
+    /// Viscous plus Coulomb torque opposing the shaft, in newton-meters.
+    pub shaft_loss_torque_nm: f64,
+    /// Net torque available at the motor shaft, in newton-meters.
+    pub shaft_torque_nm: f64,
+    /// Whether the requested terminal voltage exceeded the supply limit.
+    pub voltage_saturated: bool,
+    /// Whether the unconstrained armature current exceeded the current limit.
+    pub current_saturated: bool,
+}
+
+/// Completed static transmission evaluation at one wheel coordinate.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TransmissionEvaluation {
+    /// Motor-shaft velocity implied by the wheel coordinate, in radians per second.
+    pub motor_velocity_rad_s: f64,
+    /// Wheel-side torque after ratio and directional efficiency, in newton-meters.
+    pub wheel_torque_nm: f64,
+    /// Motor rotor inertia reflected to the wheel coordinate, in kilogram square meters.
+    pub reflected_rotor_inertia_kg_m2: f64,
+    /// Efficiency selected from the direction of mechanical power flow.
+    pub applied_efficiency_ratio: f64,
+}
+
+/// Evaluates one DC motor from terminal voltage and completed rotor velocity.
+///
+/// With no inductance, current is the algebraic equivalent-circuit solution
+/// `I = (V - k_e omega) / R`. With inductance, current advances by explicit Euler from
+/// `dI/dt = (V - k_e omega - R I) / L` and is then limited. Shaft loss combines viscous
+/// friction and a regularized Coulomb term: at standstill Coulomb friction cancels available
+/// electromagnetic torque up to its declared magnitude rather than inventing motion.
+pub fn evaluate_dc_motor(
+    spec: DcMotorSpec,
+    state: DcMotorState,
+    command_voltage_v: f64,
+    rotor_velocity_rad_s: f64,
+    dt_s: f64,
+) -> Result<DcMotorEvaluation, MobilityPlantEvaluationError> {
+    if !spec.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    if !state.current_a.is_finite()
+        || !command_voltage_v.is_finite()
+        || !rotor_velocity_rad_s.is_finite()
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    if !dt_s.is_finite() || dt_s <= 0.0 {
+        return Err(MobilityPlantEvaluationError::InvalidTimeStep);
+    }
+
+    let voltage_saturated = command_voltage_v.abs() > spec.supply_voltage_v;
+    let limited_command_voltage_v =
+        command_voltage_v.clamp(-spec.supply_voltage_v, spec.supply_voltage_v);
+    let terminal_voltage_v = match spec.failure_mode {
+        DcMotorFailureMode::Nominal => limited_command_voltage_v,
+        DcMotorFailureMode::OpenCircuit | DcMotorFailureMode::ShortCircuit => 0.0,
+    };
+    let back_emf_v = spec.back_emf_constant_v_s_rad * rotor_velocity_rad_s;
+    let unconstrained_current_a = match (spec.failure_mode, spec.inductance_h) {
+        (DcMotorFailureMode::OpenCircuit, _) => 0.0,
+        (_, Some(inductance_h)) => {
+            state.current_a
+                + (terminal_voltage_v - back_emf_v - spec.resistance_ohm * state.current_a)
+                    / inductance_h
+                    * dt_s
+        }
+        (_, None) => (terminal_voltage_v - back_emf_v) / spec.resistance_ohm,
+    };
+    let current_saturated = unconstrained_current_a.abs() > spec.current_limit_a;
+    let current_a = unconstrained_current_a.clamp(-spec.current_limit_a, spec.current_limit_a);
+    let electromagnetic_torque_nm = spec.torque_constant_nm_a * current_a;
+    let viscous_loss_nm = spec.viscous_friction_nm_s_rad * rotor_velocity_rad_s;
+    let coulomb_loss_nm = if rotor_velocity_rad_s.abs() > 1.0e-12 {
+        spec.coulomb_friction_nm * rotor_velocity_rad_s.signum()
+    } else {
+        electromagnetic_torque_nm.clamp(-spec.coulomb_friction_nm, spec.coulomb_friction_nm)
+    };
+    let shaft_loss_torque_nm = viscous_loss_nm + coulomb_loss_nm;
+
+    Ok(DcMotorEvaluation {
+        state: DcMotorState { current_a },
+        terminal_voltage_v,
+        back_emf_v,
+        electromagnetic_torque_nm,
+        shaft_loss_torque_nm,
+        shaft_torque_nm: electromagnetic_torque_nm - shaft_loss_torque_nm,
+        voltage_saturated,
+        current_saturated,
+    })
+}
+
+/// Maps motor torque and rotor inertia to a wheel coordinate without backend types.
+///
+/// This is the rigid static map. Declared backlash and compliance require a later stateful
+/// driveline evaluator and are intentionally not approximated by hidden backend joints.
+pub fn evaluate_transmission(
+    spec: TransmissionSpec,
+    motor_rotor_inertia_kg_m2: f64,
+    motor_torque_nm: f64,
+    wheel_velocity_rad_s: f64,
+) -> Result<TransmissionEvaluation, MobilityPlantEvaluationError> {
+    if !spec.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    if !motor_rotor_inertia_kg_m2.is_finite()
+        || motor_rotor_inertia_kg_m2 < 0.0
+        || !motor_torque_nm.is_finite()
+        || !wheel_velocity_rad_s.is_finite()
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let ratio = spec.ratio_motor_rad_per_wheel_rad;
+    let motor_velocity_rad_s = wheel_velocity_rad_s * ratio;
+    let applied_efficiency_ratio = if motor_torque_nm * motor_velocity_rad_s >= 0.0 {
+        spec.drive_efficiency_ratio
+    } else {
+        spec.backdrive_efficiency_ratio
+    };
+    Ok(TransmissionEvaluation {
+        motor_velocity_rad_s,
+        wheel_torque_nm: motor_torque_nm * ratio * applied_efficiency_ratio,
+        reflected_rotor_inertia_kg_m2: motor_rotor_inertia_kg_m2 * ratio * ratio,
+        applied_efficiency_ratio,
+    })
+}
+
+/// Returns wheel rolling-resistance torque opposing completed wheel motion.
+///
+/// The v1 law is `Crr * normal_load * radius` and returns zero at exact standstill so it
+/// cannot create a direction. A later wheel/ground solver may use impending slip to model
+/// static rolling resistance.
+pub fn wheel_rolling_resistance_torque_nm(
+    spec: WheelAssemblySpec,
+    normal_load_n: f64,
+    wheel_velocity_rad_s: f64,
+) -> Result<f64, MobilityPlantEvaluationError> {
+    if !spec.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    if !normal_load_n.is_finite() || normal_load_n < 0.0 || !wheel_velocity_rad_s.is_finite() {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    Ok(if wheel_velocity_rad_s == 0.0 {
+        0.0
+    } else {
+        -wheel_velocity_rad_s.signum()
+            * spec.rolling_resistance_coefficient
+            * normal_load_n
+            * spec.radius_m
+    })
+}
 
 /// Result of applying one actuator command.
 #[derive(Clone, Debug, PartialEq)]
@@ -879,6 +1058,136 @@ mod tests {
         ));
 
         (world, robot_entity, wheel, wheel)
+    }
+
+    #[test]
+    fn dc_motor_locked_rotor_obeys_current_and_voltage_limits() {
+        let evaluation = evaluate_dc_motor(
+            DcMotorSpec::default(),
+            DcMotorState::default(),
+            48.0,
+            0.0,
+            0.001,
+        )
+        .unwrap();
+
+        assert_eq!(evaluation.terminal_voltage_v, 24.0);
+        assert_eq!(evaluation.state.current_a, 20.0);
+        assert_eq!(evaluation.electromagnetic_torque_nm, 1.6);
+        assert_eq!(evaluation.shaft_loss_torque_nm, 0.01);
+        assert_eq!(evaluation.shaft_torque_nm, 1.59);
+        assert!(evaluation.voltage_saturated);
+        assert!(evaluation.current_saturated);
+    }
+
+    #[test]
+    fn dc_motor_back_emf_and_failures_are_explicit() {
+        let spec = DcMotorSpec::default();
+        let free_speed_rad_s = spec.supply_voltage_v / spec.back_emf_constant_v_s_rad;
+        let nominal = evaluate_dc_motor(
+            spec,
+            DcMotorState::default(),
+            spec.supply_voltage_v,
+            free_speed_rad_s,
+            0.001,
+        )
+        .unwrap();
+        assert_eq!(nominal.state.current_a, 0.0);
+        assert!(nominal.shaft_torque_nm < 0.0);
+
+        let open = evaluate_dc_motor(
+            DcMotorSpec {
+                failure_mode: DcMotorFailureMode::OpenCircuit,
+                ..spec
+            },
+            DcMotorState { current_a: 5.0 },
+            24.0,
+            100.0,
+            0.001,
+        )
+        .unwrap();
+        assert_eq!(open.state.current_a, 0.0);
+        assert_eq!(open.electromagnetic_torque_nm, 0.0);
+
+        let short = evaluate_dc_motor(
+            DcMotorSpec {
+                failure_mode: DcMotorFailureMode::ShortCircuit,
+                ..spec
+            },
+            DcMotorState::default(),
+            24.0,
+            100.0,
+            0.001,
+        )
+        .unwrap();
+        assert!(short.state.current_a < 0.0);
+        assert!(short.shaft_torque_nm < 0.0);
+    }
+
+    #[test]
+    fn dc_motor_inductance_retains_deterministic_current_state() {
+        let spec = DcMotorSpec {
+            resistance_ohm: 1.0,
+            torque_constant_nm_a: 1.0,
+            back_emf_constant_v_s_rad: 1.0,
+            supply_voltage_v: 12.0,
+            current_limit_a: 20.0,
+            viscous_friction_nm_s_rad: 0.0,
+            coulomb_friction_nm: 0.0,
+            inductance_h: Some(0.1),
+            ..DcMotorSpec::default()
+        };
+        let first = evaluate_dc_motor(spec, DcMotorState::default(), 1.0, 0.0, 0.01).unwrap();
+        let second = evaluate_dc_motor(spec, first.state, 1.0, 0.0, 0.01).unwrap();
+        assert!((first.state.current_a - 0.1).abs() < 1.0e-12);
+        assert!((second.state.current_a - 0.19).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn transmission_maps_directional_efficiency_and_reflected_inertia() {
+        let spec = TransmissionSpec::default();
+        let drive = evaluate_transmission(spec, 0.001, 1.0, 2.0).unwrap();
+        assert_eq!(drive.motor_velocity_rad_s, 40.0);
+        assert_eq!(drive.wheel_torque_nm, 18.0);
+        assert_eq!(drive.reflected_rotor_inertia_kg_m2, 0.4);
+        assert_eq!(drive.applied_efficiency_ratio, 0.9);
+
+        let backdrive = evaluate_transmission(spec, 0.001, -1.0, 2.0).unwrap();
+        assert_eq!(backdrive.wheel_torque_nm, -15.0);
+        assert_eq!(backdrive.applied_efficiency_ratio, 0.75);
+    }
+
+    #[test]
+    fn wheel_rolling_resistance_opposes_motion_without_inventing_direction() {
+        let spec = WheelAssemblySpec::default();
+        assert_eq!(
+            wheel_rolling_resistance_torque_nm(spec, 100.0, 0.0).unwrap(),
+            0.0
+        );
+        let forward = wheel_rolling_resistance_torque_nm(spec, 100.0, 2.0).unwrap();
+        let reverse = wheel_rolling_resistance_torque_nm(spec, 100.0, -2.0).unwrap();
+        assert!((forward + 0.15).abs() < 1.0e-12);
+        assert!((reverse - 0.15).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn mobility_plant_evaluators_reject_invalid_specs_and_inputs() {
+        let invalid_motor = DcMotorSpec {
+            resistance_ohm: 0.0,
+            ..DcMotorSpec::default()
+        };
+        assert_eq!(
+            evaluate_dc_motor(invalid_motor, DcMotorState::default(), 0.0, 0.0, 0.001),
+            Err(MobilityPlantEvaluationError::InvalidSpec)
+        );
+        assert_eq!(
+            evaluate_transmission(TransmissionSpec::default(), 0.001, f64::NAN, 0.0),
+            Err(MobilityPlantEvaluationError::InvalidInput)
+        );
+        assert_eq!(
+            wheel_rolling_resistance_torque_nm(WheelAssemblySpec::default(), -1.0, 0.0),
+            Err(MobilityPlantEvaluationError::InvalidInput)
+        );
     }
 
     #[test]

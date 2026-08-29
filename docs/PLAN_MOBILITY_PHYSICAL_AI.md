@@ -29,6 +29,13 @@ exact peer truth. The current localization stream is a simulated measurement bou
 by pose truth; M2 replaces it with a sensor-only estimator and must prove stale, delayed, or
 missing inputs affect estimates without leaking ECS state.
 
+M1-A implementation has started behind the M0 merge train: backend-neutral `DcMotorSpec`,
+`TransmissionSpec`, and `WheelAssemblySpec` plus pure evaluators cover voltage/current
+limits, back-EMF, optional inductance, explicit open/short failures, directional efficiency,
+reflected inertia, and rolling resistance. The assumptions and identification requirements
+are frozen in [`MOBILITY_PLANT_V1.md`](MOBILITY_PLANT_V1.md); no contact-backend integration
+or tire-fidelity claim is included yet.
+
 ## North-star outcome
 
 RNE must evaluate a policy through the same closed loop that exists on a real mobile
