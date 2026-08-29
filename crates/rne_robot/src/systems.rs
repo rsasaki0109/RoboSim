@@ -657,6 +657,7 @@ pub fn differential_drive_kinematics(
             .get::<RigidBody>(drive.base_link)
             .is_some_and(|body| body.body_type == RigidBodyType::Kinematic)
         {
+            integrate_kinematic_wheel_joints(world, drive, dt_s);
             sync_wheel_transforms(world, drive, &base_snapshot);
         }
 
@@ -664,6 +665,20 @@ pub fn differential_drive_kinematics(
             let forward_flat = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
             body.linear_velocity_m_s = forward_flat * linear_m_s;
             body.angular_velocity_rad_s = Vec3::new(0.0, yaw_rad_s, 0.0);
+        }
+    }
+}
+
+fn integrate_kinematic_wheel_joints(world: &mut World, drive: &DifferentialDrive, dt_s: f64) {
+    for actuator_entity in [drive.left_actuator, drive.right_actuator] {
+        let Some(joint_entity) = world
+            .get::<Actuator>(actuator_entity)
+            .and_then(|actuator| actuator.joint)
+        else {
+            continue;
+        };
+        if let Some(mut joint) = world.get_mut::<Joint>(joint_entity) {
+            joint.position += joint.velocity * dt_s;
         }
     }
 }
@@ -969,6 +984,11 @@ mod tests {
             .translation
             .x;
         assert!(x > 0.0, "robot should move forward, x={x}");
+        for wheel in [spawned.left_wheel, spawned.right_wheel] {
+            let joint = world.get::<Joint>(wheel).unwrap();
+            assert_eq!(joint.position, 5.0);
+            assert_eq!(joint.velocity, 5.0);
+        }
     }
 
     #[test]

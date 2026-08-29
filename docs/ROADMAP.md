@@ -37,6 +37,9 @@ available.
 The concrete sensor and control-engineering sequence, report contents, and
 definition of done are tracked in the
 [External product proof plan](PLAN_EXTERNAL_PRODUCT_PROOF.md#sensor-and-control-dynamics-hardening-track).
+The current mobile-robot-to-Physical-AI implementation sequence, researched
+plant/sensor model choices, and cross-backend benchmark gates are tracked in
+[Mobility Physical AI Foundation](PLAN_MOBILITY_PHYSICAL_AI.md).
 
 The promotion gates are measurement integrity, estimation validity, plant
 integrity, identification validity, closed-loop performance, and portability.

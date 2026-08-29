@@ -198,7 +198,10 @@ pub struct PoseSample {
     pub yaw_rad: f64,
 }
 
-/// Wheel encoder sample payload.
+/// Measured wheel encoder sample payload.
+///
+/// These values describe a realized wheel coordinate. Actuator command targets
+/// must be transported separately and must not be substituted into this payload.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WheelEncoderSample {
     /// Wheel position in radians.
