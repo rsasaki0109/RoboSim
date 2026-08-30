@@ -239,7 +239,12 @@ and cross-backend results.
     additive incremental-encoder slice now provides finite counters, CPR/direction/
     zero/index calibration, count/time velocity reconstruction, timing, latency,
     dropout, stuck, and saturation; steering and current frontends remain.
-11. M2-B: wheel/IMU estimator and sensor-only mobile TaskSpec.
+11. M2-B: wheel/IMU estimator and sensor-only mobile TaskSpec. The additive estimator
+    now consumes only available incremental-encoder and raw-IMU frames, reconstructs
+    finite counters, exposes timing/gaps/faults and disagreement, and propagates planar
+    covariance. Its actor observation and motor-voltage TaskSpec expose estimate,
+    uncertainty, timing, health, and task goal without a truth tensor; truth-named
+    reward/termination terms remain diagnostic scoring outside the actor contract.
 12. M3: benchmark matrix, tolerances, evidence bundle, and Failure Capsules.
 13. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.
