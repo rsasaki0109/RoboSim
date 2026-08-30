@@ -12,9 +12,10 @@ pub mod systems;
 pub use actuator::{ActuatorLimits, ActuatorTarget, ControlMode};
 pub use commands::{ActuatorCommand, ActuatorCommandBuffer, ActuatorCommandEntry};
 pub use components::{
-    AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState, DcMotorFailureMode,
-    DcMotorSpec, DcMotorState, Joint, JointKind, JointLimits, Link, MultirotorFlight, Robot,
-    RobotId, TransmissionSpec, VehicleDynamics, WheelAssemblySpec,
+    AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
+    DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
+    JointLimits, Link, MultirotorFlight, Robot, RobotId, TransmissionSpec, VehicleDynamics,
+    WheelAssemblySpec,
 };
 pub use diff_drive::{
     spawn_diff_drive_robot, DiffDriveComponent, DiffDriveConfig, DiffDriveDriveMode,

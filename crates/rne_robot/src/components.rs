@@ -217,6 +217,30 @@ pub struct DcMotorState {
     pub current_a: f64,
 }
 
+/// Completed motor electrical telemetry made available to measurement frontends.
+///
+/// This component contains realized plant outputs, never command targets. A motor
+/// integration system may attach or replace it after each completed electrical
+/// step. Winding temperature remains `None` until a declared thermal plant exists.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DcMotorCompletedTelemetry {
+    /// Realized terminal voltage after supply and failure limits, in volts.
+    pub terminal_voltage_v: f64,
+    /// Realized armature or torque-producing current, in amperes.
+    pub current_a: f64,
+    /// Back electromotive force at the completed rotor speed, in volts.
+    pub back_emf_v: f64,
+    /// Optional completed winding temperature in degrees Celsius.
+    pub winding_temperature_c: Option<f64>,
+    /// Whether the plant clipped requested terminal voltage.
+    pub voltage_saturated: bool,
+    /// Whether the plant clipped unconstrained current.
+    pub current_saturated: bool,
+    /// Electrical failure active during the completed step.
+    pub failure_mode: DcMotorFailureMode,
+}
+
 /// Backend-neutral motor-to-wheel transmission parameters.
 ///
 /// Positive ratio preserves coordinate sign and negative ratio reverses it. Backlash and

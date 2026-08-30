@@ -259,6 +259,52 @@ impl IncrementalEncoderFeedback {
     pub const SCHEMA_VERSION: u32 = 1;
 }
 
+/// Sample-level state of a motor electrical measurement frontend.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MotorElectricalFeedbackStatus {
+    /// Fresh measurement with no frontend or plant saturation.
+    #[default]
+    Nominal,
+    /// Fresh measurement with plant or measurement-range saturation.
+    Saturated,
+    /// Fresh electrical measurement from a plant with no thermal state.
+    TemperatureUnavailable,
+    /// Values held from an earlier emitted sample by a declared fault.
+    StuckValue,
+}
+
+/// Timestamp-aware measured motor voltage, current, and optional temperature.
+///
+/// Values originate from completed plant telemetry. Command voltage and torque
+/// targets are not accepted as substitutes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MotorElectricalFeedback {
+    /// Current serialized schema version.
+    pub schema_version: u32,
+    /// Scheduled sample time in simulation nanosecond ticks.
+    pub scheduled_capture_ticks: u64,
+    /// Non-negative delay from scheduled to actual capture, in ticks.
+    pub sample_phase_error_ticks: u64,
+    /// Measurement, availability, and fault status.
+    pub status: MotorElectricalFeedbackStatus,
+    /// Measured motor terminal voltage in volts.
+    pub terminal_voltage_v: f64,
+    /// Measured motor current in amperes.
+    pub current_a: f64,
+    /// Measured winding temperature in degrees Celsius, if the plant supplies it.
+    pub winding_temperature_c: Option<f64>,
+    /// Whether the current plant or measurement range saturated.
+    pub current_saturated: bool,
+    /// Whether the voltage plant or measurement range saturated.
+    pub voltage_saturated: bool,
+}
+
+impl MotorElectricalFeedback {
+    /// Current serialized motor-electrical-feedback schema version.
+    pub const SCHEMA_VERSION: u32 = 1;
+}
+
 /// Articulated joint positions and velocities published on the DataBus.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct JointState {
@@ -603,5 +649,30 @@ mod tests {
         assert_eq!(value["angular_velocity_rad_s"][2], 0.3);
         assert_eq!(value["specific_force_m_s2"][1], 2.0);
         assert!(value.get("orientation").is_none());
+    }
+
+    #[test]
+    fn motor_electrical_feedback_preserves_unavailable_temperature() {
+        let feedback = MotorElectricalFeedback {
+            schema_version: MotorElectricalFeedback::SCHEMA_VERSION,
+            scheduled_capture_ticks: 20,
+            sample_phase_error_ticks: 3,
+            status: MotorElectricalFeedbackStatus::TemperatureUnavailable,
+            terminal_voltage_v: 12.5,
+            current_a: -2.25,
+            winding_temperature_c: None,
+            current_saturated: false,
+            voltage_saturated: false,
+        };
+
+        let value = serde_json::to_value(feedback).expect("motor feedback JSON");
+        assert_eq!(
+            value["schema_version"],
+            MotorElectricalFeedback::SCHEMA_VERSION
+        );
+        assert_eq!(value["status"], "temperature_unavailable");
+        assert_eq!(value["terminal_voltage_v"], 12.5);
+        assert_eq!(value["current_a"], -2.25);
+        assert!(value["winding_temperature_c"].is_null());
     }
 }
