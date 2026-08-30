@@ -1,7 +1,7 @@
 {
   "kind": "rne_external_physics_backend_conformance_report",
   "schema_version": 1,
-  "catalog_version": 2,
+  "catalog_version": 3,
   "tolerance_registry_version": 2,
   "subject": {
     "label": "reference-external-backend-source.tar.zst",
@@ -169,6 +169,14 @@
     {
       "id": "joint_effort_measurement.direct_revolute_effort",
       "capability": "joint_effort_measurement",
+      "status": "not_advertised",
+      "snapshot_hash": null,
+      "metrics": [],
+      "detail": "capability not advertised by the backend manifest"
+    },
+    {
+      "id": "external_body_wrench.one_step_force_at_point",
+      "capability": "external_body_wrench",
       "status": "not_advertised",
       "snapshot_hash": null,
       "metrics": [],

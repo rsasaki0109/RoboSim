@@ -13,11 +13,11 @@ use rne_ecs::{Entity, World};
 use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
 use rne_physics::{
-    Collider, ContactEvent, FixedJointDesc, JointActuation, JointEffortMeasurement, JointMotor,
-    JointMotorGainModel, JointPassiveDynamics, JointState, MultibodyLink, PhysicsBackend,
-    PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCapability, PhysicsError,
-    PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc, RaycastHit, RaycastQuery,
-    RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
+    Collider, ContactEvent, ExternalBodyWrench, FixedJointDesc, JointActuation,
+    JointEffortMeasurement, JointMotor, JointMotorGainModel, JointPassiveDynamics, JointState,
+    MultibodyLink, PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability,
+    PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc,
+    RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::HashMap;
@@ -30,6 +30,7 @@ const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::RaycastBatch,
     PhysicsCapability::KinematicBody,
     PhysicsCapability::JointEffortMeasurement,
+    PhysicsCapability::ExternalBodyWrench,
 ];
 
 /// Rapier-backed physics simulation.
@@ -593,6 +594,49 @@ impl PhysicsBackend for RapierBackend {
                 .then_with(|| left.entity.index().cmp(&right.entity.index()))
         });
         Ok(intersections)
+    }
+
+    fn apply_external_body_wrench(
+        &mut self,
+        physics_world: PhysicsWorldId,
+        wrench: ExternalBodyWrench,
+    ) -> Result<(), PhysicsError> {
+        if !wrench.is_finite() {
+            return Err(PhysicsError::InvalidExternalBodyWrench {
+                entity_index: wrench.entity.index(),
+                reason: "point, force, and torque must be finite",
+            });
+        }
+        let state = self.world_mut(physics_world)?;
+        let body_handle = state.entity_to_body.get(&wrench.entity).copied().ok_or(
+            PhysicsError::InvalidExternalBodyWrench {
+                entity_index: wrench.entity.index(),
+                reason: "entity has no rigid body in this physics world",
+            },
+        )?;
+        let body =
+            state
+                .bodies
+                .get_mut(body_handle)
+                .ok_or(PhysicsError::InvalidExternalBodyWrench {
+                    entity_index: wrench.entity.index(),
+                    reason: "backend rigid body is unavailable",
+                })?;
+        if !body.is_dynamic() {
+            return Err(PhysicsError::InvalidExternalBodyWrench {
+                entity_index: wrench.entity.index(),
+                reason: "external wrenches require a dynamic rigid body",
+            });
+        }
+
+        body.add_force_at_point(
+            vec3_to_rapier(wrench.force_world_n),
+            vec3_to_point(wrench.point_world_m),
+            true,
+        );
+        body.add_torque(vec3_to_rapier(wrench.torque_world_nm), true);
+        state.impulse_forced.push(body_handle);
+        Ok(())
     }
 
     fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError> {
@@ -1314,6 +1358,96 @@ mod tests {
             .y;
         assert!(y < 5.0, "cube should fall from initial height, y={y}");
         assert!(y > 0.0, "cube should rest above ground, y={y}");
+    }
+
+    #[test]
+    fn external_wrench_is_world_frame_force_at_point_and_lasts_one_step() {
+        let mut backend = RapierBackend::new();
+        let physics_world = backend
+            .create_world(PhysicsWorldDesc {
+                gravity_m_s2: Vec3::ZERO,
+                solver_iterations: 0,
+            })
+            .expect("physics world");
+        let mut world = World::new();
+        let body = spawn_named(&mut world, "wrench body");
+        world.entity_mut(body).insert((
+            RigidBody::default(),
+            Collider::cuboid(Vec3::splat(0.5)),
+            Transform3::IDENTITY,
+        ));
+        backend.sync_from_ecs(&mut world, physics_world).unwrap();
+
+        backend
+            .apply_external_body_wrench(
+                physics_world,
+                ExternalBodyWrench {
+                    entity: body,
+                    point_world_m: Vec3::Y,
+                    force_world_n: Vec3::X * 60.0,
+                    torque_world_nm: Vec3::ZERO,
+                },
+            )
+            .unwrap();
+        backend.step(physics_world, fixed_step()).unwrap();
+        backend.sync_to_ecs(&mut world, physics_world).unwrap();
+        let after_forced_step = *world.get::<RigidBody>(body).unwrap();
+        assert!(after_forced_step.linear_velocity_m_s.x > 0.0);
+        assert!(after_forced_step.angular_velocity_rad_s.z < 0.0);
+
+        backend.step(physics_world, fixed_step()).unwrap();
+        backend.sync_to_ecs(&mut world, physics_world).unwrap();
+        let after_unforced_step = *world.get::<RigidBody>(body).unwrap();
+        assert_relative_eq!(
+            after_unforced_step.linear_velocity_m_s.x,
+            after_forced_step.linear_velocity_m_s.x,
+            epsilon = 1.0e-6
+        );
+        assert_relative_eq!(
+            after_unforced_step.angular_velocity_rad_s.z,
+            after_forced_step.angular_velocity_rad_s.z,
+            epsilon = 1.0e-6
+        );
+    }
+
+    #[test]
+    fn external_wrench_rejects_nonfinite_and_fixed_targets_without_mutation() {
+        let (mut backend, physics_world, mut world, ground, cube) = setup_world();
+        backend.sync_from_ecs(&mut world, physics_world).unwrap();
+
+        let nonfinite = backend
+            .apply_external_body_wrench(
+                physics_world,
+                ExternalBodyWrench {
+                    entity: cube,
+                    point_world_m: Vec3::ZERO,
+                    force_world_n: Vec3::new(f64::NAN, 0.0, 0.0),
+                    torque_world_nm: Vec3::ZERO,
+                },
+            )
+            .expect_err("non-finite wrench must be rejected");
+        assert!(matches!(
+            nonfinite,
+            PhysicsError::InvalidExternalBodyWrench { entity_index, .. }
+                if entity_index == cube.index()
+        ));
+
+        let fixed = backend
+            .apply_external_body_wrench(
+                physics_world,
+                ExternalBodyWrench {
+                    entity: ground,
+                    point_world_m: Vec3::ZERO,
+                    force_world_n: Vec3::X,
+                    torque_world_nm: Vec3::ZERO,
+                },
+            )
+            .expect_err("fixed body must be rejected");
+        assert!(matches!(
+            fixed,
+            PhysicsError::InvalidExternalBodyWrench { entity_index, .. }
+                if entity_index == ground.index()
+        ));
     }
 
     #[test]

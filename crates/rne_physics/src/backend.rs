@@ -1,6 +1,6 @@
 //! Physics backend trait and world identifiers.
 
-use crate::{ContactEvent, RaycastHit, RaycastQuery};
+use crate::{ContactEvent, ExternalBodyWrench, RaycastHit, RaycastQuery};
 use rne_core::SimDuration;
 use rne_ecs::World;
 use rne_math::Vec3;
@@ -14,7 +14,7 @@ pub const PHYSICS_BACKEND_MANIFEST_SCHEMA_VERSION: u16 = 3;
 pub const PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION: u16 = 2;
 
 /// Current version of the named, unit-bearing physics tolerance registry.
-pub const PHYSICS_TOLERANCE_REGISTRY_VERSION: u16 = 2;
+pub const PHYSICS_TOLERANCE_REGISTRY_VERSION: u16 = 3;
 
 /// Identifier for a backend-owned physics world instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -67,6 +67,8 @@ pub enum PhysicsCapability {
     /// Retains backend-measured realization of direct joint-effort actuation from
     /// the completed simulation step.
     JointEffortMeasurement,
+    /// Accepts a world-frame rigid-body wrench for exactly one physics step.
+    ExternalBodyWrench,
 }
 
 /// Repeatability promise made by a physics backend manifest.
@@ -185,6 +187,13 @@ impl PhysicsBackendManifest {
         {
             return Err(PhysicsBackendManifestError::JointEffortWithoutArticulation);
         }
+        if self
+            .capabilities
+            .contains(&PhysicsCapability::ExternalBodyWrench)
+            && !self.capabilities.contains(&PhysicsCapability::RigidBody)
+        {
+            return Err(PhysicsBackendManifestError::ExternalWrenchWithoutRigidBody);
+        }
         Ok(())
     }
 }
@@ -224,6 +233,9 @@ pub enum PhysicsBackendManifestError {
     /// Joint-effort measurement refines the articulation capability.
     #[error("joint_effort_measurement capability requires articulation capability")]
     JointEffortWithoutArticulation,
+    /// External rigid-body wrench support refines the rigid-body capability.
+    #[error("external_body_wrench capability requires rigid_body capability")]
+    ExternalWrenchWithoutRigidBody,
 }
 
 fn is_stable_identifier(value: &str) -> bool {
@@ -236,7 +248,7 @@ fn is_stable_identifier(value: &str) -> bool {
 
 impl PhysicsCapability {
     /// Every capability known by this engine version in stable wire/report order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::RigidBody,
         Self::Articulation,
         Self::GpuRigidBody,
@@ -246,6 +258,7 @@ impl PhysicsCapability {
         Self::RaycastBatch,
         Self::KinematicBody,
         Self::JointEffortMeasurement,
+        Self::ExternalBodyWrench,
     ];
 
     /// Returns the stable lowercase identifier used by conformance reports.
@@ -260,6 +273,7 @@ impl PhysicsCapability {
             Self::ContactForce => "contact_force",
             Self::RaycastBatch => "raycast_batch",
             Self::JointEffortMeasurement => "joint_effort_measurement",
+            Self::ExternalBodyWrench => "external_body_wrench",
         }
     }
 }
@@ -299,6 +313,14 @@ pub enum PhysicsError {
     #[error("invalid rigid-body inertia on entity {entity_index}: {reason}")]
     InvalidInertia {
         /// Stable ECS entity index carrying the rejected properties.
+        entity_index: u32,
+        /// Static validation reason shared by backend implementations.
+        reason: &'static str,
+    },
+    /// An external rigid-body wrench command is invalid.
+    #[error("invalid external body wrench on entity {entity_index}: {reason}")]
+    InvalidExternalBodyWrench {
+        /// Stable ECS entity index carrying the rejected command.
         entity_index: u32,
         /// Static validation reason shared by backend implementations.
         reason: &'static str,
@@ -381,6 +403,22 @@ pub trait PhysicsBackend: Send + Sync + 'static {
             .copied()
             .map(|query| self.raycast(physics_world, query))
             .collect()
+    }
+
+    /// Applies a world-frame force and moment for exactly the next physics step.
+    ///
+    /// Backends advertising [`PhysicsCapability::ExternalBodyWrench`] must accept
+    /// finite wrenches on dynamic rigid bodies, preserve force-at-point moments,
+    /// and clear accepted loads after one call to [`Self::step`]. The default
+    /// implementation fails capability negotiation without changing state.
+    fn apply_external_body_wrench(
+        &mut self,
+        _physics_world: PhysicsWorldId,
+        _wrench: ExternalBodyWrench,
+    ) -> Result<(), PhysicsError> {
+        Err(PhysicsError::MissingCapabilities {
+            missing: vec![PhysicsCapability::ExternalBodyWrench],
+        })
     }
 
     /// Returns contact events from the last simulation step.
@@ -606,6 +644,44 @@ mod tests {
         assert_eq!(
             orphan_joint_effort,
             PhysicsBackendManifestError::JointEffortWithoutArticulation
+        );
+
+        let orphan_external_wrench = PhysicsBackendManifest::new(
+            "fixture",
+            "0.1.0",
+            "fixture",
+            "1",
+            [PhysicsCapability::ExternalBodyWrench],
+            PhysicsBackendRepeatability::ToleranceBounded,
+        )
+        .expect_err("external wrench support refines rigid-body support");
+        assert_eq!(
+            orphan_external_wrench,
+            PhysicsBackendManifestError::ExternalWrenchWithoutRigidBody
+        );
+    }
+
+    #[test]
+    fn default_external_wrench_fails_capability_negotiation() {
+        let mut backend = MockBackend::new();
+        let mut world = World::new();
+        let entity = spawn_named(&mut world, "wrench target");
+        let error = backend
+            .apply_external_body_wrench(
+                PhysicsWorldId(0),
+                ExternalBodyWrench {
+                    entity,
+                    point_world_m: Vec3::ZERO,
+                    force_world_n: Vec3::X,
+                    torque_world_nm: Vec3::ZERO,
+                },
+            )
+            .expect_err("the default implementation must fail closed");
+        assert_eq!(
+            error,
+            PhysicsError::MissingCapabilities {
+                missing: vec![PhysicsCapability::ExternalBodyWrench]
+            }
         );
     }
 

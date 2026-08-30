@@ -36,6 +36,13 @@ reflected inertia, and rolling resistance. The assumptions and identification re
 are frozen in [`MOBILITY_PLANT_V1.md`](MOBILITY_PLANT_V1.md); no contact-backend integration
 or tire-fidelity claim is included yet.
 
+M1-B is in progress behind M1-A. `ExternalBodyWrench` and the
+`ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus
+free-moment boundary. Rapier implements it and conformance checks force response, lever-arm
+moment, and automatic clearing. The exact semantics and primary-source basis are frozen in
+[`MOBILITY_CONTACT_WRENCH_V1.md`](MOBILITY_CONTACT_WRENCH_V1.md). Contact acquisition and
+MuJoCo parity remain explicit follow-up work, so this does not yet satisfy the M1 exit gate.
+
 ## North-star outcome
 
 RNE must evaluate a policy through the same closed loop that exists on a real mobile
