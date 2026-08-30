@@ -14,6 +14,7 @@ The RNE DataBus is a typed publish/subscribe bus for sensor and recorder data.
 - `PointCloud`
 - `ImageRgb8`
 - `WheelEncoderSample`
+- `IncrementalEncoderFeedback`
 
 ## Design rules
 

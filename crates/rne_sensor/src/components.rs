@@ -3,7 +3,7 @@
 use crate::{CameraSpec, ImuSpec, LidarSpec, WheelEncoderSpec};
 use bevy_ecs::prelude::Component;
 use rne_core::SimDuration;
-use rne_data::{ImuFeedback, JointFeedback, StreamId};
+use rne_data::{ImuFeedback, IncrementalEncoderFeedback, JointFeedback, StreamId};
 use rne_ecs::Entity;
 use rne_math::Vec3;
 use rne_world::Transform3;
@@ -296,6 +296,131 @@ pub struct SensorState {
     pub last_sample_ticks: u64,
     /// Total emitted frames.
     pub frame_count: u64,
+}
+
+/// Finite-counter behavior after the signed hardware range is exceeded.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IncrementalEncoderOverflowBehavior {
+    /// Wrap modulo the configured counter width, as a hardware timer counter does.
+    #[default]
+    Wrap,
+    /// Hold the signed minimum or maximum and report counter saturation.
+    Saturate,
+}
+
+/// Physical and digital configuration of an incremental encoder frontend.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct IncrementalEncoderSpec {
+    /// Actuator whose associated revolute joint provides completed position.
+    pub actuator: Entity,
+    /// Decoded counts per mechanical revolution; quadrature users normally set `4 * PPR`.
+    pub counts_per_revolution: u32,
+    /// Count direction, restricted to `-1` or `1`.
+    pub direction: i8,
+    /// Mechanical zero offset in radians.
+    pub zero_offset_rad: f64,
+    /// Signed hardware counter width in bits, from 2 through 63.
+    pub counter_bits: u8,
+    /// Counter behavior at the finite signed range.
+    pub overflow_behavior: IncrementalEncoderOverflowBehavior,
+    /// Number of adjacent sample intervals used by count-difference velocity estimation.
+    pub velocity_window_samples: u32,
+    /// Optional mechanical index phase in radians relative to the zero offset.
+    pub index_phase_rad: Option<f64>,
+}
+
+impl IncrementalEncoderSpec {
+    /// Returns true when quantization, calibration, counter, and velocity settings are valid.
+    pub fn is_valid(self) -> bool {
+        self.counts_per_revolution > 0
+            && matches!(self.direction, -1 | 1)
+            && self.zero_offset_rad.is_finite()
+            && (2..=63).contains(&self.counter_bits)
+            && (1..=1024).contains(&self.velocity_window_samples)
+            && self.index_phase_rad.is_none_or(f64::is_finite)
+    }
+}
+
+/// Deterministic fault injected after encoder reconstruction and before latency.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum IncrementalEncoderFault {
+    /// No injected fault.
+    #[default]
+    None,
+    /// Drop exactly one attempted sequence, leaving an observable sequence gap.
+    DropSequence {
+        /// One-based attempted sequence to drop.
+        sequence: u64,
+    },
+    /// Hold the last emitted measurement from this attempted sequence onward.
+    StuckFromSequence {
+        /// One-based first attempted sequence that reuses prior values.
+        sequence: u64,
+    },
+}
+
+/// Typed incremental encoder sensor with explicit capture and availability timing.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct IncrementalEncoderSensor {
+    /// Physical encoder, calibration, counter, and estimator specification.
+    pub spec: IncrementalEncoderSpec,
+    /// Nominal update rate in hertz.
+    pub update_rate_hz: f64,
+    /// Exact sampling period in ticks, overriding `update_rate_hz` when present.
+    pub sample_period_ticks: Option<u64>,
+    /// First scheduled capture time in simulation nanosecond ticks.
+    pub phase_offset_ticks: u64,
+    /// Capture-to-availability latency in simulation nanosecond ticks.
+    pub latency_ticks: u64,
+    /// Whether sampling is enabled.
+    pub enabled: bool,
+    /// DataBus stream id.
+    pub stream_id: StreamId,
+    /// Optional deterministic dropout or stuck-value fault.
+    pub fault: IncrementalEncoderFault,
+}
+
+impl IncrementalEncoderSensor {
+    /// Sample period derived from exact ticks or the declared update rate.
+    pub fn period(&self) -> SimDuration {
+        self.sample_period_ticks.map_or_else(
+            || SimDuration::from_hertz(rne_math::Hertz::new(self.update_rate_hz)),
+            SimDuration::from_ticks,
+        )
+    }
+
+    /// Returns true when timing, frontend configuration, and fault sequence are valid.
+    pub fn is_valid(&self) -> bool {
+        if !self.update_rate_hz.is_finite()
+            || self.update_rate_hz <= 0.0
+            || self.sample_period_ticks == Some(0)
+            || !self.spec.is_valid()
+        {
+            return false;
+        }
+        match self.fault {
+            IncrementalEncoderFault::None => true,
+            IncrementalEncoderFault::DropSequence { sequence } => sequence > 0,
+            IncrementalEncoderFault::StuckFromSequence { sequence } => sequence > 1,
+        }
+    }
+}
+
+/// Runtime edge, counter, and finite-difference history for an incremental encoder.
+#[derive(Component, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct IncrementalEncoderSensorState {
+    /// Number of scheduled attempts, including injected drops.
+    pub attempted_sequence: u64,
+    /// Number of frames actually emitted.
+    pub emitted_frames: u64,
+    /// Last emitted payload used by deterministic stuck-value injection.
+    pub last_emitted: Option<IncrementalEncoderFeedback>,
+    pub(crate) previous_ideal_count: Option<i64>,
+    pub(crate) previous_raw_count: Option<i64>,
+    pub(crate) observed_accumulated_count: i64,
+    pub(crate) velocity_history: Vec<(u64, i64)>,
 }
 
 /// One named joint included in a [`JointFeedbackSensor`] stream.

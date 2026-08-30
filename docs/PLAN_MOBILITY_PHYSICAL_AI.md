@@ -235,7 +235,10 @@ and cross-backend results.
 8. M1-D: backend-neutral point-contact load/kinematics contract with Rapier/MuJoCo parity.
 9. M1-E: transient combined-slip force law, split-friction and low-speed tests. Implemented
    as a pure backend-neutral force element; backend scenario integration is the next gate.
-10. M2-A: encoder/steering/current payloads, calibration and fault pipeline.
+10. M2-A: encoder/steering/current payloads, calibration and fault pipeline. The
+    additive incremental-encoder slice now provides finite counters, CPR/direction/
+    zero/index calibration, count/time velocity reconstruction, timing, latency,
+    dropout, stuck, and saturation; steering and current frontends remain.
 11. M2-B: wheel/IMU estimator and sensor-only mobile TaskSpec.
 12. M3: benchmark matrix, tolerances, evidence bundle, and Failure Capsules.
 13. M4/M5: batched Physical AI observations/randomization, then real-log identification,

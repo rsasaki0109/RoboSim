@@ -210,6 +210,55 @@ pub struct WheelEncoderSample {
     pub velocity_rad_s: f64,
 }
 
+/// Status of an incremental encoder frontend observation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IncrementalEncoderStatus {
+    /// The first count has been captured but no finite-difference interval exists yet.
+    #[default]
+    Initializing,
+    /// The counter and count-derived velocity are operating normally.
+    Nominal,
+    /// The configured finite counter reached its signed saturation limit.
+    CounterSaturated,
+    /// An injected stuck-value fault held the previous published measurement.
+    StuckValue,
+}
+
+/// Timestamp-aware incremental wheel or steering encoder feedback.
+///
+/// Counts are generated from completed joint position. Velocity is reconstructed
+/// only from observed integer count changes and capture timestamps; completed
+/// joint velocity and actuator commands are deliberately absent from this payload.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct IncrementalEncoderFeedback {
+    /// Version of this serialized observation schema.
+    pub schema_version: u32,
+    /// Scheduled sample time in simulation nanosecond ticks.
+    pub scheduled_capture_ticks: u64,
+    /// Non-negative delay from scheduled to actual capture, in ticks.
+    pub sample_phase_error_ticks: u64,
+    /// Measurement and injected-fault status.
+    pub status: IncrementalEncoderStatus,
+    /// Signed finite-width hardware counter value after wrapping or saturation.
+    pub raw_count: i64,
+    /// Count change reconstructed from successive finite-width counter observations.
+    pub delta_count: i64,
+    /// Quantized position reconstructed from `raw_count`, in radians.
+    pub position_rad: f64,
+    /// Angular velocity reconstructed from count and capture-time differences.
+    pub velocity_rad_s: f64,
+    /// Whether the finite-width counter wrapped since the preceding capture.
+    pub counter_wrapped: bool,
+    /// Whether an index phase was crossed since the preceding capture.
+    pub index_pulse: bool,
+}
+
+impl IncrementalEncoderFeedback {
+    /// Current serialized observation schema version.
+    pub const SCHEMA_VERSION: u32 = 1;
+}
+
 /// Articulated joint positions and velocities published on the DataBus.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct JointState {
