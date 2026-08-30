@@ -154,8 +154,8 @@ and a command/measurement substitution regression fails.
   reflected inertia.
 - `WheelAssemblySpec`: radius, inertia, rolling resistance, steering coordinate, and
   contact frame.
-- `WheelContactSample` and `WheelWrench`: deterministic backend-neutral boundary.
-- `TransientCombinedSlip`: longitudinal/lateral slip, relaxation length, load-sensitive
+- `ContactPointSample` and `ExternalBodyWrench`: deterministic backend-neutral boundary.
+- `CombinedSlipTireSpec`: longitudinal/lateral slip, relaxation length, load-sensitive
   force limits, friction ellipse, and regularized standstill behavior.
 - Ackermann adds suspension/load-transfer state after the per-wheel contract is stable;
   skid-steer adds anisotropic lateral resistance and scrub loss.
@@ -233,7 +233,8 @@ and cross-backend results.
 6. M1-B: contact/wrench contract plus Rapier implementation and conformance fixture.
 7. M1-C: MuJoCo implementation of the same contract and cross-backend fixture.
 8. M1-D: backend-neutral point-contact load/kinematics contract with Rapier/MuJoCo parity.
-9. M1-E: transient combined-slip force law, split-friction and low-speed tests.
+9. M1-E: transient combined-slip force law, split-friction and low-speed tests. Implemented
+   as a pure backend-neutral force element; backend scenario integration is the next gate.
 10. M2-A: encoder/steering/current payloads, calibration and fault pipeline.
 11. M2-B: wheel/IMU estimator and sensor-only mobile TaskSpec.
 12. M3: benchmark matrix, tolerances, evidence bundle, and Failure Capsules.

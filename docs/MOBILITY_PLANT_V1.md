@@ -1,6 +1,7 @@
 # Mobility plant v1 contracts
 
-Status: M1-A model contracts implemented; wheel/contact coupling is pending M1-B.
+Status: M1-A plant contracts and the M1-E combined-slip force element are implemented;
+cross-backend wheel/contact scenarios remain pending.
 
 These contracts are backend-neutral inputs to the Mobility Physical AI foundation. They
 do not expose Rapier, MuJoCo, or another solver type, and they do not claim vehicle fidelity
@@ -48,10 +49,10 @@ an orthonormal local contact frame. Its standalone rolling-resistance law is
 `Crr * normal_load_n * radius_m`, opposes completed motion, and returns zero at exact
 standstill rather than inventing a direction.
 
-The wheel spec is not a tire model. M1-B supplies backend-neutral contact kinematics and
-normal load; M1-D supplies transient combined-slip forces and low-speed regularization.
-Until those stages land, generic collider friction must not be presented as identified
-tire behavior.
+The wheel spec is not a tire model. The point-contact contract supplies backend-neutral
+contact kinematics and normal load; `CombinedSlipTireSpec` supplies transient combined-slip
+forces and low-speed regularization. Generic collider friction must not be presented as
+identified tire behavior or silently combined with the tire force element.
 
 ## Evidence and validity
 
