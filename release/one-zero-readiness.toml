@@ -24,7 +24,7 @@ blocker_registry = "release/blockers.toml"
 required_platforms = ["linux_x86_64", "windows_x86_64"]
 accelerator_adapter = []
 installed_flagship_reproduction = []
-compatibility_report = { path = "evidence/compatibility-report-v1.json", sha256 = "sha256:ce0018725f84c692b4e0a048af0e24e5bf1fde9779aaa20489b20e9f93566879" }
+compatibility_report = { path = "evidence/compatibility-report-v1.json", sha256 = "sha256:1a0570a265f3f9c42a0ac34aac3bab7cb9612bdb54d017f384daa40a1808066a" }
 
 [candidate]
 revision = "9e1ea8cb2dab8f468cf7bc51fac8bd381359acc4"
