@@ -30,7 +30,7 @@ use std::collections::BTreeSet;
 pub const CONFORMANCE_REPORT_KIND: &str = "rne_physics_conformance_report";
 
 /// Version of the shared capability-to-vector catalog.
-pub const CONFORMANCE_CATALOG_VERSION: u16 = 5;
+pub const CONFORMANCE_CATALOG_VERSION: u16 = 6;
 
 const BACKEND_ANALYTIC: &str = "analytic";
 #[cfg(feature = "mujoco")]
@@ -73,6 +73,7 @@ enum MetricUnit {
     MetrePerSecond,
     Radian,
     NewtonSecond,
+    Newton,
     NewtonMetre,
     RadianPerSecond,
     Unitless,
@@ -85,6 +86,7 @@ impl MetricUnit {
             Self::MetrePerSecond => "m/s",
             Self::Radian => "rad",
             Self::NewtonSecond => "N*s",
+            Self::Newton => "N",
             Self::NewtonMetre => "N*m",
             Self::RadianPerSecond => "rad/s",
             Self::Unitless => "1",
@@ -199,6 +201,34 @@ const TOLERANCES: &[ToleranceSpec] = &[
         relative: 0.35,
         rationale:
             "TGS contact stabilization biases manifold impulse above mass times gravity times dt",
+    },
+    ToleranceSpec {
+        id: "rapier_contact_point_normal_load_n_v1",
+        case_id: "rapier.contact_point_kinematics.resting_load",
+        metric_id: "mean_total_normal_force_n",
+        unit: MetricUnit::Newton,
+        absolute: 0.9,
+        relative: 0.35,
+        rationale: "TGS stabilization biases summed point load like aggregate contact impulse",
+    },
+    #[cfg(feature = "mujoco")]
+    ToleranceSpec {
+        id: "mujoco_contact_point_normal_load_n_v1",
+        case_id: "mujoco.contact_point_kinematics.resting_load",
+        metric_id: "mean_total_normal_force_n",
+        unit: MetricUnit::Newton,
+        absolute: 0.1,
+        relative: 0.02,
+        rationale: "settled MuJoCo point forces track body weight directly",
+    },
+    ToleranceSpec {
+        id: "contact_point_rest_speed_m_s_v1",
+        case_id: "shared.contact_point_kinematics",
+        metric_id: "max_surface_relative_speed_m_s",
+        unit: MetricUnit::MetrePerSecond,
+        absolute: 0.05,
+        relative: 0.0,
+        rationale: "resting surface-point kinematics converge close to zero",
     },
     #[cfg(feature = "mujoco")]
     ToleranceSpec {
@@ -824,6 +854,12 @@ where
                 capability,
                 run_external_body_wrench_case(factory(), backend_id),
             ),
+            PhysicsCapability::ContactPointKinematics => result_case(
+                &capability_case_id(backend_id, capability),
+                backend_id,
+                capability,
+                run_contact_point_case(factory(), backend_id),
+            ),
             PhysicsCapability::GpuRigidBody | PhysicsCapability::SoftBody => failed_case(
                 &capability_case_id(backend_id, capability),
                 backend_id,
@@ -862,6 +898,7 @@ fn capability_case_id(backend: &str, capability: PhysicsCapability) -> String {
             "joint_effort_measurement.direct_revolute_effort"
         }
         PhysicsCapability::ExternalBodyWrench => "external_body_wrench.one_step_force_at_point",
+        PhysicsCapability::ContactPointKinematics => "contact_point_kinematics.resting_load",
     };
     format!("{backend}.{suffix}")
 }
@@ -1405,6 +1442,111 @@ fn run_contact_case<B: PhysicsBackend>(
         detail: format!(
             "{} of 60 settled steps reported the canonical load-bearing pair; effective_mass_kg={effective_mass_kg}",
             impulses.len(),
+        ),
+    })
+}
+
+fn run_contact_point_case<B: PhysicsBackend>(
+    mut backend: B,
+    backend_id: &str,
+) -> anyhow::Result<CaseReport> {
+    let physics_world = backend.create_world(PhysicsWorldDesc::default())?;
+    let mut world = World::new();
+    let ground = spawn_named(&mut world, "contact_point_ground");
+    world.entity_mut(ground).insert((
+        RigidBody {
+            body_type: RigidBodyType::Fixed,
+            ..RigidBody::default()
+        },
+        Collider::cuboid(Vec3::new(2.0, 0.5, 2.0)),
+        Transform3::from_translation_rotation(Vec3::new(0.0, -0.5, 0.0), Quat::IDENTITY),
+    ));
+    let cube = spawn_named(&mut world, "contact_point_cube");
+    let mass_kg = 2.0;
+    world.entity_mut(cube).insert((
+        RigidBody {
+            mass_kg,
+            ..RigidBody::default()
+        },
+        Collider::cuboid(Vec3::splat(0.25)),
+        Transform3::from_translation_rotation(Vec3::new(0.0, 0.25, 0.0), Quat::IDENTITY),
+    ));
+
+    let mut frame_loads_n = Vec::new();
+    let mut max_relative_speed_m_s = 0.0_f64;
+    let mut conventions_ok = true;
+    for step in 0..180 {
+        step_backend(&mut backend, &mut world, physics_world, fixed_dt())?;
+        if step < 120 {
+            continue;
+        }
+        let pair_samples = backend
+            .contact_points(physics_world)?
+            .iter()
+            .filter(|sample| sample.entity_a == ground && sample.entity_b == cube)
+            .collect::<Vec<_>>();
+        if pair_samples.is_empty() {
+            continue;
+        }
+        frame_loads_n.push(
+            pair_samples
+                .iter()
+                .map(|sample| sample.normal_force_n)
+                .sum::<f64>(),
+        );
+        for sample in pair_samples {
+            max_relative_speed_m_s =
+                max_relative_speed_m_s.max(sample.velocity_b_relative_to_a_world_m_s.length());
+            conventions_ok &= sample.point_world_m.is_finite()
+                && sample.normal_a_to_b.is_finite()
+                && (sample.normal_a_to_b.length() - 1.0).abs() <= 1.0e-5
+                && sample.normal_force_n.is_finite()
+                && sample.normal_force_n > 0.0;
+        }
+    }
+    if frame_loads_n.is_empty() {
+        return Err(anyhow!(
+            "resting contact did not produce point-level load evidence"
+        ));
+    }
+    let (effective_mass_kg, load_tolerance_id) = match backend_id {
+        BACKEND_RAPIER => (
+            mass_kg + 0.5_f64.powi(3),
+            "rapier_contact_point_normal_load_n_v1",
+        ),
+        #[cfg(feature = "mujoco")]
+        BACKEND_MUJOCO => (mass_kg, "mujoco_contact_point_normal_load_n_v1"),
+        _ => {
+            return Err(anyhow!(
+                "{backend_id} has no registered contact-point mass profile"
+            ))
+        }
+    };
+    let mean_load_n = frame_loads_n.iter().sum::<f64>() / frame_loads_n.len() as f64;
+    let metrics = vec![
+        metric(
+            "mean_total_normal_force_n",
+            mean_load_n,
+            effective_mass_kg * GRAVITY_M_S2.abs(),
+            load_tolerance_id,
+        ),
+        metric(
+            "max_surface_relative_speed_m_s",
+            max_relative_speed_m_s,
+            0.0,
+            "contact_point_rest_speed_m_s_v1",
+        ),
+    ];
+    Ok(CaseReport {
+        id: capability_case_id(backend_id, PhysicsCapability::ContactPointKinematics),
+        backend: backend_id.to_string(),
+        capability: PhysicsCapability::ContactPointKinematics,
+        passed: conventions_ok && metrics.iter().all(|metric| metric.passed),
+        snapshot_hash: None,
+        metrics,
+        detail: format!(
+            "{} of 60 settled steps reported canonical point-level load and kinematics; effective_mass_kg={effective_mass_kg}",
+            frame_loads_n.len()
         ),
     })
 }

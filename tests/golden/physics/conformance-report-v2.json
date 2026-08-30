@@ -1,8 +1,8 @@
 {
   "kind": "rne_physics_conformance_report",
   "schema_version": 2,
-  "catalog_version": 5,
-  "tolerance_registry_version": 3,
+  "catalog_version": 6,
+  "tolerance_registry_version": 4,
   "backends": [
     {
       "manifest": {
@@ -47,7 +47,8 @@
           "raycast_batch",
           "kinematic_body",
           "joint_effort_measurement",
-          "external_body_wrench"
+          "external_body_wrench",
+          "contact_point_kinematics"
         ],
         "repeatability": "same_runtime_exact"
       },
@@ -59,7 +60,8 @@
         "raycast_batch",
         "kinematic_body",
         "joint_effort_measurement",
-        "external_body_wrench"
+        "external_body_wrench",
+        "contact_point_kinematics"
       ],
       "manifest_passed": true,
       "covered_capabilities": [
@@ -70,7 +72,8 @@
         "raycast_batch",
         "kinematic_body",
         "joint_effort_measurement",
-        "external_body_wrench"
+        "external_body_wrench",
+        "contact_point_kinematics"
       ],
       "coverage_passed": true,
       "detail": "manifest and runtime capability declarations match"
@@ -270,6 +273,46 @@
         }
       ],
       "detail": "60 of 60 settled steps reported the canonical load-bearing pair; effective_mass_kg=2.125"
+    },
+    {
+      "id": "rapier.contact_point_kinematics.resting_load",
+      "backend": "rapier",
+      "capability": "contact_point_kinematics",
+      "passed": true,
+      "snapshot_hash": null,
+      "metrics": [
+        {
+          "id": "mean_total_normal_force_n",
+          "unit": "N",
+          "measured": 26.057813677657503,
+          "expected": 20.84625,
+          "absolute_error": 5.211563677657502,
+          "tolerance": {
+            "id": "rapier_contact_point_normal_load_n_v1",
+            "absolute": 0.9,
+            "relative": 0.35,
+            "allowed_error": 7.2961875,
+            "rationale": "TGS stabilization biases summed point load like aggregate contact impulse"
+          },
+          "passed": true
+        },
+        {
+          "id": "max_surface_relative_speed_m_s",
+          "unit": "m/s",
+          "measured": 0.0,
+          "expected": 0.0,
+          "absolute_error": 0.0,
+          "tolerance": {
+            "id": "contact_point_rest_speed_m_s_v1",
+            "absolute": 0.05,
+            "relative": 0.0,
+            "allowed_error": 0.05,
+            "rationale": "resting surface-point kinematics converge close to zero"
+          },
+          "passed": true
+        }
+      ],
+      "detail": "60 of 60 settled steps reported canonical point-level load and kinematics; effective_mass_kg=2.125"
     },
     {
       "id": "rapier.deterministic_step.repeat_snapshot",

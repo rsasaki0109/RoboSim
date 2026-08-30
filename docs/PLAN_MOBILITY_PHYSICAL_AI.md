@@ -232,11 +232,12 @@ and cross-backend results.
 5. M1-A: backend-neutral motor/transmission/wheel types and pure deterministic unit tests.
 6. M1-B: contact/wrench contract plus Rapier implementation and conformance fixture.
 7. M1-C: MuJoCo implementation of the same contract and cross-backend fixture.
-8. M1-D: transient combined-slip force law, split-friction and low-speed tests.
-9. M2-A: encoder/steering/current payloads, calibration and fault pipeline.
-10. M2-B: wheel/IMU estimator and sensor-only mobile TaskSpec.
-11. M3: benchmark matrix, tolerances, evidence bundle, and Failure Capsules.
-12. M4/M5: batched Physical AI observations/randomization, then real-log identification,
+8. M1-D: backend-neutral point-contact load/kinematics contract with Rapier/MuJoCo parity.
+9. M1-E: transient combined-slip force law, split-friction and low-speed tests.
+10. M2-A: encoder/steering/current payloads, calibration and fault pipeline.
+11. M2-B: wheel/IMU estimator and sensor-only mobile TaskSpec.
+12. M3: benchmark matrix, tolerances, evidence bundle, and Failure Capsules.
+13. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.
 
 Every PR is independently headless-testable, documents new public contracts, runs format,

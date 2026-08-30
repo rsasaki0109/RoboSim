@@ -33,17 +33,17 @@ pub const EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_KIND: &str =
 pub const EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_REPORT_SCHEMA_VERSION: u16 = 1;
 
 /// Current immutable external capability-case catalog.
-pub const EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_CATALOG_VERSION: u16 = 3;
+pub const EXTERNAL_PHYSICS_BACKEND_CONFORMANCE_CATALOG_VERSION: u16 = 4;
 
 /// Current named, unit-bearing tolerance registry used by the external catalog.
-pub const EXTERNAL_PHYSICS_BACKEND_TOLERANCE_REGISTRY_VERSION: u16 = 2;
+pub const EXTERNAL_PHYSICS_BACKEND_TOLERANCE_REGISTRY_VERSION: u16 = 3;
 
 const STEP_HZ: f64 = 60.0;
 const FREE_FALL_STEPS: u64 = 60;
 const GRAVITY_M_S2: f64 = -9.81;
 const FREE_FALL_INITIAL_Y_M: f64 = 5.0;
 
-const CHECK_IDS: [&str; 11] = [
+const CHECK_IDS: [&str; 12] = [
     "manifest_identity",
     "rigid_body.free_fall",
     "articulation.revolute_limit",
@@ -55,6 +55,7 @@ const CHECK_IDS: [&str; 11] = [
     "kinematic_body.external_pose",
     "joint_effort_measurement.direct_revolute_effort",
     "external_body_wrench.one_step_force_at_point",
+    "contact_point_kinematics.resting_load",
 ];
 
 /// Invalid conformance configuration, report, or serialized artifact.
@@ -420,6 +421,9 @@ where
             }
             PhysicsCapability::ExternalBodyWrench => {
                 case_result(capability, run_external_body_wrench(factory()))
+            }
+            PhysicsCapability::ContactPointKinematics => {
+                case_result(capability, run_contact_points(factory()))
             }
         };
         checks.push(check);
@@ -1015,6 +1019,106 @@ fn run_contact<B: PhysicsBackend>(mut backend: B) -> Result<ExternalPhysicsBacke
     ))
 }
 
+fn run_contact_points<B: PhysicsBackend>(
+    mut backend: B,
+) -> Result<ExternalPhysicsBackendCheck, String> {
+    let physics_world = backend
+        .create_world(PhysicsWorldDesc::default())
+        .map_err(|error| error.to_string())?;
+    let mut world = World::new();
+    let ground = spawn_named(&mut world, "external_contact_point_ground");
+    world.entity_mut(ground).insert((
+        RigidBody {
+            body_type: RigidBodyType::Fixed,
+            ..RigidBody::default()
+        },
+        Collider::cuboid(Vec3::new(2.0, 0.5, 2.0)),
+        Transform3::from_translation_rotation(Vec3::new(0.0, -0.5, 0.0), Quat::IDENTITY),
+    ));
+    let cube = spawn_named(&mut world, "external_contact_point_cube");
+    let mass_kg = 2.0;
+    world.entity_mut(cube).insert((
+        RigidBody {
+            mass_kg,
+            ..RigidBody::default()
+        },
+        Collider::cuboid(Vec3::splat(0.25)),
+        Transform3::from_translation_rotation(Vec3::new(0.0, 0.25, 0.0), Quat::IDENTITY),
+    ));
+
+    let mut frame_loads_n = Vec::new();
+    let mut max_relative_speed_m_s = 0.0_f64;
+    let mut conventions_ok = true;
+    for step in 0..180 {
+        step_backend(&mut backend, &mut world, physics_world, fixed_dt())?;
+        if step < 120 {
+            continue;
+        }
+        let samples = backend
+            .contact_points(physics_world)
+            .map_err(|error| error.to_string())?;
+        let pair_samples = samples
+            .iter()
+            .filter(|sample| sample.entity_a == ground && sample.entity_b == cube)
+            .collect::<Vec<_>>();
+        if pair_samples.is_empty() {
+            continue;
+        }
+        frame_loads_n.push(
+            pair_samples
+                .iter()
+                .map(|sample| sample.normal_force_n)
+                .sum::<f64>(),
+        );
+        for sample in pair_samples {
+            max_relative_speed_m_s =
+                max_relative_speed_m_s.max(sample.velocity_b_relative_to_a_world_m_s.length());
+            conventions_ok &= sample.point_world_m.is_finite()
+                && sample.normal_a_to_b.is_finite()
+                && (sample.normal_a_to_b.length() - 1.0).abs() <= 1.0e-5
+                && sample.normal_force_n.is_finite()
+                && sample.normal_force_n > 0.0;
+        }
+    }
+    if frame_loads_n.is_empty() {
+        return Err("resting contact did not produce point-level load evidence".to_string());
+    }
+    let mean_load_n = frame_loads_n.iter().sum::<f64>() / frame_loads_n.len() as f64;
+    let expected_load_n = mass_kg * GRAVITY_M_S2.abs();
+    let metrics = vec![
+        metric(
+            "mean_total_normal_force_n",
+            "N",
+            mean_load_n,
+            expected_load_n,
+            "external_contact_point_normal_load_n_v1",
+            0.9,
+            0.35,
+            "summed settled point loads permit the same iterative stabilization bias as aggregate contact impulse",
+        ),
+        metric(
+            "max_surface_relative_speed_m_s",
+            "m/s",
+            max_relative_speed_m_s,
+            0.0,
+            "external_contact_point_rest_speed_m_s_v1",
+            0.05,
+            0.0,
+            "resting surface-point kinematics should converge close to zero",
+        ),
+    ];
+    Ok(completed_case(
+        PhysicsCapability::ContactPointKinematics,
+        conventions_ok && metrics.iter().all(|metric| metric.passed),
+        None,
+        metrics,
+        &format!(
+            "{} of 60 settled steps reported canonical point-level load and kinematics",
+            frame_loads_n.len()
+        ),
+    ))
+}
+
 fn run_raycast<B: PhysicsBackend>(mut backend: B) -> Result<ExternalPhysicsBackendCheck, String> {
     let physics_world = backend
         .create_world(PhysicsWorldDesc::default())
@@ -1169,6 +1273,7 @@ fn capability_check_id(capability: PhysicsCapability) -> &'static str {
         PhysicsCapability::KinematicBody => CHECK_IDS[8],
         PhysicsCapability::JointEffortMeasurement => CHECK_IDS[9],
         PhysicsCapability::ExternalBodyWrench => CHECK_IDS[10],
+        PhysicsCapability::ContactPointKinematics => CHECK_IDS[11],
     }
 }
 
@@ -1383,7 +1488,7 @@ mod tests {
         )
         .expect("conformance report");
         assert!(report.passed());
-        assert_eq!(report.checks.len(), 11);
+        assert_eq!(report.checks.len(), 12);
         assert_eq!(
             report.covered_capabilities,
             external_manifest().capabilities

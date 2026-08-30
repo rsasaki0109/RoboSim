@@ -1,6 +1,6 @@
 //! Physics backend trait and world identifiers.
 
-use crate::{ContactEvent, ExternalBodyWrench, RaycastHit, RaycastQuery};
+use crate::{ContactEvent, ContactPointSample, ExternalBodyWrench, RaycastHit, RaycastQuery};
 use rne_core::SimDuration;
 use rne_ecs::World;
 use rne_math::Vec3;
@@ -14,7 +14,7 @@ pub const PHYSICS_BACKEND_MANIFEST_SCHEMA_VERSION: u16 = 3;
 pub const PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION: u16 = 2;
 
 /// Current version of the named, unit-bearing physics tolerance registry.
-pub const PHYSICS_TOLERANCE_REGISTRY_VERSION: u16 = 3;
+pub const PHYSICS_TOLERANCE_REGISTRY_VERSION: u16 = 4;
 
 /// Identifier for a backend-owned physics world instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -69,6 +69,8 @@ pub enum PhysicsCapability {
     JointEffortMeasurement,
     /// Accepts a world-frame rigid-body wrench for exactly one physics step.
     ExternalBodyWrench,
+    /// Reports solved point-level contact kinematics and normal load.
+    ContactPointKinematics,
 }
 
 /// Repeatability promise made by a physics backend manifest.
@@ -194,6 +196,13 @@ impl PhysicsBackendManifest {
         {
             return Err(PhysicsBackendManifestError::ExternalWrenchWithoutRigidBody);
         }
+        if self
+            .capabilities
+            .contains(&PhysicsCapability::ContactPointKinematics)
+            && !self.capabilities.contains(&PhysicsCapability::ContactForce)
+        {
+            return Err(PhysicsBackendManifestError::ContactPointsWithoutContactForce);
+        }
         Ok(())
     }
 }
@@ -236,6 +245,9 @@ pub enum PhysicsBackendManifestError {
     /// External rigid-body wrench support refines the rigid-body capability.
     #[error("external_body_wrench capability requires rigid_body capability")]
     ExternalWrenchWithoutRigidBody,
+    /// Point-level contact evidence refines aggregate contact-force reporting.
+    #[error("contact_point_kinematics capability requires contact_force capability")]
+    ContactPointsWithoutContactForce,
 }
 
 fn is_stable_identifier(value: &str) -> bool {
@@ -248,7 +260,7 @@ fn is_stable_identifier(value: &str) -> bool {
 
 impl PhysicsCapability {
     /// Every capability known by this engine version in stable wire/report order.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::RigidBody,
         Self::Articulation,
         Self::GpuRigidBody,
@@ -259,6 +271,7 @@ impl PhysicsCapability {
         Self::KinematicBody,
         Self::JointEffortMeasurement,
         Self::ExternalBodyWrench,
+        Self::ContactPointKinematics,
     ];
 
     /// Returns the stable lowercase identifier used by conformance reports.
@@ -274,6 +287,7 @@ impl PhysicsCapability {
             Self::RaycastBatch => "raycast_batch",
             Self::JointEffortMeasurement => "joint_effort_measurement",
             Self::ExternalBodyWrench => "external_body_wrench",
+            Self::ContactPointKinematics => "contact_point_kinematics",
         }
     }
 }
@@ -423,6 +437,20 @@ pub trait PhysicsBackend: Send + Sync + 'static {
 
     /// Returns contact events from the last simulation step.
     fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError>;
+
+    /// Returns solved point-level contact samples from the last simulation step.
+    ///
+    /// Backends advertising [`PhysicsCapability::ContactPointKinematics`] must
+    /// return samples in a deterministic order and obey the world-frame, sign,
+    /// and unit conventions documented by [`ContactPointSample`].
+    fn contact_points(
+        &self,
+        _physics_world: PhysicsWorldId,
+    ) -> Result<&[ContactPointSample], PhysicsError> {
+        Err(PhysicsError::MissingCapabilities {
+            missing: vec![PhysicsCapability::ContactPointKinematics],
+        })
+    }
 
     /// Returns supported capabilities for this backend.
     fn capabilities(&self) -> &[PhysicsCapability];
@@ -659,6 +687,23 @@ mod tests {
             orphan_external_wrench,
             PhysicsBackendManifestError::ExternalWrenchWithoutRigidBody
         );
+
+        let orphan_contact_points = PhysicsBackendManifest::new(
+            "fixture",
+            "0.1.0",
+            "fixture",
+            "1",
+            [
+                PhysicsCapability::RigidBody,
+                PhysicsCapability::ContactPointKinematics,
+            ],
+            PhysicsBackendRepeatability::ToleranceBounded,
+        )
+        .expect_err("point kinematics refine aggregate contact-force reporting");
+        assert_eq!(
+            orphan_contact_points,
+            PhysicsBackendManifestError::ContactPointsWithoutContactForce
+        );
     }
 
     #[test]
@@ -681,6 +726,20 @@ mod tests {
             error,
             PhysicsError::MissingCapabilities {
                 missing: vec![PhysicsCapability::ExternalBodyWrench]
+            }
+        );
+    }
+
+    #[test]
+    fn default_contact_points_fail_capability_negotiation() {
+        let backend = MockBackend::new();
+        let error = backend
+            .contact_points(PhysicsWorldId(0))
+            .expect_err("the default implementation must fail closed");
+        assert_eq!(
+            error,
+            PhysicsError::MissingCapabilities {
+                missing: vec![PhysicsCapability::ContactPointKinematics]
             }
         );
     }

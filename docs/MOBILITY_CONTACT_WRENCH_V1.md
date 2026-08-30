@@ -42,9 +42,9 @@ numeric type crosses the `rne_physics` API.
 
 ## Deliberate limitations
 
-- Contact point, normal load, surface velocity, and material state are not yet standardized.
-  The next slice must add the input half of the force-element boundary before any
-  combined-slip claim.
+- Contact point, normal load, and surface velocity are standardized by
+  `ContactPointSample` in the following M1-D slice. Material state and tire-frame
+  aggregation remain intentionally outside this v1 wrench contract.
 - The existing pair-aggregated `ContactEvent` normal impulse is diagnostic evidence, not a
   per-wheel contact patch model.
 - Generic collider Coulomb friction is not called a tire model.
@@ -55,6 +55,6 @@ numeric type crosses the `rne_physics` API.
 
 ## Next proof
 
-The next slice defines `WheelContactSample` from contact point, normal, relative surface
-velocity, and normal load before implementing transient combined slip. Rapier and MuJoCo
-already execute this exact output-wrench vector through the shared conformance catalog.
+The next slice consumes generic `ContactPointSample` values to form a wheel contact patch,
+then implements transient combined slip. Rapier and MuJoCo already execute this exact
+output-wrench vector through the shared conformance catalog.

@@ -10,9 +10,10 @@ use rne_core::SimDuration;
 use rne_ecs::{Entity, Parent, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
-    ColliderShape, ContactEvent, ExternalBodyWrench, JointActuation, JointEffortMeasurement,
-    JointMotor, JointPassiveDynamics, JointState, PhysicsBackend, PhysicsCapability, PhysicsError,
-    PhysicsWorldDesc, PhysicsWorldId, RaycastHit, RaycastQuery, RigidBody, RigidBodyType,
+    ColliderShape, ContactEvent, ContactPointSample, ExternalBodyWrench, JointActuation,
+    JointEffortMeasurement, JointMotor, JointPassiveDynamics, JointState, PhysicsBackend,
+    PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, RaycastHit, RaycastQuery,
+    RigidBody, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::{BTreeMap, HashMap};
@@ -30,6 +31,7 @@ const CAPABILITIES: &[PhysicsCapability] = &[
     PhysicsCapability::RaycastBatch,
     PhysicsCapability::JointEffortMeasurement,
     PhysicsCapability::ExternalBodyWrench,
+    PhysicsCapability::ContactPointKinematics,
 ];
 
 /// Errors specific to the optional MuJoCo adapter.
@@ -148,6 +150,7 @@ struct MuJoCoWorld {
     geom_entities: Vec<Option<Entity>>,
     sensor_geoms: Vec<bool>,
     contacts: Vec<ContactEvent>,
+    contact_points: Vec<ContactPointSample>,
     one_step_wrench_bodies: Vec<String>,
 }
 
@@ -493,25 +496,27 @@ fn collect_contact_events(
     geom_entities: &[Option<Entity>],
     sensor_geoms: &[bool],
     timestep_s: f64,
-) -> Result<Vec<ContactEvent>, MuJoCoError> {
+) -> Result<(Vec<ContactEvent>, Vec<ContactPointSample>), MuJoCoError> {
+    if geom_entities.len() != sensor_geoms.len() {
+        return Err(MuJoCoError::UnsupportedFixture(
+            "geometry binding lengths differ".to_owned(),
+        ));
+    }
     let mut pairs = BTreeMap::<(u32, u32), ContactAccumulator>::new();
+    let mut point_samples = Vec::new();
     let contact_count = data.contact().len();
     for contact_id in 0..contact_count {
         let contact = &data.contact()[contact_id];
-        let Some(entity_1) = usize::try_from(contact.geom1)
-            .ok()
-            .and_then(|index| geom_entities.get(index))
-            .copied()
-            .flatten()
-        else {
+        let Ok(geom_1) = usize::try_from(contact.geom1) else {
             continue;
         };
-        let Some(entity_2) = usize::try_from(contact.geom2)
-            .ok()
-            .and_then(|index| geom_entities.get(index))
-            .copied()
-            .flatten()
-        else {
+        let Ok(geom_2) = usize::try_from(contact.geom2) else {
+            continue;
+        };
+        let Some(entity_1) = geom_entities.get(geom_1).copied().flatten() else {
+            continue;
+        };
+        let Some(entity_2) = geom_entities.get(geom_2).copied().flatten() else {
             continue;
         };
         if entity_1 == entity_2 {
@@ -530,6 +535,28 @@ fn collect_contact_events(
             ));
         }
         let native_normal = native_normal / normal_length_squared.sqrt();
+        if !sensor_geoms[geom_1] && !sensor_geoms[geom_2] && normal_force_n > 0.0 {
+            let point_world_m = Vec3::from_slice(&contact.pos);
+            let velocity_1 = geom_velocity_at_world_point(data, geom_1, point_world_m)?;
+            let velocity_2 = geom_velocity_at_world_point(data, geom_2, point_world_m)?;
+            let canonical = entity_1.index() <= entity_2.index();
+            point_samples.push(ContactPointSample {
+                entity_a: if canonical { entity_1 } else { entity_2 },
+                entity_b: if canonical { entity_2 } else { entity_1 },
+                point_world_m,
+                normal_a_to_b: if canonical {
+                    native_normal
+                } else {
+                    -native_normal
+                },
+                velocity_b_relative_to_a_world_m_s: if canonical {
+                    velocity_2 - velocity_1
+                } else {
+                    velocity_1 - velocity_2
+                },
+                normal_force_n,
+            });
+        }
         let impulse_n_s = normal_force_n.max(0.0) * timestep_s;
         if !impulse_n_s.is_finite() {
             return Err(MuJoCoError::NonFiniteState("contact impulse"));
@@ -554,11 +581,6 @@ fn collect_contact_events(
         accumulator.impulse_n_s += impulse_n_s;
     }
 
-    if geom_entities.len() != sensor_geoms.len() {
-        return Err(MuJoCoError::UnsupportedFixture(
-            "geometry binding lengths differ".to_owned(),
-        ));
-    }
     for geom_a in 0..geom_entities.len() {
         for geom_b in (geom_a + 1)..geom_entities.len() {
             if !(sensor_geoms[geom_a] || sensor_geoms[geom_b]) {
@@ -595,7 +617,7 @@ fn collect_contact_events(
         }
     }
 
-    pairs
+    let events = pairs
         .into_values()
         .map(|pair| {
             if pair.impulse_n_s > f32::MAX as f64 {
@@ -617,7 +639,43 @@ fn collect_contact_events(
                 impulse: pair.impulse_n_s as f32,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    point_samples.sort_by(|left, right| {
+        left.entity_a
+            .index()
+            .cmp(&right.entity_a.index())
+            .then_with(|| left.entity_b.index().cmp(&right.entity_b.index()))
+            .then_with(|| left.point_world_m.x.total_cmp(&right.point_world_m.x))
+            .then_with(|| left.point_world_m.y.total_cmp(&right.point_world_m.y))
+            .then_with(|| left.point_world_m.z.total_cmp(&right.point_world_m.z))
+    });
+    Ok((events, point_samples))
+}
+
+fn geom_velocity_at_world_point(
+    data: &MjData<Box<MjModel>>,
+    geom_id: usize,
+    point_world_m: Vec3,
+) -> Result<Vec3, MuJoCoError> {
+    let velocity = data
+        .try_object_velocity(MjtObj::mjOBJ_GEOM, geom_id, false)
+        .map_err(|error| MuJoCoError::UnsupportedFixture(error.to_string()))?;
+    let center_world_m = data
+        .geom_xpos()
+        .get(geom_id)
+        .copied()
+        .map(|position| Vec3::from_slice(&position))
+        .ok_or_else(|| {
+            MuJoCoError::UnsupportedFixture("contact geometry id is out of range".to_owned())
+        })?;
+    let angular_velocity_world_rad_s = Vec3::from_slice(&velocity[..3]);
+    let linear_velocity_world_m_s = Vec3::from_slice(&velocity[3..]);
+    let point_velocity = linear_velocity_world_m_s
+        + angular_velocity_world_rad_s.cross(point_world_m - center_world_m);
+    if !point_velocity.is_finite() {
+        return Err(MuJoCoError::NonFiniteState("contact-point velocity"));
+    }
+    Ok(point_velocity)
 }
 
 fn sync_from_ecs_state(
@@ -945,6 +1003,7 @@ impl PhysicsBackend for MuJoCoBackend {
                 geom_entities: Vec::new(),
                 sensor_geoms: Vec::new(),
                 contacts: Vec::new(),
+                contact_points: Vec::new(),
                 one_step_wrench_bodies: Vec::new(),
             },
         );
@@ -1033,7 +1092,7 @@ impl PhysicsBackend for MuJoCoBackend {
             }));
         }
         let wrench_bodies = std::mem::take(&mut world_state.one_step_wrench_bodies);
-        let contacts = {
+        let (contacts, contact_points) = {
             let mut data_guard = world_state.lock_data();
             let data = data_guard
                 .as_mut()
@@ -1062,6 +1121,7 @@ impl PhysicsBackend for MuJoCoBackend {
             .map_err(Self::map_error)?
         };
         world_state.contacts = contacts;
+        world_state.contact_points = contact_points;
         Ok(())
     }
 
@@ -1327,6 +1387,13 @@ impl PhysicsBackend for MuJoCoBackend {
 
     fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError> {
         Ok(&self.world(physics_world)?.contacts)
+    }
+
+    fn contact_points(
+        &self,
+        physics_world: PhysicsWorldId,
+    ) -> Result<&[ContactPointSample], PhysicsError> {
+        Ok(&self.world(physics_world)?.contact_points)
     }
 
     fn capabilities(&self) -> &[PhysicsCapability] {
