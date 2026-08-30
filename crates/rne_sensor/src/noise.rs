@@ -5,6 +5,7 @@ use rne_math::Vec3;
 use serde::{Deserialize, Serialize};
 
 const IMU_NOISE_DOMAIN_V1: u64 = 0x314E_756D_6945_4E52;
+const MOTOR_ELECTRICAL_NOISE_DOMAIN_V1: u64 = 0x314C_4543_544F_4D52;
 
 /// Stable coordinate for stateless sensor noise samples.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,6 +88,17 @@ pub(crate) fn gaussian_pair(random: &KeyedRandom, key: SensorNoiseKey, slot: u64
     let magnitude = (-2.0 * u1.ln()).sqrt();
     let angle = std::f64::consts::TAU * u2;
     (magnitude * angle.cos(), magnitude * angle.sin())
+}
+
+/// Draws independent current, voltage, and temperature standard normals.
+pub(crate) fn motor_electrical_gaussian(key: SensorNoiseKey) -> [f64; 3] {
+    let random = KeyedRandom::new(
+        key.root_seed,
+        MOTOR_ELECTRICAL_NOISE_DOMAIN_V1 ^ mix64(key.sensor_seed),
+    );
+    let (current, voltage) = gaussian_pair(&random, key, 0);
+    let (temperature, _) = gaussian_pair(&random, key, 2);
+    [current, voltage, temperature]
 }
 
 fn keyed_unit(key: SensorNoiseKey) -> Vec3 {

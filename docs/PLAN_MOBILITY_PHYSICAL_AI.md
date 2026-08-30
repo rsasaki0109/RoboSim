@@ -245,8 +245,13 @@ and cross-backend results.
     covariance. Its actor observation and motor-voltage TaskSpec expose estimate,
     uncertainty, timing, health, and task goal without a truth tensor; truth-named
     reward/termination terms remain diagnostic scoring outside the actor contract.
-12. M3: benchmark matrix, tolerances, evidence bundle, and Failure Capsules.
-13. M4/M5: batched Physical AI observations/randomization, then real-log identification,
+12. M2-C: completed motor telemetry plus measured current/voltage/optional-temperature
+    frontend. The additive path now models offset, seeded noise, measurement range,
+    quantization, timing, latency, dropout, stuck, saturation, and explicit missing
+    temperature without reading commands. Generic incremental encoders already cover
+    revolute steering coordinates; integrated steering/backlash evidence remains.
+13. M3: benchmark matrix, tolerances, evidence bundle, and Failure Capsules.
+14. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.
 
 Every PR is independently headless-testable, documents new public contracts, runs format,

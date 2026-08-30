@@ -38,6 +38,7 @@ pub use payloads::{
     ImageDepth, ImageRgb8, ImuFeedback, ImuFeedbackStatus, ImuSample, IncrementalEncoderFeedback,
     IncrementalEncoderStatus, JointCommandFeedback, JointCommandMode, JointCoordinateFeedback,
     JointEffortFeedback, JointFeedback, JointFeedbackChannel, JointFeedbackStatus, JointState,
-    PointCloud, PoseSample, WheelEncoderSample,
+    MotorElectricalFeedback, MotorElectricalFeedbackStatus, PointCloud, PoseSample,
+    WheelEncoderSample,
 };
 pub use stream::StreamId;

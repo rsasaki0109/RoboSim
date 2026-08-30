@@ -3,7 +3,9 @@
 use crate::{CameraSpec, ImuSpec, LidarSpec, WheelEncoderSpec};
 use bevy_ecs::prelude::Component;
 use rne_core::SimDuration;
-use rne_data::{ImuFeedback, IncrementalEncoderFeedback, JointFeedback, StreamId};
+use rne_data::{
+    ImuFeedback, IncrementalEncoderFeedback, JointFeedback, MotorElectricalFeedback, StreamId,
+};
 use rne_ecs::Entity;
 use rne_math::Vec3;
 use rne_world::Transform3;
@@ -421,6 +423,150 @@ pub struct IncrementalEncoderSensorState {
     pub(crate) previous_raw_count: Option<i64>,
     pub(crate) observed_accumulated_count: i64,
     pub(crate) velocity_history: Vec<(u64, i64)>,
+}
+
+/// Range, calibration, noise, and quantization of a motor electrical frontend.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MotorElectricalFeedbackSpec {
+    /// Motor entity carrying completed plant telemetry.
+    pub motor_entity: Entity,
+    /// Symmetric measurable current range in amperes.
+    pub current_range_a: f64,
+    /// Symmetric measurable terminal-voltage range in volts.
+    pub voltage_range_v: f64,
+    /// Minimum measurable winding temperature in degrees Celsius.
+    pub minimum_temperature_c: f64,
+    /// Maximum measurable winding temperature in degrees Celsius.
+    pub maximum_temperature_c: f64,
+    /// Constant current calibration offset in amperes.
+    pub current_offset_a: f64,
+    /// Constant terminal-voltage calibration offset in volts.
+    pub voltage_offset_v: f64,
+    /// Constant winding-temperature calibration offset in degrees Celsius.
+    pub temperature_offset_c: f64,
+    /// Current white-noise standard deviation in amperes.
+    pub current_noise_std_a: f64,
+    /// Terminal-voltage white-noise standard deviation in volts.
+    pub voltage_noise_std_v: f64,
+    /// Winding-temperature white-noise standard deviation in degrees Celsius.
+    pub temperature_noise_std_c: f64,
+    /// Current ADC resolution in amperes; zero disables current quantization.
+    pub current_resolution_a: f64,
+    /// Voltage ADC resolution in volts; zero disables voltage quantization.
+    pub voltage_resolution_v: f64,
+    /// Temperature ADC resolution in degrees Celsius; zero disables quantization.
+    pub temperature_resolution_c: f64,
+    /// Sensor-local deterministic noise salt.
+    pub seed: u64,
+}
+
+impl MotorElectricalFeedbackSpec {
+    /// Returns true when range, calibration, noise, and resolution are physical.
+    pub fn is_valid(self) -> bool {
+        self.current_range_a.is_finite()
+            && self.current_range_a > 0.0
+            && self.voltage_range_v.is_finite()
+            && self.voltage_range_v > 0.0
+            && self.minimum_temperature_c.is_finite()
+            && self.maximum_temperature_c.is_finite()
+            && self.minimum_temperature_c < self.maximum_temperature_c
+            && [
+                self.current_offset_a,
+                self.voltage_offset_v,
+                self.temperature_offset_c,
+                self.current_noise_std_a,
+                self.voltage_noise_std_v,
+                self.temperature_noise_std_c,
+                self.current_resolution_a,
+                self.voltage_resolution_v,
+                self.temperature_resolution_c,
+            ]
+            .into_iter()
+            .all(f64::is_finite)
+            && self.current_noise_std_a >= 0.0
+            && self.voltage_noise_std_v >= 0.0
+            && self.temperature_noise_std_c >= 0.0
+            && self.current_resolution_a >= 0.0
+            && self.voltage_resolution_v >= 0.0
+            && self.temperature_resolution_c >= 0.0
+    }
+}
+
+/// Deterministic fault injected after electrical measurement and before latency.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MotorElectricalFeedbackFault {
+    /// No injected fault.
+    #[default]
+    None,
+    /// Drop exactly one attempted sequence, producing a visible sequence gap.
+    DropSequence {
+        /// One-based attempted sequence to drop.
+        sequence: u64,
+    },
+    /// Hold the last emitted values from this attempted sequence onward.
+    StuckFromSequence {
+        /// One-based first attempted sequence that reuses prior values.
+        sequence: u64,
+    },
+}
+
+/// Typed motor electrical feedback sensor with explicit capture and availability timing.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct MotorElectricalFeedbackSensor {
+    /// Measurement frontend specification.
+    pub spec: MotorElectricalFeedbackSpec,
+    /// Nominal update rate in hertz.
+    pub update_rate_hz: f64,
+    /// Exact sampling period in ticks, overriding the update rate when present.
+    pub sample_period_ticks: Option<u64>,
+    /// First scheduled capture time in simulation nanosecond ticks.
+    pub phase_offset_ticks: u64,
+    /// Capture-to-availability latency in simulation nanosecond ticks.
+    pub latency_ticks: u64,
+    /// Whether sampling is enabled.
+    pub enabled: bool,
+    /// DataBus stream id.
+    pub stream_id: StreamId,
+    /// Optional deterministic dropout or stuck-value fault.
+    pub fault: MotorElectricalFeedbackFault,
+}
+
+impl MotorElectricalFeedbackSensor {
+    /// Sample period derived from exact ticks or the declared update rate.
+    pub fn period(&self) -> SimDuration {
+        self.sample_period_ticks.map_or_else(
+            || SimDuration::from_hertz(rne_math::Hertz::new(self.update_rate_hz)),
+            SimDuration::from_ticks,
+        )
+    }
+
+    /// Returns true when timing, frontend parameters, and fault are valid.
+    pub fn is_valid(&self) -> bool {
+        if !self.update_rate_hz.is_finite()
+            || self.update_rate_hz <= 0.0
+            || self.sample_period_ticks == Some(0)
+            || !self.spec.is_valid()
+        {
+            return false;
+        }
+        match self.fault {
+            MotorElectricalFeedbackFault::None => true,
+            MotorElectricalFeedbackFault::DropSequence { sequence } => sequence > 0,
+            MotorElectricalFeedbackFault::StuckFromSequence { sequence } => sequence > 1,
+        }
+    }
+}
+
+/// Runtime sequence and fault-hold state for a motor electrical sensor.
+#[derive(Component, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MotorElectricalFeedbackSensorState {
+    /// Number of scheduled attempts, including injected drops.
+    pub attempted_sequence: u64,
+    /// Number of frames actually emitted.
+    pub emitted_frames: u64,
+    /// Last emitted payload used by deterministic stuck-value injection.
+    pub last_emitted: Option<MotorElectricalFeedback>,
 }
 
 /// One named joint included in a [`JointFeedbackSensor`] stream.

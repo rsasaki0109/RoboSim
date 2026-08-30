@@ -3,9 +3,9 @@
 use crate::actuator::ControlMode;
 use crate::commands::{ActuatorCommand, ActuatorCommandBuffer};
 use crate::components::{
-    AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState, DcMotorFailureMode,
-    DcMotorSpec, DcMotorState, Joint, JointKind, MultirotorFlight, TransmissionSpec,
-    VehicleDynamics, WheelAssemblySpec,
+    AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
+    DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
+    MultirotorFlight, TransmissionSpec, VehicleDynamics, WheelAssemblySpec,
 };
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
@@ -52,6 +52,28 @@ pub struct DcMotorEvaluation {
     pub voltage_saturated: bool,
     /// Whether the unconstrained armature current exceeded the current limit.
     pub current_saturated: bool,
+}
+
+impl DcMotorEvaluation {
+    /// Converts this completed evaluation into sensor-source telemetry.
+    ///
+    /// Temperature is supplied separately because the v1 electrical evaluator
+    /// deliberately has no thermal state.
+    pub fn completed_telemetry(
+        self,
+        failure_mode: DcMotorFailureMode,
+        winding_temperature_c: Option<f64>,
+    ) -> DcMotorCompletedTelemetry {
+        DcMotorCompletedTelemetry {
+            terminal_voltage_v: self.terminal_voltage_v,
+            current_a: self.state.current_a,
+            back_emf_v: self.back_emf_v,
+            winding_temperature_c,
+            voltage_saturated: self.voltage_saturated,
+            current_saturated: self.current_saturated,
+            failure_mode,
+        }
+    }
 }
 
 /// Completed static transmission evaluation at one wheel coordinate.
@@ -1358,6 +1380,11 @@ mod tests {
 
         assert_eq!(evaluation.terminal_voltage_v, 24.0);
         assert_eq!(evaluation.state.current_a, 20.0);
+        let telemetry = evaluation.completed_telemetry(DcMotorFailureMode::Nominal, None);
+        assert_eq!(telemetry.terminal_voltage_v, 24.0);
+        assert_eq!(telemetry.current_a, 20.0);
+        assert_eq!(telemetry.winding_temperature_c, None);
+        assert!(telemetry.current_saturated);
         assert_eq!(evaluation.electromagnetic_torque_nm, 1.6);
         assert_eq!(evaluation.shaft_loss_torque_nm, 0.01);
         assert_eq!(evaluation.shaft_torque_nm, 1.59);

@@ -5,27 +5,30 @@ use crate::components::{
     ImuFeedbackFault, ImuFeedbackSensor, ImuFeedbackSensorState, ImuKinematicState, ImuMount,
     ImuState, IncrementalEncoderFault, IncrementalEncoderOverflowBehavior,
     IncrementalEncoderSensor, IncrementalEncoderSensorState, JointFeedbackFault,
-    JointFeedbackSensor, JointFeedbackSensorState, Sensor, SensorKind, SensorState,
+    JointFeedbackSensor, JointFeedbackSensorState, MotorElectricalFeedbackFault,
+    MotorElectricalFeedbackSensor, MotorElectricalFeedbackSensorState, Sensor, SensorKind,
+    SensorState,
 };
 use crate::imu::{
     sample_imu_stateful_diagnostic_with_kinematics, sample_imu_stateful_with_kinematics,
     ImuSampleError,
 };
 use crate::lidar::sample_lidar_at_entity_keyed;
-use crate::noise::SensorNoiseKey;
+use crate::noise::{motor_electrical_gaussian, SensorNoiseKey};
 use crate::wheel_encoder::sample_wheel_encoder;
 use rne_core::{SimDuration, SimTime};
 use rne_data::{
     DataBus, Frame, FramePayload, ImuFeedback, ImuFeedbackStatus, IncrementalEncoderFeedback,
     IncrementalEncoderStatus, JointCommandFeedback, JointCommandMode, JointCoordinateFeedback,
     JointEffortFeedback, JointFeedback, JointFeedbackChannel, JointFeedbackStatus,
+    MotorElectricalFeedback, MotorElectricalFeedbackStatus,
 };
 use rne_ecs::{Entity, World};
 use rne_physics::{
     JointActuation, JointEffortMeasurement, JointState, PhysicsBackend, PhysicsWorldId,
 };
 use rne_render::{HeadlessRenderBackend, RenderBackend, RenderScene};
-use rne_robot::{Actuator, Joint, JointKind};
+use rne_robot::{Actuator, DcMotorCompletedTelemetry, Joint, JointKind};
 use rne_world::{Transform3, WorldRandom};
 use thiserror::Error;
 
@@ -781,6 +784,235 @@ fn crossed_encoder_index(
         (index_count - current_count).div_euclid(period)
             > (index_count - previous_count).div_euclid(period)
     }
+}
+
+/// Failure to sample a typed motor electrical measurement frontend.
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
+pub enum MotorElectricalFeedbackError {
+    /// A due sensor has invalid timing, range, calibration, noise, or fault parameters.
+    #[error("invalid motor electrical feedback sensor on entity {sensor_entity_index}")]
+    InvalidSensor {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+    /// The configured motor has no completed plant telemetry component.
+    #[error("motor electrical sensor {sensor_entity_index} has no completed motor telemetry")]
+    MissingCompletedTelemetry {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+    /// Completed plant telemetry contained a non-finite value.
+    #[error("motor electrical sensor {sensor_entity_index} received non-finite plant telemetry")]
+    InvalidCompletedTelemetry {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+    /// Schedule or sequence arithmetic overflowed.
+    #[error("motor electrical sensor schedule overflow on entity {sensor_entity_index}")]
+    ScheduleOverflow {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+    /// A stuck-value fault has no prior emitted value to hold.
+    #[error(
+        "motor electrical stuck-value fault on entity {sensor_entity_index} has no prior sample"
+    )]
+    StuckWithoutPrevious {
+        /// Stable sensor entity index.
+        sensor_entity_index: u32,
+    },
+}
+
+/// Samples motor electrical frontends from completed plant telemetry in entity order.
+///
+/// Processing order is fixed: schedule, completed telemetry, calibration offset,
+/// deterministic white noise, measurement-range saturation, quantization, stuck
+/// substitution, frame dropout, then output latency. Command targets are never read.
+/// Every due sensor is validated before any state or frame is published.
+pub fn sample_motor_electrical_feedback_sensors(
+    world: &mut World,
+    sim_time: SimTime,
+    bus: &mut impl DataBus,
+) -> Result<usize, MotorElectricalFeedbackError> {
+    let mut sensors: Vec<(Entity, MotorElectricalFeedbackSensor)> = world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            entity_ref
+                .get::<MotorElectricalFeedbackSensor>()
+                .cloned()
+                .map(|sensor| (entity_ref.id(), sensor))
+        })
+        .collect();
+    sensors.sort_unstable_by_key(|(entity, _)| entity.index());
+    let world_seed = world
+        .get_resource::<WorldRandom>()
+        .map(WorldRandom::seed)
+        .unwrap_or(0);
+
+    let mut pending = Vec::new();
+    for (sensor_entity, sensor) in sensors {
+        if !sensor.enabled {
+            continue;
+        }
+        if !sensor.is_valid() || sensor.period().ticks() == 0 {
+            return Err(MotorElectricalFeedbackError::InvalidSensor {
+                sensor_entity_index: sensor_entity.index(),
+            });
+        }
+        let mut state = world
+            .get::<MotorElectricalFeedbackSensorState>(sensor_entity)
+            .cloned()
+            .unwrap_or_default();
+        let scheduled_capture_ticks = sensor
+            .period()
+            .ticks()
+            .checked_mul(state.attempted_sequence)
+            .and_then(|ticks| sensor.phase_offset_ticks.checked_add(ticks))
+            .ok_or(MotorElectricalFeedbackError::ScheduleOverflow {
+                sensor_entity_index: sensor_entity.index(),
+            })?;
+        if sim_time.ticks() < scheduled_capture_ticks {
+            continue;
+        }
+        let sequence = state.attempted_sequence.checked_add(1).ok_or(
+            MotorElectricalFeedbackError::ScheduleOverflow {
+                sensor_entity_index: sensor_entity.index(),
+            },
+        )?;
+        let telemetry = world
+            .get::<DcMotorCompletedTelemetry>(sensor.spec.motor_entity)
+            .copied()
+            .ok_or(MotorElectricalFeedbackError::MissingCompletedTelemetry {
+                sensor_entity_index: sensor_entity.index(),
+            })?;
+        if !telemetry.terminal_voltage_v.is_finite()
+            || !telemetry.current_a.is_finite()
+            || !telemetry.back_emf_v.is_finite()
+            || telemetry
+                .winding_temperature_c
+                .is_some_and(|value| !value.is_finite())
+        {
+            return Err(MotorElectricalFeedbackError::InvalidCompletedTelemetry {
+                sensor_entity_index: sensor_entity.index(),
+            });
+        }
+
+        let noise = motor_electrical_gaussian(SensorNoiseKey::new(
+            world_seed,
+            sensor.spec.seed,
+            sensor.stream_id.0,
+            sequence,
+        ));
+        let (current_a, current_frontend_saturated) = measured_symmetric(
+            telemetry.current_a
+                + sensor.spec.current_offset_a
+                + noise[0] * sensor.spec.current_noise_std_a,
+            sensor.spec.current_range_a,
+            sensor.spec.current_resolution_a,
+        );
+        let (terminal_voltage_v, voltage_frontend_saturated) = measured_symmetric(
+            telemetry.terminal_voltage_v
+                + sensor.spec.voltage_offset_v
+                + noise[1] * sensor.spec.voltage_noise_std_v,
+            sensor.spec.voltage_range_v,
+            sensor.spec.voltage_resolution_v,
+        );
+        let (winding_temperature_c, temperature_frontend_saturated) = telemetry
+            .winding_temperature_c
+            .map(|temperature_c| {
+                measured_bounded(
+                    temperature_c
+                        + sensor.spec.temperature_offset_c
+                        + noise[2] * sensor.spec.temperature_noise_std_c,
+                    sensor.spec.minimum_temperature_c,
+                    sensor.spec.maximum_temperature_c,
+                    sensor.spec.temperature_resolution_c,
+                )
+            })
+            .map_or((None, false), |(value, saturated)| (Some(value), saturated));
+        let saturated = telemetry.current_saturated
+            || telemetry.voltage_saturated
+            || current_frontend_saturated
+            || voltage_frontend_saturated
+            || temperature_frontend_saturated;
+        let mut payload = MotorElectricalFeedback {
+            schema_version: MotorElectricalFeedback::SCHEMA_VERSION,
+            scheduled_capture_ticks,
+            sample_phase_error_ticks: sim_time.ticks() - scheduled_capture_ticks,
+            status: if saturated {
+                MotorElectricalFeedbackStatus::Saturated
+            } else if winding_temperature_c.is_none() {
+                MotorElectricalFeedbackStatus::TemperatureUnavailable
+            } else {
+                MotorElectricalFeedbackStatus::Nominal
+            },
+            terminal_voltage_v,
+            current_a,
+            winding_temperature_c,
+            current_saturated: telemetry.current_saturated || current_frontend_saturated,
+            voltage_saturated: telemetry.voltage_saturated || voltage_frontend_saturated,
+        };
+        if matches!(
+            sensor.fault,
+            MotorElectricalFeedbackFault::StuckFromSequence { sequence: start }
+                if sequence >= start
+        ) {
+            let previous = state.last_emitted.as_ref().ok_or(
+                MotorElectricalFeedbackError::StuckWithoutPrevious {
+                    sensor_entity_index: sensor_entity.index(),
+                },
+            )?;
+            payload.terminal_voltage_v = previous.terminal_voltage_v;
+            payload.current_a = previous.current_a;
+            payload.winding_temperature_c = previous.winding_temperature_c;
+            payload.current_saturated = previous.current_saturated;
+            payload.voltage_saturated = previous.voltage_saturated;
+            payload.status = MotorElectricalFeedbackStatus::StuckValue;
+        }
+
+        state.attempted_sequence = sequence;
+        let dropped = matches!(
+            sensor.fault,
+            MotorElectricalFeedbackFault::DropSequence { sequence: dropped }
+                if sequence == dropped
+        );
+        let frame = if dropped {
+            None
+        } else {
+            state.emitted_frames += 1;
+            state.last_emitted = Some(payload);
+            Some(
+                Frame::new(sensor.stream_id, sensor_entity, sequence, sim_time, payload)
+                    .with_latency(SimDuration::from_ticks(sensor.latency_ticks)),
+            )
+        };
+        pending.push((sensor_entity, state, frame));
+    }
+
+    let mut published = 0;
+    for (sensor_entity, state, frame) in pending {
+        world.entity_mut(sensor_entity).insert(state);
+        if let Some(frame) = frame {
+            bus.publish(frame);
+            published += 1;
+        }
+    }
+    Ok(published)
+}
+
+fn measured_symmetric(value: f64, range: f64, resolution: f64) -> (f64, bool) {
+    measured_bounded(value, -range, range, resolution)
+}
+
+fn measured_bounded(value: f64, minimum: f64, maximum: f64, resolution: f64) -> (f64, bool) {
+    let saturated = value < minimum || value > maximum;
+    let clipped = value.clamp(minimum, maximum);
+    let quantized = if resolution > 0.0 {
+        (clipped / resolution).round() * resolution
+    } else {
+        clipped
+    };
+    (quantized.clamp(minimum, maximum), saturated)
 }
 
 /// Joint-feedback sampling error.
@@ -2145,5 +2377,241 @@ mod tests {
                 velocity_rad_s: 0.2
             }
         ));
+    }
+
+    fn motor_feedback_fixture(
+        fault: MotorElectricalFeedbackFault,
+    ) -> (World, Entity, Entity, StreamId, InMemoryDataBus) {
+        let mut world = World::new();
+        let motor = world
+            .spawn(DcMotorCompletedTelemetry {
+                terminal_voltage_v: 12.04,
+                current_a: 2.04,
+                back_emf_v: 3.0,
+                winding_temperature_c: None,
+                voltage_saturated: false,
+                current_saturated: false,
+                failure_mode: rne_robot::DcMotorFailureMode::Nominal,
+            })
+            .id();
+        let stream = StreamId(910);
+        let sensor = world
+            .spawn((
+                MotorElectricalFeedbackSensor {
+                    spec: crate::MotorElectricalFeedbackSpec {
+                        motor_entity: motor,
+                        current_range_a: 3.0,
+                        voltage_range_v: 20.0,
+                        minimum_temperature_c: -40.0,
+                        maximum_temperature_c: 150.0,
+                        current_offset_a: 0.02,
+                        voltage_offset_v: 0.02,
+                        temperature_offset_c: 0.0,
+                        current_noise_std_a: 0.0,
+                        voltage_noise_std_v: 0.0,
+                        temperature_noise_std_c: 0.0,
+                        current_resolution_a: 0.1,
+                        voltage_resolution_v: 0.1,
+                        temperature_resolution_c: 0.5,
+                        seed: 17,
+                    },
+                    update_rate_hz: 100.0,
+                    sample_period_ticks: Some(10),
+                    phase_offset_ticks: 5,
+                    latency_ticks: 7,
+                    enabled: true,
+                    stream_id: stream,
+                    fault,
+                },
+                MotorElectricalFeedbackSensorState::default(),
+            ))
+            .id();
+        (world, motor, sensor, stream, InMemoryDataBus::new())
+    }
+
+    #[test]
+    fn motor_feedback_reads_completed_telemetry_with_timing_and_quantization() {
+        let (mut world, _, _, stream, mut bus) =
+            motor_feedback_fixture(MotorElectricalFeedbackFault::None);
+        assert_eq!(
+            sample_motor_electrical_feedback_sensors(&mut world, SimTime::from_ticks(4), &mut bus)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            sample_motor_electrical_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus)
+                .unwrap(),
+            1
+        );
+        let frame = bus
+            .latest::<MotorElectricalFeedback>(stream)
+            .expect("motor feedback");
+        assert_eq!(frame.capture_time.ticks(), 5);
+        assert_eq!(frame.available_time.ticks(), 12);
+        assert_eq!(frame.payload.scheduled_capture_ticks, 5);
+        assert_eq!(frame.payload.sample_phase_error_ticks, 0);
+        assert_eq!(
+            frame.payload.status,
+            MotorElectricalFeedbackStatus::TemperatureUnavailable
+        );
+        assert_eq!(frame.payload.current_a, 2.1);
+        assert!((frame.payload.terminal_voltage_v - 12.1).abs() < 1.0e-12);
+        assert_eq!(frame.payload.winding_temperature_c, None);
+        assert!(bus
+            .latest_available::<MotorElectricalFeedback>(stream, SimTime::from_ticks(11))
+            .is_none());
+    }
+
+    #[test]
+    fn motor_feedback_reports_plant_and_frontend_saturation() {
+        let (mut world, motor, _, stream, mut bus) =
+            motor_feedback_fixture(MotorElectricalFeedbackFault::None);
+        world.entity_mut(motor).insert(DcMotorCompletedTelemetry {
+            terminal_voltage_v: 25.0,
+            current_a: 4.0,
+            winding_temperature_c: Some(160.0),
+            current_saturated: true,
+            ..DcMotorCompletedTelemetry::default()
+        });
+        sample_motor_electrical_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus)
+            .unwrap();
+        let payload = bus
+            .latest::<MotorElectricalFeedback>(stream)
+            .unwrap()
+            .payload;
+        assert_eq!(payload.status, MotorElectricalFeedbackStatus::Saturated);
+        assert_eq!(payload.current_a, 3.0);
+        assert_eq!(payload.terminal_voltage_v, 20.0);
+        assert_eq!(payload.winding_temperature_c, Some(150.0));
+        assert!(payload.current_saturated);
+        assert!(payload.voltage_saturated);
+    }
+
+    #[test]
+    fn motor_feedback_dropout_and_stuck_are_observable() {
+        let (mut world, motor, _, stream, mut bus) =
+            motor_feedback_fixture(MotorElectricalFeedbackFault::StuckFromSequence { sequence: 2 });
+        sample_motor_electrical_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus)
+            .unwrap();
+        world.entity_mut(motor).insert(DcMotorCompletedTelemetry {
+            terminal_voltage_v: 2.0,
+            current_a: -1.0,
+            ..DcMotorCompletedTelemetry::default()
+        });
+        sample_motor_electrical_feedback_sensors(&mut world, SimTime::from_ticks(15), &mut bus)
+            .unwrap();
+        let frame = bus.latest::<MotorElectricalFeedback>(stream).unwrap();
+        assert_eq!(frame.sequence, 2);
+        assert_eq!(
+            frame.payload.status,
+            MotorElectricalFeedbackStatus::StuckValue
+        );
+        assert_eq!(frame.payload.current_a, 2.1);
+
+        let (mut world, _, sensor, stream, mut bus) =
+            motor_feedback_fixture(MotorElectricalFeedbackFault::DropSequence { sequence: 2 });
+        for ticks in [5, 15, 25] {
+            sample_motor_electrical_feedback_sensors(
+                &mut world,
+                SimTime::from_ticks(ticks),
+                &mut bus,
+            )
+            .unwrap();
+        }
+        assert_eq!(bus.frame_count(stream), 2);
+        assert_eq!(
+            bus.latest::<MotorElectricalFeedback>(stream)
+                .unwrap()
+                .sequence,
+            3
+        );
+        assert_eq!(
+            world
+                .get::<MotorElectricalFeedbackSensorState>(sensor)
+                .unwrap()
+                .attempted_sequence,
+            3
+        );
+    }
+
+    #[test]
+    fn invalid_motor_feedback_set_fails_atomically() {
+        let (mut world, _, valid_sensor, stream, mut bus) =
+            motor_feedback_fixture(MotorElectricalFeedbackFault::None);
+        let missing_motor = world.spawn_empty().id();
+        let mut invalid = world
+            .get::<MotorElectricalFeedbackSensor>(valid_sensor)
+            .unwrap()
+            .clone();
+        invalid.spec.motor_entity = missing_motor;
+        invalid.stream_id = StreamId(911);
+        world.spawn((invalid, MotorElectricalFeedbackSensorState::default()));
+
+        assert!(matches!(
+            sample_motor_electrical_feedback_sensors(&mut world, SimTime::from_ticks(5), &mut bus),
+            Err(MotorElectricalFeedbackError::MissingCompletedTelemetry { .. })
+        ));
+        assert_eq!(bus.frame_count(stream), 0);
+        assert_eq!(
+            world
+                .get::<MotorElectricalFeedbackSensorState>(valid_sensor)
+                .unwrap()
+                .attempted_sequence,
+            0
+        );
+    }
+
+    #[test]
+    fn motor_feedback_noise_is_seeded_and_sample_indexed() {
+        let (mut first_world, _, first_sensor, first_stream, mut first_bus) =
+            motor_feedback_fixture(MotorElectricalFeedbackFault::None);
+        let (mut second_world, _, second_sensor, second_stream, mut second_bus) =
+            motor_feedback_fixture(MotorElectricalFeedbackFault::None);
+        for (world, sensor) in [
+            (&mut first_world, first_sensor),
+            (&mut second_world, second_sensor),
+        ] {
+            world.insert_resource(WorldRandom::new(42));
+            let mut frontend = world
+                .get::<MotorElectricalFeedbackSensor>(sensor)
+                .unwrap()
+                .clone();
+            frontend.spec.current_noise_std_a = 0.2;
+            frontend.spec.voltage_noise_std_v = 0.3;
+            world.entity_mut(sensor).insert(frontend);
+        }
+        sample_motor_electrical_feedback_sensors(
+            &mut first_world,
+            SimTime::from_ticks(5),
+            &mut first_bus,
+        )
+        .unwrap();
+        sample_motor_electrical_feedback_sensors(
+            &mut second_world,
+            SimTime::from_ticks(5),
+            &mut second_bus,
+        )
+        .unwrap();
+        let first = first_bus
+            .latest::<MotorElectricalFeedback>(first_stream)
+            .unwrap()
+            .payload;
+        let second = second_bus
+            .latest::<MotorElectricalFeedback>(second_stream)
+            .unwrap()
+            .payload;
+        assert_eq!(first, second);
+
+        sample_motor_electrical_feedback_sensors(
+            &mut first_world,
+            SimTime::from_ticks(15),
+            &mut first_bus,
+        )
+        .unwrap();
+        let next = first_bus
+            .latest::<MotorElectricalFeedback>(first_stream)
+            .unwrap()
+            .payload;
+        assert_ne!(first.current_a, next.current_a);
     }
 }

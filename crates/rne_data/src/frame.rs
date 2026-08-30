@@ -14,6 +14,7 @@ impl FramePayload for crate::payloads::PoseSample {}
 impl FramePayload for crate::payloads::PointCloud {}
 impl FramePayload for crate::payloads::WheelEncoderSample {}
 impl FramePayload for crate::payloads::IncrementalEncoderFeedback {}
+impl FramePayload for crate::payloads::MotorElectricalFeedback {}
 impl FramePayload for crate::payloads::JointState {}
 impl FramePayload for crate::payloads::JointFeedback {}
 impl FramePayload for crate::payloads::ImageRgb8 {}
