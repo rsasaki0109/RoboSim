@@ -3882,6 +3882,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rne_mobility_benchmark"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "rne_robot",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rne_openscenario"
 version = "0.2.0"
 dependencies = [
