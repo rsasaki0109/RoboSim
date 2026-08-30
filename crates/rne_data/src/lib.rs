@@ -35,9 +35,9 @@ pub use offline::{
     DepthPairEvaluationReport, DepthPairMetricSpec, DATASET_OFFLINE_EVALUATION_SCHEMA_VERSION,
 };
 pub use payloads::{
-    ImageDepth, ImageRgb8, ImuFeedback, ImuFeedbackStatus, ImuSample, JointCommandFeedback,
-    JointCommandMode, JointCoordinateFeedback, JointEffortFeedback, JointFeedback,
-    JointFeedbackChannel, JointFeedbackStatus, JointState, PointCloud, PoseSample,
-    WheelEncoderSample,
+    ImageDepth, ImageRgb8, ImuFeedback, ImuFeedbackStatus, ImuSample, IncrementalEncoderFeedback,
+    IncrementalEncoderStatus, JointCommandFeedback, JointCommandMode, JointCoordinateFeedback,
+    JointEffortFeedback, JointFeedback, JointFeedbackChannel, JointFeedbackStatus, JointState,
+    PointCloud, PoseSample, WheelEncoderSample,
 };
 pub use stream::StreamId;

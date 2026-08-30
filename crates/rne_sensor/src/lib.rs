@@ -16,8 +16,10 @@ pub use camera::{
 };
 pub use components::{
     ImuFeedbackFault, ImuFeedbackSensor, ImuFeedbackSensorState, ImuKinematicState, ImuMount,
-    ImuState, JointFeedbackChannelSpec, JointFeedbackFault, JointFeedbackSensor,
-    JointFeedbackSensorState, LidarMaterial, Sensor, SensorKind, SensorState,
+    ImuState, IncrementalEncoderFault, IncrementalEncoderOverflowBehavior,
+    IncrementalEncoderSensor, IncrementalEncoderSensorState, IncrementalEncoderSpec,
+    JointFeedbackChannelSpec, JointFeedbackFault, JointFeedbackSensor, JointFeedbackSensorState,
+    LidarMaterial, Sensor, SensorKind, SensorState,
 };
 pub use imu::{
     sample_imu, sample_imu_keyed, sample_imu_stateful, sample_imu_stateful_diagnostic,
@@ -31,7 +33,8 @@ pub use lidar::{
 };
 pub use noise::{NoiseModel, SensorNoiseKey};
 pub use systems::{
-    sample_imu_feedback_sensors, sample_joint_feedback_sensors, sample_sensors, ImuFeedbackError,
-    JointFeedbackError, SensorSampleContext, SensorSampler, CAMERA_DEPTH_STREAM_OFFSET,
+    sample_imu_feedback_sensors, sample_incremental_encoder_sensors, sample_joint_feedback_sensors,
+    sample_sensors, ImuFeedbackError, IncrementalEncoderError, JointFeedbackError,
+    SensorSampleContext, SensorSampler, CAMERA_DEPTH_STREAM_OFFSET,
 };
 pub use wheel_encoder::{sample_wheel_encoder, WheelEncoderSpec};
