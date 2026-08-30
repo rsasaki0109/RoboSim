@@ -4,9 +4,9 @@ use rne_core::SimDuration;
 use rne_ecs::{spawn_named, Entity, Parent, World};
 use rne_math::{Hertz, Quat, Vec3};
 use rne_physics::{
-    Collider, JointActuation, JointEffortMeasurement, JointMotor, JointPassiveDynamics, JointState,
-    PhysicsBackend, PhysicsError, PhysicsWorldDesc, PrismaticJointDesc, RevoluteJointDesc,
-    RigidBody, RigidBodyType,
+    Collider, ExternalBodyWrench, JointActuation, JointEffortMeasurement, JointMotor,
+    JointPassiveDynamics, JointState, PhysicsBackend, PhysicsError, PhysicsWorldDesc,
+    PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
 };
 use rne_physics_mujoco::{MuJoCoBackend, MuJoCoError};
 use rne_world::{world_transform_of, Transform3};
@@ -87,6 +87,67 @@ fn compiles_and_syncs_multiple_rigid_bodies() {
         world.get::<Transform3>(fixed).unwrap().translation,
         Vec3::new(20.0, 0.0, 0.0)
     );
+}
+
+#[test]
+fn external_wrench_preserves_lever_arm_and_clears_after_one_step() {
+    let dt = SimDuration::from_hertz(Hertz::new(60.0));
+    let mut backend = MuJoCoBackend::new(dt).expect("MuJoCo runtime");
+    let physics_world = backend
+        .create_world(PhysicsWorldDesc {
+            gravity_m_s2: Vec3::ZERO,
+            solver_iterations: 16,
+        })
+        .expect("physics world");
+    let mut world = World::new();
+    let body = spawn_body(
+        &mut world,
+        "wrench body",
+        RigidBodyType::Dynamic,
+        Collider::cuboid(Vec3::splat(0.5)),
+        Vec3::ZERO,
+    );
+    world.entity_mut(body).insert(RigidBodyInertia {
+        center_of_mass_local_m: Vec3::ZERO,
+        ixx_kg_m2: 1.0,
+        ixy_kg_m2: 0.0,
+        ixz_kg_m2: 0.0,
+        iyy_kg_m2: 1.0,
+        iyz_kg_m2: 0.0,
+        izz_kg_m2: 1.0,
+    });
+    backend.sync_from_ecs(&mut world, physics_world).unwrap();
+    backend
+        .apply_external_body_wrench(
+            physics_world,
+            ExternalBodyWrench {
+                entity: body,
+                point_world_m: Vec3::Y,
+                force_world_n: Vec3::X * 120.0,
+                torque_world_nm: Vec3::Z * 60.0,
+            },
+        )
+        .unwrap();
+    backend.step(physics_world, dt).unwrap();
+    backend.sync_to_ecs(&mut world, physics_world).unwrap();
+    let forced = *world.get::<RigidBody>(body).unwrap();
+    assert!(
+        (forced.linear_velocity_m_s.x - 1.0).abs() < 1.0e-7,
+        "forced linear velocity was {:?}",
+        forced.linear_velocity_m_s
+    );
+    assert!(
+        (forced.angular_velocity_rad_s.z + 1.0).abs() < 1.0e-7,
+        "forced angular velocity was {:?}",
+        forced.angular_velocity_rad_s
+    );
+
+    backend.sync_from_ecs(&mut world, physics_world).unwrap();
+    backend.step(physics_world, dt).unwrap();
+    backend.sync_to_ecs(&mut world, physics_world).unwrap();
+    let unforced = *world.get::<RigidBody>(body).unwrap();
+    assert!((unforced.linear_velocity_m_s.x - forced.linear_velocity_m_s.x).abs() < 1.0e-7);
+    assert!((unforced.angular_velocity_rad_s.z - forced.angular_velocity_rad_s.z).abs() < 1.0e-7);
 }
 
 #[test]

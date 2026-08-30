@@ -43,6 +43,7 @@ fn fixture_loads_only_when_the_runtime_is_installed() {
             PhysicsCapability::ContactForce,
             PhysicsCapability::RaycastBatch,
             PhysicsCapability::JointEffortMeasurement,
+            PhysicsCapability::ExternalBodyWrench,
         ]
     );
 }

@@ -19,7 +19,10 @@ The conformance vector applies 120 N at a 1 m lever arm plus a 60 N*m free momen
 checks that neither load persists into the following step.
 
 Rapier implements the boundary with its native force-at-point and torque operations.
-No Rapier handle or numeric type crosses the `rne_physics` API.
+MuJoCo maps the application-point force to a center-of-mass torque with
+`(point - COM) x force`, adds the declared free moment, writes the resulting world-frame
+Cartesian load, and clears it immediately after the completed step. No backend handle or
+numeric type crosses the `rne_physics` API.
 
 ## Research basis
 
@@ -40,7 +43,8 @@ No Rapier handle or numeric type crosses the `rne_physics` API.
 ## Deliberate limitations
 
 - Contact point, normal load, surface velocity, and material state are not yet standardized.
-  M1-C must add the input half of the force-element boundary before any combined-slip claim.
+  The next slice must add the input half of the force-element boundary before any
+  combined-slip claim.
 - The existing pair-aggregated `ContactEvent` normal impulse is diagnostic evidence, not a
   per-wheel contact patch model.
 - Generic collider Coulomb friction is not called a tire model.
@@ -51,6 +55,6 @@ No Rapier handle or numeric type crosses the `rne_physics` API.
 
 ## Next proof
 
-M1-C adds equivalent MuJoCo support and a cross-backend fixture for this exact wrench vector.
-The following slice then defines `WheelContactSample` from contact point, normal, relative
-surface velocity, and normal load before implementing transient combined slip.
+The next slice defines `WheelContactSample` from contact point, normal, relative surface
+velocity, and normal load before implementing transient combined slip. Rapier and MuJoCo
+already execute this exact output-wrench vector through the shared conformance catalog.
