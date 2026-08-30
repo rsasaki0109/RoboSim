@@ -46,6 +46,16 @@ The exact semantics and primary-source basis are frozen in
 the transient force law remain explicit follow-up work, so this does not yet satisfy the M1
 exit gate.
 
+M3-A now adds a backend-neutral closed-loop longitudinal plant and a deterministic evidence
+producer. Voltage drives motor current and torque through transmission and wheel inertia;
+transient tire force accelerates the chassis and feeds back through wheel speed. Locked
+rotor, acceleration, ice-like traction limiting, regenerative braking, open circuit, and
+step convergence emit versioned SI-unit metrics and a stable content digest. Its scope and
+research basis are frozen in
+[`MOBILITY_LONGITUDINAL_BENCHMARK_V1.md`](MOBILITY_LONGITUDINAL_BENCHMARK_V1.md). This is
+the analytic control baseline, not the M3 exit gate: backend contact/wrench integration,
+Rapier/MuJoCo TaskSpec parity, time-series evidence, and Failure Capsules remain.
+
 ## North-star outcome
 
 RNE must evaluate a policy through the same closed loop that exists on a real mobile
@@ -250,8 +260,11 @@ and cross-backend results.
     quantization, timing, latency, dropout, stuck, saturation, and explicit missing
     temperature without reading commands. Generic incremental encoders already cover
     revolute steering coordinates; integrated steering/backlash evidence remains.
-13. M3: benchmark matrix, tolerances, evidence bundle, and Failure Capsules.
-14. M4/M5: batched Physical AI observations/randomization, then real-log identification,
+13. M3-A: deterministic analytic longitudinal plant and stable benchmark report. Implemented
+    as a control-oriented baseline; it does not yet claim rigid-body backend fidelity.
+14. M3-B: integrate the tire/contact/wrench path into one shared Rapier/MuJoCo TaskSpec,
+    record time series and capability evidence, and add Failure Capsules.
+15. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.
 
 Every PR is independently headless-testable, documents new public contracts, runs format,

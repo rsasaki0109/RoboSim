@@ -129,6 +129,7 @@ members = [
   "examples/90_showcase_captures",
   "tests/determinism",
   "tests/dynamics",
+  "tests/mobility_benchmark",
   "tests/fuzz_smoke",
   "tests/compatibility",
   "tests/physics_conformance",

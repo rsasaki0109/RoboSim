@@ -451,6 +451,75 @@ pub struct CombinedSlipTireState {
     pub lateral_slip_tangent: f64,
 }
 
+/// Parameters for a coupled one-dimensional motor-to-road mobility plant.
+///
+/// One representative driven wheel is simulated and its longitudinal tire
+/// force is multiplied by `driven_wheel_count` at the chassis. The declared
+/// motor, transmission, inertia, load, and tire state therefore represent one
+/// path shared by identical driven wheels. This is a control-oriented
+/// straight-line model, not an Ackermann or suspension replacement.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LongitudinalMobilityPlantSpec {
+    /// Total translating vehicle mass in kilograms.
+    pub vehicle_mass_kg: f64,
+    /// Number of identical driven wheel/motor paths.
+    pub driven_wheel_count: u32,
+    /// Completed normal load carried by each driven wheel in newtons.
+    pub normal_load_per_driven_wheel_n: f64,
+    /// Constant road grade, positive uphill, in radians.
+    pub road_grade_rad: f64,
+    /// Quadratic aerodynamic force coefficient in newton-seconds squared per square meter.
+    pub aerodynamic_drag_n_s2_m2: f64,
+    /// Road friction multiplier applied to the tire model.
+    pub road_friction_scale: f64,
+    /// Electrical motor model for each driven wheel.
+    pub motor: DcMotorSpec,
+    /// Motor-to-wheel transmission for each driven wheel.
+    pub transmission: TransmissionSpec,
+    /// Driven wheel geometry, inertia, and rolling resistance.
+    pub wheel: WheelAssemblySpec,
+    /// Transient combined-slip tire model; lateral input remains zero in this plant.
+    pub tire: CombinedSlipTireSpec,
+}
+
+impl LongitudinalMobilityPlantSpec {
+    /// Returns whether all physical parameters and nested plant specs are valid.
+    pub fn is_valid(self) -> bool {
+        self.vehicle_mass_kg.is_finite()
+            && self.vehicle_mass_kg > 0.0
+            && self.driven_wheel_count > 0
+            && self.normal_load_per_driven_wheel_n.is_finite()
+            && self.normal_load_per_driven_wheel_n > 0.0
+            && self.road_grade_rad.is_finite()
+            && self.road_grade_rad.abs() < std::f64::consts::FRAC_PI_2
+            && self.aerodynamic_drag_n_s2_m2.is_finite()
+            && self.aerodynamic_drag_n_s2_m2 >= 0.0
+            && self.road_friction_scale.is_finite()
+            && self.road_friction_scale >= 0.0
+            && self.motor.is_valid()
+            && self.transmission.is_valid()
+            && self.wheel.is_valid()
+            && self.tire.is_valid()
+    }
+}
+
+/// Dynamic state of [`LongitudinalMobilityPlantSpec`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LongitudinalMobilityPlantState {
+    /// Chassis longitudinal position in meters.
+    pub position_m: f64,
+    /// Chassis longitudinal velocity in meters per second.
+    pub velocity_m_s: f64,
+    /// Representative driven-wheel angle in radians.
+    pub wheel_position_rad: f64,
+    /// Representative driven-wheel angular velocity in radians per second.
+    pub wheel_velocity_rad_s: f64,
+    /// Electrical current state for the representative motor.
+    pub motor_state: DcMotorState,
+    /// Relaxed tire-slip state for the representative tire.
+    pub tire_state: CombinedSlipTireState,
+}
+
 /// Deterministic kinematic Ackermann drive state and safety limits.
 ///
 /// The drive uses the entity's local `+X` axis as its forward direction. Commands
