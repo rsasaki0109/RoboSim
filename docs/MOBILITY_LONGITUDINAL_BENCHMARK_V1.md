@@ -101,10 +101,12 @@ driveline ratio, flat longitudinal contact, and no native backend tangential fri
 It does not yet model front/rear load transfer, suspension, pitch, steering, yaw, lateral
 scrub, backlash state, tire temperature or pressure, road roughness, wheel lift, ABS,
 traction control, inverter switching, bus-voltage sag, battery state, or thermal limits.
-It also does not inject tire forces into Rapier or MuJoCo. Those omissions are observable
-scope boundaries, not hidden fidelity claims.
+The analytic plant itself does not inject tire forces into Rapier or MuJoCo. The separate
+[`MOBILITY_BACKEND_CLOSED_LOOP_V1.md`](MOBILITY_BACKEND_CLOSED_LOOP_V1.md) fixture now
+runs the shared drive-path evaluator through real Rapier and MuJoCo contact/wrench paths,
+retains manifests and time series, applies unit-bearing tolerances, and proves the Failure
+Capsule path with an injected diagnostic bound. It remains an equivalent single support
+path, not yet a per-wheel suspension or steering model.
 
-The next M3 gate must run the same TaskSpec through real Rapier and MuJoCo contact/wrench
-paths, retain backend capability and time-series evidence, and compare only metrics inside
-a declared tolerance. Later identification must separate fitting logs from validation logs
-and preserve raw-data hashes, fitted parameters, residuals, and failure cases.
+Later identification must separate fitting logs from validation logs and preserve raw-data
+hashes, fitted parameters, residuals, and failure cases.

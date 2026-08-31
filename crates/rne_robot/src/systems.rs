@@ -5,8 +5,8 @@ use crate::commands::{ActuatorCommand, ActuatorCommandBuffer};
 use crate::components::{
     AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
     DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
-    LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState, MultirotorFlight,
-    TransmissionSpec, VehicleDynamics, WheelAssemblySpec,
+    LongitudinalDrivePathState, LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState,
+    MultirotorFlight, TransmissionSpec, VehicleDynamics, WheelAssemblySpec,
 };
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
@@ -137,6 +137,44 @@ pub struct CombinedSlipTireInput {
     pub road_friction_scale: f64,
 }
 
+/// Completed backend contact and command input for one driven-wheel path.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LongitudinalDrivePathInput {
+    /// Completed contact evidence before wheel circumferential velocity is added.
+    ///
+    /// The patch velocity is the rigid wheel carrier's contact-point velocity
+    /// relative to the road. The evaluator subtracts wheel circumferential speed
+    /// along `forward_world` exactly once.
+    pub carrier_patch: Option<WheelContactPatch>,
+    /// Positive wheel-forward unit axis in world coordinates.
+    pub forward_world: Vec3,
+    /// Positive wheel-lateral unit axis in world coordinates.
+    pub lateral_world: Vec3,
+    /// Requested motor terminal voltage in volts.
+    pub command_voltage_v: f64,
+}
+
+/// Completed motor-to-contact evaluation for one driven-wheel path.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LongitudinalDrivePathEvaluation {
+    /// State to retain for the next completed path step.
+    pub state: LongitudinalDrivePathState,
+    /// Completed motor equivalent-circuit evaluation.
+    pub motor: DcMotorEvaluation,
+    /// Completed rigid transmission evaluation.
+    pub transmission: TransmissionEvaluation,
+    /// Completed transient tire-force evaluation.
+    pub tire: CombinedSlipTireEvaluation,
+    /// Completed motor telemetry suitable for a measurement frontend.
+    pub motor_telemetry: DcMotorCompletedTelemetry,
+    /// Wheel angular acceleration in radians per second squared.
+    pub wheel_acceleration_rad_s2: f64,
+    /// Rolling-resistance torque on the wheel in newton-meters.
+    pub rolling_resistance_torque_nm: f64,
+    /// Per-wheel force-at-contact for the next backend step, or `None` on lift.
+    pub tire_wrench: Option<ExternalBodyWrench>,
+}
+
 /// Completed coupled motor, transmission, wheel, tire, and chassis step.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LongitudinalMobilityPlantEvaluation {
@@ -160,6 +198,106 @@ pub struct LongitudinalMobilityPlantEvaluation {
     pub grade_resistance_force_n: f64,
     /// Rolling-resistance torque on one driven wheel in newton-meters.
     pub rolling_resistance_torque_nm: f64,
+}
+
+/// Advances one motor/transmission/wheel/tire path from completed contact evidence.
+///
+/// The backend owns chassis motion. This evaluator owns only electrical current,
+/// wheel rotation, and transient tire slip, then returns a backend-neutral wrench
+/// for one driven wheel. Contact evidence is necessarily from the completed step,
+/// so the returned wrench is applied during the following step.
+pub fn evaluate_longitudinal_drive_path(
+    spec: LongitudinalMobilityPlantSpec,
+    state: LongitudinalDrivePathState,
+    input: LongitudinalDrivePathInput,
+    dt_s: f64,
+) -> Result<LongitudinalDrivePathEvaluation, MobilityPlantEvaluationError> {
+    if !spec.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    if !state.wheel_position_rad.is_finite()
+        || !state.wheel_velocity_rad_s.is_finite()
+        || !state.motor_state.current_a.is_finite()
+        || !state.tire_state.longitudinal_slip_ratio.is_finite()
+        || !state.tire_state.lateral_slip_tangent.is_finite()
+        || !input.command_voltage_v.is_finite()
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    if !dt_s.is_finite() || dt_s <= 0.0 {
+        return Err(MobilityPlantEvaluationError::InvalidTimeStep);
+    }
+
+    let motor_velocity_rad_s =
+        state.wheel_velocity_rad_s * spec.transmission.ratio_motor_rad_per_wheel_rad;
+    let motor = evaluate_dc_motor(
+        spec.motor,
+        state.motor_state,
+        input.command_voltage_v,
+        motor_velocity_rad_s,
+        dt_s,
+    )?;
+    let transmission = evaluate_transmission(
+        spec.transmission,
+        spec.motor.rotor_inertia_kg_m2,
+        motor.shaft_torque_nm,
+        state.wheel_velocity_rad_s,
+    )?;
+    let wheel_circumferential_speed_m_s = state.wheel_velocity_rad_s * spec.wheel.radius_m;
+    let tire_patch = input.carrier_patch.map(|mut patch| {
+        patch.wheel_relative_to_road_world_m_s -=
+            input.forward_world * wheel_circumferential_speed_m_s;
+        patch
+    });
+    let tire = evaluate_combined_slip_tire(
+        spec.tire,
+        state.tire_state,
+        CombinedSlipTireInput {
+            patch: tire_patch,
+            forward_world: input.forward_world,
+            lateral_world: input.lateral_world,
+            wheel_circumferential_speed_m_s,
+            road_friction_scale: spec.road_friction_scale,
+        },
+        dt_s,
+    )?;
+    let normal_load_n = tire_patch.map_or(0.0, |patch| patch.normal_load_n);
+    let rolling_resistance_torque_nm =
+        wheel_rolling_resistance_torque_nm(spec.wheel, normal_load_n, state.wheel_velocity_rad_s)?;
+    let total_wheel_inertia_kg_m2 =
+        spec.wheel.inertia_kg_m2 + transmission.reflected_rotor_inertia_kg_m2;
+    if total_wheel_inertia_kg_m2 <= 0.0 || !total_wheel_inertia_kg_m2.is_finite() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    let wheel_acceleration_rad_s2 = (transmission.wheel_torque_nm + rolling_resistance_torque_nm
+        - tire.longitudinal_force_n * spec.wheel.radius_m)
+        / total_wheel_inertia_kg_m2;
+    let wheel_velocity_rad_s = state.wheel_velocity_rad_s + wheel_acceleration_rad_s2 * dt_s;
+    let next_state = LongitudinalDrivePathState {
+        wheel_position_rad: state.wheel_position_rad + wheel_velocity_rad_s * dt_s,
+        wheel_velocity_rad_s,
+        motor_state: motor.state,
+        tire_state: tire.state,
+    };
+    if !next_state.wheel_position_rad.is_finite() || !next_state.wheel_velocity_rad_s.is_finite() {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let tire_wrench = tire_patch
+        .map(|patch| {
+            combined_slip_tire_wrench(patch, tire, input.forward_world, input.lateral_world)
+        })
+        .transpose()?;
+
+    Ok(LongitudinalDrivePathEvaluation {
+        state: next_state,
+        motor,
+        transmission,
+        tire,
+        motor_telemetry: motor.completed_telemetry(spec.motor.failure_mode, None),
+        wheel_acceleration_rad_s2,
+        rolling_resistance_torque_nm,
+        tire_wrench,
+    })
 }
 
 /// Aggregates deterministic point-contact evidence for one wheel.
@@ -380,71 +518,45 @@ pub fn evaluate_longitudinal_mobility_plant(
         return Err(MobilityPlantEvaluationError::InvalidTimeStep);
     }
 
-    let motor_velocity_rad_s =
-        state.wheel_velocity_rad_s * spec.transmission.ratio_motor_rad_per_wheel_rad;
-    let motor = evaluate_dc_motor(
-        spec.motor,
-        state.motor_state,
-        command_voltage_v,
-        motor_velocity_rad_s,
-        dt_s,
-    )?;
-    let transmission = evaluate_transmission(
-        spec.transmission,
-        spec.motor.rotor_inertia_kg_m2,
-        motor.shaft_torque_nm,
-        state.wheel_velocity_rad_s,
-    )?;
-    let wheel_circumferential_speed_m_s = state.wheel_velocity_rad_s * spec.wheel.radius_m;
-    let contact_surface_velocity_m_s = state.velocity_m_s - wheel_circumferential_speed_m_s;
-    let tire = evaluate_combined_slip_tire(
-        spec.tire,
-        state.tire_state,
-        CombinedSlipTireInput {
-            patch: Some(WheelContactPatch {
+    let drive = evaluate_longitudinal_drive_path(
+        spec,
+        LongitudinalDrivePathState {
+            wheel_position_rad: state.wheel_position_rad,
+            wheel_velocity_rad_s: state.wheel_velocity_rad_s,
+            motor_state: state.motor_state,
+            tire_state: state.tire_state,
+        },
+        LongitudinalDrivePathInput {
+            carrier_patch: Some(WheelContactPatch {
                 wheel_entity: Entity::PLACEHOLDER,
                 point_world_m: Vec3::ZERO,
                 normal_road_to_wheel_world: Vec3::Y,
-                wheel_relative_to_road_world_m_s: Vec3::X * contact_surface_velocity_m_s,
+                wheel_relative_to_road_world_m_s: Vec3::X * state.velocity_m_s,
                 normal_load_n: spec.normal_load_per_driven_wheel_n,
             }),
             forward_world: Vec3::X,
             lateral_world: Vec3::Z,
-            wheel_circumferential_speed_m_s,
-            road_friction_scale: spec.road_friction_scale,
+            command_voltage_v,
         },
         dt_s,
     )?;
-    let rolling_resistance_torque_nm = wheel_rolling_resistance_torque_nm(
-        spec.wheel,
-        spec.normal_load_per_driven_wheel_n,
-        state.wheel_velocity_rad_s,
-    )?;
-    let total_wheel_inertia_kg_m2 =
-        spec.wheel.inertia_kg_m2 + transmission.reflected_rotor_inertia_kg_m2;
-    if total_wheel_inertia_kg_m2 <= 0.0 || !total_wheel_inertia_kg_m2.is_finite() {
-        return Err(MobilityPlantEvaluationError::InvalidSpec);
-    }
-    let wheel_acceleration_rad_s2 = (transmission.wheel_torque_nm + rolling_resistance_torque_nm
-        - tire.longitudinal_force_n * spec.wheel.radius_m)
-        / total_wheel_inertia_kg_m2;
     let aerodynamic_force_n =
         -spec.aerodynamic_drag_n_s2_m2 * state.velocity_m_s * state.velocity_m_s.abs();
     let grade_resistance_force_n = spec.vehicle_mass_kg * 9.806_65 * spec.road_grade_rad.sin();
-    let chassis_acceleration_m_s2 =
-        (f64::from(spec.driven_wheel_count) * tire.longitudinal_force_n + aerodynamic_force_n
-            - grade_resistance_force_n)
-            / spec.vehicle_mass_kg;
+    let chassis_acceleration_m_s2 = (f64::from(spec.driven_wheel_count)
+        * drive.tire.longitudinal_force_n
+        + aerodynamic_force_n
+        - grade_resistance_force_n)
+        / spec.vehicle_mass_kg;
 
-    let wheel_velocity_rad_s = state.wheel_velocity_rad_s + wheel_acceleration_rad_s2 * dt_s;
     let velocity_m_s = state.velocity_m_s + chassis_acceleration_m_s2 * dt_s;
     let next_state = LongitudinalMobilityPlantState {
         position_m: state.position_m + velocity_m_s * dt_s,
         velocity_m_s,
-        wheel_position_rad: state.wheel_position_rad + wheel_velocity_rad_s * dt_s,
-        wheel_velocity_rad_s,
-        motor_state: motor.state,
-        tire_state: tire.state,
+        wheel_position_rad: drive.state.wheel_position_rad,
+        wheel_velocity_rad_s: drive.state.wheel_velocity_rad_s,
+        motor_state: drive.state.motor_state,
+        tire_state: drive.state.tire_state,
     };
     if !next_state.position_m.is_finite()
         || !next_state.velocity_m_s.is_finite()
@@ -456,15 +568,15 @@ pub fn evaluate_longitudinal_mobility_plant(
 
     Ok(LongitudinalMobilityPlantEvaluation {
         state: next_state,
-        motor,
-        transmission,
-        tire,
-        motor_telemetry: motor.completed_telemetry(spec.motor.failure_mode, None),
-        wheel_acceleration_rad_s2,
+        motor: drive.motor,
+        transmission: drive.transmission,
+        tire: drive.tire,
+        motor_telemetry: drive.motor_telemetry,
+        wheel_acceleration_rad_s2: drive.wheel_acceleration_rad_s2,
         chassis_acceleration_m_s2,
         aerodynamic_force_n,
         grade_resistance_force_n,
-        rolling_resistance_torque_nm,
+        rolling_resistance_torque_nm: drive.rolling_resistance_torque_nm,
     })
 }
 
@@ -2404,6 +2516,65 @@ mod tests {
 
         assert_eq!(state, LongitudinalMobilityPlantState::default());
         assert_eq!(utilization, 0.0);
+    }
+
+    #[test]
+    fn longitudinal_drive_path_composes_carrier_and_wheel_surface_velocity_once() {
+        let spec = longitudinal_plant_spec(1.0);
+        let body = Entity::from_raw(41);
+        let evaluation = evaluate_longitudinal_drive_path(
+            spec,
+            LongitudinalDrivePathState::default(),
+            LongitudinalDrivePathInput {
+                carrier_patch: Some(WheelContactPatch {
+                    wheel_entity: body,
+                    point_world_m: Vec3::new(0.0, -0.25, 0.0),
+                    normal_road_to_wheel_world: Vec3::Y,
+                    wheel_relative_to_road_world_m_s: Vec3::X,
+                    normal_load_n: spec.normal_load_per_driven_wheel_n,
+                }),
+                forward_world: Vec3::X,
+                lateral_world: Vec3::Z,
+                command_voltage_v: 0.0,
+            },
+            0.001,
+        )
+        .unwrap();
+
+        assert!(evaluation.tire.state.longitudinal_slip_ratio < 0.0);
+        assert!(evaluation.tire.longitudinal_force_n < 0.0);
+        let wrench = evaluation.tire_wrench.expect("contact wrench");
+        assert_eq!(wrench.entity, body);
+        assert!(wrench.force_world_n.x < 0.0);
+        assert_eq!(wrench.force_world_n.y, 0.0);
+    }
+
+    #[test]
+    fn longitudinal_drive_path_lift_resets_tire_and_emits_no_wrench() {
+        let spec = longitudinal_plant_spec(1.0);
+        let evaluation = evaluate_longitudinal_drive_path(
+            spec,
+            LongitudinalDrivePathState {
+                tire_state: CombinedSlipTireState {
+                    longitudinal_slip_ratio: 0.4,
+                    lateral_slip_tangent: -0.2,
+                },
+                ..LongitudinalDrivePathState::default()
+            },
+            LongitudinalDrivePathInput {
+                carrier_patch: None,
+                forward_world: Vec3::X,
+                lateral_world: Vec3::Z,
+                command_voltage_v: 24.0,
+            },
+            0.001,
+        )
+        .unwrap();
+
+        assert_eq!(evaluation.tire, zero_tire_evaluation());
+        assert_eq!(evaluation.rolling_resistance_torque_nm, 0.0);
+        assert!(evaluation.state.wheel_velocity_rad_s > 0.0);
+        assert_eq!(evaluation.tire_wrench, None);
     }
 
     #[test]

@@ -503,6 +503,23 @@ impl LongitudinalMobilityPlantSpec {
     }
 }
 
+/// Dynamic electrical, rotational, and slip state of one driven-wheel path.
+///
+/// Chassis pose and velocity are intentionally absent: a physics backend owns
+/// those states when this path is coupled through completed contact evidence and
+/// an external wrench.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct LongitudinalDrivePathState {
+    /// Driven-wheel angle in radians.
+    pub wheel_position_rad: f64,
+    /// Driven-wheel angular velocity in radians per second.
+    pub wheel_velocity_rad_s: f64,
+    /// Electrical current state for the motor.
+    pub motor_state: DcMotorState,
+    /// Relaxed tire-slip state for the tire.
+    pub tire_state: CombinedSlipTireState,
+}
+
 /// Dynamic state of [`LongitudinalMobilityPlantSpec`].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LongitudinalMobilityPlantState {
