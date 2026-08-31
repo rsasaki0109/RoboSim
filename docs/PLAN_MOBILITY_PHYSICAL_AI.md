@@ -1,6 +1,7 @@
 # Mobility Physical AI Foundation plan
 
-Status: active, M3-B implemented; M3-C and later milestones remain
+Status: active, M3-B implemented; M3-C sensor-observed subgate implemented,
+per-wheel vehicle fixtures and later milestones remain
 
 Implemented M0 evidence:
 
@@ -275,9 +276,17 @@ and cross-backend results.
     completed-contact feedback, next-step tire wrench application, complete time-series and
     capability evidence, unit-bearing comparison, diagnostic replay, and verified Failure
     Capsule.
-15. M3-C: replace the equivalent support path with per-wheel differential/skid and
-    Ackermann fixtures; add steering, suspension/load transfer, lateral scrub, split
-    friction, grade, curb, roughness, lift/recontact, and sensor-only closed-loop metrics.
+15. M3-C: in progress. The first additive subgate now runs the same TaskSpec, 2048-CPR
+    encoders, calibrated stochastic IMU, measured motor voltage/current, availability-time
+    DataBus reads, wheel/IMU estimator, and estimate-only PI controller through Rapier and
+    MuJoCo. It retains complete unit-bearing traces, privileged truth only for scoring,
+    deterministic dropout evidence, tracking bounds, and cross-backend estimator-error
+    bounds; see
+    [`MOBILITY_SENSOR_OBSERVED_CLOSED_LOOP_V1.md`](MOBILITY_SENSOR_OBSERVED_CLOSED_LOOP_V1.md).
+    M3-C remains open until the equivalent support path is replaced with per-wheel
+    differential/skid and Ackermann fixtures with steering, suspension/load transfer,
+    lateral scrub, split friction, grade, curb, roughness, lift/recontact, and the same
+    sensor-only closed-loop evidence.
 16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.
 

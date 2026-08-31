@@ -1,6 +1,7 @@
 //! Stable Mobility Physical AI longitudinal benchmark producer.
 
 pub mod backend;
+pub mod observed;
 
 use anyhow::{ensure, Result};
 use rne_robot::{

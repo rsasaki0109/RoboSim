@@ -99,3 +99,9 @@ The next fidelity gate replaces the equivalent support path with per-wheel rigid
 steering, suspension/load-transfer state, anisotropic skid scrub, and named Ackermann and
 differential-drive fixtures. Its acceptance must add yaw-rate, lateral acceleration,
 wheel-load, steering, and lift/recontact evidence before any road-vehicle fidelity claim.
+
+The first additive M3-C subgate is documented in
+[`MOBILITY_SENSOR_OBSERVED_CLOSED_LOOP_V1.md`](MOBILITY_SENSOR_OBSERVED_CLOSED_LOOP_V1.md).
+It retains this equivalent support geometry but removes direct physics-state feedback from
+the controller: timestamped encoder, IMU, and electrical frontends feed a sensor-only
+estimator and PI loop through DataBus availability semantics on both backends.

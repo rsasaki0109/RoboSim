@@ -1,5 +1,6 @@
 use anyhow::{bail, ensure, Context, Result};
 use rne_mobility_benchmark::backend::run_backend_mobility_trace;
+use rne_mobility_benchmark::observed::run_sensor_observed_trace;
 use rne_mobility_benchmark::run_mobility_benchmark;
 use rne_physics_rapier::RapierBackend;
 use std::path::PathBuf;
@@ -39,8 +40,18 @@ fn main() -> Result<()> {
             ensure!(trace.passed, "Rapier mobility benchmark verdict failed");
             (serde_json::to_string_pretty(&trace)? + "\n", "rapier")
         }
+        "sensor-rapier" => {
+            let trace = run_sensor_observed_trace(RapierBackend::new(), RapierBackend::manifest())?;
+            ensure!(trace.passed, "Rapier sensor-observed verdict failed");
+            (
+                serde_json::to_string_pretty(&trace)? + "\n",
+                "sensor-rapier",
+            )
+        }
         "mujoco" => run_mujoco()?,
         "compare" => run_comparison(failure_replay.as_deref())?,
+        "sensor-mujoco" => run_sensor_mujoco()?,
+        "sensor-compare" => run_sensor_comparison()?,
         other => bail!("unknown backend: {other}"),
     };
     ensure!(
@@ -58,6 +69,55 @@ fn main() -> Result<()> {
         print!("{json}");
     }
     Ok(())
+}
+
+#[cfg(feature = "mujoco")]
+fn run_sensor_mujoco() -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::observed::SENSOR_OBSERVED_FIXED_DELTA_TICKS;
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let backend = MuJoCoBackend::new(SimDuration::from_ticks(SENSOR_OBSERVED_FIXED_DELTA_TICKS))?;
+    let trace = run_sensor_observed_trace(backend, MuJoCoBackend::manifest())?;
+    ensure!(trace.passed, "MuJoCo sensor-observed verdict failed");
+    Ok((
+        serde_json::to_string_pretty(&trace)? + "\n",
+        "sensor-mujoco",
+    ))
+}
+
+#[cfg(feature = "mujoco")]
+fn run_sensor_comparison() -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::observed::{
+        compare_sensor_observed_traces, SENSOR_OBSERVED_FIXED_DELTA_TICKS,
+    };
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let rapier = run_sensor_observed_trace(RapierBackend::new(), RapierBackend::manifest())?;
+    let mujoco = run_sensor_observed_trace(
+        MuJoCoBackend::new(SimDuration::from_ticks(SENSOR_OBSERVED_FIXED_DELTA_TICKS))?,
+        MuJoCoBackend::manifest(),
+    )?;
+    let comparison = compare_sensor_observed_traces(rapier, mujoco)?;
+    ensure!(
+        comparison.passed,
+        "sensor-observed cross-backend verdict failed"
+    );
+    Ok((
+        serde_json::to_string_pretty(&comparison)? + "\n",
+        "sensor-rapier-vs-mujoco",
+    ))
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_sensor_mujoco() -> Result<(String, &'static str)> {
+    bail!("sensor-observed mujoco backend requires --features mujoco")
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_sensor_comparison() -> Result<(String, &'static str)> {
+    bail!("sensor-observed backend comparison requires --features mujoco")
 }
 
 #[cfg(feature = "mujoco")]
