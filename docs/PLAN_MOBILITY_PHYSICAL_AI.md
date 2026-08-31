@@ -1,6 +1,6 @@
 # Mobility Physical AI Foundation plan
 
-Status: active, M0 in progress
+Status: active, M3-B implemented; M3-C and later milestones remain
 
 Implemented M0 evidence:
 
@@ -23,38 +23,47 @@ Implemented M0 evidence:
   sequence, capture, availability, and age metadata; identical seeded rollouts produce
   identical evidence digests.
 
-Remaining M0 work is a final policy-access inventory and exit-gate audit. Any future peer
-feature must be declared as a sensor or estimator stream rather than silently restoring
-exact peer truth. The current localization stream is a simulated measurement boundary backed
-by pose truth; M2 replaces it with a sensor-only estimator and must prove stale, delayed, or
+The M0 policy-access inventory and exit-gate audit are complete. Any future peer feature
+must be declared as a sensor or estimator stream rather than silently restoring exact peer
+truth. The legacy localization stream remains a simulated measurement boundary backed by
+pose truth; the M2-B estimator provides the sensor-only path and proves stale, delayed, or
 missing inputs affect estimates without leaking ECS state.
 
-M1-A implementation has started behind the M0 merge train: backend-neutral `DcMotorSpec`,
+M1-A is implemented: backend-neutral `DcMotorSpec`,
 `TransmissionSpec`, and `WheelAssemblySpec` plus pure evaluators cover voltage/current
 limits, back-EMF, optional inductance, explicit open/short failures, directional efficiency,
 reflected inertia, and rolling resistance. The assumptions and identification requirements
 are frozen in [`MOBILITY_PLANT_V1.md`](MOBILITY_PLANT_V1.md); no contact-backend integration
 or tire-fidelity claim is included yet.
 
-M1-B/M1-C are implemented behind M1-A. `ExternalBodyWrench` and the
+M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus
 free-moment boundary. Rapier implements it and conformance checks force response, lever-arm
 moment, and automatic clearing. MuJoCo applies the same contract through a COM-shifted
 Cartesian load, and the shared feature-enabled conformance catalog passes on both backends.
 The exact semantics and primary-source basis are frozen in
-[`MOBILITY_CONTACT_WRENCH_V1.md`](MOBILITY_CONTACT_WRENCH_V1.md). Contact acquisition and
-the transient force law remain explicit follow-up work, so this does not yet satisfy the M1
-exit gate.
+[`MOBILITY_CONTACT_WRENCH_V1.md`](MOBILITY_CONTACT_WRENCH_V1.md). M1-D adds deterministic
+point-contact load/kinematics acquisition and M1-E adds the transient combined-slip force
+law; M3-B now composes those contracts into the first real backend loop.
 
-M3-A now adds a backend-neutral closed-loop longitudinal plant and a deterministic evidence
+M3-A adds a backend-neutral closed-loop longitudinal plant and a deterministic evidence
 producer. Voltage drives motor current and torque through transmission and wheel inertia;
 transient tire force accelerates the chassis and feeds back through wheel speed. Locked
 rotor, acceleration, ice-like traction limiting, regenerative braking, open circuit, and
 step convergence emit versioned SI-unit metrics and a stable content digest. Its scope and
 research basis are frozen in
 [`MOBILITY_LONGITUDINAL_BENCHMARK_V1.md`](MOBILITY_LONGITUDINAL_BENCHMARK_V1.md). This is
-the analytic control baseline, not the M3 exit gate: backend contact/wrench integration,
-Rapier/MuJoCo TaskSpec parity, time-series evidence, and Failure Capsules remain.
+the analytic control baseline, not by itself a rigid-body fidelity claim.
+
+M3-B now runs the exact same TaskSpec, seed, 1 ms clock, motor/transmission/wheel/tire
+evaluator, contact acquisition, and external-wrench loop through Rapier and MuJoCo. Complete
+traces retain backend manifests, privileged pose/velocity/contact telemetry, stability
+metrics, unit-bearing cross-backend tolerances, and content digests. A deliberately strict
+1 mm diagnostic records the first real position divergence as a Behavior replay and passes
+through the standard Failure Capsule creator and verifier. The fixture is still an
+equivalent single driven support path; per-wheel geometry, suspension/load transfer,
+steering/yaw, skid scrub, split friction, grade, curb, and lift belong to M3-C. See
+[`MOBILITY_BACKEND_CLOSED_LOOP_V1.md`](MOBILITY_BACKEND_CLOSED_LOOP_V1.md).
 
 ## North-star outcome
 
@@ -262,9 +271,14 @@ and cross-backend results.
     revolute steering coordinates; integrated steering/backlash evidence remains.
 13. M3-A: deterministic analytic longitudinal plant and stable benchmark report. Implemented
     as a control-oriented baseline; it does not yet claim rigid-body backend fidelity.
-14. M3-B: integrate the tire/contact/wrench path into one shared Rapier/MuJoCo TaskSpec,
-    record time series and capability evidence, and add Failure Capsules.
-15. M4/M5: batched Physical AI observations/randomization, then real-log identification,
+14. M3-B: implemented. The same exact TaskSpec runs through Rapier and MuJoCo with
+    completed-contact feedback, next-step tire wrench application, complete time-series and
+    capability evidence, unit-bearing comparison, diagnostic replay, and verified Failure
+    Capsule.
+15. M3-C: replace the equivalent support path with per-wheel differential/skid and
+    Ackermann fixtures; add steering, suspension/load transfer, lateral scrub, split
+    friction, grade, curb, roughness, lift/recontact, and sensor-only closed-loop metrics.
+16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.
 
 Every PR is independently headless-testable, documents new public contracts, runs format,

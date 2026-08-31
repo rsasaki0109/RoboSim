@@ -1,5 +1,7 @@
 //! Stable Mobility Physical AI longitudinal benchmark producer.
 
+pub mod backend;
+
 use anyhow::{ensure, Result};
 use rne_robot::{
     evaluate_longitudinal_mobility_plant, CombinedSlipTireSpec, DcMotorFailureMode, DcMotorSpec,
