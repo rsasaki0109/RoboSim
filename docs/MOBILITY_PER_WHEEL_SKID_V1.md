@@ -101,9 +101,12 @@ The design follows the separation already established in the mobility plan:
 
 ## Remaining M3-C boundary
 
-This gate does not close M3-C. Remaining work is:
+The plant is now connected to four physical encoders, four motor-current frontends, a mounted
+IMU, side-stream fusion, sensor-only odometry, and yaw-rate control in
+[`MOBILITY_PER_WHEEL_SENSOR_CLOSED_LOOP_V1.md`](MOBILITY_PER_WHEEL_SENSOR_CLOSED_LOOP_V1.md).
+This gate still does not close M3-C. Remaining work is:
 
-- connect four independent encoder/electrical channels and the IMU estimator to this plant;
+- add deterministic encoder/electrical/IMU fault cases to the connected plant;
 - add differential two-wheel-plus-caster and anisotropic skid profiles;
 - replace the explicit load conditioner with identified suspension travel, spring, damper,
   bump/rebound stop, lift, and recontact evidence;

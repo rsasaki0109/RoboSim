@@ -183,6 +183,15 @@ impl FourWheelSideEncoderFusion {
                 });
             }
         }
+        if self.previous.is_some_and(|previous| {
+            frames
+                .iter()
+                .map(|frame| frame.sequence)
+                .zip(previous.sequences)
+                .any(|(current, prior)| current <= prior)
+        }) {
+            return Ok(false);
+        }
         let oldest_capture_ticks = frames
             .iter()
             .map(|frame| frame.capture_time.ticks())
@@ -213,14 +222,6 @@ impl FourWheelSideEncoderFusion {
             capture_ticks,
         };
         let (side_delta_counts, side_skipped_sequences) = if let Some(previous) = self.previous {
-            if accepted
-                .sequences
-                .iter()
-                .zip(previous.sequences)
-                .any(|(current, prior)| *current <= prior)
-            {
-                return Ok(false);
-            }
             if accepted.capture_ticks <= previous.capture_ticks {
                 return Err(WheelImuOdometryError::NonAdvancingCaptureTime);
             }
@@ -1363,7 +1364,7 @@ mod tests {
                 &mut bus,
                 FOUR_WHEEL_STREAMS,
                 SIDE_STREAMS,
-                SimTime::from_ticks(10_000_002),
+                SimTime::from_ticks(100_000_000),
             )
             .unwrap());
     }

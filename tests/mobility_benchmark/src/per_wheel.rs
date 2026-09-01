@@ -40,10 +40,10 @@ const TOTAL_STEPS: u64 = SETTLE_STEPS + DRIVE_STEPS;
 const TRACE_STRIDE_STEPS: u64 = 100;
 const COMMAND_VOLTAGE_V: f64 = 12.0;
 const WORLD_SEED: u64 = 0;
-const VEHICLE_MASS_KG: f64 = 100.0;
+pub(crate) const VEHICLE_MASS_KG: f64 = 100.0;
 const WHEEL_RADIUS_M: f64 = 0.12;
 const SELF_COLLISION_GROUP: u32 = 1;
-const CONTACT_LOAD_FILTER_TIME_CONSTANT_S: f64 = 0.02;
+pub(crate) const CONTACT_LOAD_FILTER_TIME_CONSTANT_S: f64 = 0.02;
 
 /// One downsampled per-wheel row; chassis fields are explicitly privileged truth.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -632,12 +632,12 @@ pub fn compare_per_wheel_skid_traces(
 }
 
 #[derive(Clone, Copy, Debug)]
-struct WheelStation {
-    entity: Entity,
-    spec: WheelStationSpec,
+pub(crate) struct WheelStation {
+    pub(crate) entity: Entity,
+    pub(crate) spec: WheelStationSpec,
 }
 
-fn spawn_wheel_stations(world: &mut World, chassis: Entity) -> [WheelStation; 4] {
+pub(crate) fn spawn_wheel_stations(world: &mut World, chassis: Entity) -> [WheelStation; 4] {
     let names = ["front_left", "rear_left", "front_right", "rear_right"];
     let specs = wheel_station_specs();
     std::array::from_fn(|index| {
@@ -668,7 +668,7 @@ fn spawn_wheel_stations(world: &mut World, chassis: Entity) -> [WheelStation; 4]
     })
 }
 
-fn wheel_station_specs() -> [WheelStationSpec; 4] {
+pub(crate) fn wheel_station_specs() -> [WheelStationSpec; 4] {
     [
         Vec3::new(0.35, -0.25, 0.30),
         Vec3::new(-0.35, -0.25, 0.30),
@@ -715,7 +715,7 @@ fn sample(
     }
 }
 
-fn wheel_plant_spec() -> LongitudinalMobilityPlantSpec {
+pub(crate) fn wheel_plant_spec() -> LongitudinalMobilityPlantSpec {
     let reference_load_n = VEHICLE_MASS_KG * 9.806_65 / 4.0;
     LongitudinalMobilityPlantSpec {
         vehicle_mass_kg: VEHICLE_MASS_KG,
@@ -743,7 +743,7 @@ fn wheel_plant_spec() -> LongitudinalMobilityPlantSpec {
     }
 }
 
-fn frictionless_cuboid(half_extents_m: Vec3) -> Collider {
+pub(crate) fn frictionless_cuboid(half_extents_m: Vec3) -> Collider {
     let mut collider = Collider::cuboid(half_extents_m);
     collider.material = PhysicsMaterial {
         friction: 0.0,

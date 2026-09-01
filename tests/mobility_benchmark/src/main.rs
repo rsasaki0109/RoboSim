@@ -2,6 +2,7 @@ use anyhow::{bail, ensure, Context, Result};
 use rne_mobility_benchmark::backend::run_backend_mobility_trace;
 use rne_mobility_benchmark::observed::run_sensor_observed_trace;
 use rne_mobility_benchmark::per_wheel::run_per_wheel_skid_trace;
+use rne_mobility_benchmark::per_wheel_observed::run_per_wheel_observed_trace;
 use rne_mobility_benchmark::run_mobility_benchmark;
 use rne_physics_rapier::RapierBackend;
 use std::path::PathBuf;
@@ -54,12 +55,23 @@ fn main() -> Result<()> {
             ensure!(trace.passed, "Rapier per-wheel skid verdict failed");
             (serde_json::to_string_pretty(&trace)? + "\n", "skid-rapier")
         }
+        "skid-sensor-rapier" => {
+            let trace =
+                run_per_wheel_observed_trace(RapierBackend::new(), RapierBackend::manifest())?;
+            ensure!(trace.passed, "Rapier per-wheel sensor verdict failed");
+            (
+                serde_json::to_string_pretty(&trace)? + "\n",
+                "skid-sensor-rapier",
+            )
+        }
         "mujoco" => run_mujoco()?,
         "compare" => run_comparison(failure_replay.as_deref())?,
         "sensor-mujoco" => run_sensor_mujoco()?,
         "sensor-compare" => run_sensor_comparison()?,
         "skid-mujoco" => run_skid_mujoco()?,
         "skid-compare" => run_skid_comparison()?,
+        "skid-sensor-mujoco" => run_skid_sensor_mujoco()?,
+        "skid-sensor-compare" => run_skid_sensor_comparison()?,
         other => bail!("unknown backend: {other}"),
     };
     ensure!(
@@ -77,6 +89,58 @@ fn main() -> Result<()> {
         print!("{json}");
     }
     Ok(())
+}
+
+#[cfg(feature = "mujoco")]
+fn run_skid_sensor_mujoco() -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::per_wheel_observed::PER_WHEEL_OBSERVED_FIXED_DELTA_TICKS;
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let trace = run_per_wheel_observed_trace(
+        MuJoCoBackend::new(SimDuration::from_ticks(
+            PER_WHEEL_OBSERVED_FIXED_DELTA_TICKS,
+        ))?,
+        MuJoCoBackend::manifest(),
+    )?;
+    ensure!(trace.passed, "MuJoCo per-wheel sensor verdict failed");
+    Ok((
+        serde_json::to_string_pretty(&trace)? + "\n",
+        "skid-sensor-mujoco",
+    ))
+}
+
+#[cfg(feature = "mujoco")]
+fn run_skid_sensor_comparison() -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::per_wheel_observed::{
+        compare_per_wheel_observed_traces, PER_WHEEL_OBSERVED_FIXED_DELTA_TICKS,
+    };
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let rapier = run_per_wheel_observed_trace(RapierBackend::new(), RapierBackend::manifest())?;
+    let mujoco = run_per_wheel_observed_trace(
+        MuJoCoBackend::new(SimDuration::from_ticks(
+            PER_WHEEL_OBSERVED_FIXED_DELTA_TICKS,
+        ))?,
+        MuJoCoBackend::manifest(),
+    )?;
+    let comparison = compare_per_wheel_observed_traces(rapier, mujoco)?;
+    ensure!(comparison.passed, "per-wheel sensor comparison failed");
+    Ok((
+        serde_json::to_string_pretty(&comparison)? + "\n",
+        "skid-sensor-rapier-vs-mujoco",
+    ))
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_skid_sensor_mujoco() -> Result<(String, &'static str)> {
+    bail!("per-wheel sensor mujoco requires --features mujoco")
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_skid_sensor_comparison() -> Result<(String, &'static str)> {
+    bail!("per-wheel sensor comparison requires --features mujoco")
 }
 
 #[cfg(feature = "mujoco")]

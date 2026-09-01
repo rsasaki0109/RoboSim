@@ -290,7 +290,12 @@ and cross-backend results.
     The sensor path now also has a deterministic four-physical-encoder to two-side-stream
     fusion boundary that preserves modular wrap, availability timing, independent raw streams,
     and per-side source gaps and feeds the existing wheel/IMU estimator without truth access.
-    M3-C remains open until this primitive and plant are connected in the sensor-only loop and
+    The third subgate connects that primitive to the four-wheel plant, four motor-current
+    frontends, mounted IMU, sensor-only odometry, and estimate-only yaw-rate PI control under
+    the exact same Rapier/MuJoCo TaskSpec; see
+    [`MOBILITY_PER_WHEEL_SENSOR_CLOSED_LOOP_V1.md`](MOBILITY_PER_WHEEL_SENSOR_CLOSED_LOOP_V1.md).
+    A deterministic physical encoder drop propagates through side fusion into estimator health;
+    stuck/saturation and motor/IMU faults remain. M3-C remains open until those cases and
     differential and Ackermann fixtures add steering, identified suspension/load transfer,
     split friction, grade, curb, roughness, and lift/recontact evidence.
 16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
