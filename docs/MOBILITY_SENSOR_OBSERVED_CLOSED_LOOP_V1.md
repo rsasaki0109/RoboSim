@@ -132,11 +132,28 @@ Rendering is neither required nor accepted as evidence.
   Pacejka and notes the need for transient slip states. RNE likewise keeps its
   transient tire-force element separate from generic rigid contact; this fixture
   must not be relabeled as a calibrated handling vehicle.
+- Mandow et al., *Experimental kinematics for wheeled skid-steer mobile robots*
+  ([DOI 10.1109/IROS.2007.4399139](https://doi.org/10.1109/IROS.2007.4399139)),
+  models skid steering through experimentally identified slip/ICR behavior rather than
+  assuming an ideal no-slip differential drive. Yi et al. then combine wheel encoders
+  and a low-cost IMU for skid-steer motion and slip estimation
+  ([DOI 10.1109/TRO.2009.2026506](https://doi.org/10.1109/TRO.2009.2026506)). RNE therefore
+  retains all four physical encoder streams and IMU disagreement evidence instead of hiding
+  front/rear wheel disagreement inside physics truth.
+- [WPILib's DifferentialDriveOdometry](https://docs.wpilib.org/en/stable/docs/software/kinematics-and-odometry/differential-drive-odometry.html)
+  consumes left/right traveled distance plus gyro angle and explicitly warns that the result
+  drifts. RNE's new `FourWheelSideEncoderFusion` is the preceding four-to-two measurement
+  boundary: modular changes from the two encoders on each side are summed, the derived stream
+  declares twice the physical counts per revolution and a signed 63-bit finite counter, and
+  source latency, wrap, and sequence gaps remain observable before the existing wheel/IMU
+  estimator consumes the pair.
 
 ## Remaining M3-C boundary
 
-The next gate replaces the equivalent driven support with named per-wheel
-differential/skid and Ackermann fixtures. Acceptance must cover steering and yaw
+The four-wheel side-fusion primitive is implemented and unit-tested through the existing
+wheel/IMU estimator, but it is not yet wired into the rigid-body benchmark controller. The
+next gate completes that connection and adds differential and Ackermann fixtures. Acceptance
+must cover steering and yaw
 response, lateral acceleration and scrub, per-wheel load transfer, split friction,
 grade, roughness/curb interaction, lift/recontact, synchronized steering feedback,
 and sensor-only closed-loop metrics. M5 then fits motor, tire, geometry, sensor,

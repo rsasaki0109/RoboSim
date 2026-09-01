@@ -287,9 +287,12 @@ and cross-backend results.
     stations, independent motor/transmission/wheel/tire states, rigid per-wheel contact,
     raw-versus-conditioned load evidence, lateral scrub, pivot yaw, and SI-unit Rapier/MuJoCo
     tolerances; see [`MOBILITY_PER_WHEEL_SKID_V1.md`](MOBILITY_PER_WHEEL_SKID_V1.md).
-    M3-C remains open until this plant is connected to the sensor-only loop and differential
-    and Ackermann fixtures add steering, identified suspension/load transfer, split friction,
-    grade, curb, roughness, and lift/recontact evidence.
+    The sensor path now also has a deterministic four-physical-encoder to two-side-stream
+    fusion boundary that preserves modular wrap, availability timing, independent raw streams,
+    and per-side source gaps and feeds the existing wheel/IMU estimator without truth access.
+    M3-C remains open until this primitive and plant are connected in the sensor-only loop and
+    differential and Ackermann fixtures add steering, identified suspension/load transfer,
+    split friction, grade, curb, roughness, and lift/recontact evidence.
 16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.
 
