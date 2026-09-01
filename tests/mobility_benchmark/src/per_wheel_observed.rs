@@ -1,6 +1,6 @@
 //! Sensor-only yaw-rate control over the four-wheel skid plant.
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use rne_ai::{
     ActionSpec, FourWheelEncoderStreams, FourWheelSideEncoderFusion,
     FourWheelSideEncoderFusionConfig, ObservationSpec, ResetSpec, RewardSpec, RewardTermSpec,
@@ -12,7 +12,8 @@ use rne_ai::{
 use rne_core::{SimDuration, SimTime};
 use rne_data::{
     DataBus, ImuFeedback, ImuFeedbackStatus, InMemoryDataBus, IncrementalEncoderFeedback,
-    MotorElectricalFeedback, MotorElectricalFeedbackStatus, PoseSample, StreamId,
+    IncrementalEncoderStatus, MotorElectricalFeedback, MotorElectricalFeedbackStatus, PoseSample,
+    StreamId,
 };
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Quat, Vec3};
@@ -288,6 +289,125 @@ pub struct PerWheelObservedComparison {
     pub content_digest: String,
 }
 
+/// Stable fail-closed classification for a sensor-only mobility run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PerWheelObservedFailureCode {
+    /// A physical encoder reported a held value.
+    EncoderStuck,
+    /// A physical encoder finite counter saturated.
+    EncoderSaturated,
+    /// The mounted IMU reported a held value.
+    ImuStuck,
+}
+
+/// Self-verifying snapshot emitted when an unsafe motion input fails closed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PerWheelObservedFailureCapsule {
+    /// Stable artifact discriminator.
+    pub kind: String,
+    /// Artifact schema version.
+    pub schema_version: u32,
+    /// Backend identity and capabilities.
+    pub backend: PhysicsBackendManifest,
+    /// Exact actor/action task contract.
+    pub task_spec: TaskSpec,
+    /// Exact sensor/controller/fault contract.
+    pub contract: PerWheelObservedContract,
+    /// One stable fail-closed category.
+    pub failure_code: PerWheelObservedFailureCode,
+    /// Completed physics step at which the controller rejected input.
+    pub failed_step: u64,
+    /// Controller decision timestamp in ticks.
+    pub decision_ticks: u64,
+    /// Latest physical encoder sequences, or zero before first availability.
+    pub encoder_sequences: [u64; 4],
+    /// Latest physical encoder status codes.
+    pub encoder_status_codes: [u8; 4],
+    /// Latest motor-feedback sequences.
+    pub motor_sequences: [u64; 4],
+    /// Latest motor-feedback status codes.
+    pub motor_status_codes: [u8; 4],
+    /// Latest mounted-IMU sequence.
+    pub imu_sequence: u64,
+    /// Latest mounted-IMU status code.
+    pub imu_status_code: u8,
+    /// FNV-1a digest with this field empty.
+    pub content_digest: String,
+}
+
+impl PerWheelObservedFailureCapsule {
+    /// Recomputes fault compatibility, timing, status evidence, and content integrity.
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.kind == "rne_mobility_per_wheel_observed_failure_capsule",
+            "capsule kind mismatch"
+        );
+        ensure!(
+            self.schema_version == PER_WHEEL_OBSERVED_SCHEMA_VERSION,
+            "schema mismatch"
+        );
+        self.backend.validate()?;
+        self.task_spec.validate()?;
+        ensure!(
+            self.task_spec == per_wheel_observed_task_spec(),
+            "TaskSpec drift"
+        );
+        self.contract.validate()?;
+        ensure!(
+            self.failed_step > 0
+                && self.failed_step <= TOTAL_STEPS
+                && self.decision_ticks == self.failed_step * PER_WHEEL_OBSERVED_FIXED_DELTA_TICKS,
+            "failure timing mismatch"
+        );
+        let compatible = matches!(
+            (self.contract.fault, self.failure_code),
+            (
+                PerWheelObservedFault::FrontLeftEncoderStuck { .. },
+                PerWheelObservedFailureCode::EncoderStuck
+            ) | (
+                PerWheelObservedFault::FrontLeftEncoderSaturate { .. },
+                PerWheelObservedFailureCode::EncoderSaturated
+            ) | (
+                PerWheelObservedFault::ImuStuck { .. },
+                PerWheelObservedFailureCode::ImuStuck
+            )
+        );
+        ensure!(compatible, "fault/failure-code mismatch");
+        ensure!(
+            self.encoder_status_codes.iter().all(|status| *status <= 3)
+                && self.motor_status_codes.iter().all(|status| *status <= 3)
+                && self.imu_status_code <= 2,
+            "invalid status code"
+        );
+        match self.failure_code {
+            PerWheelObservedFailureCode::EncoderStuck => {
+                ensure!(self.encoder_status_codes[0] == 3, "stuck status missing");
+            }
+            PerWheelObservedFailureCode::EncoderSaturated => {
+                ensure!(
+                    self.encoder_status_codes[0] == 2,
+                    "saturation status missing"
+                );
+            }
+            PerWheelObservedFailureCode::ImuStuck => {
+                ensure!(self.imu_status_code == 2, "IMU stuck status missing");
+            }
+        }
+        ensure!(
+            self.content_digest == capsule_digest(self)?,
+            "capsule digest mismatch"
+        );
+        Ok(())
+    }
+}
+
+enum PerWheelObservedRunOutcome {
+    Trace(Box<PerWheelObservedTrace>),
+    Failure(Box<PerWheelObservedFailureCapsule>),
+}
+
 impl PerWheelObservedTrace {
     /// Recomputes frozen contracts, ordering, metric verdicts, and content integrity.
     pub fn validate(&self) -> Result<()> {
@@ -505,10 +625,38 @@ pub fn run_per_wheel_observed_trace<B: PhysicsBackend>(
 }
 
 fn run_per_wheel_observed_trace_with_fault<B: PhysicsBackend>(
-    mut backend: B,
+    backend: B,
     manifest: PhysicsBackendManifest,
     fault: PerWheelObservedFault,
 ) -> Result<PerWheelObservedTrace> {
+    match run_per_wheel_observed_outcome(backend, manifest, fault)? {
+        PerWheelObservedRunOutcome::Trace(trace) => Ok(*trace),
+        PerWheelObservedRunOutcome::Failure(capsule) => {
+            bail!(
+                "sensor-only mobility failed closed: {:?}",
+                capsule.failure_code
+            )
+        }
+    }
+}
+
+/// Executes one expected unsafe sensor fault and returns its self-verifying Failure Capsule.
+pub fn run_per_wheel_observed_failure_capsule<B: PhysicsBackend>(
+    backend: B,
+    manifest: PhysicsBackendManifest,
+    fault: PerWheelObservedFault,
+) -> Result<PerWheelObservedFailureCapsule> {
+    match run_per_wheel_observed_outcome(backend, manifest, fault)? {
+        PerWheelObservedRunOutcome::Failure(capsule) => Ok(*capsule),
+        PerWheelObservedRunOutcome::Trace(_) => bail!("fault did not fail closed"),
+    }
+}
+
+fn run_per_wheel_observed_outcome<B: PhysicsBackend>(
+    mut backend: B,
+    manifest: PhysicsBackendManifest,
+    fault: PerWheelObservedFault,
+) -> Result<PerWheelObservedRunOutcome> {
     manifest.validate()?;
     require_capabilities(
         backend.capabilities(),
@@ -663,7 +811,20 @@ fn run_per_wheel_observed_trace_with_fault<B: PhysicsBackend>(
         ) {
             Ok(false) | Err(WheelImuOdometryError::MissingAvailableFrame { .. }) => continue,
             Ok(true) => {}
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                if let Some(capsule) = build_failure_capsule(
+                    &manifest,
+                    &task_spec,
+                    &contract,
+                    step,
+                    decision_time,
+                    &bus,
+                    error,
+                )? {
+                    return Ok(PerWheelObservedRunOutcome::Failure(Box::new(capsule)));
+                }
+                return Err(error.into());
+            }
         }
         let Some(left) = bus.latest_available::<IncrementalEncoderFeedback>(
             SIDE_ENCODER_STREAMS.left,
@@ -690,7 +851,20 @@ fn run_per_wheel_observed_trace_with_fault<B: PhysicsBackend>(
                 | WheelImuOdometryError::InputSkew { .. }
                 | WheelImuOdometryError::StaleInput { .. },
             ) => continue,
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                if let Some(capsule) = build_failure_capsule(
+                    &manifest,
+                    &task_spec,
+                    &contract,
+                    step,
+                    decision_time,
+                    &bus,
+                    error,
+                )? {
+                    return Ok(PerWheelObservedRunOutcome::Failure(Box::new(capsule)));
+                }
+                return Err(error.into());
+            }
         };
         last_left_sequence = left.sequence;
         let target = if step > SETTLE_STEPS {
@@ -821,7 +995,7 @@ fn run_per_wheel_observed_trace_with_fault<B: PhysicsBackend>(
     };
     trace.content_digest = trace_digest(&trace)?;
     trace.validate()?;
-    Ok(trace)
+    Ok(PerWheelObservedRunOutcome::Trace(Box::new(trace)))
 }
 
 /// Builds a self-verifying SI-unit comparison from two complete backend traces.
@@ -844,6 +1018,76 @@ pub fn compare_per_wheel_observed_traces(
     comparison.content_digest = comparison_digest(&comparison)?;
     comparison.validate()?;
     Ok(comparison)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_failure_capsule(
+    manifest: &PhysicsBackendManifest,
+    task_spec: &TaskSpec,
+    contract: &PerWheelObservedContract,
+    failed_step: u64,
+    decision_time: SimTime,
+    bus: &InMemoryDataBus,
+    error: WheelImuOdometryError,
+) -> Result<Option<PerWheelObservedFailureCapsule>> {
+    let failure_code = match (contract.fault, error) {
+        (
+            PerWheelObservedFault::FrontLeftEncoderStuck { .. },
+            WheelImuOdometryError::StuckValue { .. },
+        ) => PerWheelObservedFailureCode::EncoderStuck,
+        (
+            PerWheelObservedFault::FrontLeftEncoderSaturate { .. },
+            WheelImuOdometryError::EncoderSaturated { .. },
+        ) => PerWheelObservedFailureCode::EncoderSaturated,
+        (PerWheelObservedFault::ImuStuck { .. }, WheelImuOdometryError::StuckValue { .. }) => {
+            PerWheelObservedFailureCode::ImuStuck
+        }
+        _ => return Ok(None),
+    };
+    let encoder_frames = [
+        PHYSICAL_ENCODER_STREAMS.front_left,
+        PHYSICAL_ENCODER_STREAMS.rear_left,
+        PHYSICAL_ENCODER_STREAMS.front_right,
+        PHYSICAL_ENCODER_STREAMS.rear_right,
+    ]
+    .map(|stream| bus.latest_available::<IncrementalEncoderFeedback>(stream, decision_time));
+    let motor_frames = MOTOR_STREAMS
+        .map(|stream| bus.latest_available::<MotorElectricalFeedback>(stream, decision_time));
+    let imu_frame = bus.latest_available::<ImuFeedback>(IMU_STREAM, decision_time);
+    let mut capsule = PerWheelObservedFailureCapsule {
+        kind: "rne_mobility_per_wheel_observed_failure_capsule".to_string(),
+        schema_version: PER_WHEEL_OBSERVED_SCHEMA_VERSION,
+        backend: manifest.clone(),
+        task_spec: task_spec.clone(),
+        contract: contract.clone(),
+        failure_code,
+        failed_step,
+        decision_ticks: decision_time.ticks(),
+        encoder_sequences: encoder_frames
+            .each_ref()
+            .map(|frame| frame.as_ref().map_or(0, |frame| frame.sequence)),
+        encoder_status_codes: encoder_frames.each_ref().map(|frame| {
+            frame
+                .as_ref()
+                .map_or(0, |frame| encoder_status_code(frame.payload.status))
+        }),
+        motor_sequences: motor_frames
+            .each_ref()
+            .map(|frame| frame.as_ref().map_or(0, |frame| frame.sequence)),
+        motor_status_codes: motor_frames.each_ref().map(|frame| {
+            frame
+                .as_ref()
+                .map_or(0, |frame| motor_status_code(frame.payload.status))
+        }),
+        imu_sequence: imu_frame.as_ref().map_or(0, |frame| frame.sequence),
+        imu_status_code: imu_frame
+            .as_ref()
+            .map_or(0, |frame| imu_status_code(frame.payload.status)),
+        content_digest: String::new(),
+    };
+    capsule.content_digest = capsule_digest(&capsule)?;
+    capsule.validate()?;
+    Ok(Some(capsule))
 }
 
 fn spawn_sensor_rig(
@@ -1142,6 +1386,15 @@ fn health_code(health: WheelImuOdometryHealth) -> u8 {
     }
 }
 
+fn encoder_status_code(status: IncrementalEncoderStatus) -> u8 {
+    match status {
+        IncrementalEncoderStatus::Initializing => 0,
+        IncrementalEncoderStatus::Nominal => 1,
+        IncrementalEncoderStatus::CounterSaturated => 2,
+        IncrementalEncoderStatus::StuckValue => 3,
+    }
+}
+
 fn motor_status_code(status: MotorElectricalFeedbackStatus) -> u8 {
     match status {
         MotorElectricalFeedbackStatus::Nominal => 0,
@@ -1190,6 +1443,17 @@ fn validate_metrics(metrics: &[MobilityBenchmarkMetric], passed: bool) -> Result
 
 fn trace_digest(trace: &PerWheelObservedTrace) -> Result<String> {
     let mut canonical = trace.clone();
+    canonical.content_digest.clear();
+    let mut digest = 0xcbf29ce484222325_u64;
+    for byte in serde_json::to_vec(&canonical)? {
+        digest ^= u64::from(byte);
+        digest = digest.wrapping_mul(0x100000001b3);
+    }
+    Ok(format!("fnv1a64:{digest:016x}"))
+}
+
+fn capsule_digest(capsule: &PerWheelObservedFailureCapsule) -> Result<String> {
+    let mut canonical = capsule.clone();
     canonical.content_digest.clear();
     let mut digest = 0xcbf29ce484222325_u64;
     for byte in serde_json::to_vec(&canonical)? {
@@ -1370,23 +1634,48 @@ mod tests {
     }
 
     #[test]
-    fn stuck_and_saturated_motion_inputs_fail_closed() {
-        for fault in [
-            PerWheelObservedFault::FrontLeftEncoderStuck { sequence: 30 },
-            PerWheelObservedFault::FrontLeftEncoderSaturate { counter_bits: 4 },
-            PerWheelObservedFault::ImuStuck { sequence: 30 },
+    fn fatal_motion_inputs_emit_deterministic_failure_capsules() {
+        for (fault, expected_code) in [
+            (
+                PerWheelObservedFault::FrontLeftEncoderStuck { sequence: 30 },
+                PerWheelObservedFailureCode::EncoderStuck,
+            ),
+            (
+                PerWheelObservedFault::FrontLeftEncoderSaturate { counter_bits: 4 },
+                PerWheelObservedFailureCode::EncoderSaturated,
+            ),
+            (
+                PerWheelObservedFault::ImuStuck { sequence: 30 },
+                PerWheelObservedFailureCode::ImuStuck,
+            ),
         ] {
+            let first = run_per_wheel_observed_failure_capsule(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                fault,
+            )
+            .unwrap();
+            let second = run_per_wheel_observed_failure_capsule(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                fault,
+            )
+            .unwrap();
+            assert_eq!(first.failure_code, expected_code);
+            assert_eq!(first, second);
+            first.validate().unwrap();
+
+            let mut tampered = first.clone();
+            tampered.failed_step += 1;
+            assert!(tampered.validate().is_err());
+
             let error = run_per_wheel_observed_trace_with_fault(
                 RapierBackend::new(),
                 RapierBackend::manifest(),
                 fault,
             )
             .unwrap_err();
-            let message = error.to_string();
-            assert!(
-                message.contains("stuck") || message.contains("saturated"),
-                "fault={fault:?}, error={message}"
-            );
+            assert!(error.to_string().contains("failed closed"));
         }
     }
 

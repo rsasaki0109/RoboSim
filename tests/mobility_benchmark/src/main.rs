@@ -2,7 +2,9 @@ use anyhow::{bail, ensure, Context, Result};
 use rne_mobility_benchmark::backend::run_backend_mobility_trace;
 use rne_mobility_benchmark::observed::run_sensor_observed_trace;
 use rne_mobility_benchmark::per_wheel::run_per_wheel_skid_trace;
-use rne_mobility_benchmark::per_wheel_observed::run_per_wheel_observed_trace;
+use rne_mobility_benchmark::per_wheel_observed::{
+    run_per_wheel_observed_failure_capsule, run_per_wheel_observed_trace, PerWheelObservedFault,
+};
 use rne_mobility_benchmark::run_mobility_benchmark;
 use rne_physics_rapier::RapierBackend;
 use std::path::PathBuf;
@@ -11,6 +13,7 @@ fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let mut output = None;
     let mut failure_replay = None;
+    let mut fault = None;
     let mut backend = "analytic".to_string();
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -26,6 +29,9 @@ fn main() -> Result<()> {
                 failure_replay = Some(PathBuf::from(
                     args.next().context("--failure-replay requires a path")?,
                 ));
+            }
+            "--fault" => {
+                fault = Some(args.next().context("--fault requires a value")?);
             }
             other => bail!("unknown argument: {other}"),
         }
@@ -64,6 +70,23 @@ fn main() -> Result<()> {
                 "skid-sensor-rapier",
             )
         }
+        "skid-sensor-failure-rapier" => {
+            let fault = parse_fatal_sensor_fault(
+                fault
+                    .as_deref()
+                    .context("--backend skid-sensor-failure-rapier requires --fault")?,
+            )?;
+            let capsule = run_per_wheel_observed_failure_capsule(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                fault,
+            )?;
+            capsule.validate()?;
+            (
+                serde_json::to_string_pretty(&capsule)? + "\n",
+                "skid-sensor-failure-rapier",
+            )
+        }
         "mujoco" => run_mujoco()?,
         "compare" => run_comparison(failure_replay.as_deref())?,
         "sensor-mujoco" => run_sensor_mujoco()?,
@@ -78,6 +101,10 @@ fn main() -> Result<()> {
         backend == "compare" || failure_replay.is_none(),
         "--failure-replay is valid only with --backend compare"
     );
+    ensure!(
+        backend == "skid-sensor-failure-rapier" || fault.is_none(),
+        "--fault is valid only with --backend skid-sensor-failure-rapier"
+    );
     if let Some(path) = output {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -89,6 +116,19 @@ fn main() -> Result<()> {
         print!("{json}");
     }
     Ok(())
+}
+
+fn parse_fatal_sensor_fault(value: &str) -> Result<PerWheelObservedFault> {
+    match value {
+        "encoder-stuck" => Ok(PerWheelObservedFault::FrontLeftEncoderStuck { sequence: 30 }),
+        "encoder-saturated" => Ok(PerWheelObservedFault::FrontLeftEncoderSaturate {
+            counter_bits: 4,
+        }),
+        "imu-stuck" => Ok(PerWheelObservedFault::ImuStuck { sequence: 30 }),
+        other => bail!(
+            "unknown fatal sensor fault {other}; expected encoder-stuck, encoder-saturated, or imu-stuck"
+        ),
+    }
 }
 
 #[cfg(feature = "mujoco")]

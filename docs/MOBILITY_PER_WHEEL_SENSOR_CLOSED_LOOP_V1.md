@@ -94,11 +94,18 @@ motion-input faults:
 | motor-current stuck | `StuckValue` motor status and held measurement | continue with explicit degraded evidence |
 | IMU drop | IMU sequence gap, estimator health | hold action until next synchronized set |
 | IMU saturation | `Saturated` IMU status and `ImuSaturated` health | continue with encoder yaw fallback |
-| encoder stuck / counter saturation | typed estimator error | fail closed |
-| IMU stuck | typed estimator error | fail closed |
+| encoder stuck / counter saturation | typed estimator error plus physical stream status | fail closed and emit a Failure Capsule |
+| IMU stuck | typed estimator error plus mounted-IMU status | fail closed and emit a Failure Capsule |
 
 Faults are applied after physical measurement and before declared output latency. They never
 modify wheel state, rigid-body truth, or commands to manufacture the expected evidence.
+
+Every fatal case emits a self-verifying JSON Failure Capsule containing the frozen backend,
+TaskSpec, sensor/controller/fault contract, failure step and decision time, and latest sequence
+and status evidence for all four encoders, all four motor channels, and the mounted IMU. Its
+stable failure code is one of `encoder_stuck`, `encoder_saturated`, or `imu_stuck`; an FNV-1a
+content digest detects any later mutation. Exact replay equality is tested independently for
+all three cases.
 
 Run the comparison with:
 
@@ -106,6 +113,15 @@ Run the comparison with:
 cargo run -p rne_mobility_benchmark --features mujoco -- \
   --backend skid-sensor-compare \
   --output per-wheel-sensor-comparison-v1.json
+```
+
+Generate a fatal-input capsule (prefer an external output path for generated evidence):
+
+```text
+cargo run -p rne_mobility_benchmark --features mujoco -- \
+  --backend skid-sensor-failure-rapier \
+  --fault encoder-stuck \
+  --output E:\RNE-build\m3c-sensor\encoder-stuck-capsule-v1.json
 ```
 
 ## Research correspondence and limits
@@ -119,5 +135,5 @@ not claim their identified ICR model or EKF accuracy.
 
 M3-C remains open for differential two-wheel-plus-caster behavior, identified suspension/load
 transfer, Ackermann steering feedback, split friction, grade, curb, roughness, and
-lift/recontact evidence. A later benchmark-level Failure Capsule will serialize the typed
-fail-closed cases rather than retaining them only as deterministic test errors.
+lift/recontact evidence. Fatal encoder and IMU input cases are now serialized rather than
+retained only as test errors; future fixtures must use the same evidence contract.

@@ -296,7 +296,9 @@ and cross-backend results.
     [`MOBILITY_PER_WHEEL_SENSOR_CLOSED_LOOP_V1.md`](MOBILITY_PER_WHEEL_SENSOR_CLOSED_LOOP_V1.md).
     The same physical plant now covers recoverable encoder/motor/IMU drops, motor stuck,
     IMU saturation, and fail-closed encoder stuck/counter saturation and IMU stuck behavior.
-    M3-C remains open until the typed failures are serialized as Failure Capsules and
+    Every fatal input now emits a deterministic, self-verifying JSON Failure Capsule with the
+    frozen backend/TaskSpec/fault contract, rejection timing, all physical sequence/status
+    evidence, stable failure code, and mutation-detecting digest. M3-C remains open until
     differential and Ackermann fixtures add steering, identified suspension/load transfer,
     split friction, grade, curb, roughness, and lift/recontact evidence.
 16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
