@@ -84,6 +84,22 @@ Four-to-two fusion waits for a complete set, propagates the source gap into the 
 sequence, and the estimator reports `InputSequenceGap` while retaining bounded sensor-only
 control. A separate mutation test proves actor-evidence changes invalidate the trace digest.
 
+The typed fault matrix now distinguishes recoverable transport/diagnostic faults from unsafe
+motion-input faults:
+
+| injected frontend fault | controller-visible evidence | runtime behavior |
+| --- | --- | --- |
+| encoder drop | physical and derived sequence gap, estimator health | hold action until next synchronized set |
+| motor-current drop | motor sequence gap | continue; current is diagnostic input |
+| motor-current stuck | `StuckValue` motor status and held measurement | continue with explicit degraded evidence |
+| IMU drop | IMU sequence gap, estimator health | hold action until next synchronized set |
+| IMU saturation | `Saturated` IMU status and `ImuSaturated` health | continue with encoder yaw fallback |
+| encoder stuck / counter saturation | typed estimator error | fail closed |
+| IMU stuck | typed estimator error | fail closed |
+
+Faults are applied after physical measurement and before declared output latency. They never
+modify wheel state, rigid-body truth, or commands to manufacture the expected evidence.
+
 Run the comparison with:
 
 ```text
@@ -101,6 +117,7 @@ slip estimation ([DOI 10.1109/TRO.2009.2026506](https://doi.org/10.1109/TRO.2009
 This gate implements the measurement boundary and explicit disagreement evidence, but it does
 not claim their identified ICR model or EKF accuracy.
 
-M3-C remains open for stuck/saturation and motor/IMU fault cases on this exact plant,
-differential two-wheel-plus-caster behavior, identified suspension/load transfer, Ackermann
-steering feedback, split friction, grade, curb, roughness, and lift/recontact evidence.
+M3-C remains open for differential two-wheel-plus-caster behavior, identified suspension/load
+transfer, Ackermann steering feedback, split friction, grade, curb, roughness, and
+lift/recontact evidence. A later benchmark-level Failure Capsule will serialize the typed
+fail-closed cases rather than retaining them only as deterministic test errors.

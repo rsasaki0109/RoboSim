@@ -11,8 +11,8 @@ use rne_ai::{
 };
 use rne_core::{SimDuration, SimTime};
 use rne_data::{
-    DataBus, InMemoryDataBus, IncrementalEncoderFeedback, MotorElectricalFeedback, PoseSample,
-    StreamId,
+    DataBus, ImuFeedback, ImuFeedbackStatus, InMemoryDataBus, IncrementalEncoderFeedback,
+    MotorElectricalFeedback, MotorElectricalFeedbackStatus, PoseSample, StreamId,
 };
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Quat, Vec3};
@@ -99,8 +99,57 @@ pub struct PerWheelObservedContract {
     pub controller_kp_v_s_rad: f64,
     /// Yaw-rate PI integral gain in volts per radian.
     pub controller_ki_v_rad: f64,
-    /// Optional deterministic front-left encoder sequence drop.
-    pub front_left_encoder_drop_sequence: Option<u64>,
+    /// Deterministic frontend fault selected for this run.
+    pub fault: PerWheelObservedFault,
+}
+
+/// One typed sensor fault applied without modifying plant truth.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PerWheelObservedFault {
+    /// Nominal sensor suite.
+    #[default]
+    None,
+    /// Drop one front-left physical encoder frame.
+    FrontLeftEncoderDrop {
+        /// One-based attempted sequence to drop.
+        sequence: u64,
+    },
+    /// Hold the front-left physical encoder from this sequence onward.
+    FrontLeftEncoderStuck {
+        /// One-based first attempted sequence to hold.
+        sequence: u64,
+    },
+    /// Saturate the front-left encoder's signed counter at the declared width.
+    FrontLeftEncoderSaturate {
+        /// Reduced signed hardware-counter width.
+        counter_bits: u8,
+    },
+    /// Drop one front-left motor-current frame.
+    FrontLeftMotorDrop {
+        /// One-based attempted sequence to drop.
+        sequence: u64,
+    },
+    /// Hold front-left motor feedback from this sequence onward.
+    FrontLeftMotorStuck {
+        /// One-based first attempted sequence to hold.
+        sequence: u64,
+    },
+    /// Drop one mounted-IMU frame.
+    ImuDrop {
+        /// One-based attempted sequence to drop.
+        sequence: u64,
+    },
+    /// Hold mounted-IMU output from this sequence onward.
+    ImuStuck {
+        /// One-based first attempted sequence to hold.
+        sequence: u64,
+    },
+    /// Reduce the gyro range so physical yaw-rate clips.
+    ImuSaturate {
+        /// Symmetric gyroscope clipping range in radians per second.
+        gyro_range_rad_s: f64,
+    },
 }
 
 impl PerWheelObservedContract {
@@ -113,16 +162,33 @@ impl PerWheelObservedContract {
             calibrated_gyro_z_bias_rad_s: 0.001,
             controller_kp_v_s_rad: 20.0,
             controller_ki_v_rad: 18.0,
-            front_left_encoder_drop_sequence: None,
+            fault: PerWheelObservedFault::None,
         }
     }
 
     fn validate(&self) -> Result<()> {
         let mut expected = Self::nominal();
-        expected.front_left_encoder_drop_sequence = self.front_left_encoder_drop_sequence;
+        expected.fault = self.fault;
         ensure!(*self == expected, "contract drift");
-        if let Some(sequence) = self.front_left_encoder_drop_sequence {
-            ensure!(sequence > 1, "invalid drop sequence");
+        match self.fault {
+            PerWheelObservedFault::None => {}
+            PerWheelObservedFault::FrontLeftEncoderDrop { sequence }
+            | PerWheelObservedFault::FrontLeftEncoderStuck { sequence }
+            | PerWheelObservedFault::FrontLeftMotorDrop { sequence }
+            | PerWheelObservedFault::FrontLeftMotorStuck { sequence }
+            | PerWheelObservedFault::ImuDrop { sequence }
+            | PerWheelObservedFault::ImuStuck { sequence } => {
+                ensure!(sequence > 1, "invalid fault sequence");
+            }
+            PerWheelObservedFault::FrontLeftEncoderSaturate { counter_bits } => {
+                ensure!((2..=16).contains(&counter_bits), "invalid saturation width");
+            }
+            PerWheelObservedFault::ImuSaturate { gyro_range_rad_s } => {
+                ensure!(
+                    gyro_range_rad_s.is_finite() && gyro_range_rad_s > 0.0,
+                    "invalid gyro saturation range"
+                );
+            }
         }
         Ok(())
     }
@@ -142,6 +208,14 @@ pub struct PerWheelObservedSample {
     pub encoder_sequences: [u64; 4],
     /// Four measured motor-current values in amperes.
     pub measured_motor_current_a: [f64; 4],
+    /// Four motor-feedback stream sequences.
+    pub motor_sequences: [u64; 4],
+    /// Four stable motor-feedback status codes.
+    pub motor_status_codes: [u8; 4],
+    /// Mounted-IMU stream sequence.
+    pub imu_sequence: u64,
+    /// Stable mounted-IMU status code.
+    pub imu_status_code: u8,
     /// Sensor-only estimated yaw rate in radians per second.
     pub estimated_yaw_rate_rad_s: f64,
     /// Wheel/IMU yaw innovation in radians.
@@ -283,6 +357,11 @@ impl PerWheelObservedTrace {
                 "non-finite current"
             );
             ensure!(
+                sample.motor_status_codes.iter().all(|status| *status <= 3)
+                    && sample.imu_status_code <= 2,
+                "invalid sensor status code"
+            );
+            ensure!(
                 sample.estimated_yaw_rate_rad_s.is_finite()
                     && sample.yaw_innovation_rad.is_finite()
                     && sample.privileged_yaw_rate_rad_s.is_finite(),
@@ -377,6 +456,12 @@ pub fn per_wheel_observed_task_spec() -> TaskSpec {
                 .with_bounds(TensorBounds::broadcast(0.0, 4.0)),
             TensorSpec::new("physical_encoder_sequence", TensorDType::I64, vec![4], "1"),
             TensorSpec::new("measured_motor_current_a", TensorDType::F64, vec![4], "A"),
+            TensorSpec::new("motor_sequence", TensorDType::I64, vec![4], "1"),
+            TensorSpec::new("motor_status_code", TensorDType::U8, vec![4], "1")
+                .with_bounds(TensorBounds::broadcast(0.0, 3.0)),
+            TensorSpec::new("imu_sequence", TensorDType::I64, vec![], "1"),
+            TensorSpec::new("imu_status_code", TensorDType::U8, vec![], "1")
+                .with_bounds(TensorBounds::broadcast(0.0, 2.0)),
             TensorSpec::new("target_yaw_rate_rad_s", TensorDType::F64, vec![], "rad/s")
                 .with_bounds(TensorBounds::broadcast(0.0, TARGET_YAW_RATE_RAD_S)),
         ]),
@@ -416,13 +501,13 @@ pub fn run_per_wheel_observed_trace<B: PhysicsBackend>(
     backend: B,
     manifest: PhysicsBackendManifest,
 ) -> Result<PerWheelObservedTrace> {
-    run_per_wheel_observed_trace_with_fault(backend, manifest, None)
+    run_per_wheel_observed_trace_with_fault(backend, manifest, PerWheelObservedFault::None)
 }
 
 fn run_per_wheel_observed_trace_with_fault<B: PhysicsBackend>(
     mut backend: B,
     manifest: PhysicsBackendManifest,
-    front_left_encoder_drop_sequence: Option<u64>,
+    fault: PerWheelObservedFault,
 ) -> Result<PerWheelObservedTrace> {
     manifest.validate()?;
     require_capabilities(
@@ -442,7 +527,7 @@ fn run_per_wheel_observed_trace_with_fault<B: PhysicsBackend>(
     let task_spec = per_wheel_observed_task_spec();
     task_spec.validate()?;
     let mut contract = PerWheelObservedContract::nominal();
-    contract.front_left_encoder_drop_sequence = front_left_encoder_drop_sequence;
+    contract.fault = fault;
     contract.validate()?;
     let fixed_delta = SimDuration::from_ticks(PER_WHEEL_OBSERVED_FIXED_DELTA_TICKS);
     let dt_s = fixed_delta.as_seconds().value();
@@ -601,7 +686,9 @@ fn run_per_wheel_observed_trace_with_fault<B: PhysicsBackend>(
             Ok(estimate) => estimate,
             Err(
                 WheelImuOdometryError::MissingAvailableFrame { .. }
-                | WheelImuOdometryError::NoNewEncoderPair,
+                | WheelImuOdometryError::NoNewEncoderPair
+                | WheelImuOdometryError::InputSkew { .. }
+                | WheelImuOdometryError::StaleInput { .. },
             ) => continue,
             Err(error) => return Err(error.into()),
         };
@@ -627,12 +714,18 @@ fn run_per_wheel_observed_trace_with_fault<B: PhysicsBackend>(
                 .expect("fused source")
                 .sequence
         });
-        let measured_motor_current_a = MOTOR_STREAMS.map(|stream| {
+        let motor_frames = MOTOR_STREAMS.map(|stream| {
             bus.latest_available::<MotorElectricalFeedback>(stream, decision_time)
                 .expect("motor feedback synchronized")
-                .payload
-                .current_a
         });
+        let measured_motor_current_a = motor_frames.each_ref().map(|frame| frame.payload.current_a);
+        let motor_sequences = motor_frames.each_ref().map(|frame| frame.sequence);
+        let motor_status_codes = motor_frames
+            .each_ref()
+            .map(|frame| motor_status_code(frame.payload.status));
+        let imu_frame = bus
+            .latest_available::<ImuFeedback>(IMU_STREAM, decision_time)
+            .context("IMU feedback unavailable after estimator update")?;
         if target > 0.0 && estimate.health != WheelImuOdometryHealth::Initializing {
             squared_estimation_error +=
                 (estimate.angular_velocity_rad_s - body.angular_velocity_rad_s.y).powi(2);
@@ -645,6 +738,10 @@ fn run_per_wheel_observed_trace_with_fault<B: PhysicsBackend>(
             capture_ticks: estimate.provenance.capture_ticks,
             encoder_sequences,
             measured_motor_current_a,
+            motor_sequences,
+            motor_status_codes,
+            imu_sequence: imu_frame.sequence,
+            imu_status_code: imu_status_code(imu_frame.payload.status),
             estimated_yaw_rate_rad_s: estimate.angular_velocity_rad_s,
             yaw_innovation_rad: estimate.yaw_innovation_rad,
             health_code: health_code(estimate.health),
@@ -762,14 +859,14 @@ fn spawn_sensor_rig(
     ];
     let names = ["front_left", "rear_left", "front_right", "rear_right"];
     let wheel_joints = std::array::from_fn(|index| {
-        let fault = if index == 0 {
-            contract
-                .front_left_encoder_drop_sequence
-                .map_or(IncrementalEncoderFault::None, |sequence| {
-                    IncrementalEncoderFault::DropSequence { sequence }
-                })
-        } else {
-            IncrementalEncoderFault::None
+        let fault = match (index, contract.fault) {
+            (0, PerWheelObservedFault::FrontLeftEncoderDrop { sequence }) => {
+                IncrementalEncoderFault::DropSequence { sequence }
+            }
+            (0, PerWheelObservedFault::FrontLeftEncoderStuck { sequence }) => {
+                IncrementalEncoderFault::StuckFromSequence { sequence }
+            }
+            _ => IncrementalEncoderFault::None,
         };
         spawn_encoder_channel(
             world,
@@ -790,14 +887,30 @@ fn spawn_sensor_rig(
             ),
         },
         ImuFeedbackSensor {
-            spec: realistic_imu_spec(contract.calibrated_gyro_z_bias_rad_s),
+            spec: realistic_imu_spec(
+                contract.calibrated_gyro_z_bias_rad_s,
+                match contract.fault {
+                    PerWheelObservedFault::ImuSaturate { gyro_range_rad_s } => {
+                        Some(gyro_range_rad_s)
+                    }
+                    _ => None,
+                },
+            ),
             update_rate_hz: 100.0,
             sample_period_ticks: Some(contract.sensor_period_ticks),
             phase_offset_ticks: 0,
             latency_ticks: contract.sensor_latency_ticks,
             enabled: true,
             stream_id: IMU_STREAM,
-            fault: ImuFeedbackFault::None,
+            fault: match contract.fault {
+                PerWheelObservedFault::ImuDrop { sequence } => {
+                    ImuFeedbackFault::DropSequence { sequence }
+                }
+                PerWheelObservedFault::ImuStuck { sequence } => {
+                    ImuFeedbackFault::StuckFromSequence { sequence }
+                }
+                _ => ImuFeedbackFault::None,
+            },
         },
         ImuFeedbackSensorState::default(),
     ));
@@ -829,7 +942,15 @@ fn spawn_sensor_rig(
                 latency_ticks: contract.sensor_latency_ticks,
                 enabled: true,
                 stream_id: MOTOR_STREAMS[index],
-                fault: MotorElectricalFeedbackFault::None,
+                fault: match (index, contract.fault) {
+                    (0, PerWheelObservedFault::FrontLeftMotorDrop { sequence }) => {
+                        MotorElectricalFeedbackFault::DropSequence { sequence }
+                    }
+                    (0, PerWheelObservedFault::FrontLeftMotorStuck { sequence }) => {
+                        MotorElectricalFeedbackFault::StuckFromSequence { sequence }
+                    }
+                    _ => MotorElectricalFeedbackFault::None,
+                },
             },
             MotorElectricalFeedbackSensorState::default(),
         ));
@@ -886,8 +1007,23 @@ fn spawn_encoder_channel(
                 counts_per_revolution: contract.encoder_counts_per_revolution,
                 direction: 1,
                 zero_offset_rad: 0.0,
-                counter_bits: contract.encoder_counter_bits,
-                overflow_behavior: IncrementalEncoderOverflowBehavior::Wrap,
+                counter_bits: match contract.fault {
+                    PerWheelObservedFault::FrontLeftEncoderSaturate { counter_bits }
+                        if name == "front_left" =>
+                    {
+                        counter_bits
+                    }
+                    _ => contract.encoder_counter_bits,
+                },
+                overflow_behavior: if matches!(
+                    contract.fault,
+                    PerWheelObservedFault::FrontLeftEncoderSaturate { .. }
+                ) && name == "front_left"
+                {
+                    IncrementalEncoderOverflowBehavior::Saturate
+                } else {
+                    IncrementalEncoderOverflowBehavior::Wrap
+                },
                 velocity_window_samples: 2,
                 index_phase_rad: Some(0.0),
             },
@@ -904,7 +1040,7 @@ fn spawn_encoder_channel(
     joint
 }
 
-fn realistic_imu_spec(calibrated_bias_rad_s: f64) -> ImuSpec {
+fn realistic_imu_spec(calibrated_bias_rad_s: f64, gyro_range_rad_s: Option<f64>) -> ImuSpec {
     ImuSpec {
         seed: 29,
         gyro: ImuAxisErrors {
@@ -925,7 +1061,7 @@ fn realistic_imu_spec(calibrated_bias_rad_s: f64) -> ImuSpec {
             scale_factor_error: Vec3::new(0.000_3, -0.000_2, 0.000_1),
             misalignment_rad: Vec3::new(0.000_1, 0.000_1, -0.000_1),
         },
-        gyro_range_rad_s: 10.0,
+        gyro_range_rad_s: gyro_range_rad_s.unwrap_or(10.0),
         accel_range_m_s2: 40.0,
         gyro_resolution_rad_s: 0.000_1,
         accel_resolution_m_s2: 0.001,
@@ -1003,6 +1139,23 @@ fn health_code(health: WheelImuOdometryHealth) -> u8 {
         WheelImuOdometryHealth::InputSequenceGap => 2,
         WheelImuOdometryHealth::ImuSaturated => 3,
         WheelImuOdometryHealth::WheelImuDisagreement => 4,
+    }
+}
+
+fn motor_status_code(status: MotorElectricalFeedbackStatus) -> u8 {
+    match status {
+        MotorElectricalFeedbackStatus::Nominal => 0,
+        MotorElectricalFeedbackStatus::Saturated => 1,
+        MotorElectricalFeedbackStatus::TemperatureUnavailable => 2,
+        MotorElectricalFeedbackStatus::StuckValue => 3,
+    }
+}
+
+fn imu_status_code(status: ImuFeedbackStatus) -> u8 {
+    match status {
+        ImuFeedbackStatus::Nominal => 0,
+        ImuFeedbackStatus::Saturated => 1,
+        ImuFeedbackStatus::StuckValue => 2,
     }
 }
 
@@ -1149,15 +1302,92 @@ mod tests {
         let trace = run_per_wheel_observed_trace_with_fault(
             RapierBackend::new(),
             RapierBackend::manifest(),
-            Some(30),
+            PerWheelObservedFault::FrontLeftEncoderDrop { sequence: 30 },
         )
         .unwrap();
-        assert_eq!(trace.contract.front_left_encoder_drop_sequence, Some(30));
+        assert_eq!(
+            trace.contract.fault,
+            PerWheelObservedFault::FrontLeftEncoderDrop { sequence: 30 }
+        );
         assert!(trace.samples.iter().any(|sample| sample.health_code == 2));
         assert!(trace
             .samples
             .windows(2)
             .any(|pair| { pair[1].encoder_sequences[0] > pair[0].encoder_sequences[0] + 1 }));
+    }
+
+    #[test]
+    fn motor_drop_and_stuck_are_visible_without_changing_plant_truth() {
+        let dropped = run_per_wheel_observed_trace_with_fault(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            PerWheelObservedFault::FrontLeftMotorDrop { sequence: 30 },
+        )
+        .unwrap();
+        assert!(dropped
+            .samples
+            .windows(2)
+            .any(|pair| { pair[1].motor_sequences[0] > pair[0].motor_sequences[0] + 1 }));
+
+        let stuck = run_per_wheel_observed_trace_with_fault(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            PerWheelObservedFault::FrontLeftMotorStuck { sequence: 30 },
+        )
+        .unwrap();
+        assert!(stuck
+            .samples
+            .iter()
+            .any(|sample| sample.motor_status_codes[0] == 3));
+    }
+
+    #[test]
+    fn imu_drop_and_saturation_reach_estimator_health() {
+        let dropped = run_per_wheel_observed_trace_with_fault(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            PerWheelObservedFault::ImuDrop { sequence: 30 },
+        )
+        .unwrap();
+        assert!(dropped.samples.iter().any(|sample| sample.health_code == 2));
+        assert!(dropped
+            .samples
+            .windows(2)
+            .any(|pair| pair[1].imu_sequence > pair[0].imu_sequence + 1));
+
+        let saturated = run_per_wheel_observed_trace_with_fault(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            PerWheelObservedFault::ImuSaturate {
+                gyro_range_rad_s: 0.05,
+            },
+        )
+        .unwrap();
+        assert!(saturated
+            .samples
+            .iter()
+            .any(|sample| sample.imu_status_code == 1 && sample.health_code == 3));
+    }
+
+    #[test]
+    fn stuck_and_saturated_motion_inputs_fail_closed() {
+        for fault in [
+            PerWheelObservedFault::FrontLeftEncoderStuck { sequence: 30 },
+            PerWheelObservedFault::FrontLeftEncoderSaturate { counter_bits: 4 },
+            PerWheelObservedFault::ImuStuck { sequence: 30 },
+        ] {
+            let error = run_per_wheel_observed_trace_with_fault(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                fault,
+            )
+            .unwrap_err();
+            let message = error.to_string();
+            assert!(
+                message.contains("stuck") || message.contains("saturated"),
+                "fault={fault:?}, error={message}"
+            );
+        }
     }
 
     #[cfg(feature = "mujoco")]

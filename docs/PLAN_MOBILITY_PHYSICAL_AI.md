@@ -294,8 +294,9 @@ and cross-backend results.
     frontends, mounted IMU, sensor-only odometry, and estimate-only yaw-rate PI control under
     the exact same Rapier/MuJoCo TaskSpec; see
     [`MOBILITY_PER_WHEEL_SENSOR_CLOSED_LOOP_V1.md`](MOBILITY_PER_WHEEL_SENSOR_CLOSED_LOOP_V1.md).
-    A deterministic physical encoder drop propagates through side fusion into estimator health;
-    stuck/saturation and motor/IMU faults remain. M3-C remains open until those cases and
+    The same physical plant now covers recoverable encoder/motor/IMU drops, motor stuck,
+    IMU saturation, and fail-closed encoder stuck/counter saturation and IMU stuck behavior.
+    M3-C remains open until the typed failures are serialized as Failure Capsules and
     differential and Ackermann fixtures add steering, identified suspension/load transfer,
     split friction, grade, curb, roughness, and lift/recontact evidence.
 16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
