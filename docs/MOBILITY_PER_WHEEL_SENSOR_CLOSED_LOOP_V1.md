@@ -49,7 +49,7 @@ code as actor-visible slip evidence.
 | derived side encoders | 2 x 4096 CPR, signed 63-bit wrap |
 | motor feedback | 4 independent measured-current streams |
 | action | left/right motor terminal voltage, +/-24 V |
-| controller | estimate-only yaw-rate PI |
+| controller | estimate-only yaw-rate PI, 21 V/(rad/s) proportional and 18 V/rad integral |
 
 The TaskSpec exposes estimated yaw rate, wheel/IMU innovation, input age, health, four source
 sequences, four measured currents, and task target. It rejects truth- or privileged-named
@@ -66,12 +66,12 @@ E:\RNE-build\m3c-sensor\per-wheel-sensor-comparison-v1.json
 
 | metric | Rapier | MuJoCo | trace gate |
 | --- | ---: | ---: | ---: |
-| final estimated yaw rate | 0.1863 rad/s | 0.3363 rad/s | 0.15 to 0.50 rad/s |
-| final privileged yaw rate | 0.1662 rad/s | 0.3412 rad/s | 0.15 to 0.50 rad/s |
-| RMS yaw-rate estimation error | 0.0162 rad/s | 0.0093 rad/s | 0 to 0.25 rad/s |
-| RMS truth tracking error | 0.2339 rad/s | 0.1703 rad/s | 0 to 0.25 rad/s |
-| absolute integrated yaw | 0.4033 rad | 0.4687 rad | 0.3 to 3.0 rad |
-| maximum measured motor current | 18.03 A | 20.08 A | 0.5 to 25 A |
+| final estimated yaw rate | 0.4286 rad/s | 0.4111 rad/s | 0.15 to 0.50 rad/s |
+| final privileged yaw rate | 0.4136 rad/s | 0.3910 rad/s | 0.15 to 0.50 rad/s |
+| RMS yaw-rate estimation error | 0.0183 rad/s | 0.0192 rad/s | 0 to 0.25 rad/s |
+| RMS truth tracking error | 0.2430 rad/s | 0.2466 rad/s | 0 to 0.25 rad/s |
+| absolute integrated yaw | 0.4106 rad | 0.4241 rad | 0.3 to 3.0 rad |
+| maximum measured motor current | 18.32 A | 17.90 A | 0.5 to 25 A |
 
 Cross-backend gaps pass 0.20 rad/s final truth yaw rate, 0.50 rad integrated yaw,
 0.15 rad/s RMS estimation error, and 0.15 rad/s RMS tracking error. Rapier replay is

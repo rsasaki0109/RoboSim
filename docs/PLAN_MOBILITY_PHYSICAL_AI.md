@@ -1,7 +1,8 @@
 # Mobility Physical AI Foundation plan
 
-Status: active, M3-B implemented; M3-C sensor-observed and per-wheel skid subgates
-implemented, Ackermann/suspension/sensor integration and later milestones remain
+Status: active, M3-B implemented; M3-C sensor-observed, per-wheel skid, and explicit
+differential-drive trailing-caster subgates implemented; Ackermann/suspension integration
+and later milestones remain
 
 Implemented M0 evidence:
 
@@ -298,9 +299,15 @@ and cross-backend results.
     IMU saturation, and fail-closed encoder stuck/counter saturation and IMU stuck behavior.
     Every fatal input now emits a deterministic, self-verifying JSON Failure Capsule with the
     frozen backend/TaskSpec/fault contract, rejection timing, all physical sequence/status
-    evidence, stable failure code, and mutation-detecting digest. M3-C remains open until
-    differential and Ackermann fixtures add steering, identified suspension/load transfer,
-    split friction, grade, curb, roughness, and lift/recontact evidence.
+    evidence, stable failure code, and mutation-detecting digest. The third additive
+    subgate is an explicit two-drive-wheel plus passive trailing-caster multibody fixture.
+    It proves caster trail, swivel/roll inertia and damping, three-point load transfer,
+    arc/straighten/reverse response, normal-only frictionless MuJoCo contact, and
+    Rapier/MuJoCo agreement; see
+    [`MOBILITY_DIFFERENTIAL_CASTER_V1.md`](MOBILITY_DIFFERENTIAL_CASTER_V1.md). M3-C remains
+    open until Ackermann fixtures add steering, identified suspension/load transfer, split
+    friction, grade, curb, roughness, and lift/recontact evidence, and until the explicit
+    caster plant is joined to the sensor-only loop.
 16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.
 

@@ -141,10 +141,18 @@ pub fn resolve_wheel_station_frame(
     {
         return Err(MobilityPlantEvaluationError::InvalidInput);
     }
+    let rotation_length_squared = body_transform.rotation.length_squared();
+    if !rotation_length_squared.is_finite() || rotation_length_squared <= 1.0e-18 {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    // Physics backends commonly store unit quaternions in f32. Normalize after
+    // promotion to f64 so strict tire/contact axis validation does not interpret
+    // harmless solver roundoff as a non-unit wheel frame.
+    let body_rotation = body_transform.rotation.normalize();
     let steering = Quat::from_axis_angle(spec.steering_axis_body, steering_rad);
-    let center_offset_world_m = body_transform.rotation * spec.center_body_m;
-    let forward_world = body_transform.rotation * (steering * spec.zero_steer_forward_body);
-    let lateral_world = body_transform.rotation * (steering * spec.zero_steer_axle_body);
+    let center_offset_world_m = body_rotation * spec.center_body_m;
+    let forward_world = body_rotation * (steering * spec.zero_steer_forward_body);
+    let lateral_world = body_rotation * (steering * spec.zero_steer_axle_body);
     let carrier_velocity_world_m_s = body_linear_velocity_world_m_s
         + body_angular_velocity_world_rad_s.cross(center_offset_world_m);
     Ok(WheelStationFrame {
@@ -294,9 +302,19 @@ pub fn evaluate_longitudinal_drive_path(
         state.wheel_velocity_rad_s,
     )?;
     let wheel_circumferential_speed_m_s = state.wheel_velocity_rad_s * spec.wheel.radius_m;
+    let (contact_forward_world, contact_lateral_world) =
+        input
+            .carrier_patch
+            .map_or(Ok((input.forward_world, input.lateral_world)), |patch| {
+                contact_tangent_axes(
+                    input.forward_world,
+                    input.lateral_world,
+                    patch.normal_road_to_wheel_world,
+                )
+            })?;
     let tire_patch = input.carrier_patch.map(|mut patch| {
         patch.wheel_relative_to_road_world_m_s -=
-            input.forward_world * wheel_circumferential_speed_m_s;
+            contact_forward_world * wheel_circumferential_speed_m_s;
         patch
     });
     let tire = evaluate_combined_slip_tire(
@@ -304,8 +322,8 @@ pub fn evaluate_longitudinal_drive_path(
         state.tire_state,
         CombinedSlipTireInput {
             patch: tire_patch,
-            forward_world: input.forward_world,
-            lateral_world: input.lateral_world,
+            forward_world: contact_forward_world,
+            lateral_world: contact_lateral_world,
             wheel_circumferential_speed_m_s,
             road_friction_scale: spec.road_friction_scale,
         },
@@ -342,7 +360,7 @@ pub fn evaluate_longitudinal_drive_path(
     }
     let tire_wrench = tire_patch
         .map(|patch| {
-            combined_slip_tire_wrench(patch, tire, input.forward_world, input.lateral_world)
+            combined_slip_tire_wrench(patch, tire, contact_forward_world, contact_lateral_world)
         })
         .transpose()?;
 
@@ -471,14 +489,19 @@ pub fn evaluate_combined_slip_tire(
         return Err(MobilityPlantEvaluationError::InvalidInput);
     }
 
+    let (contact_forward_world, contact_lateral_world) = contact_tangent_axes(
+        input.forward_world,
+        input.lateral_world,
+        patch.normal_road_to_wheel_world,
+    )?;
     let transport_speed_m_s =
         input.wheel_circumferential_speed_m_s.abs() + spec.low_speed_regularization_m_s;
     let longitudinal_surface_speed_m_s = patch
         .wheel_relative_to_road_world_m_s
-        .dot(input.forward_world);
+        .dot(contact_forward_world);
     let lateral_surface_speed_m_s = patch
         .wheel_relative_to_road_world_m_s
-        .dot(input.lateral_world);
+        .dot(contact_lateral_world);
     let target_longitudinal_slip_ratio = -longitudinal_surface_speed_m_s / transport_speed_m_s;
     let target_lateral_slip_tangent = -lateral_surface_speed_m_s / transport_speed_m_s;
     let next_longitudinal_slip = relax_slip(
@@ -652,17 +675,51 @@ pub fn combined_slip_tire_wrench(
     {
         return Err(MobilityPlantEvaluationError::InvalidInput);
     }
+    let (contact_forward_world, contact_lateral_world) = contact_tangent_axes(
+        forward_world,
+        lateral_world,
+        patch.normal_road_to_wheel_world,
+    )?;
     let wrench = ExternalBodyWrench {
         entity: patch.wheel_entity,
         point_world_m: patch.point_world_m,
-        force_world_n: forward_world * evaluation.longitudinal_force_n
-            + lateral_world * evaluation.lateral_force_n,
+        force_world_n: contact_forward_world * evaluation.longitudinal_force_n
+            + contact_lateral_world * evaluation.lateral_force_n,
         torque_world_nm: Vec3::ZERO,
     };
     if !wrench.is_finite() {
         return Err(MobilityPlantEvaluationError::InvalidInput);
     }
     Ok(wrench)
+}
+
+fn contact_tangent_axes(
+    forward_world: Vec3,
+    lateral_world: Vec3,
+    normal_road_to_wheel_world: Vec3,
+) -> Result<(Vec3, Vec3), MobilityPlantEvaluationError> {
+    if !forward_world.is_finite()
+        || !lateral_world.is_finite()
+        || !normal_road_to_wheel_world.is_finite()
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let normal_length_squared = normal_road_to_wheel_world.length_squared();
+    if normal_length_squared <= 1.0e-18 {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let normal = normal_road_to_wheel_world / normal_length_squared.sqrt();
+    let projected_forward = forward_world - normal * forward_world.dot(normal);
+    let projected_forward_length_squared = projected_forward.length_squared();
+    if projected_forward_length_squared <= 1.0e-18 {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let contact_forward = projected_forward / projected_forward_length_squared.sqrt();
+    let mut contact_lateral = contact_forward.cross(normal);
+    if contact_lateral.dot(lateral_world) < 0.0 {
+        contact_lateral = -contact_lateral;
+    }
+    Ok((contact_forward, contact_lateral))
 }
 
 fn relax_slip(current: f64, target: f64, length_m: f64, speed_m_s: f64, dt_s: f64) -> f64 {
@@ -1703,6 +1760,26 @@ mod tests {
         assert_eq!(error, MobilityPlantEvaluationError::InvalidInput);
     }
 
+    #[test]
+    fn wheel_station_frame_normalizes_backend_quaternion_roundoff() {
+        let transform = Transform3::from_translation_rotation(
+            Vec3::ZERO,
+            Quat::from_xyzw(0.0, 0.001, 0.0, 1.0),
+        );
+        let frame = resolve_wheel_station_frame(
+            WheelStationSpec::default(),
+            0.0,
+            transform,
+            Vec3::ZERO,
+            Vec3::ZERO,
+        )
+        .unwrap();
+
+        assert!((frame.forward_world.length() - 1.0).abs() < 1.0e-12);
+        assert!((frame.lateral_world.length() - 1.0).abs() < 1.0e-12);
+        assert!(frame.forward_world.dot(frame.lateral_world).abs() < 1.0e-12);
+    }
+
     fn setup_robot_with_joint() -> (World, Entity, Entity, Entity) {
         let mut world = World::new();
         let robot_entity = spawn_named(&mut world, "robot");
@@ -2607,6 +2684,27 @@ mod tests {
         assert_eq!(wrench.entity, wheel);
         assert_eq!(wrench.point_world_m, patch.point_world_m);
         assert_eq!(wrench.force_world_n, Vec3::new(20.0, 0.0, -5.0));
+    }
+
+    #[test]
+    fn tire_wrench_is_tangent_to_tilted_contact_plane() {
+        let mut world = World::new();
+        let wheel = world.spawn_empty().id();
+        let normal = Vec3::new(0.2, 0.97, 0.1).normalize();
+        let patch = WheelContactPatch {
+            normal_road_to_wheel_world: normal,
+            ..test_patch(wheel, Vec3::ZERO, 100.0)
+        };
+        let evaluation = CombinedSlipTireEvaluation {
+            longitudinal_force_n: 20.0,
+            lateral_force_n: -5.0,
+            ..zero_tire_evaluation()
+        };
+
+        let wrench = combined_slip_tire_wrench(patch, evaluation, Vec3::X, Vec3::Z).unwrap();
+
+        assert!(wrench.force_world_n.dot(normal).abs() < 1.0e-12);
+        assert!((wrench.force_world_n.length() - 20.0_f64.hypot(5.0)).abs() < 1.0e-12);
     }
 
     fn longitudinal_plant_spec(road_friction_scale: f64) -> LongitudinalMobilityPlantSpec {

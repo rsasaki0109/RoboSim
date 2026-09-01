@@ -15,8 +15,8 @@ pub use components::{
     AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
     DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
     JointLimits, Link, LongitudinalDrivePathState, LongitudinalMobilityPlantSpec,
-    LongitudinalMobilityPlantState, MultirotorFlight, Robot, RobotId, TransmissionSpec,
-    VehicleDynamics, WheelAssemblySpec, WheelStationSpec, WheelSteeringState,
+    LongitudinalMobilityPlantState, MultirotorFlight, PassiveCasterSpec, Robot, RobotId,
+    TransmissionSpec, VehicleDynamics, WheelAssemblySpec, WheelStationSpec, WheelSteeringState,
 };
 pub use diff_drive::{
     spawn_diff_drive_robot, DiffDriveComponent, DiffDriveConfig, DiffDriveDriveMode,

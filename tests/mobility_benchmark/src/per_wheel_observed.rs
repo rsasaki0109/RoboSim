@@ -161,7 +161,7 @@ impl PerWheelObservedContract {
             sensor_period_ticks: SENSOR_PERIOD_TICKS,
             sensor_latency_ticks: SENSOR_LATENCY_TICKS,
             calibrated_gyro_z_bias_rad_s: 0.001,
-            controller_kp_v_s_rad: 20.0,
+            controller_kp_v_s_rad: 21.0,
             controller_ki_v_rad: 18.0,
             fault: PerWheelObservedFault::None,
         }

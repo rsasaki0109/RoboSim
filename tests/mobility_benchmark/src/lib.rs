@@ -1,6 +1,7 @@
 //! Stable Mobility Physical AI longitudinal benchmark producer.
 
 pub mod backend;
+pub mod diff_caster;
 pub mod observed;
 pub mod per_wheel;
 pub mod per_wheel_observed;

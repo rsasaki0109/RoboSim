@@ -72,7 +72,7 @@ The quantitative gates and exact regeneration commands are in
 | Area | What is included | Start here |
 | --- | --- | --- |
 | City simulation | Official PLATEAU import, traffic routing/signals, dynamic vehicles, LiDAR, RGB-D camera, and OSM HUD | [PLATEAU import](docs/PLATEAU_IMPORT.md), examples 46–47 |
-| Vehicle dynamics | Dynamic bicycle model, tire saturation, controller metrics, sensor latency, and deterministic multi-seed evaluation | [Vehicle dynamics](docs/VEHICLE_DYNAMICS.md), examples 49–51 |
+| Vehicle dynamics | Dynamic bicycle model, tire saturation, explicit differential-drive caster dynamics, cross-backend contact/load evidence, sensor latency, and deterministic evaluation | [Vehicle dynamics](docs/VEHICLE_DYNAMICS.md), [caster benchmark](docs/MOBILITY_DIFFERENTIAL_CASTER_V1.md), examples 49–51 |
 | Quadruped locomotion | Official Unitree Go2, torque control, disturbances, steering, velocity/terrain policy, and replay tests | [GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md), examples 52–65 |
 | Humanoid locomotion | Official Unitree G1 23-DoF articulation, balance, learned stride, typed commands, bounded heading-yaw, and CEM evaluation | [G1_LOCOMOTION.md](docs/G1_LOCOMOTION.md), examples 39, 63, 67, 68 |
 | Manipulation | Authored PBR mobile manipulator, real-capture indoor 3DGS hybrid rendering, friction grasp/release episodes, articulated Dex3 hands, and task markers | [Showcase contract](docs/README_SHOWCASE.md), examples 32, 40–42, 89 |

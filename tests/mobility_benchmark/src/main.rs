@@ -1,5 +1,6 @@
 use anyhow::{bail, ensure, Context, Result};
 use rne_mobility_benchmark::backend::run_backend_mobility_trace;
+use rne_mobility_benchmark::diff_caster::run_differential_caster_trace;
 use rne_mobility_benchmark::observed::run_sensor_observed_trace;
 use rne_mobility_benchmark::per_wheel::run_per_wheel_skid_trace;
 use rne_mobility_benchmark::per_wheel_observed::{
@@ -95,6 +96,17 @@ fn main() -> Result<()> {
         "skid-compare" => run_skid_comparison()?,
         "skid-sensor-mujoco" => run_skid_sensor_mujoco()?,
         "skid-sensor-compare" => run_skid_sensor_comparison()?,
+        "diff-caster-rapier" => {
+            let trace =
+                run_differential_caster_trace(RapierBackend::new(), RapierBackend::manifest())?;
+            ensure!(trace.passed, "Rapier differential-caster verdict failed");
+            (
+                serde_json::to_string_pretty(&trace)? + "\n",
+                "diff-caster-rapier",
+            )
+        }
+        "diff-caster-mujoco" => run_diff_caster_mujoco()?,
+        "diff-caster-compare" => run_diff_caster_comparison()?,
         other => bail!("unknown backend: {other}"),
     };
     ensure!(
@@ -116,6 +128,54 @@ fn main() -> Result<()> {
         print!("{json}");
     }
     Ok(())
+}
+
+#[cfg(feature = "mujoco")]
+fn run_diff_caster_mujoco() -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::diff_caster::DIFF_CASTER_FIXED_DELTA_TICKS;
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let trace = run_differential_caster_trace(
+        MuJoCoBackend::new(SimDuration::from_ticks(DIFF_CASTER_FIXED_DELTA_TICKS))?,
+        MuJoCoBackend::manifest(),
+    )?;
+    ensure!(trace.passed, "MuJoCo differential-caster verdict failed");
+    Ok((
+        serde_json::to_string_pretty(&trace)? + "\n",
+        "diff-caster-mujoco",
+    ))
+}
+
+#[cfg(feature = "mujoco")]
+fn run_diff_caster_comparison() -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::diff_caster::{
+        compare_differential_caster_traces, DIFF_CASTER_FIXED_DELTA_TICKS,
+    };
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let rapier = run_differential_caster_trace(RapierBackend::new(), RapierBackend::manifest())?;
+    let mujoco = run_differential_caster_trace(
+        MuJoCoBackend::new(SimDuration::from_ticks(DIFF_CASTER_FIXED_DELTA_TICKS))?,
+        MuJoCoBackend::manifest(),
+    )?;
+    let comparison = compare_differential_caster_traces(rapier, mujoco)?;
+    ensure!(comparison.passed, "differential-caster comparison failed");
+    Ok((
+        serde_json::to_string_pretty(&comparison)? + "\n",
+        "diff-caster-rapier-vs-mujoco",
+    ))
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_diff_caster_mujoco() -> Result<(String, &'static str)> {
+    bail!("differential-caster mujoco requires --features mujoco")
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_diff_caster_comparison() -> Result<(String, &'static str)> {
+    bail!("differential-caster comparison requires --features mujoco")
 }
 
 fn parse_fatal_sensor_fault(value: &str) -> Result<PerWheelObservedFault> {

@@ -112,3 +112,8 @@ support with four named rigid wheel stations and independent drive/tire state, t
 pivot yaw, lateral scrub, per-wheel raw/conditioned load, and contact participation across
 Rapier and MuJoCo. Ackermann steering, identified compliant suspension, and the combined
 sensor-only per-wheel loop remain open.
+
+The explicit differential-drive support subgate is documented in
+[`MOBILITY_DIFFERENTIAL_CASTER_V1.md`](MOBILITY_DIFFERENTIAL_CASTER_V1.md). It adds a
+multibody trailing caster with identified trail, mass, inertia, damping, swivel and rolling
+coordinates, plus three-point load-transfer evidence across the same two backends.

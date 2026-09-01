@@ -420,6 +420,82 @@ impl WheelStationSpec {
     }
 }
 
+/// Backend-neutral geometry and inertial contract for one passive trailing caster.
+///
+/// The caster is represented by a vertical swivel bracket followed by a free rolling
+/// wheel. Physics backends own both revolute coordinates; the tire force element owns
+/// only transient slip. Keeping the swivel and rolling bodies explicit preserves the
+/// posture-dependent inertia and bore torque that a point support cannot reproduce.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PassiveCasterSpec {
+    /// Swivel-axis location in the chassis body frame, in meters.
+    pub mount_body_m: Vec3,
+    /// Positive distance from swivel axis to wheel axle behind it, in meters.
+    pub trail_m: f64,
+    /// Wheel rolling radius in meters.
+    pub wheel_radius_m: f64,
+    /// Swivel bracket mass in kilograms.
+    pub bracket_mass_kg: f64,
+    /// Wheel mass in kilograms.
+    pub wheel_mass_kg: f64,
+    /// Bracket inertia about the vertical swivel axis, in kilogram-square meters.
+    pub swivel_inertia_kg_m2: f64,
+    /// Wheel inertia about its rolling axle, in kilogram-square meters.
+    pub wheel_axle_inertia_kg_m2: f64,
+    /// Viscous damping about the swivel axis, in newton-meter-seconds per radian.
+    pub swivel_damping_nm_s_per_rad: f64,
+    /// Viscous damping about the rolling axle, in newton-meter-seconds per radian.
+    pub rolling_damping_nm_s_per_rad: f64,
+    /// Initial swivel coordinate relative to chassis forward, in radians.
+    pub initial_swivel_rad: f64,
+    /// Identifiable transient combined-slip tire profile for the caster contact.
+    pub tire: CombinedSlipTireSpec,
+}
+
+impl Default for PassiveCasterSpec {
+    fn default() -> Self {
+        Self {
+            mount_body_m: Vec3::new(0.35, -0.25, 0.0),
+            trail_m: 0.08,
+            wheel_radius_m: 0.12,
+            bracket_mass_kg: 2.0,
+            wheel_mass_kg: 3.0,
+            swivel_inertia_kg_m2: 0.02,
+            wheel_axle_inertia_kg_m2: 0.015,
+            swivel_damping_nm_s_per_rad: 0.05,
+            rolling_damping_nm_s_per_rad: 0.01,
+            initial_swivel_rad: 0.0,
+            tire: CombinedSlipTireSpec::default(),
+        }
+    }
+}
+
+impl PassiveCasterSpec {
+    /// Returns whether geometry, inertias, damping, and tire parameters are usable.
+    pub fn is_valid(self) -> bool {
+        self.mount_body_m.is_finite()
+            && self.trail_m.is_finite()
+            && self.trail_m > 0.0
+            && self.wheel_radius_m.is_finite()
+            && self.wheel_radius_m > 0.0
+            && self.bracket_mass_kg.is_finite()
+            && self.bracket_mass_kg > 0.0
+            && self.wheel_mass_kg.is_finite()
+            && self.wheel_mass_kg > 0.0
+            && self.swivel_inertia_kg_m2.is_finite()
+            && self.swivel_inertia_kg_m2 > 0.0
+            && self.wheel_axle_inertia_kg_m2.is_finite()
+            && self.wheel_axle_inertia_kg_m2 > 0.0
+            && self.swivel_damping_nm_s_per_rad.is_finite()
+            && self.swivel_damping_nm_s_per_rad >= 0.0
+            && self.rolling_damping_nm_s_per_rad.is_finite()
+            && self.rolling_damping_nm_s_per_rad >= 0.0
+            && self.initial_swivel_rad.is_finite()
+            && self.tire.is_valid()
+    }
+}
+
 /// Completed steering coordinate for one wheel station.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

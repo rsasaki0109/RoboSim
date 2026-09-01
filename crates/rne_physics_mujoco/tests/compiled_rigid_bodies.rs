@@ -4,9 +4,10 @@ use rne_core::SimDuration;
 use rne_ecs::{spawn_named, Entity, Parent, World};
 use rne_math::{Hertz, Quat, Vec3};
 use rne_physics::{
-    Collider, ExternalBodyWrench, FixedJointDesc, JointActuation, JointEffortMeasurement,
-    JointMotor, JointPassiveDynamics, JointState, PhysicsBackend, PhysicsError, PhysicsWorldDesc,
-    PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
+    Collider, CollisionGroups, ExternalBodyWrench, FixedJointDesc, JointActuation,
+    JointEffortMeasurement, JointMotor, JointPassiveDynamics, JointState, PhysicsBackend,
+    PhysicsError, PhysicsWorldDesc, PrismaticJointDesc, RevoluteJointDesc, RigidBody,
+    RigidBodyInertia, RigidBodyType,
 };
 use rne_physics_mujoco::{MuJoCoBackend, MuJoCoError};
 use rne_world::{world_transform_of, Transform3};
@@ -213,6 +214,35 @@ fn external_wrench_preserves_lever_arm_and_clears_after_one_step() {
     let unforced = *world.get::<RigidBody>(body).unwrap();
     assert!((unforced.linear_velocity_m_s.x - forced.linear_velocity_m_s.x).abs() < 1.0e-7);
     assert!((unforced.angular_velocity_rad_s.z - forced.angular_velocity_rad_s.z).abs() < 1.0e-7);
+}
+
+#[test]
+fn collision_groups_disable_overlapping_body_contacts() {
+    let dt = SimDuration::from_hertz(Hertz::new(1_000.0));
+    let mut backend = MuJoCoBackend::new(dt).expect("MuJoCo runtime");
+    let physics_world = backend
+        .create_world(PhysicsWorldDesc {
+            gravity_m_s2: Vec3::ZERO,
+            solver_iterations: 16,
+        })
+        .expect("physics world");
+    let mut world = World::new();
+    let groups = CollisionGroups::without_self_collision(1);
+    for name in ["overlap a", "overlap b"] {
+        let entity = spawn_body(
+            &mut world,
+            name,
+            RigidBodyType::Dynamic,
+            Collider::sphere(0.5),
+            Vec3::ZERO,
+        );
+        world.entity_mut(entity).insert(groups);
+    }
+
+    backend.sync_from_ecs(&mut world, physics_world).unwrap();
+    backend.step(physics_world, dt).unwrap();
+
+    assert!(backend.contact_points(physics_world).unwrap().is_empty());
 }
 
 #[test]
