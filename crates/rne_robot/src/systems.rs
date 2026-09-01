@@ -6,7 +6,7 @@ use crate::components::{
     AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
     DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
     LongitudinalDrivePathState, LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState,
-    MultirotorFlight, TransmissionSpec, VehicleDynamics, WheelAssemblySpec,
+    MultirotorFlight, TransmissionSpec, VehicleDynamics, WheelAssemblySpec, WheelStationSpec,
 };
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
@@ -103,6 +103,56 @@ pub struct WheelContactPatch {
     pub wheel_relative_to_road_world_m_s: Vec3,
     /// Total step-average normal load carried by the patch, in newtons.
     pub normal_load_n: f64,
+}
+
+/// Completed world-frame geometry and rigid-carrier velocity for one wheel station.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WheelStationFrame {
+    /// Wheel-center position in world coordinates, in meters.
+    pub center_world_m: Vec3,
+    /// Positive free-rolling unit axis in world coordinates.
+    pub forward_world: Vec3,
+    /// Positive axle/lateral unit axis in world coordinates.
+    pub lateral_world: Vec3,
+    /// Carrier velocity at the wheel center before wheel spin, in meters per second.
+    pub carrier_velocity_world_m_s: Vec3,
+}
+
+/// Resolves one physical wheel station from completed rigid-body state.
+///
+/// Steering rotates the rolling and axle axes about the declared body-frame steering axis.
+/// The carrier velocity includes the body's angular contribution at the station lever arm;
+/// wheel circumference speed is intentionally excluded and is added exactly once by the
+/// tire/drive-path evaluator.
+pub fn resolve_wheel_station_frame(
+    spec: WheelStationSpec,
+    steering_rad: f64,
+    body_transform: Transform3,
+    body_linear_velocity_world_m_s: Vec3,
+    body_angular_velocity_world_rad_s: Vec3,
+) -> Result<WheelStationFrame, MobilityPlantEvaluationError> {
+    if !spec.is_valid()
+        || !steering_rad.is_finite()
+        || steering_rad.abs() > spec.maximum_steering_rad
+        || !body_transform.translation.is_finite()
+        || !body_transform.rotation.is_finite()
+        || !body_linear_velocity_world_m_s.is_finite()
+        || !body_angular_velocity_world_rad_s.is_finite()
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let steering = Quat::from_axis_angle(spec.steering_axis_body, steering_rad);
+    let center_offset_world_m = body_transform.rotation * spec.center_body_m;
+    let forward_world = body_transform.rotation * (steering * spec.zero_steer_forward_body);
+    let lateral_world = body_transform.rotation * (steering * spec.zero_steer_axle_body);
+    let carrier_velocity_world_m_s = body_linear_velocity_world_m_s
+        + body_angular_velocity_world_rad_s.cross(center_offset_world_m);
+    Ok(WheelStationFrame {
+        center_world_m: body_transform.translation + center_offset_world_m,
+        forward_world,
+        lateral_world,
+        carrier_velocity_world_m_s,
+    })
 }
 
 /// Completed force and state from one transient combined-slip tire step.
@@ -261,17 +311,25 @@ pub fn evaluate_longitudinal_drive_path(
         },
         dt_s,
     )?;
-    let normal_load_n = tire_patch.map_or(0.0, |patch| patch.normal_load_n);
-    let rolling_resistance_torque_nm =
-        wheel_rolling_resistance_torque_nm(spec.wheel, normal_load_n, state.wheel_velocity_rad_s)?;
     let total_wheel_inertia_kg_m2 =
         spec.wheel.inertia_kg_m2 + transmission.reflected_rotor_inertia_kg_m2;
     if total_wheel_inertia_kg_m2 <= 0.0 || !total_wheel_inertia_kg_m2.is_finite() {
         return Err(MobilityPlantEvaluationError::InvalidSpec);
     }
-    let wheel_acceleration_rad_s2 = (transmission.wheel_torque_nm + rolling_resistance_torque_nm
-        - tire.longitudinal_force_n * spec.wheel.radius_m)
-        / total_wheel_inertia_kg_m2;
+    let torque_before_rolling_nm =
+        transmission.wheel_torque_nm - tire.longitudinal_force_n * spec.wheel.radius_m;
+    let wheel_velocity_before_rolling_rad_s =
+        state.wheel_velocity_rad_s + torque_before_rolling_nm / total_wheel_inertia_kg_m2 * dt_s;
+    let normal_load_n = tire_patch.map_or(0.0, |patch| patch.normal_load_n);
+    let rolling_resistance_torque_nm = bounded_rolling_resistance_torque_nm(
+        spec.wheel,
+        normal_load_n,
+        wheel_velocity_before_rolling_rad_s,
+        total_wheel_inertia_kg_m2,
+        dt_s,
+    )?;
+    let wheel_acceleration_rad_s2 =
+        (torque_before_rolling_nm + rolling_resistance_torque_nm) / total_wheel_inertia_kg_m2;
     let wheel_velocity_rad_s = state.wheel_velocity_rad_s + wheel_acceleration_rad_s2 * dt_s;
     let next_state = LongitudinalDrivePathState {
         wheel_position_rad: state.wheel_position_rad + wheel_velocity_rad_s * dt_s,
@@ -754,6 +812,31 @@ pub fn wheel_rolling_resistance_torque_nm(
             * normal_load_n
             * spec.radius_m
     })
+}
+
+/// Bounds Coulomb rolling resistance so one explicit step can stop, but not reverse, a wheel.
+fn bounded_rolling_resistance_torque_nm(
+    spec: WheelAssemblySpec,
+    normal_load_n: f64,
+    wheel_velocity_before_rolling_rad_s: f64,
+    total_wheel_inertia_kg_m2: f64,
+    dt_s: f64,
+) -> Result<f64, MobilityPlantEvaluationError> {
+    if !total_wheel_inertia_kg_m2.is_finite()
+        || total_wheel_inertia_kg_m2 <= 0.0
+        || !dt_s.is_finite()
+        || dt_s <= 0.0
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let unconstrained = wheel_rolling_resistance_torque_nm(
+        spec,
+        normal_load_n,
+        wheel_velocity_before_rolling_rad_s,
+    )?;
+    let stopping_torque_nm =
+        wheel_velocity_before_rolling_rad_s.abs() * total_wheel_inertia_kg_m2 / dt_s;
+    Ok(unconstrained.signum() * unconstrained.abs().min(stopping_torque_nm))
 }
 
 /// Result of applying one actuator command.
@@ -1581,6 +1664,45 @@ mod tests {
     use rne_ecs::spawn_named;
     use rne_math::Seconds;
 
+    #[test]
+    fn wheel_station_frame_includes_steering_and_rigid_lever_velocity() {
+        let spec = WheelStationSpec {
+            center_body_m: Vec3::new(1.0, -0.2, 0.5),
+            maximum_steering_rad: std::f64::consts::FRAC_PI_4,
+            ..WheelStationSpec::default()
+        };
+        let frame = resolve_wheel_station_frame(
+            spec,
+            std::f64::consts::FRAC_PI_6,
+            Transform3::from_translation_rotation(Vec3::new(2.0, 1.0, -3.0), Quat::IDENTITY),
+            Vec3::new(4.0, 0.0, 1.0),
+            Vec3::new(0.0, 2.0, 0.0),
+        )
+        .unwrap();
+
+        assert!((frame.center_world_m - Vec3::new(3.0, 0.8, -2.5)).length() < 1.0e-12);
+        assert!(
+            (frame.forward_world - Vec3::new(3.0_f64.sqrt() / 2.0, 0.0, -0.5)).length() < 1.0e-12
+        );
+        assert!(
+            (frame.lateral_world - Vec3::new(0.5, 0.0, 3.0_f64.sqrt() / 2.0)).length() < 1.0e-12
+        );
+        assert!((frame.carrier_velocity_world_m_s - Vec3::new(5.0, 0.0, -1.0)).length() < 1.0e-12);
+    }
+
+    #[test]
+    fn wheel_station_frame_rejects_steering_beyond_declared_limit() {
+        let error = resolve_wheel_station_frame(
+            WheelStationSpec::default(),
+            0.01,
+            Transform3::IDENTITY,
+            Vec3::ZERO,
+            Vec3::ZERO,
+        )
+        .unwrap_err();
+        assert_eq!(error, MobilityPlantEvaluationError::InvalidInput);
+    }
+
     fn setup_robot_with_joint() -> (World, Entity, Entity, Entity) {
         let mut world = World::new();
         let robot_entity = spawn_named(&mut world, "robot");
@@ -1737,6 +1859,25 @@ mod tests {
         let reverse = wheel_rolling_resistance_torque_nm(spec, 100.0, -2.0).unwrap();
         assert!((forward + 0.15).abs() < 1.0e-12);
         assert!((reverse - 0.15).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn step_bounded_rolling_resistance_cannot_reverse_a_slow_wheel() {
+        let spec = WheelAssemblySpec::default();
+        let inertia_kg_m2 = 0.5;
+        let dt_s = 0.001;
+        let velocity_rad_s = 1.0e-6;
+        let torque_nm = bounded_rolling_resistance_torque_nm(
+            spec,
+            100_000_000.0,
+            velocity_rad_s,
+            inertia_kg_m2,
+            dt_s,
+        )
+        .unwrap();
+        assert!((torque_nm + 0.0005).abs() < 1.0e-12);
+        let completed_velocity_rad_s = velocity_rad_s + torque_nm / inertia_kg_m2 * dt_s;
+        assert!(completed_velocity_rad_s.abs() < 1.0e-15);
     }
 
     #[test]

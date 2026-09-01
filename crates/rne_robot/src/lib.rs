@@ -16,7 +16,7 @@ pub use components::{
     DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
     JointLimits, Link, LongitudinalDrivePathState, LongitudinalMobilityPlantSpec,
     LongitudinalMobilityPlantState, MultirotorFlight, Robot, RobotId, TransmissionSpec,
-    VehicleDynamics, WheelAssemblySpec,
+    VehicleDynamics, WheelAssemblySpec, WheelStationSpec, WheelSteeringState,
 };
 pub use diff_drive::{
     spawn_diff_drive_robot, DiffDriveComponent, DiffDriveConfig, DiffDriveDriveMode,
@@ -28,10 +28,10 @@ pub use systems::{
     combined_slip_tire_wrench, command_ackermann_drive, command_multirotor,
     differential_drive_kinematics, evaluate_combined_slip_tire, evaluate_dc_motor,
     evaluate_longitudinal_drive_path, evaluate_longitudinal_mobility_plant, evaluate_transmission,
-    multirotor_flight, pure_pursuit_steering, sync_all_joint_motors_from_actuators,
-    sync_joint_motors_from_actuators, vehicle_dynamics, wheel_rolling_resistance_torque_nm,
-    AckermannCommandResult, CombinedSlipTireEvaluation, CombinedSlipTireInput, CommandApplyResult,
-    DcMotorEvaluation, LongitudinalDrivePathEvaluation, LongitudinalDrivePathInput,
-    LongitudinalMobilityPlantEvaluation, MobilityPlantEvaluationError, MultirotorCommandResult,
-    TransmissionEvaluation, WheelContactPatch,
+    multirotor_flight, pure_pursuit_steering, resolve_wheel_station_frame,
+    sync_all_joint_motors_from_actuators, sync_joint_motors_from_actuators, vehicle_dynamics,
+    wheel_rolling_resistance_torque_nm, AckermannCommandResult, CombinedSlipTireEvaluation,
+    CombinedSlipTireInput, CommandApplyResult, DcMotorEvaluation, LongitudinalDrivePathEvaluation,
+    LongitudinalDrivePathInput, LongitudinalMobilityPlantEvaluation, MobilityPlantEvaluationError,
+    MultirotorCommandResult, TransmissionEvaluation, WheelContactPatch, WheelStationFrame,
 };

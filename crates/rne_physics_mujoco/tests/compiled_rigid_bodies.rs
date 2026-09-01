@@ -4,8 +4,8 @@ use rne_core::SimDuration;
 use rne_ecs::{spawn_named, Entity, Parent, World};
 use rne_math::{Hertz, Quat, Vec3};
 use rne_physics::{
-    Collider, ExternalBodyWrench, JointActuation, JointEffortMeasurement, JointMotor,
-    JointPassiveDynamics, JointState, PhysicsBackend, PhysicsError, PhysicsWorldDesc,
+    Collider, ExternalBodyWrench, FixedJointDesc, JointActuation, JointEffortMeasurement,
+    JointMotor, JointPassiveDynamics, JointState, PhysicsBackend, PhysicsError, PhysicsWorldDesc,
     PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
 };
 use rne_physics_mujoco::{MuJoCoBackend, MuJoCoError};
@@ -86,6 +86,71 @@ fn compiles_and_syncs_multiple_rigid_bodies() {
     assert_eq!(
         world.get::<Transform3>(fixed).unwrap().translation,
         Vec3::new(20.0, 0.0, 0.0)
+    );
+}
+
+#[test]
+fn fixed_child_contact_velocity_preserves_world_direction() {
+    let dt = SimDuration::from_ticks(1_000_000);
+    let mut backend = MuJoCoBackend::new(dt).expect("MuJoCo runtime");
+    let physics_world = backend
+        .create_world(PhysicsWorldDesc {
+            gravity_m_s2: Vec3::new(0.0, -9.806_65, 0.0),
+            solver_iterations: 24,
+        })
+        .expect("physics world");
+    let mut world = World::new();
+    let ground = spawn_body(
+        &mut world,
+        "ground",
+        RigidBodyType::Fixed,
+        Collider::cuboid(Vec3::new(10.0, 0.5, 10.0)),
+        Vec3::new(0.0, -0.5, 0.0),
+    );
+    let root = spawn_body(
+        &mut world,
+        "root",
+        RigidBodyType::Dynamic,
+        Collider::cuboid(Vec3::new(0.2, 0.1, 0.2)),
+        Vec3::new(0.0, 0.369, 0.0),
+    );
+    world
+        .get_mut::<RigidBody>(root)
+        .unwrap()
+        .linear_velocity_m_s = Vec3::X;
+    let wheel = spawn_body(
+        &mut world,
+        "fixed wheel",
+        RigidBodyType::Dynamic,
+        Collider::sphere(0.12),
+        Vec3::new(0.0, 0.119, 0.3),
+    );
+    world.entity_mut(wheel).insert(FixedJointDesc {
+        parent: root,
+        anchor_parent_m: Vec3::new(0.0, -0.25, 0.3),
+        anchor_child_m: Vec3::ZERO,
+        relative_rotation: Quat::IDENTITY,
+    });
+
+    backend.sync_from_ecs(&mut world, physics_world).unwrap();
+    backend.step(physics_world, dt).unwrap();
+    let sample = backend
+        .contact_points(physics_world)
+        .unwrap()
+        .iter()
+        .find(|sample| {
+            (sample.entity_a == ground && sample.entity_b == wheel)
+                || (sample.entity_a == wheel && sample.entity_b == ground)
+        })
+        .expect("fixed child wheel contact sample");
+    let wheel_relative_to_ground_m_s = if sample.entity_a == wheel {
+        -sample.velocity_b_relative_to_a_world_m_s
+    } else {
+        sample.velocity_b_relative_to_a_world_m_s
+    };
+    assert!(
+        wheel_relative_to_ground_m_s.x > 0.9,
+        "fixed child contact velocity reversed or lost: {wheel_relative_to_ground_m_s:?}"
     );
 }
 

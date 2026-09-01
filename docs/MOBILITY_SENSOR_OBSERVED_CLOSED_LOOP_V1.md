@@ -141,3 +141,8 @@ response, lateral acceleration and scrub, per-wheel load transfer, split frictio
 grade, roughness/curb interaction, lift/recontact, synchronized steering feedback,
 and sensor-only closed-loop metrics. M5 then fits motor, tire, geometry, sensor,
 and estimator parameters against training logs and scores held-out real logs.
+
+The first half of that replacement is now implemented in
+[`MOBILITY_PER_WHEEL_SKID_V1.md`](MOBILITY_PER_WHEEL_SKID_V1.md): four independent skid
+wheel paths execute against both rigid-body backends. Its plant has not yet been connected
+to this sensor-only estimator/controller, so the combined M3-C gate remains open.

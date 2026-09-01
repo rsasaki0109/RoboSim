@@ -356,6 +356,80 @@ impl WheelAssemblySpec {
     }
 }
 
+/// Backend-neutral mounting and steering geometry for one physical wheel station.
+///
+/// The body frame is `+X` forward and `+Y` up by convention, but explicit axes make
+/// imported robots and vehicles unambiguous. The station belongs on the wheel entity;
+/// motor, transmission, wheel-assembly, tire, and dynamic states remain separate
+/// components so fidelity tiers can be composed without backend handles.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WheelStationSpec {
+    /// Wheel-center position in the owning rigid body's local frame, in meters.
+    pub center_body_m: Vec3,
+    /// Zero-steer rolling direction in the owning rigid body's local frame.
+    pub zero_steer_forward_body: Vec3,
+    /// Positive axle direction at zero steer in the owning rigid body's local frame.
+    pub zero_steer_axle_body: Vec3,
+    /// Positive steering axis in the owning rigid body's local frame.
+    pub steering_axis_body: Vec3,
+    /// Whether motor/transmission torque is applied at this station.
+    pub driven: bool,
+    /// Maximum absolute steering angle in radians; zero declares a fixed station.
+    pub maximum_steering_rad: f64,
+}
+
+impl Default for WheelStationSpec {
+    fn default() -> Self {
+        Self {
+            center_body_m: Vec3::ZERO,
+            zero_steer_forward_body: Vec3::X,
+            zero_steer_axle_body: Vec3::Z,
+            steering_axis_body: Vec3::Y,
+            driven: true,
+            maximum_steering_rad: 0.0,
+        }
+    }
+}
+
+impl WheelStationSpec {
+    /// Returns whether the station geometry and steering bound are physically usable.
+    pub fn is_valid(&self) -> bool {
+        const AXIS_TOLERANCE: f64 = 1.0e-6;
+        self.center_body_m.is_finite()
+            && self.zero_steer_forward_body.is_finite()
+            && self.zero_steer_axle_body.is_finite()
+            && self.steering_axis_body.is_finite()
+            && (self.zero_steer_forward_body.length() - 1.0).abs() <= AXIS_TOLERANCE
+            && (self.zero_steer_axle_body.length() - 1.0).abs() <= AXIS_TOLERANCE
+            && (self.steering_axis_body.length() - 1.0).abs() <= AXIS_TOLERANCE
+            && self
+                .zero_steer_forward_body
+                .dot(self.zero_steer_axle_body)
+                .abs()
+                <= AXIS_TOLERANCE
+            && self
+                .steering_axis_body
+                .dot(self.zero_steer_forward_body)
+                .abs()
+                <= AXIS_TOLERANCE
+            && self.steering_axis_body.dot(self.zero_steer_axle_body).abs() <= AXIS_TOLERANCE
+            && self.maximum_steering_rad.is_finite()
+            && ((0.0..std::f64::consts::FRAC_PI_2).contains(&self.maximum_steering_rad)
+                || self.maximum_steering_rad == 0.0)
+    }
+}
+
+/// Completed steering coordinate for one wheel station.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WheelSteeringState {
+    /// Signed steering angle about the station steering axis, in radians.
+    pub position_rad: f64,
+    /// Signed steering rate, in radians per second.
+    pub velocity_rad_s: f64,
+}
+
 /// Identifiable low-order combined-slip tire parameters.
 ///
 /// This is a force-element model, not a generic collider material. Longitudinal
@@ -458,7 +532,7 @@ pub struct CombinedSlipTireState {
 /// motor, transmission, inertia, load, and tire state therefore represent one
 /// path shared by identical driven wheels. This is a control-oriented
 /// straight-line model, not an Ackermann or suspension replacement.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LongitudinalMobilityPlantSpec {
     /// Total translating vehicle mass in kilograms.
     pub vehicle_mass_kg: f64,

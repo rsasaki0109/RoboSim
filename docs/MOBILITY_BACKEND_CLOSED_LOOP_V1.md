@@ -105,3 +105,10 @@ The first additive M3-C subgate is documented in
 It retains this equivalent support geometry but removes direct physics-state feedback from
 the controller: timestamped encoder, IMU, and electrical frontends feed a sensor-only
 estimator and PI loop through DataBus availability semantics on both backends.
+
+The next additive M3-C subgate is documented in
+[`MOBILITY_PER_WHEEL_SKID_V1.md`](MOBILITY_PER_WHEEL_SKID_V1.md). It replaces the equivalent
+support with four named rigid wheel stations and independent drive/tire state, then proves
+pivot yaw, lateral scrub, per-wheel raw/conditioned load, and contact participation across
+Rapier and MuJoCo. Ackermann steering, identified compliant suspension, and the combined
+sensor-only per-wheel loop remain open.

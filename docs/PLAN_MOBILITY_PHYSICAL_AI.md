@@ -1,7 +1,7 @@
 # Mobility Physical AI Foundation plan
 
-Status: active, M3-B implemented; M3-C sensor-observed subgate implemented,
-per-wheel vehicle fixtures and later milestones remain
+Status: active, M3-B implemented; M3-C sensor-observed and per-wheel skid subgates
+implemented, Ackermann/suspension/sensor integration and later milestones remain
 
 Implemented M0 evidence:
 
@@ -283,10 +283,13 @@ and cross-backend results.
     deterministic dropout evidence, tracking bounds, and cross-backend estimator-error
     bounds; see
     [`MOBILITY_SENSOR_OBSERVED_CLOSED_LOOP_V1.md`](MOBILITY_SENSOR_OBSERVED_CLOSED_LOOP_V1.md).
-    M3-C remains open until the equivalent support path is replaced with per-wheel
-    differential/skid and Ackermann fixtures with steering, suspension/load transfer,
-    lateral scrub, split friction, grade, curb, roughness, lift/recontact, and the same
-    sensor-only closed-loop evidence.
+    The second additive subgate replaces the equivalent support with four named skid wheel
+    stations, independent motor/transmission/wheel/tire states, rigid per-wheel contact,
+    raw-versus-conditioned load evidence, lateral scrub, pivot yaw, and SI-unit Rapier/MuJoCo
+    tolerances; see [`MOBILITY_PER_WHEEL_SKID_V1.md`](MOBILITY_PER_WHEEL_SKID_V1.md).
+    M3-C remains open until this plant is connected to the sensor-only loop and differential
+    and Ackermann fixtures add steering, identified suspension/load transfer, split friction,
+    grade, curb, roughness, and lift/recontact evidence.
 16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.
 

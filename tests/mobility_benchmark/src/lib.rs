@@ -2,6 +2,7 @@
 
 pub mod backend;
 pub mod observed;
+pub mod per_wheel;
 
 use anyhow::{ensure, Result};
 use rne_robot::{
