@@ -56,6 +56,45 @@ independent attestation. A qualifying physical result must later bind the raw lo
 instrument calibration, robot identity, acquisition procedure, and immutable source
 hash through the external-evidence path.
 
+The physical acquisition manifest now makes that boundary executable. A
+`recorded_bench` or `recorded_vehicle` dataset does not pass it unless all of the
+following are present and internally consistent:
+
+- exact vehicle/rig, strut, logger, logger-software, capture, and RNE commit identities;
+- synchronized position, velocity, and force channels in canonical SI units and sign;
+- sample rate, resolution, expanded uncertainty, and calibration/derivation class for
+  every channel;
+- a shared hardware, IEEE 1588 PTP, or GNSS-disciplined clock with no more than 1 ms
+  declared inter-channel timestamp uncertainty;
+- SHA-256 and exact byte length for the raw capture, acquisition procedure, and every
+  calibration or derivation artifact;
+- streamed rehashing of those files beneath an explicitly supplied external evidence
+  root, including canonical-path containment checks.
+
+This follows the data-integrity shape of [ASAM MDF](https://www.asam.net/standards/detail/mdf/),
+which retains raw values, conversion formulas, timestamps, and interpretation metadata.
+[NI's bridge guidance](https://www.ni.com/white-paper/11368/en/) identifies excitation,
+filtering, offset nulling, and shunt calibration as parts of a load-cell measurement
+chain, while [NIST GMP 13](https://www.nist.gov/document/gmp-13-ensuring-traceability-20190621pdf)
+requires the SI reference, traceability and uncertainty statements, results, and
+documented procedure. MCAP is also admitted as a raw container because its
+[official message contract](https://github.com/foxglove/mcap/blob/main/cpp/mcap/include/mcap/types.hpp)
+separates log and publish timestamps. Container choice alone never qualifies a capture.
+
+Given a populated manifest and its referenced files on the external SSD, verify the
+complete acquisition boundary before fitting:
+
+```powershell
+cargo run -p rne_mobility_benchmark -- `
+  --backend suspension-acquisition-verify `
+  --input E:\RNE-data\capture-001\suspension-dataset.json `
+  --acquisition-manifest E:\RNE-data\capture-001\acquisition-manifest.json `
+  --evidence-root E:\RNE-data\capture-001
+```
+
+Manifest validation and file hashing are qualifications performed by RNE, not an
+independent accreditation or a cryptographic signature from the instrument operator.
+
 Generate and fit the contract-only fixture on the external SSD:
 
 ```powershell
@@ -125,7 +164,8 @@ vehicle calibration or physical fidelity.
 ## Remaining physical gate
 
 This fixture proves the schema, split, solver, residual calculation, provenance
-propagation, determinism, and tamper rejection. It does not identify the RNE vehicle.
+propagation, determinism, and tamper rejection. It does not pass the physical acquisition
+manifest because its source is synthetic, and it does not identify the RNE vehicle.
 M3-C/M5 remain open until a physical bench or vehicle log with calibrated force,
 position, velocity, and timing is retained externally; the resulting parameters must
 then pass this same two-backend application path and a separately captured road profile.

@@ -330,8 +330,11 @@ and cross-backend results.
     gates, provenance propagation, and tamper detection. The fitted parameters now replace
     the exact force-law terms in one portable strut and run unchanged through the shared
     Rapier/MuJoCo rigid-road TaskSpec, with dataset, fit, applied values, traces, metrics,
-    verdict, and digests bound into one external-SSD artifact. The synthetic fixture proves
-    this software path but explicitly does not count as physical evidence; see
+    verdict, and digests bound into one external-SSD artifact. A separate physical
+    acquisition manifest now requires source/rig/logger identities, synchronized SI
+    channels, uncertainty and calibration classes, raw/procedure/calibration SHA-256
+    references, and streamed external-root verification. The synthetic fixture proves
+    the software path but cannot pass this physical gate; see
     [`MOBILITY_SUSPENSION_IDENTIFICATION_V1.md`](MOBILITY_SUSPENSION_IDENTIFICATION_V1.md).
     Ackermann wheel/steering/IMU fatal faults now emit deterministic,
     cross-backend, status- and digest-bound Failure Capsules.

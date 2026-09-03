@@ -60,6 +60,12 @@ pub struct SuspensionIdentificationDataset {
 }
 
 impl SuspensionIdentificationDataset {
+    /// Recomputes the integrity digest after a producer has populated the dataset.
+    pub fn seal(&mut self) -> Result<()> {
+        self.content_digest = dataset_digest(self)?;
+        Ok(())
+    }
+
     /// Validates shape, provenance, timestamps, and content integrity.
     pub fn validate(&self) -> Result<()> {
         ensure!(
@@ -200,7 +206,7 @@ pub fn synthetic_suspension_identification_dataset() -> Result<SuspensionIdentif
         samples,
         content_digest: String::new(),
     };
-    dataset.content_digest = dataset_digest(&dataset)?;
+    dataset.seal()?;
     dataset.validate()?;
     Ok(dataset)
 }

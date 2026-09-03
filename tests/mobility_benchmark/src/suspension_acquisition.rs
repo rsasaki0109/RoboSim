@@ -1,0 +1,570 @@
+//! Physical suspension-log acquisition and calibration evidence contract.
+
+use crate::suspension_identification::{
+    SuspensionDatasetSourceKind, SuspensionIdentificationDataset,
+};
+use anyhow::{ensure, Context, Result};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
+use std::fs::File;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
+/// Stable artifact discriminator for a physical suspension capture manifest.
+pub const SUSPENSION_ACQUISITION_MANIFEST_KIND: &str =
+    "rne_mobility_suspension_acquisition_manifest";
+/// Physical suspension capture manifest schema.
+pub const SUSPENSION_ACQUISITION_SCHEMA_VERSION: u32 = 1;
+/// Maximum serialized acquisition-manifest size accepted by the CLI.
+pub const MAX_SUSPENSION_ACQUISITION_MANIFEST_BYTES: usize = 1024 * 1024;
+/// Maximum size of any referenced raw or calibration artifact.
+pub const MAX_SUSPENSION_ACQUISITION_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+const MAX_TIMESTAMP_UNCERTAINTY_S: f64 = 0.001;
+
+/// Container used for the retained raw measurement stream.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SuspensionRawCaptureFormat {
+    /// ASAM MDF 4.x measurement data.
+    Mdf4,
+    /// MCAP robotics message container.
+    Mcap,
+    /// A documented, immutable CSV export.
+    Csv,
+}
+
+/// Synchronization source shared by the required channels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SuspensionCaptureClockKind {
+    /// Channels are sampled from one hardware clock and trigger domain.
+    SharedHardware,
+    /// IEEE 1588 PTP synchronized hardware clocks.
+    PtpIeee1588,
+    /// Hardware timestamps disciplined by a GNSS time source.
+    GnssDisciplined,
+}
+
+/// Required physical or derived signal identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SuspensionSignalKind {
+    /// Strut coordinate along the declared positive axis.
+    Position,
+    /// Time derivative of the strut coordinate.
+    Velocity,
+    /// Generalized strut force along the declared positive axis.
+    Force,
+}
+
+impl SuspensionSignalKind {
+    fn unit(self) -> &'static str {
+        match self {
+            Self::Position => "m",
+            Self::Velocity => "m/s",
+            Self::Force => "N",
+        }
+    }
+}
+
+/// Whether a channel was directly measured or deterministically derived.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SuspensionSignalOrigin {
+    /// Directly sampled transducer output.
+    Measured,
+    /// Deterministic processing of another retained channel.
+    Derived,
+}
+
+/// Calibration traceability class declared by the retained certificate or procedure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SuspensionCalibrationKind {
+    /// Calibration performed by an ISO/IEC 17025 accredited laboratory.
+    Iso17025,
+    /// Calibration traceable to a national metrology institute.
+    NationalMetrologyTraceable,
+    /// In-situ bridge shunt/zero verification retained with the capture.
+    InSituShunt,
+    /// Deterministic derivation procedure for a calculated channel.
+    DerivedSignalProcedure,
+}
+
+/// Immutable file reference verified relative to an explicitly supplied evidence root.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionEvidenceFileRef {
+    /// Canonical slash-separated relative path.
+    pub path: String,
+    /// Exact file length.
+    pub size_bytes: u64,
+    /// Lowercase SHA-256 with a `sha256:` prefix.
+    pub sha256: String,
+}
+
+impl SuspensionEvidenceFileRef {
+    /// Validates portable path, bounded size, and digest syntax without reading the file.
+    pub fn validate(&self) -> Result<()> {
+        ensure!(valid_relative_path(&self.path), "invalid evidence path");
+        ensure!(
+            self.size_bytes > 0 && self.size_bytes <= MAX_SUSPENSION_ACQUISITION_ARTIFACT_BYTES,
+            "invalid evidence file size"
+        );
+        ensure!(valid_sha256(&self.sha256), "invalid evidence SHA-256");
+        Ok(())
+    }
+}
+
+/// One unit-, direction-, uncertainty-, and calibration-bound input channel.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionSignalEvidence {
+    /// Canonical signal identity; entries must be sorted by this field.
+    pub signal: SuspensionSignalKind,
+    /// Stable installed transducer or derived-channel identity.
+    pub sensor_id: String,
+    /// Exact SI unit required for this signal.
+    pub unit: String,
+    /// Direct measurement or deterministic derivation.
+    pub origin: SuspensionSignalOrigin,
+    /// Positive values point along the strut axis used by `SuspensionStrutSpec`.
+    pub positive_along_strut_axis: bool,
+    /// Nominal sample rate.
+    pub sample_rate_hz: f64,
+    /// Smallest declared output increment in SI units.
+    pub resolution_si: f64,
+    /// Expanded measurement uncertainty in the same SI unit.
+    pub expanded_uncertainty_si: f64,
+    /// Traceability class of the retained calibration or derivation record.
+    pub calibration_kind: SuspensionCalibrationKind,
+    /// Content-addressed certificate, shunt result, or derivation procedure.
+    pub calibration_artifact: SuspensionEvidenceFileRef,
+}
+
+impl SuspensionSignalEvidence {
+    fn validate(&self) -> Result<()> {
+        ensure!(valid_id(&self.sensor_id), "invalid suspension sensor ID");
+        ensure!(
+            self.unit == self.signal.unit(),
+            "suspension signal unit drift"
+        );
+        ensure!(
+            self.positive_along_strut_axis,
+            "suspension signal direction is not canonical"
+        );
+        ensure!(
+            self.sample_rate_hz.is_finite() && (1.0..=100_000.0).contains(&self.sample_rate_hz),
+            "invalid suspension sample rate"
+        );
+        ensure!(
+            self.resolution_si.is_finite() && self.resolution_si > 0.0,
+            "invalid suspension signal resolution"
+        );
+        ensure!(
+            self.expanded_uncertainty_si.is_finite() && self.expanded_uncertainty_si >= 0.0,
+            "invalid suspension signal uncertainty"
+        );
+        ensure!(
+            (self.origin == SuspensionSignalOrigin::Derived)
+                == (self.calibration_kind == SuspensionCalibrationKind::DerivedSignalProcedure),
+            "derived signal calibration class mismatch"
+        );
+        self.calibration_artifact.validate()
+    }
+}
+
+/// Content-bound acquisition metadata required before a log can qualify as physical evidence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionPhysicalAcquisitionManifest {
+    /// Artifact discriminator.
+    pub kind: String,
+    /// Artifact schema.
+    pub schema_version: u32,
+    /// Stable capture identity.
+    pub capture_id: String,
+    /// Physical source class; synthetic fixtures are forbidden.
+    pub source_kind: SuspensionDatasetSourceKind,
+    /// Exact converted dataset digest.
+    pub dataset_content_digest: String,
+    /// Stable vehicle or test-rig identity.
+    pub vehicle_id: String,
+    /// Stable corner/strut identity on that vehicle or rig.
+    pub strut_id: String,
+    /// Stable DAQ/logger hardware identity.
+    pub data_logger_id: String,
+    /// Exact logger software and version.
+    pub logger_software: String,
+    /// Clock synchronization mechanism.
+    pub clock_kind: SuspensionCaptureClockKind,
+    /// True only when every channel uses the declared synchronized clock domain.
+    pub all_channels_synchronized: bool,
+    /// Conservative upper bound on inter-channel timestamp error.
+    pub maximum_timestamp_uncertainty_s: f64,
+    /// Raw retained measurement container.
+    pub raw_capture_format: SuspensionRawCaptureFormat,
+    /// Content-addressed raw measurement bytes.
+    pub raw_capture: SuspensionEvidenceFileRef,
+    /// Content-addressed acquisition and installation procedure.
+    pub acquisition_procedure: SuspensionEvidenceFileRef,
+    /// Exactly position, velocity, and force, in canonical order.
+    pub signals: Vec<SuspensionSignalEvidence>,
+    /// Full source commit used to convert and identify the capture.
+    pub rne_commit: String,
+    /// SHA-256 of compact JSON with this field empty.
+    pub content_sha256: String,
+}
+
+impl SuspensionPhysicalAcquisitionManifest {
+    /// Recomputes and stores the self-excluding manifest digest.
+    pub fn seal(&mut self) -> Result<()> {
+        self.content_sha256 = self.computed_content_sha256()?;
+        Ok(())
+    }
+
+    /// Returns the self-excluding manifest digest.
+    pub fn computed_content_sha256(&self) -> Result<String> {
+        let mut canonical = self.clone();
+        canonical.content_sha256.clear();
+        Ok(format!(
+            "sha256:{:x}",
+            Sha256::digest(serde_json::to_vec(&canonical)?)
+        ))
+    }
+
+    /// Validates metadata and binds the manifest to an exact physical-source dataset.
+    pub fn validate(&self, dataset: &SuspensionIdentificationDataset) -> Result<()> {
+        dataset.validate()?;
+        ensure!(
+            self.kind == SUSPENSION_ACQUISITION_MANIFEST_KIND
+                && self.schema_version == SUSPENSION_ACQUISITION_SCHEMA_VERSION,
+            "suspension acquisition kind/schema drift"
+        );
+        ensure!(
+            matches!(
+                self.source_kind,
+                SuspensionDatasetSourceKind::RecordedBench
+                    | SuspensionDatasetSourceKind::RecordedVehicle
+            ) && self.source_kind == dataset.source_kind,
+            "physical suspension source mismatch"
+        );
+        ensure!(
+            self.dataset_content_digest == dataset.content_digest,
+            "physical suspension dataset digest mismatch"
+        );
+        ensure!(
+            [
+                self.capture_id.as_str(),
+                self.vehicle_id.as_str(),
+                self.strut_id.as_str(),
+                self.data_logger_id.as_str(),
+            ]
+            .into_iter()
+            .all(valid_id),
+            "invalid physical suspension identity"
+        );
+        ensure!(valid_text(&self.logger_software), "invalid logger software");
+        ensure!(
+            self.all_channels_synchronized
+                && self.maximum_timestamp_uncertainty_s.is_finite()
+                && (0.0..=MAX_TIMESTAMP_UNCERTAINTY_S)
+                    .contains(&self.maximum_timestamp_uncertainty_s),
+            "unqualified suspension timestamp synchronization"
+        );
+        self.raw_capture.validate()?;
+        self.acquisition_procedure.validate()?;
+        ensure!(
+            self.signals.len() == 3
+                && self.signals.iter().map(|signal| signal.signal).eq([
+                    SuspensionSignalKind::Position,
+                    SuspensionSignalKind::Velocity,
+                    SuspensionSignalKind::Force,
+                ]),
+            "physical suspension channels are incomplete or unordered"
+        );
+        for signal in &self.signals {
+            signal.validate()?;
+        }
+        let reference_rate_hz = self.signals[0].sample_rate_hz;
+        ensure!(
+            self.signals
+                .iter()
+                .all(|signal| signal.sample_rate_hz == reference_rate_hz),
+            "physical suspension channel sample-rate mismatch"
+        );
+        ensure!(valid_git_revision(&self.rne_commit), "invalid RNE commit");
+        ensure!(
+            valid_sha256(&self.content_sha256)
+                && self.content_sha256 == self.computed_content_sha256()?,
+            "suspension acquisition manifest digest mismatch"
+        );
+        Ok(())
+    }
+
+    /// Validates the contract and streams every referenced file from an external root.
+    pub fn verify_files(
+        &self,
+        dataset: &SuspensionIdentificationDataset,
+        evidence_root: &Path,
+    ) -> Result<()> {
+        self.validate(dataset)?;
+        let canonical_root = evidence_root
+            .canonicalize()
+            .with_context(|| format!("canonicalize {}", evidence_root.display()))?;
+        ensure!(
+            canonical_root.is_dir(),
+            "suspension evidence root is not a directory"
+        );
+        let mut paths = BTreeSet::new();
+        for artifact in self.artifacts() {
+            if paths.insert(artifact.path.as_str()) {
+                verify_file(&canonical_root, artifact)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn artifacts(&self) -> impl Iterator<Item = &SuspensionEvidenceFileRef> {
+        std::iter::once(&self.raw_capture)
+            .chain(std::iter::once(&self.acquisition_procedure))
+            .chain(
+                self.signals
+                    .iter()
+                    .map(|signal| &signal.calibration_artifact),
+            )
+    }
+}
+
+/// Decodes one bounded manifest and validates its binding to the supplied dataset.
+pub fn decode_suspension_acquisition_manifest(
+    bytes: &[u8],
+    dataset: &SuspensionIdentificationDataset,
+) -> Result<SuspensionPhysicalAcquisitionManifest> {
+    ensure!(
+        bytes.len() <= MAX_SUSPENSION_ACQUISITION_MANIFEST_BYTES,
+        "suspension acquisition manifest exceeds byte limit"
+    );
+    let manifest: SuspensionPhysicalAcquisitionManifest = serde_json::from_slice(bytes)?;
+    manifest.validate(dataset)?;
+    Ok(manifest)
+}
+
+fn verify_file(root: &Path, artifact: &SuspensionEvidenceFileRef) -> Result<()> {
+    artifact.validate()?;
+    let candidate = root.join(PathBuf::from(&artifact.path));
+    let canonical = candidate
+        .canonicalize()
+        .with_context(|| format!("canonicalize {}", candidate.display()))?;
+    ensure!(
+        canonical.starts_with(root),
+        "suspension evidence path escaped root"
+    );
+    let metadata = canonical
+        .metadata()
+        .with_context(|| format!("inspect {}", canonical.display()))?;
+    ensure!(
+        metadata.is_file() && metadata.len() == artifact.size_bytes,
+        "suspension evidence file size mismatch"
+    );
+    let mut file =
+        File::open(&canonical).with_context(|| format!("open {}", canonical.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .with_context(|| format!("read {}", canonical.display()))?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    ensure!(
+        format!("sha256:{:x}", hasher.finalize()) == artifact.sha256,
+        "suspension evidence file SHA-256 mismatch"
+    );
+    Ok(())
+}
+
+fn valid_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn valid_text(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 1_024 && !value.chars().any(char::is_control)
+}
+
+fn valid_relative_path(value: &str) -> bool {
+    valid_text(value)
+        && !value.contains('\\')
+        && !value.starts_with('/')
+        && !value.contains(':')
+        && !value
+            .split('/')
+            .any(|component| component.is_empty() || matches!(component, "." | ".."))
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
+}
+
+fn valid_git_revision(value: &str) -> bool {
+    value.len() == 40
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::suspension_identification::synthetic_suspension_identification_dataset;
+    use std::fs;
+
+    fn recorded_dataset() -> SuspensionIdentificationDataset {
+        let mut dataset = synthetic_suspension_identification_dataset().unwrap();
+        dataset.dataset_id = "rne.recorded.suspension.bench.v1".to_string();
+        dataset.source_kind = SuspensionDatasetSourceKind::RecordedBench;
+        dataset.source_description = "test-only byte fixture standing in for a bench export".into();
+        dataset.seal().unwrap();
+        dataset
+    }
+
+    fn file_ref(path: &str, bytes: &[u8]) -> SuspensionEvidenceFileRef {
+        SuspensionEvidenceFileRef {
+            path: path.to_string(),
+            size_bytes: bytes.len() as u64,
+            sha256: format!("sha256:{:x}", Sha256::digest(bytes)),
+        }
+    }
+
+    fn manifest(
+        dataset: &SuspensionIdentificationDataset,
+    ) -> SuspensionPhysicalAcquisitionManifest {
+        let certificate = file_ref("calibration.txt", b"test-only calibration bytes");
+        let mut manifest = SuspensionPhysicalAcquisitionManifest {
+            kind: SUSPENSION_ACQUISITION_MANIFEST_KIND.to_string(),
+            schema_version: SUSPENSION_ACQUISITION_SCHEMA_VERSION,
+            capture_id: "bench.capture.001".into(),
+            source_kind: SuspensionDatasetSourceKind::RecordedBench,
+            dataset_content_digest: dataset.content_digest.clone(),
+            vehicle_id: "quarter.car.rig.01".into(),
+            strut_id: "front.left".into(),
+            data_logger_id: "daq.01".into(),
+            logger_software: "test logger 1.0".into(),
+            clock_kind: SuspensionCaptureClockKind::SharedHardware,
+            all_channels_synchronized: true,
+            maximum_timestamp_uncertainty_s: 0.000_01,
+            raw_capture_format: SuspensionRawCaptureFormat::Csv,
+            raw_capture: file_ref("raw.csv", b"test-only raw capture bytes"),
+            acquisition_procedure: file_ref("procedure.txt", b"test-only procedure bytes"),
+            signals: vec![
+                signal(SuspensionSignalKind::Position, certificate.clone()),
+                SuspensionSignalEvidence {
+                    origin: SuspensionSignalOrigin::Derived,
+                    calibration_kind: SuspensionCalibrationKind::DerivedSignalProcedure,
+                    ..signal(SuspensionSignalKind::Velocity, certificate.clone())
+                },
+                signal(SuspensionSignalKind::Force, certificate),
+            ],
+            rne_commit: "a".repeat(40),
+            content_sha256: String::new(),
+        };
+        manifest.seal().unwrap();
+        manifest
+    }
+
+    fn signal(
+        kind: SuspensionSignalKind,
+        calibration_artifact: SuspensionEvidenceFileRef,
+    ) -> SuspensionSignalEvidence {
+        SuspensionSignalEvidence {
+            signal: kind,
+            sensor_id: format!("sensor.{kind:?}").to_ascii_lowercase(),
+            unit: kind.unit().into(),
+            origin: SuspensionSignalOrigin::Measured,
+            positive_along_strut_axis: true,
+            sample_rate_hz: 200.0,
+            resolution_si: 0.000_001,
+            expanded_uncertainty_si: 0.000_01,
+            calibration_kind: SuspensionCalibrationKind::Iso17025,
+            calibration_artifact,
+        }
+    }
+
+    #[test]
+    fn physical_manifest_requires_physical_source_complete_channels_and_digest() {
+        let dataset = recorded_dataset();
+        let manifest = manifest(&dataset);
+        manifest.validate(&dataset).unwrap();
+
+        let synthetic = synthetic_suspension_identification_dataset().unwrap();
+        assert!(manifest.validate(&synthetic).is_err());
+        let mut unordered = manifest.clone();
+        unordered.signals.swap(0, 1);
+        unordered.seal().unwrap();
+        assert!(unordered.validate(&dataset).is_err());
+        let mut bad_clock = manifest;
+        bad_clock.maximum_timestamp_uncertainty_s = 0.002;
+        bad_clock.seal().unwrap();
+        assert!(bad_clock.validate(&dataset).is_err());
+    }
+
+    #[test]
+    fn external_files_are_streamed_and_tampering_is_detected() {
+        let dataset = recorded_dataset();
+        let manifest = manifest(&dataset);
+        let root = std::env::temp_dir().join(format!(
+            "rne-suspension-acquisition-{}-{}",
+            std::process::id(),
+            dataset.samples.len()
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root).unwrap();
+        }
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("raw.csv"), b"test-only raw capture bytes").unwrap();
+        fs::write(root.join("procedure.txt"), b"test-only procedure bytes").unwrap();
+        fs::write(root.join("calibration.txt"), b"test-only calibration bytes").unwrap();
+
+        manifest.verify_files(&dataset, &root).unwrap();
+        fs::write(root.join("calibration.txt"), b"tampered calibration bytes").unwrap();
+        assert!(manifest.verify_files(&dataset, &root).is_err());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn bounded_decoder_rejects_unknown_fields_and_oversize() {
+        let dataset = recorded_dataset();
+        let manifest = manifest(&dataset);
+        let bytes = serde_json::to_vec(&manifest).unwrap();
+        assert_eq!(
+            decode_suspension_acquisition_manifest(&bytes, &dataset).unwrap(),
+            manifest
+        );
+
+        let mut value = serde_json::to_value(&manifest).unwrap();
+        value["unexpected"] = serde_json::json!(true);
+        assert!(decode_suspension_acquisition_manifest(
+            &serde_json::to_vec(&value).unwrap(),
+            &dataset
+        )
+        .is_err());
+        assert!(decode_suspension_acquisition_manifest(
+            &vec![b' '; MAX_SUSPENSION_ACQUISITION_MANIFEST_BYTES + 1],
+            &dataset
+        )
+        .is_err());
+    }
+}

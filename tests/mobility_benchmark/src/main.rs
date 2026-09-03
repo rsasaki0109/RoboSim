@@ -14,6 +14,9 @@ use rne_mobility_benchmark::per_wheel_observed::{
 };
 use rne_mobility_benchmark::road_excitation::run_road_excitation_trace;
 use rne_mobility_benchmark::run_mobility_benchmark;
+use rne_mobility_benchmark::suspension_acquisition::{
+    decode_suspension_acquisition_manifest, MAX_SUSPENSION_ACQUISITION_MANIFEST_BYTES,
+};
 use rne_mobility_benchmark::suspension_identification::{
     decode_suspension_identification_dataset, identify_suspension_dataset,
     synthetic_suspension_identification_dataset, MAX_SUSPENSION_IDENTIFICATION_DATASET_BYTES,
@@ -27,6 +30,8 @@ fn main() -> Result<()> {
     let mut failure_replay = None;
     let mut fault = None;
     let mut input = None;
+    let mut acquisition_manifest = None;
+    let mut evidence_root = None;
     let mut backend = "analytic".to_string();
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -49,6 +54,17 @@ fn main() -> Result<()> {
             "--input" => {
                 input = Some(PathBuf::from(
                     args.next().context("--input requires a path")?,
+                ));
+            }
+            "--acquisition-manifest" => {
+                acquisition_manifest = Some(PathBuf::from(
+                    args.next()
+                        .context("--acquisition-manifest requires a path")?,
+                ));
+            }
+            "--evidence-root" => {
+                evidence_root = Some(PathBuf::from(
+                    args.next().context("--evidence-root requires a path")?,
                 ));
             }
             other => bail!("unknown argument: {other}"),
@@ -212,6 +228,33 @@ fn main() -> Result<()> {
                 .context("--backend identified-road-compare requires --input")?;
             run_identified_road_comparison(input)?
         }
+        "suspension-acquisition-verify" => {
+            let input = input
+                .as_deref()
+                .context("--backend suspension-acquisition-verify requires --input")?;
+            let manifest_path = acquisition_manifest.as_deref().context(
+                "--backend suspension-acquisition-verify requires --acquisition-manifest",
+            )?;
+            let evidence_root = evidence_root
+                .as_deref()
+                .context("--backend suspension-acquisition-verify requires --evidence-root")?;
+            let dataset = read_suspension_identification_dataset(input)?;
+            let metadata = std::fs::metadata(manifest_path)
+                .with_context(|| format!("inspect {}", manifest_path.display()))?;
+            ensure!(
+                metadata.is_file()
+                    && metadata.len() <= MAX_SUSPENSION_ACQUISITION_MANIFEST_BYTES as u64,
+                "suspension acquisition manifest is not a bounded regular file"
+            );
+            let bytes = std::fs::read(manifest_path)
+                .with_context(|| format!("read {}", manifest_path.display()))?;
+            let manifest = decode_suspension_acquisition_manifest(&bytes, &dataset)?;
+            manifest.verify_files(&dataset, evidence_root)?;
+            (
+                serde_json::to_string_pretty(&manifest)? + "\n",
+                "suspension-acquisition-verified",
+            )
+        }
         other => bail!("unknown backend: {other}"),
     };
     ensure!(
@@ -230,9 +273,19 @@ fn main() -> Result<()> {
     ensure!(
         matches!(
             backend.as_str(),
-            "suspension-identification" | "identified-road-compare"
+            "suspension-identification"
+                | "identified-road-compare"
+                | "suspension-acquisition-verify"
         ) || input.is_none(),
         "--input is valid only with an identification backend"
+    );
+    ensure!(
+        backend == "suspension-acquisition-verify" || acquisition_manifest.is_none(),
+        "--acquisition-manifest is valid only with suspension-acquisition-verify"
+    );
+    ensure!(
+        backend == "suspension-acquisition-verify" || evidence_root.is_none(),
+        "--evidence-root is valid only with suspension-acquisition-verify"
     );
     if let Some(path) = output {
         if let Some(parent) = path.parent() {
