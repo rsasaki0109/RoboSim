@@ -317,8 +317,9 @@ and cross-backend results.
     separately named scoring truth; see
     [`MOBILITY_ACKERMANN_SENSOR_CLOSED_LOOP_V1.md`](MOBILITY_ACKERMANN_SENSOR_CLOSED_LOOP_V1.md).
     M3-C remains open until suspension/tire parameters are identified, grade, curb,
-    roughness, and lift/recontact evidence pass, the caster plant joins a sensor-only loop,
-    and Ackermann fatal sensor faults emit verified Failure Capsules.
+    roughness, and lift/recontact evidence pass, and the caster plant joins a sensor-only
+    loop. Ackermann wheel/steering/IMU fatal faults now emit deterministic, cross-backend,
+    status- and digest-bound Failure Capsules.
 16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.
 

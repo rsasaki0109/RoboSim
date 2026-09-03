@@ -1,6 +1,6 @@
 //! Sensor-only speed and yaw control over the suspended Ackermann plant.
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use rne_ai::{
     AckermannEncoderStreams, AckermannImuOdometry, AckermannImuOdometryConfig,
     AckermannImuOdometryError, AckermannImuOdometryHealth, ActionSpec, ObservationSpec, ResetSpec,
@@ -85,7 +85,7 @@ const MOTOR_STREAMS: [StreamId; 4] = [
     StreamId::new(3_014),
 ];
 
-/// One recoverable sensor interruption used to prove sequence-aware operation.
+/// One deterministic sensor fault applied without modifying plant truth.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AckermannObservedFault {
@@ -97,9 +97,24 @@ pub enum AckermannObservedFault {
         /// One-based attempted sequence to drop.
         sequence: u64,
     },
+    /// Hold the front-left wheel encoder from this sequence onward.
+    FrontLeftWheelStuck {
+        /// One-based first attempted sequence that reuses the prior value.
+        sequence: u64,
+    },
+    /// Saturate the front-left wheel encoder at a reduced signed counter width.
+    FrontLeftWheelSaturate {
+        /// Reduced signed hardware-counter width.
+        counter_bits: u8,
+    },
     /// Drop one front-right steering encoder capture.
     FrontRightSteeringDrop {
         /// One-based attempted sequence to drop.
+        sequence: u64,
+    },
+    /// Hold the front-right steering encoder from this sequence onward.
+    FrontRightSteeringStuck {
+        /// One-based first attempted sequence that reuses the prior value.
         sequence: u64,
     },
     /// Drop one front-left motor-current capture.
@@ -110,6 +125,11 @@ pub enum AckermannObservedFault {
     /// Drop one mounted-IMU capture.
     ImuDrop {
         /// One-based attempted sequence to drop.
+        sequence: u64,
+    },
+    /// Hold the mounted IMU from this sequence onward.
+    ImuStuck {
+        /// One-based first attempted sequence that reuses the prior value.
         sequence: u64,
     },
 }
@@ -163,10 +183,16 @@ impl AckermannObservedContract {
         match self.fault {
             AckermannObservedFault::None => {}
             AckermannObservedFault::FrontLeftWheelDrop { sequence }
+            | AckermannObservedFault::FrontLeftWheelStuck { sequence }
             | AckermannObservedFault::FrontRightSteeringDrop { sequence }
+            | AckermannObservedFault::FrontRightSteeringStuck { sequence }
             | AckermannObservedFault::FrontLeftMotorDrop { sequence }
-            | AckermannObservedFault::ImuDrop { sequence } => {
+            | AckermannObservedFault::ImuDrop { sequence }
+            | AckermannObservedFault::ImuStuck { sequence } => {
                 ensure!(sequence > 1, "fault sequence must follow initialization");
+            }
+            AckermannObservedFault::FrontLeftWheelSaturate { counter_bits } => {
+                ensure!((2..=16).contains(&counter_bits), "invalid saturation width");
             }
         }
         Ok(())
@@ -402,6 +428,148 @@ impl AckermannObservedTrace {
     }
 }
 
+/// Stable fail-closed classification for an Ackermann motion input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AckermannObservedFailureCode {
+    /// A wheel encoder reported a held value.
+    WheelEncoderStuck,
+    /// A wheel encoder finite counter saturated.
+    WheelEncoderSaturated,
+    /// A steering encoder reported a held value.
+    SteeringEncoderStuck,
+    /// The mounted IMU reported a held value.
+    ImuStuck,
+}
+
+/// Self-verifying snapshot emitted when an unsafe Ackermann input fails closed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AckermannObservedFailureCapsule {
+    /// Stable artifact discriminator.
+    pub kind: String,
+    /// Artifact schema version.
+    pub schema_version: u32,
+    /// Backend identity and capabilities.
+    pub backend: PhysicsBackendManifest,
+    /// Exact actor/action task contract.
+    pub task_spec: TaskSpec,
+    /// Exact sensor/controller/fault contract.
+    pub contract: AckermannObservedContract,
+    /// Stable fail-closed category.
+    pub failure_code: AckermannObservedFailureCode,
+    /// Completed physics step at which the controller rejected input.
+    pub failed_step: u64,
+    /// Controller decision timestamp in ticks.
+    pub decision_ticks: u64,
+    /// Latest wheel encoder sequences in FL, RL, FR, RR order.
+    pub wheel_encoder_sequences: [u64; 4],
+    /// Latest wheel encoder status codes.
+    pub wheel_encoder_status_codes: [u8; 4],
+    /// Latest steering encoder sequences in FL, FR order.
+    pub steering_encoder_sequences: [u64; 2],
+    /// Latest steering encoder status codes.
+    pub steering_encoder_status_codes: [u8; 2],
+    /// Latest motor-feedback sequences.
+    pub motor_sequences: [u64; 4],
+    /// Latest motor-feedback status codes.
+    pub motor_status_codes: [u8; 4],
+    /// Latest mounted-IMU sequence.
+    pub imu_sequence: u64,
+    /// Latest mounted-IMU status code.
+    pub imu_status_code: u8,
+    /// FNV-1a digest with this field empty.
+    pub content_digest: String,
+}
+
+impl AckermannObservedFailureCapsule {
+    /// Recomputes fault compatibility, timing, status evidence, and content integrity.
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.kind == "rne_mobility_ackermann_observed_failure_capsule",
+            "capsule kind mismatch"
+        );
+        ensure!(
+            self.schema_version == ACKERMANN_OBSERVED_SCHEMA_VERSION,
+            "capsule schema mismatch"
+        );
+        self.backend.validate()?;
+        self.task_spec.validate()?;
+        ensure!(
+            self.task_spec == ackermann_observed_task_spec(),
+            "TaskSpec drift"
+        );
+        self.contract.validate()?;
+        ensure!(
+            self.failed_step > 0
+                && self.failed_step <= TOTAL_STEPS
+                && self.decision_ticks == self.failed_step * ACKERMANN_OBSERVED_FIXED_DELTA_TICKS,
+            "failure timing mismatch"
+        );
+        ensure!(
+            matches!(
+                (self.contract.fault, self.failure_code),
+                (
+                    AckermannObservedFault::FrontLeftWheelStuck { .. },
+                    AckermannObservedFailureCode::WheelEncoderStuck
+                ) | (
+                    AckermannObservedFault::FrontLeftWheelSaturate { .. },
+                    AckermannObservedFailureCode::WheelEncoderSaturated
+                ) | (
+                    AckermannObservedFault::FrontRightSteeringStuck { .. },
+                    AckermannObservedFailureCode::SteeringEncoderStuck
+                ) | (
+                    AckermannObservedFault::ImuStuck { .. },
+                    AckermannObservedFailureCode::ImuStuck
+                )
+            ),
+            "fault/failure-code mismatch"
+        );
+        ensure!(
+            self.wheel_encoder_status_codes
+                .iter()
+                .chain(self.steering_encoder_status_codes.iter())
+                .all(|status| *status <= 3)
+                && self.motor_status_codes.iter().all(|status| *status <= 3)
+                && self.imu_status_code <= 2,
+            "invalid status code"
+        );
+        match self.failure_code {
+            AckermannObservedFailureCode::WheelEncoderStuck => {
+                ensure!(
+                    self.wheel_encoder_status_codes[0] == 3,
+                    "stuck status missing"
+                );
+            }
+            AckermannObservedFailureCode::WheelEncoderSaturated => {
+                ensure!(
+                    self.wheel_encoder_status_codes[0] == 2,
+                    "saturation status missing"
+                );
+            }
+            AckermannObservedFailureCode::SteeringEncoderStuck => {
+                ensure!(
+                    self.steering_encoder_status_codes[1] == 3,
+                    "steering stuck status missing"
+                );
+            }
+            AckermannObservedFailureCode::ImuStuck => {
+                ensure!(self.imu_status_code == 2, "IMU stuck status missing");
+            }
+        }
+        ensure!(
+            self.content_digest == failure_capsule_digest(self)?,
+            "capsule digest mismatch"
+        );
+        Ok(())
+    }
+}
+
+enum AckermannObservedRunOutcome {
+    Trace(Box<AckermannObservedTrace>),
+    Failure(Box<AckermannObservedFailureCapsule>),
+}
+
 /// Self-verifying unit-aware Rapier/MuJoCo comparison.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -569,10 +737,38 @@ pub fn run_ackermann_observed_trace<B: PhysicsBackend>(
 }
 
 fn run_ackermann_observed_trace_with_fault<B: PhysicsBackend>(
-    mut backend: B,
+    backend: B,
     manifest: PhysicsBackendManifest,
     fault: AckermannObservedFault,
 ) -> Result<AckermannObservedTrace> {
+    match run_ackermann_observed_outcome(backend, manifest, fault)? {
+        AckermannObservedRunOutcome::Trace(trace) => Ok(*trace),
+        AckermannObservedRunOutcome::Failure(capsule) => {
+            bail!(
+                "sensor-only Ackermann failed closed: {:?}",
+                capsule.failure_code
+            )
+        }
+    }
+}
+
+/// Executes one unsafe sensor fault and returns its self-verifying Failure Capsule.
+pub fn run_ackermann_observed_failure_capsule<B: PhysicsBackend>(
+    backend: B,
+    manifest: PhysicsBackendManifest,
+    fault: AckermannObservedFault,
+) -> Result<AckermannObservedFailureCapsule> {
+    match run_ackermann_observed_outcome(backend, manifest, fault)? {
+        AckermannObservedRunOutcome::Failure(capsule) => Ok(*capsule),
+        AckermannObservedRunOutcome::Trace(_) => bail!("fault did not fail closed"),
+    }
+}
+
+fn run_ackermann_observed_outcome<B: PhysicsBackend>(
+    mut backend: B,
+    manifest: PhysicsBackendManifest,
+    fault: AckermannObservedFault,
+) -> Result<AckermannObservedRunOutcome> {
     manifest.validate()?;
     require_capabilities(
         backend.capabilities(),
@@ -776,7 +972,20 @@ fn run_ackermann_observed_trace_with_fault<B: PhysicsBackend>(
                 | AckermannImuOdometryError::InputSkew { .. }
                 | AckermannImuOdometryError::StaleInput { .. },
             ) => continue,
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                if let Some(capsule) = build_failure_capsule(
+                    &manifest,
+                    &task_spec,
+                    &contract,
+                    step,
+                    decision_time,
+                    &bus,
+                    error,
+                )? {
+                    return Ok(AckermannObservedRunOutcome::Failure(Box::new(capsule)));
+                }
+                return Err(error.into());
+            }
         };
         last_wheel_sequence = front_left.sequence;
         let (target_speed_m_s, target_yaw_rate_rad_s) = targets_for_step(step);
@@ -944,7 +1153,7 @@ fn run_ackermann_observed_trace_with_fault<B: PhysicsBackend>(
     };
     trace.content_digest = trace_digest(&trace)?;
     trace.validate()?;
-    Ok(trace)
+    Ok(AckermannObservedRunOutcome::Trace(Box::new(trace)))
 }
 
 /// Builds a self-verifying unit-aware comparison from two complete backend traces.
@@ -969,6 +1178,85 @@ pub fn compare_ackermann_observed_traces(
     Ok(comparison)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn build_failure_capsule(
+    manifest: &PhysicsBackendManifest,
+    task_spec: &TaskSpec,
+    contract: &AckermannObservedContract,
+    failed_step: u64,
+    decision_time: SimTime,
+    bus: &InMemoryDataBus,
+    error: AckermannImuOdometryError,
+) -> Result<Option<AckermannObservedFailureCapsule>> {
+    let failure_code = match (contract.fault, error) {
+        (
+            AckermannObservedFault::FrontLeftWheelStuck { .. },
+            AckermannImuOdometryError::StuckValue { .. },
+        ) => AckermannObservedFailureCode::WheelEncoderStuck,
+        (
+            AckermannObservedFault::FrontLeftWheelSaturate { .. },
+            AckermannImuOdometryError::EncoderSaturated { .. },
+        ) => AckermannObservedFailureCode::WheelEncoderSaturated,
+        (
+            AckermannObservedFault::FrontRightSteeringStuck { .. },
+            AckermannImuOdometryError::StuckValue { .. },
+        ) => AckermannObservedFailureCode::SteeringEncoderStuck,
+        (AckermannObservedFault::ImuStuck { .. }, AckermannImuOdometryError::StuckValue { .. }) => {
+            AckermannObservedFailureCode::ImuStuck
+        }
+        _ => return Ok(None),
+    };
+    let wheel_frames = wheel_streams()
+        .map(|stream| bus.latest_available::<IncrementalEncoderFeedback>(stream, decision_time));
+    let steering_frames = steering_streams()
+        .map(|stream| bus.latest_available::<IncrementalEncoderFeedback>(stream, decision_time));
+    let motor_frames = MOTOR_STREAMS
+        .map(|stream| bus.latest_available::<MotorElectricalFeedback>(stream, decision_time));
+    let imu_frame = bus.latest_available::<ImuFeedback>(STREAMS.imu, decision_time);
+    let mut capsule = AckermannObservedFailureCapsule {
+        kind: "rne_mobility_ackermann_observed_failure_capsule".to_string(),
+        schema_version: ACKERMANN_OBSERVED_SCHEMA_VERSION,
+        backend: manifest.clone(),
+        task_spec: task_spec.clone(),
+        contract: contract.clone(),
+        failure_code,
+        failed_step,
+        decision_ticks: decision_time.ticks(),
+        wheel_encoder_sequences: wheel_frames
+            .each_ref()
+            .map(|frame| frame.as_ref().map_or(0, |frame| frame.sequence)),
+        wheel_encoder_status_codes: wheel_frames.each_ref().map(|frame| {
+            frame
+                .as_ref()
+                .map_or(0, |frame| encoder_status_code(frame.payload.status))
+        }),
+        steering_encoder_sequences: steering_frames
+            .each_ref()
+            .map(|frame| frame.as_ref().map_or(0, |frame| frame.sequence)),
+        steering_encoder_status_codes: steering_frames.each_ref().map(|frame| {
+            frame
+                .as_ref()
+                .map_or(0, |frame| encoder_status_code(frame.payload.status))
+        }),
+        motor_sequences: motor_frames
+            .each_ref()
+            .map(|frame| frame.as_ref().map_or(0, |frame| frame.sequence)),
+        motor_status_codes: motor_frames.each_ref().map(|frame| {
+            frame
+                .as_ref()
+                .map_or(0, |frame| motor_status_code(frame.payload.status))
+        }),
+        imu_sequence: imu_frame.as_ref().map_or(0, |frame| frame.sequence),
+        imu_status_code: imu_frame
+            .as_ref()
+            .map_or(0, |frame| imu_status_code(frame.payload.status)),
+        content_digest: String::new(),
+    };
+    capsule.content_digest = failure_capsule_digest(&capsule)?;
+    capsule.validate()?;
+    Ok(Some(capsule))
+}
+
 fn spawn_sensor_rig(
     world: &mut World,
     chassis: Entity,
@@ -986,6 +1274,9 @@ fn spawn_sensor_rig(
                 match contract.fault {
                     AckermannObservedFault::FrontLeftWheelDrop { sequence } => {
                         IncrementalEncoderFault::DropSequence { sequence }
+                    }
+                    AckermannObservedFault::FrontLeftWheelStuck { sequence } => {
+                        IncrementalEncoderFault::StuckFromSequence { sequence }
                     }
                     _ => IncrementalEncoderFault::None,
                 }
@@ -1006,6 +1297,9 @@ fn spawn_sensor_rig(
                 match contract.fault {
                     AckermannObservedFault::FrontRightSteeringDrop { sequence } => {
                         IncrementalEncoderFault::DropSequence { sequence }
+                    }
+                    AckermannObservedFault::FrontRightSteeringStuck { sequence } => {
+                        IncrementalEncoderFault::StuckFromSequence { sequence }
                     }
                     _ => IncrementalEncoderFault::None,
                 }
@@ -1036,6 +1330,9 @@ fn spawn_sensor_rig(
             fault: match contract.fault {
                 AckermannObservedFault::ImuDrop { sequence } => {
                     ImuFeedbackFault::DropSequence { sequence }
+                }
+                AckermannObservedFault::ImuStuck { sequence } => {
+                    ImuFeedbackFault::StuckFromSequence { sequence }
                 }
                 _ => ImuFeedbackFault::None,
             },
@@ -1160,8 +1457,23 @@ fn spawn_encoder_sensor(
                 counts_per_revolution,
                 direction: 1,
                 zero_offset_rad: 0.0,
-                counter_bits: contract.encoder_counter_bits,
-                overflow_behavior: IncrementalEncoderOverflowBehavior::Wrap,
+                counter_bits: match contract.fault {
+                    AckermannObservedFault::FrontLeftWheelSaturate { counter_bits }
+                        if stream == STREAMS.front_left_wheel =>
+                    {
+                        counter_bits
+                    }
+                    _ => contract.encoder_counter_bits,
+                },
+                overflow_behavior: if matches!(
+                    contract.fault,
+                    AckermannObservedFault::FrontLeftWheelSaturate { .. }
+                ) && stream == STREAMS.front_left_wheel
+                {
+                    IncrementalEncoderOverflowBehavior::Saturate
+                } else {
+                    IncrementalEncoderOverflowBehavior::Wrap
+                },
                 velocity_window_samples: 2,
                 index_phase_rad: Some(0.0),
             },
@@ -1457,6 +1769,12 @@ fn trace_digest(trace: &AckermannObservedTrace) -> Result<String> {
     Ok(fnv1a64(&serde_json::to_vec(&canonical)?))
 }
 
+fn failure_capsule_digest(capsule: &AckermannObservedFailureCapsule) -> Result<String> {
+    let mut canonical = capsule.clone();
+    canonical.content_digest.clear();
+    Ok(fnv1a64(&serde_json::to_vec(&canonical)?))
+}
+
 fn comparison_digest(comparison: &AckermannObservedComparison) -> Result<String> {
     let mut canonical = comparison.clone();
     canonical.content_digest.clear();
@@ -1542,6 +1860,56 @@ mod tests {
     }
 
     #[test]
+    fn fatal_motion_inputs_emit_deterministic_failure_capsules() {
+        for (fault, expected_code) in [
+            (
+                AckermannObservedFault::FrontLeftWheelStuck { sequence: 200 },
+                AckermannObservedFailureCode::WheelEncoderStuck,
+            ),
+            (
+                AckermannObservedFault::FrontLeftWheelSaturate { counter_bits: 4 },
+                AckermannObservedFailureCode::WheelEncoderSaturated,
+            ),
+            (
+                AckermannObservedFault::FrontRightSteeringStuck { sequence: 200 },
+                AckermannObservedFailureCode::SteeringEncoderStuck,
+            ),
+            (
+                AckermannObservedFault::ImuStuck { sequence: 200 },
+                AckermannObservedFailureCode::ImuStuck,
+            ),
+        ] {
+            let first = run_ackermann_observed_failure_capsule(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                fault,
+            )
+            .unwrap();
+            let second = run_ackermann_observed_failure_capsule(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                fault,
+            )
+            .unwrap();
+            assert_eq!(first.failure_code, expected_code);
+            assert_eq!(first, second);
+            first.validate().unwrap();
+
+            let mut tampered = first.clone();
+            tampered.failed_step += 1;
+            assert!(tampered.validate().is_err());
+
+            let error = run_ackermann_observed_trace_with_fault(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                fault,
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("failed closed"));
+        }
+    }
+
+    #[test]
     fn trace_tampering_is_detected() {
         let mut trace =
             run_ackermann_observed_trace(RapierBackend::new(), RapierBackend::manifest()).unwrap();
@@ -1567,5 +1935,39 @@ mod tests {
         let comparison = compare_ackermann_observed_traces(rapier, mujoco).unwrap();
         assert!(comparison.passed, "{:#?}", comparison.metrics);
         comparison.validate().unwrap();
+    }
+
+    #[cfg(feature = "mujoco")]
+    #[test]
+    fn rapier_and_mujoco_emit_compatible_ackermann_failure_capsules() {
+        use rne_physics_mujoco::MuJoCoBackend;
+
+        for fault in [
+            AckermannObservedFault::FrontLeftWheelStuck { sequence: 200 },
+            AckermannObservedFault::FrontLeftWheelSaturate { counter_bits: 4 },
+            AckermannObservedFault::FrontRightSteeringStuck { sequence: 200 },
+            AckermannObservedFault::ImuStuck { sequence: 200 },
+        ] {
+            let rapier = run_ackermann_observed_failure_capsule(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                fault,
+            )
+            .unwrap();
+            let mujoco = run_ackermann_observed_failure_capsule(
+                MuJoCoBackend::new(SimDuration::from_ticks(
+                    ACKERMANN_OBSERVED_FIXED_DELTA_TICKS,
+                ))
+                .unwrap(),
+                MuJoCoBackend::manifest(),
+                fault,
+            )
+            .unwrap();
+            rapier.validate().unwrap();
+            mujoco.validate().unwrap();
+            assert_eq!(rapier.task_spec, mujoco.task_spec);
+            assert_eq!(rapier.contract, mujoco.contract);
+            assert_eq!(rapier.failure_code, mujoco.failure_code);
+        }
     }
 }

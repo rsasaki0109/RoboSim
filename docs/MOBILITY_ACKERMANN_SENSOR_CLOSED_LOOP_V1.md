@@ -98,12 +98,37 @@ Repository tests require exact same-runtime Rapier repeatability, actor-schema t
 exclusion, recoverable wheel/steering/IMU dropout visibility and recovery, motor-drop
 sequence evidence, mutation-digest rejection, and bounded Rapier/MuJoCo gaps.
 
+Fatal motion-input faults use a separate fail-closed path. Wheel encoder stuck and finite
+counter saturation, steering encoder stuck, and IMU stuck stop estimate-driven control and
+emit a self-verifying capsule containing the exact TaskSpec, frontend/fault contract,
+backend manifest, failure step, decision timestamp, every latest sensor sequence/status,
+and a content digest. Generate any one of the eight backend/fault artifacts with:
+
+```powershell
+cargo run -p rne_mobility_benchmark --features mujoco -- `
+  --backend ackermann-sensor-failure-rapier --fault wheel-stuck `
+  --output E:\RNE-build\m3c-sensor\ackermann-rapier-wheel-stuck-failure-v1.json
+```
+
+Replace the backend suffix with `mujoco`, and select `wheel-stuck`, `wheel-saturated`,
+`steering-stuck`, or `imu-stuck`. The retained external-SSD evidence is:
+
+| backend | failure | failed step | digest |
+| --- | --- | ---: | --- |
+| Rapier | wheel encoder stuck | 1992 | `fnv1a64:b748adb981cd5a60` |
+| MuJoCo | wheel encoder stuck | 1992 | `fnv1a64:17024140f9fad056` |
+| Rapier | wheel encoder saturated | 1712 | `fnv1a64:af4bac7e4ab80261` |
+| MuJoCo | wheel encoder saturated | 1712 | `fnv1a64:5e8badd23b6e3633` |
+| Rapier | steering encoder stuck | 1992 | `fnv1a64:00b7dcd73363cbc7` |
+| MuJoCo | steering encoder stuck | 1992 | `fnv1a64:d3ad4ec749daa63d` |
+| Rapier | IMU stuck | 1992 | `fnv1a64:10ee63fee621e617` |
+| MuJoCo | IMU stuck | 1992 | `fnv1a64:a8a65487687ed621` |
+
 ## Explicit limits
 
 This proves wiring, timing, truth separation, deterministic estimation, and cross-backend
 closed-loop execution. It does not prove real-vehicle fidelity. Tire and suspension
 parameters remain unidentified; the road is flat and rigid; steering backlash and thermal
-current-sense drift are not yet identified; fatal Ackermann sensor faults do not yet emit a
-Failure Capsule; LiDAR/camera are not part of this low-level control loop; grade, roughness,
-curb impact, lift/recontact, deterministic domain randomization, and real-log residuals
-remain open gates.
+current-sense drift are not yet identified; LiDAR/camera are not part of this low-level
+control loop; grade, roughness, curb impact, lift/recontact, deterministic domain
+randomization, and real-log residuals remain open gates.

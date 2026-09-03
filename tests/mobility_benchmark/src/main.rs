@@ -1,5 +1,7 @@
 use anyhow::{bail, ensure, Context, Result};
-use rne_mobility_benchmark::ackermann_observed::run_ackermann_observed_trace;
+use rne_mobility_benchmark::ackermann_observed::{
+    run_ackermann_observed_failure_capsule, run_ackermann_observed_trace, AckermannObservedFault,
+};
 use rne_mobility_benchmark::ackermann_suspension::run_ackermann_suspension_trace;
 use rne_mobility_benchmark::backend::run_backend_mobility_trace;
 use rne_mobility_benchmark::diff_caster::run_differential_caster_trace;
@@ -137,7 +139,27 @@ fn main() -> Result<()> {
                 "ackermann-sensor-rapier",
             )
         }
+        "ackermann-sensor-failure-rapier" => {
+            let fault = parse_ackermann_fatal_sensor_fault(
+                fault
+                    .as_deref()
+                    .context("--backend ackermann-sensor-failure-rapier requires --fault")?,
+            )?;
+            let capsule = run_ackermann_observed_failure_capsule(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                fault,
+            )?;
+            capsule.validate()?;
+            (
+                serde_json::to_string_pretty(&capsule)? + "\n",
+                "ackermann-sensor-failure-rapier",
+            )
+        }
         "ackermann-sensor-mujoco" => run_ackermann_observed_mujoco()?,
+        "ackermann-sensor-failure-mujoco" => {
+            run_ackermann_observed_failure_mujoco(fault.as_deref())?
+        }
         "ackermann-sensor-compare" => run_ackermann_observed_comparison()?,
         other => bail!("unknown backend: {other}"),
     };
@@ -146,8 +168,13 @@ fn main() -> Result<()> {
         "--failure-replay is valid only with --backend compare"
     );
     ensure!(
-        backend == "skid-sensor-failure-rapier" || fault.is_none(),
-        "--fault is valid only with --backend skid-sensor-failure-rapier"
+        matches!(
+            backend.as_str(),
+            "skid-sensor-failure-rapier"
+                | "ackermann-sensor-failure-rapier"
+                | "ackermann-sensor-failure-mujoco"
+        ) || fault.is_none(),
+        "--fault is valid only with a sensor-failure backend"
     );
     if let Some(path) = output {
         if let Some(parent) = path.parent() {
@@ -186,6 +213,29 @@ fn run_ackermann_observed_mujoco() -> Result<(String, &'static str)> {
 }
 
 #[cfg(feature = "mujoco")]
+fn run_ackermann_observed_failure_mujoco(fault: Option<&str>) -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::ackermann_observed::ACKERMANN_OBSERVED_FIXED_DELTA_TICKS;
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let fault = parse_ackermann_fatal_sensor_fault(
+        fault.context("--backend ackermann-sensor-failure-mujoco requires --fault")?,
+    )?;
+    let capsule = run_ackermann_observed_failure_capsule(
+        MuJoCoBackend::new(SimDuration::from_ticks(
+            ACKERMANN_OBSERVED_FIXED_DELTA_TICKS,
+        ))?,
+        MuJoCoBackend::manifest(),
+        fault,
+    )?;
+    capsule.validate()?;
+    Ok((
+        serde_json::to_string_pretty(&capsule)? + "\n",
+        "ackermann-sensor-failure-mujoco",
+    ))
+}
+
+#[cfg(feature = "mujoco")]
 fn run_ackermann_observed_comparison() -> Result<(String, &'static str)> {
     use rne_core::SimDuration;
     use rne_mobility_benchmark::ackermann_observed::{
@@ -215,6 +265,11 @@ fn run_ackermann_observed_comparison() -> Result<(String, &'static str)> {
 #[cfg(not(feature = "mujoco"))]
 fn run_ackermann_observed_mujoco() -> Result<(String, &'static str)> {
     bail!("sensor-only Ackermann mujoco requires --features mujoco")
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_ackermann_observed_failure_mujoco(_fault: Option<&str>) -> Result<(String, &'static str)> {
+    bail!("sensor-only Ackermann failure mujoco requires --features mujoco")
 }
 
 #[cfg(not(feature = "mujoco"))]
@@ -335,6 +390,22 @@ fn parse_fatal_sensor_fault(value: &str) -> Result<PerWheelObservedFault> {
         "imu-stuck" => Ok(PerWheelObservedFault::ImuStuck { sequence: 30 }),
         other => bail!(
             "unknown fatal sensor fault {other}; expected encoder-stuck, encoder-saturated, or imu-stuck"
+        ),
+    }
+}
+
+fn parse_ackermann_fatal_sensor_fault(value: &str) -> Result<AckermannObservedFault> {
+    match value {
+        "wheel-stuck" => Ok(AckermannObservedFault::FrontLeftWheelStuck { sequence: 200 }),
+        "wheel-saturated" => Ok(AckermannObservedFault::FrontLeftWheelSaturate {
+            counter_bits: 4,
+        }),
+        "steering-stuck" => Ok(AckermannObservedFault::FrontRightSteeringStuck {
+            sequence: 200,
+        }),
+        "imu-stuck" => Ok(AckermannObservedFault::ImuStuck { sequence: 200 }),
+        other => bail!(
+            "unknown fatal Ackermann sensor fault {other}; expected wheel-stuck, wheel-saturated, steering-stuck, or imu-stuck"
         ),
     }
 }
