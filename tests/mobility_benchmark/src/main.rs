@@ -5,6 +5,8 @@ use rne_mobility_benchmark::ackermann_observed::{
 use rne_mobility_benchmark::ackermann_suspension::run_ackermann_suspension_trace;
 use rne_mobility_benchmark::backend::run_backend_mobility_trace;
 use rne_mobility_benchmark::diff_caster::run_differential_caster_trace;
+#[cfg(feature = "mujoco")]
+use rne_mobility_benchmark::identified_suspension_road::run_identified_suspension_road_evidence;
 use rne_mobility_benchmark::observed::run_sensor_observed_trace;
 use rne_mobility_benchmark::per_wheel::run_per_wheel_skid_trace;
 use rne_mobility_benchmark::per_wheel_observed::{
@@ -197,21 +199,18 @@ fn main() -> Result<()> {
             let input = input
                 .as_deref()
                 .context("--backend suspension-identification requires --input")?;
-            let metadata =
-                std::fs::metadata(input).with_context(|| format!("inspect {}", input.display()))?;
-            ensure!(
-                metadata.is_file()
-                    && metadata.len() <= MAX_SUSPENSION_IDENTIFICATION_DATASET_BYTES as u64,
-                "suspension identification input is not a bounded regular file"
-            );
-            let bytes =
-                std::fs::read(input).with_context(|| format!("read {}", input.display()))?;
-            let dataset = decode_suspension_identification_dataset(&bytes)?;
+            let dataset = read_suspension_identification_dataset(input)?;
             let evidence = identify_suspension_dataset(&dataset)?;
             (
                 serde_json::to_string_pretty(&evidence)? + "\n",
                 "suspension-identification",
             )
+        }
+        "identified-road-compare" => {
+            let input = input
+                .as_deref()
+                .context("--backend identified-road-compare requires --input")?;
+            run_identified_road_comparison(input)?
         }
         other => bail!("unknown backend: {other}"),
     };
@@ -229,8 +228,11 @@ fn main() -> Result<()> {
         "--fault is valid only with a sensor-failure backend"
     );
     ensure!(
-        backend == "suspension-identification" || input.is_none(),
-        "--input is valid only with --backend suspension-identification"
+        matches!(
+            backend.as_str(),
+            "suspension-identification" | "identified-road-compare"
+        ) || input.is_none(),
+        "--input is valid only with an identification backend"
     );
     if let Some(path) = output {
         if let Some(parent) = path.parent() {
@@ -243,6 +245,49 @@ fn main() -> Result<()> {
         print!("{json}");
     }
     Ok(())
+}
+
+fn read_suspension_identification_dataset(
+    input: &std::path::Path,
+) -> Result<rne_mobility_benchmark::suspension_identification::SuspensionIdentificationDataset> {
+    let metadata =
+        std::fs::metadata(input).with_context(|| format!("inspect {}", input.display()))?;
+    ensure!(
+        metadata.is_file() && metadata.len() <= MAX_SUSPENSION_IDENTIFICATION_DATASET_BYTES as u64,
+        "suspension identification input is not a bounded regular file"
+    );
+    let bytes = std::fs::read(input).with_context(|| format!("read {}", input.display()))?;
+    decode_suspension_identification_dataset(&bytes)
+}
+
+#[cfg(feature = "mujoco")]
+fn run_identified_road_comparison(input: &std::path::Path) -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::road_excitation::ROAD_EXCITATION_FIXED_DELTA_TICKS;
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let dataset = read_suspension_identification_dataset(input)?;
+    let evidence = run_identified_suspension_road_evidence(
+        dataset,
+        RapierBackend::new(),
+        RapierBackend::manifest(),
+        MuJoCoBackend::new(SimDuration::from_ticks(ROAD_EXCITATION_FIXED_DELTA_TICKS))?,
+        MuJoCoBackend::manifest(),
+    )?;
+    ensure!(
+        evidence.passed,
+        "identified suspension road comparison failed: {:#?}",
+        evidence.road_comparison.metrics
+    );
+    Ok((
+        serde_json::to_string_pretty(&evidence)? + "\n",
+        "identified-suspension-road-rapier-vs-mujoco",
+    ))
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_identified_road_comparison(_input: &std::path::Path) -> Result<(String, &'static str)> {
+    bail!("identified suspension road comparison requires --features mujoco")
 }
 
 #[cfg(feature = "mujoco")]

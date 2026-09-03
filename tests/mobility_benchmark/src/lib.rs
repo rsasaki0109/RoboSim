@@ -4,6 +4,7 @@ pub mod ackermann_observed;
 pub mod ackermann_suspension;
 pub mod backend;
 pub mod diff_caster;
+pub mod identified_suspension_road;
 pub mod observed;
 pub mod per_wheel;
 pub mod per_wheel_observed;

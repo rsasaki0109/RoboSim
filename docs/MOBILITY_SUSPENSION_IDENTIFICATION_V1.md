@@ -1,6 +1,6 @@
 # Suspension identification v1
 
-Status: implemented additive M3-C/M5 identification-contract subgate; physical dataset pending
+Status: implemented additive M3-C/M5 identification-and-application contract; physical dataset pending
 
 This subgate adds a backend-neutral path from timestamped suspension measurements to
 the linear force law already consumed by the Rapier and MuJoCo Ackermann plants:
@@ -69,6 +69,12 @@ cargo run -p rne_mobility_benchmark -- `
   --backend suspension-identification `
   --input E:\RNE-build\m3c-sensor\suspension-identification-synthetic-dataset-v1.json `
   --output E:\RNE-build\m3c-sensor\suspension-identification-synthetic-result-v1.json
+$env:MUJOCO_DYNAMIC_LINK_DIR = 'E:\RoboSim-mujoco\lib'
+$env:PATH = 'E:\RoboSim-mujoco\bin;' + $env:PATH
+cargo run -p rne_mobility_benchmark --features mujoco -- `
+  --backend identified-road-compare `
+  --input E:\RNE-build\m3c-sensor\suspension-identification-synthetic-dataset-v1.json `
+  --output E:\RNE-build\m3c-sensor\identified-suspension-road-comparison-v1.json
 ```
 
 Verified fixture evidence:
@@ -86,12 +92,42 @@ Verified fixture evidence:
 | holdout force RMSE | 0.636 N |
 | maximum absolute holdout residual | 1.010 N |
 
+## Identification-to-simulation application
+
+The `identified-road-compare` path closes the software handoff that previously ended at
+the fit result. It replaces only stiffness, damping, and equilibrium position in the
+portable `SuspensionStrutSpec`; travel, axis, force limit, and unsprung mass remain the
+declared road-benchmark geometry. That exact spec is then supplied to both Rapier and
+MuJoCo under one road `TaskSpec`. The resulting artifact embeds and binds the source
+dataset, recomputed identification evidence, applied strut, both full traces, comparison
+metrics, and aggregate verdict.
+
+Verified synthetic application evidence on the external SSD:
+
+| field | value |
+| --- | ---: |
+| artifact size | 581634 bytes |
+| artifact digest | `fnv1a64:24240c35ed465d9e` |
+| independent rerun SHA-256 | `B16B626083CF96D83B9312822AE3F1E0E7B9B868BEC51B7BB6B4535FDDDC82E7` (byte-identical) |
+| physical measurement | `false` |
+| Rapier trace digest | `fnv1a64:bb50c7f4f5810cc4` |
+| MuJoCo trace digest | `fnv1a64:fe49cf4096cdc704` |
+| forward displacement gap | 0.1682 m (limit 0.5 m) |
+| curb normal-impulse gap | 39.2579 N s (limit 50 N s) |
+| suspension-velocity gap | 0.2436 m/s (limit 1.0 m/s) |
+| vertical-acceleration RMS gap | 9.3157 m/s² (limit 10 m/s²) |
+| lift / recontact event gaps | 2 / 2 events (limits 20 / 20) |
+
+The FNV digests detect ordinary artifact drift; they are not cryptographic signatures.
+This run demonstrates deterministic parameter transport and backend application, not
+vehicle calibration or physical fidelity.
+
 ## Remaining physical gate
 
 This fixture proves the schema, split, solver, residual calculation, provenance
 propagation, determinism, and tamper rejection. It does not identify the RNE vehicle.
 M3-C/M5 remain open until a physical bench or vehicle log with calibrated force,
-position, velocity, and timing is retained externally; the resulting parameters are
-then applied unchanged to both backends and evaluated on a separately captured road
-profile. Confidence/conditioning evidence, outlier-robust fitting, tire parameter
+position, velocity, and timing is retained externally; the resulting parameters must
+then pass this same two-backend application path and a separately captured road profile.
+Confidence/conditioning evidence, outlier-robust fitting, tire parameter
 identification, and recorded/shadow/HIL comparison are also still required.

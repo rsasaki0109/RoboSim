@@ -1,8 +1,9 @@
 # Mobility Physical AI Foundation plan
 
 Status: active, M3-B implemented; M3-C sensor-observed, per-wheel skid, explicit
-differential-drive trailing-caster, and four-wheel Ackermann suspension/split-friction
-subgates implemented; rough-road/lift, Ackermann sensor loop, and later milestones remain
+differential-drive trailing-caster, four-wheel Ackermann suspension/split-friction,
+rough-road/lift, and Ackermann sensor-loop subgates implemented; physical logs and later
+milestones remain
 
 Implemented M0 evidence:
 
@@ -326,8 +327,11 @@ and cross-backend results.
     plant joins a sensor-only loop. A new identification-contract subgate now fits the
     linear strut stiffness, damping, and equilibrium coordinate from bounded timestamped
     force logs with deterministic train/holdout splitting, physical bounds, residual
-    gates, provenance propagation, and tamper detection. Its external-SSD synthetic fixture
-    proves the solver and data path but explicitly does not count as physical evidence; see
+    gates, provenance propagation, and tamper detection. The fitted parameters now replace
+    the exact force-law terms in one portable strut and run unchanged through the shared
+    Rapier/MuJoCo rigid-road TaskSpec, with dataset, fit, applied values, traces, metrics,
+    verdict, and digests bound into one external-SSD artifact. The synthetic fixture proves
+    this software path but explicitly does not count as physical evidence; see
     [`MOBILITY_SUSPENSION_IDENTIFICATION_V1.md`](MOBILITY_SUSPENSION_IDENTIFICATION_V1.md).
     Ackermann wheel/steering/IMU fatal faults now emit deterministic,
     cross-backend, status- and digest-bound Failure Capsules.
