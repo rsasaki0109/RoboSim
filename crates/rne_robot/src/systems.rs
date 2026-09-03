@@ -6,8 +6,8 @@ use crate::components::{
     AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
     DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
     LongitudinalDrivePathState, LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState,
-    MultirotorFlight, SuspensionStrutSpec, TransmissionSpec, VehicleDynamics, WheelAssemblySpec,
-    WheelStationSpec,
+    MultirotorFlight, RigidRoadPatchSpec, RigidRoadProfileSpec, SuspensionStrutSpec,
+    TransmissionSpec, VehicleDynamics, WheelAssemblySpec, WheelStationSpec,
 };
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
@@ -130,6 +130,107 @@ pub struct WheelContactPatch {
     pub wheel_relative_to_road_world_m_s: Vec3,
     /// Total step-average normal load carried by the patch, in newtons.
     pub normal_load_n: f64,
+}
+
+/// Primitive collision geometry derived from one rigid-road patch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RigidRoadPatchGeometry {
+    /// World transform of the collision solid beneath the driving surface.
+    pub solid_transform: Transform3,
+    /// Local cuboid half extents in meters.
+    pub solid_half_extents_m: Vec3,
+    /// Unit tangent pointing uphill along the patch.
+    pub longitudinal_tangent_world: Vec3,
+    /// Unit normal pointing out of the driving surface.
+    pub normal_world: Vec3,
+}
+
+/// Metric road properties sampled from a finite rigid-road profile.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RigidRoadSurfaceSample {
+    /// Index of the selected canonical patch.
+    pub patch_index: usize,
+    /// Closest point on the finite driving surface, in world meters.
+    pub point_world_m: Vec3,
+    /// Unit surface normal in world coordinates.
+    pub normal_world: Vec3,
+    /// Unit longitudinal tangent in world coordinates.
+    pub longitudinal_tangent_world: Vec3,
+    /// Tire-road friction multiplier at this patch.
+    pub friction_scale: f64,
+}
+
+/// Maps one metric road patch to a backend-neutral cuboid pose and dimensions.
+pub fn rigid_road_patch_geometry(
+    patch: RigidRoadPatchSpec,
+) -> Result<RigidRoadPatchGeometry, MobilityPlantEvaluationError> {
+    if !patch.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    let rotation = Quat::from_rotation_z(patch.grade_rad);
+    let longitudinal_tangent_world = rotation * Vec3::X;
+    let normal_world = rotation * Vec3::Y;
+    Ok(RigidRoadPatchGeometry {
+        solid_transform: Transform3::from_translation_rotation(
+            patch.surface_center_world_m - normal_world * (0.5 * patch.thickness_m),
+            rotation,
+        ),
+        solid_half_extents_m: Vec3::new(
+            0.5 * patch.surface_length_m,
+            0.5 * patch.thickness_m,
+            patch.half_width_m,
+        ),
+        longitudinal_tangent_world,
+        normal_world,
+    })
+}
+
+/// Samples the closest finite planar road patch containing a world location.
+///
+/// Selection is deterministic for overlapping patches: the surface with the
+/// smallest absolute normal distance wins, followed by canonical patch index.
+/// `None` is returned for a profile gap or a location outside road width.
+pub fn sample_rigid_road_profile(
+    profile: &RigidRoadProfileSpec,
+    location_world_m: Vec3,
+) -> Result<Option<RigidRoadSurfaceSample>, MobilityPlantEvaluationError> {
+    if !profile.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    if !location_world_m.is_finite() {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    const BOUNDARY_TOLERANCE_M: f64 = 1.0e-9;
+    let mut selected: Option<(f64, RigidRoadSurfaceSample)> = None;
+    for (patch_index, patch) in profile.patches.iter().copied().enumerate() {
+        let geometry = rigid_road_patch_geometry(patch)?;
+        let relative = location_world_m - patch.surface_center_world_m;
+        let longitudinal_m = relative.dot(geometry.longitudinal_tangent_world);
+        let lateral_m = relative.z;
+        if longitudinal_m.abs() > 0.5 * patch.surface_length_m + BOUNDARY_TOLERANCE_M
+            || lateral_m.abs() > patch.half_width_m + BOUNDARY_TOLERANCE_M
+        {
+            continue;
+        }
+        let normal_distance_m = relative.dot(geometry.normal_world);
+        let sample = RigidRoadSurfaceSample {
+            patch_index,
+            point_world_m: patch.surface_center_world_m
+                + geometry.longitudinal_tangent_world * longitudinal_m
+                + Vec3::Z * lateral_m,
+            normal_world: geometry.normal_world,
+            longitudinal_tangent_world: geometry.longitudinal_tangent_world,
+            friction_scale: patch.friction_scale,
+        };
+        let distance = normal_distance_m.abs();
+        if selected
+            .as_ref()
+            .is_none_or(|(best_distance, _)| distance < *best_distance)
+        {
+            selected = Some((distance, sample));
+        }
+    }
+    Ok(selected.map(|(_, sample)| sample))
 }
 
 /// Completed world-frame geometry and rigid-carrier velocity for one wheel station.
@@ -1747,6 +1848,78 @@ mod tests {
     use rne_core::{SimClock, SimTime};
     use rne_ecs::spawn_named;
     use rne_math::Seconds;
+
+    #[test]
+    fn rigid_road_geometry_places_the_declared_surface_center_exactly() {
+        let patch = RigidRoadPatchSpec {
+            surface_center_world_m: Vec3::new(3.0, 0.4, 0.0),
+            surface_length_m: 4.0,
+            half_width_m: 1.5,
+            thickness_m: 0.2,
+            grade_rad: 0.1,
+            friction_scale: 0.8,
+        };
+        let geometry = rigid_road_patch_geometry(patch).unwrap();
+        let reconstructed_surface_center = geometry.solid_transform.translation
+            + geometry.normal_world * (0.5 * patch.thickness_m);
+
+        assert!((reconstructed_surface_center - patch.surface_center_world_m).length() < 1.0e-12);
+        assert!((geometry.normal_world.length() - 1.0).abs() < 1.0e-12);
+        assert!(geometry.longitudinal_tangent_world.y > 0.0);
+        assert_eq!(geometry.solid_half_extents_m, Vec3::new(2.0, 0.1, 1.5));
+    }
+
+    #[test]
+    fn rigid_road_sampling_exposes_grade_friction_and_gaps_deterministically() {
+        let profile = RigidRoadProfileSpec {
+            patches: vec![
+                RigidRoadPatchSpec {
+                    surface_center_world_m: Vec3::new(0.0, 0.0, 0.0),
+                    surface_length_m: 2.0,
+                    half_width_m: 1.0,
+                    thickness_m: 0.2,
+                    grade_rad: 0.0,
+                    friction_scale: 1.0,
+                },
+                RigidRoadPatchSpec {
+                    surface_center_world_m: Vec3::new(3.0, 0.2, 0.0),
+                    surface_length_m: 2.0,
+                    half_width_m: 1.0,
+                    thickness_m: 0.2,
+                    grade_rad: 0.1,
+                    friction_scale: 0.6,
+                },
+            ],
+        };
+        assert!(profile.is_valid());
+        let flat = sample_rigid_road_profile(&profile, Vec3::new(0.5, 1.0, 0.2))
+            .unwrap()
+            .unwrap();
+        assert_eq!(flat.patch_index, 0);
+        assert_eq!(flat.friction_scale, 1.0);
+        assert_eq!(flat.point_world_m, Vec3::new(0.5, 0.0, 0.2));
+        assert!(
+            sample_rigid_road_profile(&profile, Vec3::new(1.5, 0.0, 0.0))
+                .unwrap()
+                .is_none()
+        );
+
+        let slope = sample_rigid_road_profile(&profile, Vec3::new(3.4, 1.0, -0.3))
+            .unwrap()
+            .unwrap();
+        assert_eq!(slope.patch_index, 1);
+        assert_eq!(slope.friction_scale, 0.6);
+        assert!(slope.normal_world.x < 0.0);
+        assert!(slope.longitudinal_tangent_world.y > 0.0);
+
+        let mut invalid = profile.clone();
+        invalid.patches.swap(0, 1);
+        assert!(!invalid.is_valid());
+        assert_eq!(
+            sample_rigid_road_profile(&invalid, Vec3::ZERO),
+            Err(MobilityPlantEvaluationError::InvalidSpec)
+        );
+    }
 
     #[test]
     fn suspension_strut_maps_exact_si_force_law() {

@@ -486,6 +486,74 @@ impl SuspensionStrutSpec {
     }
 }
 
+/// One finite planar patch in a backend-neutral rigid-road profile.
+///
+/// `surface_center_world_m` names the center of the driving surface, not the
+/// center of its collision solid. Positive grade rises along world `+X`, world
+/// `+Y` is up, and the patch spans world `Z` laterally. This deliberately small
+/// contract maps exactly to primitive rigid terrain in multiple physics backends
+/// while retaining metric elevation, normal, and friction provenance.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RigidRoadPatchSpec {
+    /// Center of the top driving surface in world coordinates, in meters.
+    pub surface_center_world_m: Vec3,
+    /// Length of the driving surface along its grade tangent, in meters.
+    pub surface_length_m: f64,
+    /// Half width of the driving surface along world `Z`, in meters.
+    pub half_width_m: f64,
+    /// Collision-solid thickness measured along the surface normal, in meters.
+    pub thickness_m: f64,
+    /// Longitudinal road grade, positive uphill along world `+X`, in radians.
+    pub grade_rad: f64,
+    /// Non-negative multiplier applied to the identified tire-road friction.
+    pub friction_scale: f64,
+}
+
+impl RigidRoadPatchSpec {
+    /// Returns whether geometry, grade, and friction are finite and physical.
+    pub fn is_valid(self) -> bool {
+        self.surface_center_world_m.is_finite()
+            && self.surface_length_m.is_finite()
+            && self.surface_length_m > 0.0
+            && self.half_width_m.is_finite()
+            && self.half_width_m > 0.0
+            && self.thickness_m.is_finite()
+            && self.thickness_m > 0.0
+            && self.grade_rad.is_finite()
+            && self.grade_rad.abs() < std::f64::consts::FRAC_PI_2
+            && self.friction_scale.is_finite()
+            && self.friction_scale >= 0.0
+    }
+}
+
+/// Canonically ordered finite rigid-road patches.
+///
+/// Patches are ordered by driving-surface center `x`. Gaps and elevation steps
+/// are intentional: a gap can produce wheel lift and adjacent patches with
+/// different elevations form a curb face through their finite collision solids.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RigidRoadProfileSpec {
+    /// Ordered planar road patches.
+    pub patches: Vec<RigidRoadPatchSpec>,
+}
+
+impl RigidRoadProfileSpec {
+    /// Returns whether the profile is bounded, canonical, and physically usable.
+    pub fn is_valid(&self) -> bool {
+        !self.patches.is_empty()
+            && self.patches.len() <= 4_096
+            && self
+                .patches
+                .iter()
+                .copied()
+                .all(RigidRoadPatchSpec::is_valid)
+            && self
+                .patches
+                .windows(2)
+                .all(|pair| pair[0].surface_center_world_m.x < pair[1].surface_center_world_m.x)
+    }
+}
+
 /// Backend-neutral geometry and inertial contract for one passive trailing caster.
 ///
 /// The caster is represented by a vertical swivel bracket followed by a free rolling

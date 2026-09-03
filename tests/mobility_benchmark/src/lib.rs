@@ -7,6 +7,7 @@ pub mod diff_caster;
 pub mod observed;
 pub mod per_wheel;
 pub mod per_wheel_observed;
+pub mod road_excitation;
 
 use anyhow::{ensure, Result};
 use rne_robot::{

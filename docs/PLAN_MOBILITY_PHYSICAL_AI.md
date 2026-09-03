@@ -316,10 +316,15 @@ and cross-backend results.
     physical sequences, recoverable wheel/steering/IMU/motor drops, unit-bearing traces, and
     separately named scoring truth; see
     [`MOBILITY_ACKERMANN_SENSOR_CLOSED_LOOP_V1.md`](MOBILITY_ACKERMANN_SENSOR_CLOSED_LOOP_V1.md).
-    M3-C remains open until suspension/tire parameters are identified, grade, curb,
-    roughness, and lift/recontact evidence pass, and the caster plant joins a sensor-only
-    loop. Ackermann wheel/steering/IMU fatal faults now emit deterministic, cross-backend,
-    status- and digest-bound Failure Capsules.
+    The sixth additive subgate introduces a backend-neutral finite rigid-road profile and
+    drives the suspended Ackermann plant over grade, short-wave roughness, a 40 mm curb,
+    and a 40 mm drop. It records solved per-wheel contact/load, suspension and vertical
+    response, debounced lift/recontact events, and cross-backend curb impulse rather than
+    solver-sensitive peak-force parity; see
+    [`MOBILITY_ROAD_EXCITATION_V1.md`](MOBILITY_ROAD_EXCITATION_V1.md). M3-C remains open
+    until suspension/tire parameters are identified and the caster plant joins a
+    sensor-only loop. Ackermann wheel/steering/IMU fatal faults now emit deterministic,
+    cross-backend, status- and digest-bound Failure Capsules.
 16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.
 

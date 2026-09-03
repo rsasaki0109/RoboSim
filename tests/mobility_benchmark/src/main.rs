@@ -10,6 +10,7 @@ use rne_mobility_benchmark::per_wheel::run_per_wheel_skid_trace;
 use rne_mobility_benchmark::per_wheel_observed::{
     run_per_wheel_observed_failure_capsule, run_per_wheel_observed_trace, PerWheelObservedFault,
 };
+use rne_mobility_benchmark::road_excitation::run_road_excitation_trace;
 use rne_mobility_benchmark::run_mobility_benchmark;
 use rne_physics_rapier::RapierBackend;
 use std::path::PathBuf;
@@ -161,6 +162,20 @@ fn main() -> Result<()> {
             run_ackermann_observed_failure_mujoco(fault.as_deref())?
         }
         "ackermann-sensor-compare" => run_ackermann_observed_comparison()?,
+        "road-excitation-rapier" => {
+            let trace = run_road_excitation_trace(RapierBackend::new(), RapierBackend::manifest())?;
+            ensure!(
+                trace.passed,
+                "Rapier road-excitation verdict failed: {:#?}",
+                trace.metrics
+            );
+            (
+                serde_json::to_string_pretty(&trace)? + "\n",
+                "road-excitation-rapier",
+            )
+        }
+        "road-excitation-mujoco" => run_road_excitation_mujoco()?,
+        "road-excitation-compare" => run_road_excitation_comparison()?,
         other => bail!("unknown backend: {other}"),
     };
     ensure!(
@@ -262,6 +277,52 @@ fn run_ackermann_observed_comparison() -> Result<(String, &'static str)> {
     ))
 }
 
+#[cfg(feature = "mujoco")]
+fn run_road_excitation_mujoco() -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::road_excitation::ROAD_EXCITATION_FIXED_DELTA_TICKS;
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let trace = run_road_excitation_trace(
+        MuJoCoBackend::new(SimDuration::from_ticks(ROAD_EXCITATION_FIXED_DELTA_TICKS))?,
+        MuJoCoBackend::manifest(),
+    )?;
+    ensure!(
+        trace.passed,
+        "MuJoCo road-excitation verdict failed: {:#?}",
+        trace.metrics
+    );
+    Ok((
+        serde_json::to_string_pretty(&trace)? + "\n",
+        "road-excitation-mujoco",
+    ))
+}
+
+#[cfg(feature = "mujoco")]
+fn run_road_excitation_comparison() -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::road_excitation::{
+        compare_road_excitation_traces, ROAD_EXCITATION_FIXED_DELTA_TICKS,
+    };
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let rapier = run_road_excitation_trace(RapierBackend::new(), RapierBackend::manifest())?;
+    let mujoco = run_road_excitation_trace(
+        MuJoCoBackend::new(SimDuration::from_ticks(ROAD_EXCITATION_FIXED_DELTA_TICKS))?,
+        MuJoCoBackend::manifest(),
+    )?;
+    let comparison = compare_road_excitation_traces(rapier, mujoco)?;
+    ensure!(
+        comparison.passed,
+        "road-excitation comparison failed: {:#?}",
+        comparison.metrics
+    );
+    Ok((
+        serde_json::to_string_pretty(&comparison)? + "\n",
+        "road-excitation-rapier-vs-mujoco",
+    ))
+}
+
 #[cfg(not(feature = "mujoco"))]
 fn run_ackermann_observed_mujoco() -> Result<(String, &'static str)> {
     bail!("sensor-only Ackermann mujoco requires --features mujoco")
@@ -275,6 +336,16 @@ fn run_ackermann_observed_failure_mujoco(_fault: Option<&str>) -> Result<(String
 #[cfg(not(feature = "mujoco"))]
 fn run_ackermann_observed_comparison() -> Result<(String, &'static str)> {
     bail!("sensor-only Ackermann comparison requires --features mujoco")
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_road_excitation_mujoco() -> Result<(String, &'static str)> {
+    bail!("road-excitation mujoco requires --features mujoco")
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_road_excitation_comparison() -> Result<(String, &'static str)> {
+    bail!("road-excitation comparison requires --features mujoco")
 }
 
 #[cfg(feature = "mujoco")]
