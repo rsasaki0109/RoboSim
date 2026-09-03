@@ -322,8 +322,14 @@ and cross-backend results.
     response, debounced lift/recontact events, and cross-backend curb impulse rather than
     solver-sensitive peak-force parity; see
     [`MOBILITY_ROAD_EXCITATION_V1.md`](MOBILITY_ROAD_EXCITATION_V1.md). M3-C remains open
-    until suspension/tire parameters are identified and the caster plant joins a
-    sensor-only loop. Ackermann wheel/steering/IMU fatal faults now emit deterministic,
+    until suspension/tire parameters are identified from physical logs and the caster
+    plant joins a sensor-only loop. A new identification-contract subgate now fits the
+    linear strut stiffness, damping, and equilibrium coordinate from bounded timestamped
+    force logs with deterministic train/holdout splitting, physical bounds, residual
+    gates, provenance propagation, and tamper detection. Its external-SSD synthetic fixture
+    proves the solver and data path but explicitly does not count as physical evidence; see
+    [`MOBILITY_SUSPENSION_IDENTIFICATION_V1.md`](MOBILITY_SUSPENSION_IDENTIFICATION_V1.md).
+    Ackermann wheel/steering/IMU fatal faults now emit deterministic,
     cross-backend, status- and digest-bound Failure Capsules.
 16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.

@@ -19,6 +19,7 @@ use rne_physics::{
     RigidBody, RigidBodyType,
 };
 use rne_world::Transform3;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Invalid configuration or input supplied to a mobility-plant evaluator.
@@ -33,6 +34,253 @@ pub enum MobilityPlantEvaluationError {
     /// The fixed step was zero, negative, or non-finite.
     #[error("mobility plant timestep must be finite and positive")]
     InvalidTimeStep,
+}
+
+/// Failure returned by deterministic suspension-force identification.
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
+pub enum SuspensionIdentificationError {
+    /// The split, parameter bounds, or residual bounds are invalid.
+    #[error("invalid suspension identification specification")]
+    InvalidSpec,
+    /// A sample is non-finite, unordered, or outside the declared force model.
+    #[error("invalid suspension identification sample")]
+    InvalidSample,
+    /// The input does not contain enough training and holdout samples.
+    #[error("insufficient suspension identification samples")]
+    InsufficientSamples,
+    /// Position and velocity excitation cannot identify all three coefficients.
+    #[error("suspension identification design matrix is rank deficient")]
+    RankDeficient,
+    /// The fitted stiffness, damping, or equilibrium position is outside physical bounds.
+    #[error("identified suspension parameters are outside declared physical bounds")]
+    NonPhysicalResult,
+    /// Training or holdout residuals exceed the declared acceptance bounds.
+    #[error("suspension identification residual exceeds its declared bound")]
+    ResidualExceeded,
+}
+
+/// One timestamped force/position/velocity sample from a suspension log.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionForceSample {
+    /// Monotonic capture time in seconds.
+    pub capture_time_s: f64,
+    /// Measured suspension coordinate in meters.
+    pub position_m: f64,
+    /// Measured suspension-coordinate velocity in meters per second.
+    pub velocity_m_s: f64,
+    /// Measured generalized strut force in newtons.
+    pub force_n: f64,
+}
+
+/// Frozen split, physical bounds, and residual gates for suspension identification.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionIdentificationSpec {
+    /// Every `holdout_stride`th sample is reserved for holdout evaluation.
+    pub holdout_stride: usize,
+    /// Minimum number of samples used to fit the three coefficients.
+    pub minimum_training_samples: usize,
+    /// Minimum number of samples retained exclusively for holdout evaluation.
+    pub minimum_holdout_samples: usize,
+    /// Inclusive stiffness bound in newtons per meter.
+    pub stiffness_bounds_n_per_m: [f64; 2],
+    /// Inclusive damping bound in newton-seconds per meter.
+    pub damping_bounds_n_s_per_m: [f64; 2],
+    /// Inclusive unloaded equilibrium-coordinate bound in meters.
+    pub equilibrium_position_bounds_m: [f64; 2],
+    /// Maximum training root-mean-square force residual in newtons.
+    pub maximum_training_rmse_n: f64,
+    /// Maximum holdout root-mean-square force residual in newtons.
+    pub maximum_holdout_rmse_n: f64,
+}
+
+impl SuspensionIdentificationSpec {
+    /// Returns whether the split, physical bounds, and residual gates are usable.
+    pub fn is_valid(self) -> bool {
+        self.holdout_stride >= 2
+            && self.minimum_training_samples >= 3
+            && self.minimum_holdout_samples >= 1
+            && valid_positive_bounds(self.stiffness_bounds_n_per_m)
+            && valid_nonnegative_bounds(self.damping_bounds_n_s_per_m)
+            && valid_finite_bounds(self.equilibrium_position_bounds_m)
+            && self.maximum_training_rmse_n.is_finite()
+            && self.maximum_training_rmse_n >= 0.0
+            && self.maximum_holdout_rmse_n.is_finite()
+            && self.maximum_holdout_rmse_n >= 0.0
+    }
+}
+
+/// Identified linear strut parameters and independent split residuals.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionIdentificationResult {
+    /// Fitted spring stiffness in newtons per meter.
+    pub stiffness_n_per_m: f64,
+    /// Fitted viscous damping in newton-seconds per meter.
+    pub damping_n_s_per_m: f64,
+    /// Fitted unloaded equilibrium coordinate in meters.
+    pub equilibrium_position_m: f64,
+    /// Number of samples used by least squares.
+    pub training_sample_count: usize,
+    /// Number of samples excluded from fitting and used only for validation.
+    pub holdout_sample_count: usize,
+    /// Training root-mean-square force residual in newtons.
+    pub training_rmse_n: f64,
+    /// Holdout root-mean-square force residual in newtons.
+    pub holdout_rmse_n: f64,
+    /// Largest absolute holdout force residual in newtons.
+    pub maximum_absolute_holdout_residual_n: f64,
+}
+
+/// Identifies the unclamped linear strut law from timestamped force samples.
+///
+/// The fitted model is `F = k * (x_eq - x) - c * x_dot`. Samples whose
+/// zero-based index plus one is divisible by `holdout_stride` never enter the
+/// fit. The remaining samples are solved by centered ordinary least squares;
+/// holdout residuals are then evaluated with the frozen result. This routine is
+/// deterministic and performs no random resampling or wall-clock access.
+pub fn identify_suspension_strut(
+    spec: SuspensionIdentificationSpec,
+    samples: &[SuspensionForceSample],
+) -> Result<SuspensionIdentificationResult, SuspensionIdentificationError> {
+    if !spec.is_valid() {
+        return Err(SuspensionIdentificationError::InvalidSpec);
+    }
+    if samples.iter().any(|sample| {
+        !sample.capture_time_s.is_finite()
+            || !sample.position_m.is_finite()
+            || !sample.velocity_m_s.is_finite()
+            || !sample.force_n.is_finite()
+    }) || samples
+        .windows(2)
+        .any(|pair| pair[0].capture_time_s >= pair[1].capture_time_s)
+    {
+        return Err(SuspensionIdentificationError::InvalidSample);
+    }
+
+    let is_holdout = |index: usize| (index + 1).is_multiple_of(spec.holdout_stride);
+    let training_sample_count = samples
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !is_holdout(*index))
+        .count();
+    let holdout_sample_count = samples.len() - training_sample_count;
+    if training_sample_count < spec.minimum_training_samples
+        || holdout_sample_count < spec.minimum_holdout_samples
+    {
+        return Err(SuspensionIdentificationError::InsufficientSamples);
+    }
+
+    let training = || {
+        samples
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !is_holdout(*index))
+            .map(|(_, sample)| *sample)
+    };
+    let count = training_sample_count as f64;
+    let (position_sum, velocity_sum, force_sum) = training().fold(
+        (0.0, 0.0, 0.0),
+        |(position_sum, velocity_sum, force_sum), sample| {
+            (
+                position_sum + sample.position_m,
+                velocity_sum + sample.velocity_m_s,
+                force_sum + sample.force_n,
+            )
+        },
+    );
+    let position_mean = position_sum / count;
+    let velocity_mean = velocity_sum / count;
+    let force_mean = force_sum / count;
+    let (position_energy, velocity_energy, cross_energy, position_force, velocity_force) =
+        training().fold((0.0, 0.0, 0.0, 0.0, 0.0), |sums, sample| {
+            let position = sample.position_m - position_mean;
+            let velocity = sample.velocity_m_s - velocity_mean;
+            let force = sample.force_n - force_mean;
+            (
+                sums.0 + position * position,
+                sums.1 + velocity * velocity,
+                sums.2 + position * velocity,
+                sums.3 + position * force,
+                sums.4 + velocity * force,
+            )
+        });
+    let determinant = position_energy * velocity_energy - cross_energy * cross_energy;
+    if position_energy <= 0.0
+        || velocity_energy <= 0.0
+        || determinant <= 1.0e-12 * position_energy * velocity_energy
+    {
+        return Err(SuspensionIdentificationError::RankDeficient);
+    }
+    let position_coefficient =
+        (position_force * velocity_energy - velocity_force * cross_energy) / determinant;
+    let velocity_coefficient =
+        (velocity_force * position_energy - position_force * cross_energy) / determinant;
+    let intercept =
+        force_mean - position_coefficient * position_mean - velocity_coefficient * velocity_mean;
+    let stiffness_n_per_m = -position_coefficient;
+    let damping_n_s_per_m = -velocity_coefficient;
+    let equilibrium_position_m = intercept / stiffness_n_per_m;
+    if !stiffness_n_per_m.is_finite()
+        || !damping_n_s_per_m.is_finite()
+        || !equilibrium_position_m.is_finite()
+        || !(spec.stiffness_bounds_n_per_m[0]..=spec.stiffness_bounds_n_per_m[1])
+            .contains(&stiffness_n_per_m)
+        || !(spec.damping_bounds_n_s_per_m[0]..=spec.damping_bounds_n_s_per_m[1])
+            .contains(&damping_n_s_per_m)
+        || !(spec.equilibrium_position_bounds_m[0]..=spec.equilibrium_position_bounds_m[1])
+            .contains(&equilibrium_position_m)
+    {
+        return Err(SuspensionIdentificationError::NonPhysicalResult);
+    }
+
+    let predict = |sample: SuspensionForceSample| {
+        stiffness_n_per_m * (equilibrium_position_m - sample.position_m)
+            - damping_n_s_per_m * sample.velocity_m_s
+    };
+    let training_squared_error = training()
+        .map(|sample| (predict(sample) - sample.force_n).powi(2))
+        .sum::<f64>();
+    let mut holdout_squared_error = 0.0;
+    let mut maximum_absolute_holdout_residual_n = 0.0_f64;
+    for (index, sample) in samples.iter().copied().enumerate() {
+        if is_holdout(index) {
+            let residual_n = predict(sample) - sample.force_n;
+            holdout_squared_error += residual_n.powi(2);
+            maximum_absolute_holdout_residual_n =
+                maximum_absolute_holdout_residual_n.max(residual_n.abs());
+        }
+    }
+    let training_rmse_n = (training_squared_error / training_sample_count as f64).sqrt();
+    let holdout_rmse_n = (holdout_squared_error / holdout_sample_count as f64).sqrt();
+    if training_rmse_n > spec.maximum_training_rmse_n
+        || holdout_rmse_n > spec.maximum_holdout_rmse_n
+    {
+        return Err(SuspensionIdentificationError::ResidualExceeded);
+    }
+    Ok(SuspensionIdentificationResult {
+        stiffness_n_per_m,
+        damping_n_s_per_m,
+        equilibrium_position_m,
+        training_sample_count,
+        holdout_sample_count,
+        training_rmse_n,
+        holdout_rmse_n,
+        maximum_absolute_holdout_residual_n,
+    })
+}
+
+fn valid_finite_bounds(bounds: [f64; 2]) -> bool {
+    bounds.into_iter().all(f64::is_finite) && bounds[0] <= bounds[1]
+}
+
+fn valid_positive_bounds(bounds: [f64; 2]) -> bool {
+    valid_finite_bounds(bounds) && bounds[0] > 0.0
+}
+
+fn valid_nonnegative_bounds(bounds: [f64; 2]) -> bool {
+    valid_finite_bounds(bounds) && bounds[0] >= 0.0
 }
 
 /// Evaluates one suspension strut as an explicit generalized spring-damper force.
@@ -1848,6 +2096,94 @@ mod tests {
     use rne_core::{SimClock, SimTime};
     use rne_ecs::spawn_named;
     use rne_math::Seconds;
+
+    fn suspension_identification_spec() -> SuspensionIdentificationSpec {
+        SuspensionIdentificationSpec {
+            holdout_stride: 5,
+            minimum_training_samples: 40,
+            minimum_holdout_samples: 10,
+            stiffness_bounds_n_per_m: [100_000.0, 300_000.0],
+            damping_bounds_n_s_per_m: [5_000.0, 30_000.0],
+            equilibrium_position_bounds_m: [-0.10, -0.02],
+            maximum_training_rmse_n: 5.0,
+            maximum_holdout_rmse_n: 5.0,
+        }
+    }
+
+    fn suspension_identification_samples() -> Vec<SuspensionForceSample> {
+        let stiffness_n_per_m = 200_000.0;
+        let damping_n_s_per_m = 15_000.0;
+        let equilibrium_position_m = -0.061;
+        (0..200)
+            .map(|index| {
+                let time_s = index as f64 * 0.01;
+                let fast_phase = std::f64::consts::TAU * 1.2 * time_s;
+                let slow_phase = std::f64::consts::TAU * 0.37 * time_s;
+                let position_m = -0.055 + 0.010 * fast_phase.sin() + 0.004 * slow_phase.sin();
+                let velocity_m_s = 0.010 * std::f64::consts::TAU * 1.2 * fast_phase.cos()
+                    + 0.004 * std::f64::consts::TAU * 0.37 * slow_phase.cos();
+                let deterministic_noise_n = ((index * 17 % 11) as f64 - 5.0) * 0.2;
+                let force_n = stiffness_n_per_m * (equilibrium_position_m - position_m)
+                    - damping_n_s_per_m * velocity_m_s
+                    + deterministic_noise_n;
+                SuspensionForceSample {
+                    capture_time_s: time_s,
+                    position_m,
+                    velocity_m_s,
+                    force_n,
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn suspension_identification_recovers_parameters_and_holdout_residuals() {
+        let result = identify_suspension_strut(
+            suspension_identification_spec(),
+            &suspension_identification_samples(),
+        )
+        .unwrap();
+
+        assert!((result.stiffness_n_per_m - 200_000.0).abs() < 20.0);
+        assert!((result.damping_n_s_per_m - 15_000.0).abs() < 2.0);
+        assert!((result.equilibrium_position_m + 0.061).abs() < 1.0e-5);
+        assert_eq!(result.training_sample_count, 160);
+        assert_eq!(result.holdout_sample_count, 40);
+        assert!(result.training_rmse_n < 1.0);
+        assert!(result.holdout_rmse_n < 1.0);
+        assert!(result.maximum_absolute_holdout_residual_n < 2.0);
+    }
+
+    #[test]
+    fn suspension_identification_rejects_rank_loss_time_drift_and_holdout_failure() {
+        let spec = suspension_identification_spec();
+        let mut rank_deficient = suspension_identification_samples();
+        for sample in &mut rank_deficient {
+            sample.velocity_m_s = 0.0;
+        }
+        assert_eq!(
+            identify_suspension_strut(spec, &rank_deficient),
+            Err(SuspensionIdentificationError::RankDeficient)
+        );
+
+        let mut unordered = suspension_identification_samples();
+        unordered[10].capture_time_s = unordered[9].capture_time_s;
+        assert_eq!(
+            identify_suspension_strut(spec, &unordered),
+            Err(SuspensionIdentificationError::InvalidSample)
+        );
+
+        let mut corrupted_holdout = suspension_identification_samples();
+        for (index, sample) in corrupted_holdout.iter_mut().enumerate() {
+            if (index + 1).is_multiple_of(spec.holdout_stride) {
+                sample.force_n += 50.0;
+            }
+        }
+        assert_eq!(
+            identify_suspension_strut(spec, &corrupted_holdout),
+            Err(SuspensionIdentificationError::ResidualExceeded)
+        );
+    }
 
     #[test]
     fn rigid_road_geometry_places_the_declared_surface_center_exactly() {
