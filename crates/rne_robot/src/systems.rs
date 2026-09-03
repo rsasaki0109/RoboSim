@@ -6,7 +6,8 @@ use crate::components::{
     AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
     DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
     LongitudinalDrivePathState, LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState,
-    MultirotorFlight, TransmissionSpec, VehicleDynamics, WheelAssemblySpec, WheelStationSpec,
+    MultirotorFlight, SuspensionStrutSpec, TransmissionSpec, VehicleDynamics, WheelAssemblySpec,
+    WheelStationSpec,
 };
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
@@ -32,6 +33,32 @@ pub enum MobilityPlantEvaluationError {
     /// The fixed step was zero, negative, or non-finite.
     #[error("mobility plant timestep must be finite and positive")]
     InvalidTimeStep,
+}
+
+/// Evaluates one suspension strut as an explicit generalized spring-damper force.
+///
+/// The backend-neutral law is `k * (x_eq - x) - c * x_dot`, clamped to the
+/// declared force limit. Returning direct prismatic effort avoids interpreting
+/// physical spring units through a backend-native position-servo model. Travel
+/// stops remain part of the paired prismatic-joint description.
+pub fn evaluate_suspension_strut(
+    spec: SuspensionStrutSpec,
+    position_m: f64,
+    velocity_m_s: f64,
+) -> Result<JointActuation, MobilityPlantEvaluationError> {
+    if !spec.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    if !position_m.is_finite() || !velocity_m_s.is_finite() {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let force_n = (spec.stiffness_n_per_m * (spec.equilibrium_position_m - position_m)
+        - spec.damping_n_s_per_m * velocity_m_s)
+        .clamp(-spec.maximum_force_n, spec.maximum_force_n);
+    Ok(JointActuation::PrismaticEffort {
+        force_n,
+        max_force_n: spec.maximum_force_n,
+    })
 }
 
 /// Completed DC motor electrical and shaft-torque evaluation.
@@ -1720,6 +1747,63 @@ mod tests {
     use rne_core::{SimClock, SimTime};
     use rne_ecs::spawn_named;
     use rne_math::Seconds;
+
+    #[test]
+    fn suspension_strut_maps_exact_si_force_law() {
+        let spec = SuspensionStrutSpec {
+            axis_body: Vec3::Y,
+            equilibrium_position_m: -0.02,
+            minimum_position_m: -0.10,
+            maximum_position_m: 0.06,
+            stiffness_n_per_m: 24_000.0,
+            damping_n_s_per_m: 1_800.0,
+            maximum_force_n: 8_000.0,
+            unsprung_mass_kg: 18.0,
+        };
+
+        assert_eq!(
+            evaluate_suspension_strut(spec, 0.01, -0.2).unwrap(),
+            JointActuation::PrismaticEffort {
+                force_n: -360.0,
+                max_force_n: 8_000.0,
+            }
+        );
+    }
+
+    #[test]
+    fn suspension_strut_rejects_inverted_travel_and_non_unit_axis() {
+        let inverted = SuspensionStrutSpec {
+            minimum_position_m: 0.1,
+            maximum_position_m: -0.1,
+            ..SuspensionStrutSpec::default()
+        };
+        assert_eq!(
+            evaluate_suspension_strut(inverted, 0.0, 0.0),
+            Err(MobilityPlantEvaluationError::InvalidSpec)
+        );
+        let non_unit = SuspensionStrutSpec {
+            axis_body: Vec3::new(0.0, 2.0, 0.0),
+            ..SuspensionStrutSpec::default()
+        };
+        assert_eq!(
+            evaluate_suspension_strut(non_unit, 0.0, 0.0),
+            Err(MobilityPlantEvaluationError::InvalidSpec)
+        );
+        assert_eq!(
+            evaluate_suspension_strut(SuspensionStrutSpec::default(), f64::NAN, 0.0),
+            Err(MobilityPlantEvaluationError::InvalidInput)
+        );
+        let preloaded_at_droop = SuspensionStrutSpec {
+            equilibrium_position_m: -0.12,
+            minimum_position_m: -0.08,
+            ..SuspensionStrutSpec::default()
+        };
+        assert!(preloaded_at_droop.is_valid());
+        assert!(matches!(
+            evaluate_suspension_strut(preloaded_at_droop, -0.08, 0.0),
+            Ok(JointActuation::PrismaticEffort { force_n, .. }) if force_n < 0.0
+        ));
+    }
 
     #[test]
     fn wheel_station_frame_includes_steering_and_rigid_lever_velocity() {

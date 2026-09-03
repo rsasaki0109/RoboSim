@@ -1,8 +1,8 @@
 # Mobility Physical AI Foundation plan
 
-Status: active, M3-B implemented; M3-C sensor-observed, per-wheel skid, and explicit
-differential-drive trailing-caster subgates implemented; Ackermann/suspension integration
-and later milestones remain
+Status: active, M3-B implemented; M3-C sensor-observed, per-wheel skid, explicit
+differential-drive trailing-caster, and four-wheel Ackermann suspension/split-friction
+subgates implemented; rough-road/lift, Ackermann sensor loop, and later milestones remain
 
 Implemented M0 evidence:
 
@@ -304,10 +304,13 @@ and cross-backend results.
     It proves caster trail, swivel/roll inertia and damping, three-point load transfer,
     arc/straighten/reverse response, normal-only frictionless MuJoCo contact, and
     Rapier/MuJoCo agreement; see
-    [`MOBILITY_DIFFERENTIAL_CASTER_V1.md`](MOBILITY_DIFFERENTIAL_CASTER_V1.md). M3-C remains
-    open until Ackermann fixtures add steering, identified suspension/load transfer, split
-    friction, grade, curb, roughness, and lift/recontact evidence, and until the explicit
-    caster plant is joined to the sensor-only loop.
+    [`MOBILITY_DIFFERENTIAL_CASTER_V1.md`](MOBILITY_DIFFERENTIAL_CASTER_V1.md). The fourth
+    additive subgate is an explicit four-wheel Ackermann multibody fixture with independent
+    suspension and wheel-force states, inner/outer steering, settled-baseline load transfer,
+    split-friction braking, deterministic traces, and SI-unit Rapier/MuJoCo agreement; see
+    [`MOBILITY_ACKERMANN_SUSPENSION_V1.md`](MOBILITY_ACKERMANN_SUSPENSION_V1.md). M3-C remains
+    open until suspension/tire parameters are identified, grade, curb, roughness, and
+    lift/recontact evidence pass, and both caster and Ackermann plants join sensor-only loops.
 16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.
 

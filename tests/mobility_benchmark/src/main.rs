@@ -1,4 +1,5 @@
 use anyhow::{bail, ensure, Context, Result};
+use rne_mobility_benchmark::ackermann_suspension::run_ackermann_suspension_trace;
 use rne_mobility_benchmark::backend::run_backend_mobility_trace;
 use rne_mobility_benchmark::diff_caster::run_differential_caster_trace;
 use rne_mobility_benchmark::observed::run_sensor_observed_trace;
@@ -107,6 +108,21 @@ fn main() -> Result<()> {
         }
         "diff-caster-mujoco" => run_diff_caster_mujoco()?,
         "diff-caster-compare" => run_diff_caster_comparison()?,
+        "ackermann-suspension-rapier" => {
+            let trace =
+                run_ackermann_suspension_trace(RapierBackend::new(), RapierBackend::manifest())?;
+            ensure!(
+                trace.passed,
+                "Rapier Ackermann-suspension verdict failed: {:#?}",
+                trace.metrics
+            );
+            (
+                serde_json::to_string_pretty(&trace)? + "\n",
+                "ackermann-suspension-rapier",
+            )
+        }
+        "ackermann-suspension-mujoco" => run_ackermann_suspension_mujoco()?,
+        "ackermann-suspension-compare" => run_ackermann_suspension_comparison()?,
         other => bail!("unknown backend: {other}"),
     };
     ensure!(
@@ -128,6 +144,62 @@ fn main() -> Result<()> {
         print!("{json}");
     }
     Ok(())
+}
+
+#[cfg(feature = "mujoco")]
+fn run_ackermann_suspension_mujoco() -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::ackermann_suspension::ACKERMANN_SUSPENSION_FIXED_DELTA_TICKS;
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let trace = run_ackermann_suspension_trace(
+        MuJoCoBackend::new(SimDuration::from_ticks(
+            ACKERMANN_SUSPENSION_FIXED_DELTA_TICKS,
+        ))?,
+        MuJoCoBackend::manifest(),
+    )?;
+    ensure!(
+        trace.passed,
+        "MuJoCo Ackermann-suspension verdict failed: {:#?}",
+        trace.metrics
+    );
+    Ok((
+        serde_json::to_string_pretty(&trace)? + "\n",
+        "ackermann-suspension-mujoco",
+    ))
+}
+
+#[cfg(feature = "mujoco")]
+fn run_ackermann_suspension_comparison() -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::ackermann_suspension::{
+        compare_ackermann_suspension_traces, ACKERMANN_SUSPENSION_FIXED_DELTA_TICKS,
+    };
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let rapier = run_ackermann_suspension_trace(RapierBackend::new(), RapierBackend::manifest())?;
+    let mujoco = run_ackermann_suspension_trace(
+        MuJoCoBackend::new(SimDuration::from_ticks(
+            ACKERMANN_SUSPENSION_FIXED_DELTA_TICKS,
+        ))?,
+        MuJoCoBackend::manifest(),
+    )?;
+    let comparison = compare_ackermann_suspension_traces(rapier, mujoco)?;
+    ensure!(comparison.passed, "Ackermann-suspension comparison failed");
+    Ok((
+        serde_json::to_string_pretty(&comparison)? + "\n",
+        "ackermann-suspension-rapier-vs-mujoco",
+    ))
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_ackermann_suspension_mujoco() -> Result<(String, &'static str)> {
+    bail!("Ackermann-suspension mujoco requires --features mujoco")
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_ackermann_suspension_comparison() -> Result<(String, &'static str)> {
+    bail!("Ackermann-suspension comparison requires --features mujoco")
 }
 
 #[cfg(feature = "mujoco")]

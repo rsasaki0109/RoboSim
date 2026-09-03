@@ -420,6 +420,72 @@ impl WheelStationSpec {
     }
 }
 
+/// Backend-neutral linear spring-damper contract for one suspension strut.
+///
+/// The suspension coordinate is positive along [`Self::axis_body`]. The
+/// equilibrium coordinate, travel stops, stiffness, damping, and force limit are
+/// explicit so a physics backend can realize the same force-based position law
+/// without exposing a backend-native joint or constraint type.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SuspensionStrutSpec {
+    /// Unit travel axis expressed in the chassis body frame.
+    pub axis_body: Vec3,
+    /// Unloaded spring equilibrium coordinate in meters.
+    ///
+    /// This may lie outside mechanical travel: a spring longer than full droop
+    /// retains preload against the droop stop, as on a preloaded vehicle strut.
+    pub equilibrium_position_m: f64,
+    /// Minimum permitted suspension coordinate in meters.
+    pub minimum_position_m: f64,
+    /// Maximum permitted suspension coordinate in meters.
+    pub maximum_position_m: f64,
+    /// Linear spring stiffness in newtons per meter.
+    pub stiffness_n_per_m: f64,
+    /// Linear viscous damping in newton-seconds per meter.
+    pub damping_n_s_per_m: f64,
+    /// Symmetric strut-force limit in newtons.
+    pub maximum_force_n: f64,
+    /// Unsprung mass carried by this station in kilograms.
+    pub unsprung_mass_kg: f64,
+}
+
+impl Default for SuspensionStrutSpec {
+    fn default() -> Self {
+        Self {
+            axis_body: Vec3::Y,
+            equilibrium_position_m: 0.0,
+            minimum_position_m: -0.08,
+            maximum_position_m: 0.08,
+            stiffness_n_per_m: 20_000.0,
+            damping_n_s_per_m: 2_000.0,
+            maximum_force_n: 10_000.0,
+            unsprung_mass_kg: 20.0,
+        }
+    }
+}
+
+impl SuspensionStrutSpec {
+    /// Returns whether geometry, travel, force law, and unsprung mass are usable.
+    pub fn is_valid(self) -> bool {
+        const AXIS_TOLERANCE: f64 = 1.0e-6;
+        self.axis_body.is_finite()
+            && (self.axis_body.length() - 1.0).abs() <= AXIS_TOLERANCE
+            && self.equilibrium_position_m.is_finite()
+            && self.minimum_position_m.is_finite()
+            && self.maximum_position_m.is_finite()
+            && self.minimum_position_m < self.maximum_position_m
+            && self.stiffness_n_per_m.is_finite()
+            && self.stiffness_n_per_m > 0.0
+            && self.damping_n_s_per_m.is_finite()
+            && self.damping_n_s_per_m >= 0.0
+            && self.maximum_force_n.is_finite()
+            && self.maximum_force_n > 0.0
+            && self.unsprung_mass_kg.is_finite()
+            && self.unsprung_mass_kg > 0.0
+    }
+}
+
 /// Backend-neutral geometry and inertial contract for one passive trailing caster.
 ///
 /// The caster is represented by a vertical swivel bracket followed by a free rolling
