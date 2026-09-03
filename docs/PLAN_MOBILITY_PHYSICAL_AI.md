@@ -308,9 +308,17 @@ and cross-backend results.
     additive subgate is an explicit four-wheel Ackermann multibody fixture with independent
     suspension and wheel-force states, inner/outer steering, settled-baseline load transfer,
     split-friction braking, deterministic traces, and SI-unit Rapier/MuJoCo agreement; see
-    [`MOBILITY_ACKERMANN_SUSPENSION_V1.md`](MOBILITY_ACKERMANN_SUSPENSION_V1.md). M3-C remains
-    open until suspension/tire parameters are identified, grade, curb, roughness, and
-    lift/recontact evidence pass, and both caster and Ackermann plants join sensor-only loops.
+    [`MOBILITY_ACKERMANN_SUSPENSION_V1.md`](MOBILITY_ACKERMANN_SUSPENSION_V1.md). The fifth
+    additive subgate now connects that same suspended Ackermann plant to four 2048-CPR wheel
+    encoders, two 14-bit steering encoders, four measured-current frontends, a mounted IMU,
+    availability-time reads, Ackermann wheel/steering/IMU odometry, and estimate-only speed
+    and yaw control through an identical Rapier/MuJoCo TaskSpec. It retains independent
+    physical sequences, recoverable wheel/steering/IMU/motor drops, unit-bearing traces, and
+    separately named scoring truth; see
+    [`MOBILITY_ACKERMANN_SENSOR_CLOSED_LOOP_V1.md`](MOBILITY_ACKERMANN_SENSOR_CLOSED_LOOP_V1.md).
+    M3-C remains open until suspension/tire parameters are identified, grade, curb,
+    roughness, and lift/recontact evidence pass, the caster plant joins a sensor-only loop,
+    and Ackermann fatal sensor faults emit verified Failure Capsules.
 16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
     recorded/shadow/HIL validation.
 

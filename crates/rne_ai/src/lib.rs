@@ -4,6 +4,7 @@
 
 mod asset_path;
 
+pub mod ackermann_imu_odometry;
 pub mod action;
 pub mod agent;
 pub mod behavior;
@@ -34,6 +35,11 @@ pub mod transport;
 pub mod vectorized;
 pub mod wheel_imu_odometry;
 
+pub use ackermann_imu_odometry::{
+    AckermannEncoderStreams, AckermannImuOdometry, AckermannImuOdometryConfig,
+    AckermannImuOdometryError, AckermannImuOdometryEstimate, AckermannImuOdometryHealth,
+    AckermannImuOdometryProvenance,
+};
 pub use action::{DiffDriveAction, MobileManipulatorAction};
 pub use agent::{
     attach_diff_drive_policy, attach_goal_conditioned_policy, attach_shared_diff_drive_policy,

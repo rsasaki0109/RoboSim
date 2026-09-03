@@ -57,9 +57,12 @@ Scoring after the settle boundary requires:
 - a split-friction utilization difference;
 - bounded SI-unit cross-backend gaps and mutation-detecting digests.
 
-The trace intentionally labels chassis pose and velocity as privileged truth. This is an
-open-loop plant/dynamics subgate, and its TaskSpec state tensors are explicitly named
-`diagnostic_*`; it does not yet claim sensor-only Ackermann control.
+The trace intentionally labels chassis pose and velocity as privileged truth. This remains
+the open-loop plant/dynamics subgate, and its TaskSpec state tensors are explicitly named
+`diagnostic_*`. A separate
+[`mobility_ackermann_sensor_closed_loop_v1`](MOBILITY_ACKERMANN_SENSOR_CLOSED_LOOP_V1.md)
+TaskSpec now adds a DataBus-only estimator and estimate-driven controller without weakening
+this dynamics trace's fixed command schedule.
 
 Generate the external-SSD evidence with:
 
@@ -96,6 +99,7 @@ The verified comparison artifact is stored outside the repository at
 This is not real-vehicle validation. The wheel contact shapes are sphere proxies on a
 flat rigid plane, tire rotation is an explicit force-element state rather than mesh roll,
 and the parameters have not yet been identified from logs. Road roughness, curb impact,
-wheel lift/recontact, steering backlash, actuator/sensor calibration, sensor-only
-estimation, deterministic domain randomization, and real-log residuals remain subsequent
-M3-C through M5 gates.
+wheel lift/recontact, steering backlash identification, deterministic domain randomization,
+and real-log residuals remain subsequent M3-C through M5 gates. Sensor-only estimation and
+calibrated frontend timing now have a separate additive subgate; that does not make the
+unidentified tire and suspension parameters real-vehicle evidence.

@@ -1,5 +1,6 @@
 //! Stable Mobility Physical AI longitudinal benchmark producer.
 
+pub mod ackermann_observed;
 pub mod ackermann_suspension;
 pub mod backend;
 pub mod diff_caster;

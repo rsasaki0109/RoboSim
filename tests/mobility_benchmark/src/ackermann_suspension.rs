@@ -43,16 +43,16 @@ const TURN_END_STEP: u64 = 5_500;
 const TOTAL_STEPS: u64 = 7_000;
 const TRACE_STRIDE_STEPS: u64 = 100;
 const WORLD_SEED: u64 = 0;
-const CHASSIS_MASS_KG: f64 = 600.0;
-const WHEEL_RADIUS_M: f64 = 0.28;
-const WHEELBASE_M: f64 = 2.20;
-const TRACK_WIDTH_M: f64 = 1.30;
-const INITIAL_SUSPENSION_POSITION_M: f64 = -0.052;
+pub(crate) const CHASSIS_MASS_KG: f64 = 600.0;
+pub(crate) const WHEEL_RADIUS_M: f64 = 0.28;
+pub(crate) const WHEELBASE_M: f64 = 2.20;
+pub(crate) const TRACK_WIDTH_M: f64 = 1.30;
+pub(crate) const INITIAL_SUSPENSION_POSITION_M: f64 = -0.052;
 const STEERING_COMMAND_RAD: f64 = 0.35;
 const DRIVE_VOLTAGE_V: f64 = 6.0;
-const CONTACT_LOAD_FILTER_TIME_CONSTANT_S: f64 = 0.02;
+pub(crate) const CONTACT_LOAD_FILTER_TIME_CONSTANT_S: f64 = 0.02;
 const SUSPENSION_LIMIT_SOLVER_TOLERANCE_M: f64 = 0.001;
-const SELF_COLLISION_GROUP: u32 = 2;
+pub(crate) const SELF_COLLISION_GROUP: u32 = 2;
 
 /// One sampled state from the four-wheel multibody experiment.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -343,11 +343,11 @@ pub fn ackermann_suspension_task_spec() -> TaskSpec {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct StationEntities {
-    slider: Entity,
-    wheel: Entity,
-    spec: WheelStationSpec,
-    front: bool,
+pub(crate) struct StationEntities {
+    pub(crate) slider: Entity,
+    pub(crate) wheel: Entity,
+    pub(crate) spec: WheelStationSpec,
+    pub(crate) front: bool,
 }
 
 /// Runs the same explicit suspension and tire force elements through one backend.
@@ -730,7 +730,7 @@ pub fn compare_ackermann_suspension_traces(
     Ok(comparison)
 }
 
-fn spawn_stations(
+pub(crate) fn spawn_stations(
     world: &mut World,
     chassis: Entity,
     suspension: SuspensionStrutSpec,
@@ -803,7 +803,7 @@ fn spawn_stations(
     }))
 }
 
-fn wheel_station_specs() -> [WheelStationSpec; 4] {
+pub(crate) fn wheel_station_specs() -> [WheelStationSpec; 4] {
     let centers = [
         Vec3::new(WHEELBASE_M * 0.5, -0.15, TRACK_WIDTH_M * 0.5),
         Vec3::new(-WHEELBASE_M * 0.5, -0.15, TRACK_WIDTH_M * 0.5),
@@ -817,7 +817,7 @@ fn wheel_station_specs() -> [WheelStationSpec; 4] {
     })
 }
 
-fn suspension_spec() -> SuspensionStrutSpec {
+pub(crate) fn suspension_spec() -> SuspensionStrutSpec {
     SuspensionStrutSpec {
         axis_body: Vec3::Y,
         // The unloaded free-length coordinate sits below static ride height, so
@@ -833,7 +833,7 @@ fn suspension_spec() -> SuspensionStrutSpec {
     }
 }
 
-fn wheel_plant_spec() -> LongitudinalMobilityPlantSpec {
+pub(crate) fn wheel_plant_spec() -> LongitudinalMobilityPlantSpec {
     let reference_load_n =
         (CHASSIS_MASS_KG + 4.0 * suspension_spec().unsprung_mass_kg) * 9.806_65 / 4.0;
     LongitudinalMobilityPlantSpec {
@@ -906,7 +906,7 @@ fn road_friction_scale(index: usize, step: u64) -> f64 {
     }
 }
 
-fn front_steering_targets(center_rad: f64) -> [f64; 2] {
+pub(crate) fn front_steering_targets(center_rad: f64) -> [f64; 2] {
     if center_rad.abs() < 1.0e-12 {
         return [0.0; 2];
     }
@@ -978,7 +978,7 @@ fn sample_zero(transform: Transform3) -> AckermannSuspensionSample {
     )
 }
 
-fn frictionless_cuboid(half_extents_m: Vec3) -> Collider {
+pub(crate) fn frictionless_cuboid(half_extents_m: Vec3) -> Collider {
     let mut collider = Collider::cuboid(half_extents_m);
     collider.material = PhysicsMaterial {
         friction: 0.0,
