@@ -451,8 +451,14 @@ pub struct TaskSpec {
     pub task_id: String,
     /// Simulation-time duration represented by one action step.
     pub control_step_s: f64,
-    /// Ordered observation contract.
+    /// Ordered actor-visible observation contract.
     pub observation: ObservationSpec,
+    /// Optional simulator-truth tensors available only to a privileged training critic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub privileged_observation: Option<ObservationSpec>,
+    /// Optional tensors retained for evaluation and debugging, never policy input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic_observation: Option<ObservationSpec>,
     /// Ordered action contract.
     pub action: ActionSpec,
     /// Scalar reward contract.
@@ -484,6 +490,8 @@ impl TaskSpec {
             task_id: task_id.into(),
             control_step_s,
             observation,
+            privileged_observation: None,
+            diagnostic_observation: None,
             action,
             reward,
             termination,
@@ -502,6 +510,18 @@ impl TaskSpec {
     /// Adds deterministic per-episode domain randomization.
     pub fn with_randomization(mut self, randomization: RandomizationSpec) -> Self {
         self.randomization = Some(randomization);
+        self
+    }
+
+    /// Adds simulator-truth tensors for a privileged training critic.
+    pub fn with_privileged_observation(mut self, observation: ObservationSpec) -> Self {
+        self.privileged_observation = Some(observation);
+        self
+    }
+
+    /// Adds evaluation/debug tensors that are unavailable to actor and critic policies.
+    pub fn with_diagnostic_observation(mut self, observation: ObservationSpec) -> Self {
+        self.diagnostic_observation = Some(observation);
         self
     }
 
@@ -528,6 +548,13 @@ impl TaskSpec {
             return invalid("control_step_s", "must be finite and greater than zero");
         }
         validate_tensors("observation.tensors", &self.observation.tensors)?;
+        if let Some(observation) = &self.privileged_observation {
+            validate_tensors("privileged_observation.tensors", &observation.tensors)?;
+        }
+        if let Some(observation) = &self.diagnostic_observation {
+            validate_tensors("diagnostic_observation.tensors", &observation.tensors)?;
+        }
+        validate_observation_authority(self)?;
         validate_tensors("action.tensors", &self.action.tensors)?;
         validate_reward(&self.reward)?;
         validate_termination(&self.termination)?;
@@ -645,6 +672,39 @@ fn validate_tensors(field: &str, tensors: &[TensorSpec]) -> Result<(), TaskSpecV
                         "lower bound must not exceed upper bound",
                     );
                 }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_observation_authority(task: &TaskSpec) -> Result<(), TaskSpecValidationError> {
+    let mut authority_by_name = BTreeMap::new();
+    for (authority, field, observation) in [
+        ("actor", "observation", Some(&task.observation)),
+        (
+            "privileged critic",
+            "privileged_observation",
+            task.privileged_observation.as_ref(),
+        ),
+        (
+            "diagnostic",
+            "diagnostic_observation",
+            task.diagnostic_observation.as_ref(),
+        ),
+    ] {
+        let Some(observation) = observation else {
+            continue;
+        };
+        for (index, tensor) in observation.tensors.iter().enumerate() {
+            if let Some(previous) = authority_by_name.insert(tensor.name.as_str(), authority) {
+                return invalid(
+                    format!("{field}.tensors[{index}].name"),
+                    format!(
+                        "tensor {:?} is already declared in {previous} authority",
+                        tensor.name
+                    ),
+                );
             }
         }
     }
@@ -878,6 +938,44 @@ mod tests {
             task.validate(),
             Err(TaskSpecValidationError::InvalidField { field, .. })
                 if field == "action.tensors[0].bounds.lower"
+        ));
+    }
+
+    #[test]
+    fn optional_observation_authorities_round_trip_without_changing_legacy_shape() {
+        let legacy = reference_task();
+        let legacy_json = serde_json::to_value(&legacy).unwrap();
+        assert!(legacy_json.get("privileged_observation").is_none());
+        assert!(legacy_json.get("diagnostic_observation").is_none());
+
+        let task = legacy
+            .with_privileged_observation(ObservationSpec::new(vec![TensorSpec::new(
+                "truth_velocity_m_s",
+                TensorDType::F64,
+                vec![2],
+                "m/s",
+            )]))
+            .with_diagnostic_observation(ObservationSpec::new(vec![TensorSpec::new(
+                "solver_iteration_count",
+                TensorDType::I64,
+                vec![],
+                "1",
+            )]));
+        task.validate().unwrap();
+        let decoded: TaskSpec =
+            serde_json::from_str(&serde_json::to_string(&task).unwrap()).unwrap();
+        assert_eq!(decoded, task);
+    }
+
+    #[test]
+    fn tensor_names_cannot_cross_observation_authorities() {
+        let task = reference_task().with_privileged_observation(ObservationSpec::new(vec![
+            TensorSpec::new("base_yaw_rad", TensorDType::F64, vec![], "rad"),
+        ]));
+        assert!(matches!(
+            task.validate(),
+            Err(TaskSpecValidationError::InvalidField { field, .. })
+                if field == "privileged_observation.tensors[0].name"
         ));
     }
 

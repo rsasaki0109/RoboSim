@@ -61,8 +61,10 @@ The actor observation contains estimate, covariance-relevant health/provenance, 
 steering/current, and target speed/yaw rate. Its action is four bounded motor voltages plus
 a bounded center steering target. A PI speed controller and steering controller combining
 kinematic feedforward with measured yaw-rate error use only the estimate and target.
-Privileged chassis distance, speed, and yaw rate live only in separately named trace fields
-used for scoring.
+The TaskSpec declares privileged chassis distance, speed, and yaw rate in a separate
+privileged-critic observation space. Decision/capture ticks are declared diagnostic-only.
+Neither space is concatenated into the actor observation, and the privileged values are
+used only for scoring in this benchmark.
 
 ## Reproduction and evidence
 

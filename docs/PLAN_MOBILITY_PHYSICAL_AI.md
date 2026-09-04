@@ -233,8 +233,10 @@ batch in [`MOBILITY_DOMAIN_RANDOMIZATION_V1.md`](MOBILITY_DOMAIN_RANDOMIZATION_V
 It freezes lane/episode seed derivation and typed motor, transmission, wheel, tire, road,
 mass, and suspension parameter sampling with replay-verified per-lane evidence. It does
 not yet close M4: the reference rollout is analytic and open loop, suspension is retained
-but not excited, and backend TaskSpec, sensor, actor/critic tensor, and accelerated batch
-integration remain open.
+but not excited, and backend TaskSpec, sensor, and accelerated batch integration remain
+open. `TaskSpec` now has optional, separately validated actor, privileged-critic, and
+diagnostic observation spaces; the sensor-only Ackermann task declares its estimator and
+measurement actor inputs separately from rigid-body truth and timing diagnostics.
 
 ### M5 — sim-to-real proof
 

@@ -720,6 +720,30 @@ pub fn ackermann_observed_task_spec() -> TaskSpec {
         ),
         ResetSpec::splitmix64(false),
     )
+    .with_privileged_observation(ObservationSpec::new(vec![
+        TensorSpec::new(
+            "privileged_forward_distance_m",
+            TensorDType::F64,
+            vec![1],
+            "m",
+        ),
+        TensorSpec::new(
+            "privileged_forward_speed_m_s",
+            TensorDType::F64,
+            vec![1],
+            "m/s",
+        ),
+        TensorSpec::new(
+            "privileged_yaw_rate_rad_s",
+            TensorDType::F64,
+            vec![1],
+            "rad/s",
+        ),
+    ]))
+    .with_diagnostic_observation(ObservationSpec::new(vec![
+        TensorSpec::new("decision_ticks", TensorDType::I64, vec![1], "tick"),
+        TensorSpec::new("capture_ticks", TensorDType::I64, vec![1], "tick"),
+    ]))
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1804,6 +1828,30 @@ mod tests {
             .tensors
             .iter()
             .all(|tensor| !tensor.name.contains("truth") && !tensor.name.contains("privileged")));
+        assert_eq!(
+            task.privileged_observation
+                .as_ref()
+                .unwrap()
+                .tensors
+                .iter()
+                .map(|tensor| tensor.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "privileged_forward_distance_m",
+                "privileged_forward_speed_m_s",
+                "privileged_yaw_rate_rad_s",
+            ]
+        );
+        assert_eq!(
+            task.diagnostic_observation
+                .as_ref()
+                .unwrap()
+                .tensors
+                .iter()
+                .map(|tensor| tensor.name.as_str())
+                .collect::<Vec<_>>(),
+            ["decision_ticks", "capture_ticks"]
+        );
     }
 
     #[test]

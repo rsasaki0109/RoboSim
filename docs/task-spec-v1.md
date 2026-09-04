@@ -48,6 +48,14 @@ preserved. Use `"1"` for dimensionless values and explicit unit symbols for all
 other fields. Scalar tensors use an empty shape; all tensors use row-major
 logical ordering.
 
+`observation` is always the actor-visible space. A task may additionally call
+`with_privileged_observation` for simulator truth that only a training critic may
+consume, and `with_diagnostic_observation` for evaluation/debug data that no policy may
+consume. Both additions are omitted from legacy JSON when absent. Tensor names must be
+unique across all three spaces, so a truth tensor cannot silently shadow an actor tensor.
+Runtime adapters must route each space separately; concatenating these spaces is a
+contract violation.
+
 A single environment is lane zero. Its episode seed is
 `derive_episode_seed(root_seed, 0, episode_index)`. A batch uses the same
 function with each stable lane ID, so increasing batch width or partially
