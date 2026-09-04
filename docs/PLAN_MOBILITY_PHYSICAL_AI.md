@@ -228,6 +228,14 @@ the declared validity envelope; unexplained exact equality is not a fidelity tar
   evidence hashes.
 - Curriculum difficulty changes physical ranges and tasks, not hidden controller access.
 
+The first additive M4 subgate is implemented as the deterministic ordered CPU reference
+batch in [`MOBILITY_DOMAIN_RANDOMIZATION_V1.md`](MOBILITY_DOMAIN_RANDOMIZATION_V1.md).
+It freezes lane/episode seed derivation and typed motor, transmission, wheel, tire, road,
+mass, and suspension parameter sampling with replay-verified per-lane evidence. It does
+not yet close M4: the reference rollout is analytic and open loop, suspension is retained
+but not excited, and backend TaskSpec, sensor, actor/critic tensor, and accelerated batch
+integration remain open.
+
 ### M5 — sim-to-real proof
 
 - Import recorded command/sensor/ground-truth logs through an adapter.
@@ -338,8 +346,15 @@ and cross-backend results.
     [`MOBILITY_SUSPENSION_IDENTIFICATION_V1.md`](MOBILITY_SUSPENSION_IDENTIFICATION_V1.md).
     Ackermann wheel/steering/IMU fatal faults now emit deterministic,
     cross-backend, status- and digest-bound Failure Capsules.
-16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
-    recorded/shadow/HIL validation.
+16. M4/M5: in progress. The first M4 subgate now provides width-independent seeded
+    Mobility parameter sampling, conservative physical-range validation, a bounded ordered
+    CPU reference batch, exact applied-profile evidence, and full lane replay/digest
+    verification; see
+    [`MOBILITY_DOMAIN_RANDOMIZATION_V1.md`](MOBILITY_DOMAIN_RANDOMIZATION_V1.md). Next,
+    apply those profiles to the shared Rapier/MuJoCo TaskSpec, randomize sensor
+    calibration/timing/faults, and prove single-lane/batch equivalence before adding an
+    accelerator. Physical-log acquisition, recorded/shadow/HIL validation, and the final
+    real-vehicle exit gate remain open.
 
 Every PR is independently headless-testable, documents new public contracts, runs format,
 Clippy, workspace tests, and `xtask ci-headless`, and removes its isolated build directory

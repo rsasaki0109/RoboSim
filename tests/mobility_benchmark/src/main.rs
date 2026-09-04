@@ -7,6 +7,7 @@ use rne_mobility_benchmark::backend::run_backend_mobility_trace;
 use rne_mobility_benchmark::diff_caster::run_differential_caster_trace;
 #[cfg(feature = "mujoco")]
 use rne_mobility_benchmark::identified_suspension_road::run_identified_suspension_road_evidence;
+use rne_mobility_benchmark::mobility_randomization::run_mobility_randomized_batch;
 use rne_mobility_benchmark::observed::run_sensor_observed_trace;
 use rne_mobility_benchmark::per_wheel::run_per_wheel_skid_trace;
 use rne_mobility_benchmark::per_wheel_observed::{
@@ -32,6 +33,9 @@ fn main() -> Result<()> {
     let mut input = None;
     let mut acquisition_manifest = None;
     let mut evidence_root = None;
+    let mut num_envs = None;
+    let mut root_seed = None;
+    let mut episode_index = None;
     let mut backend = "analytic".to_string();
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -66,6 +70,30 @@ fn main() -> Result<()> {
                 evidence_root = Some(PathBuf::from(
                     args.next().context("--evidence-root requires a path")?,
                 ));
+            }
+            "--num-envs" => {
+                num_envs = Some(
+                    args.next()
+                        .context("--num-envs requires a value")?
+                        .parse::<usize>()
+                        .context("--num-envs must be an integer")?,
+                );
+            }
+            "--seed" => {
+                root_seed = Some(
+                    args.next()
+                        .context("--seed requires a value")?
+                        .parse::<u64>()
+                        .context("--seed must be an unsigned integer")?,
+                );
+            }
+            "--episode-index" => {
+                episode_index = Some(
+                    args.next()
+                        .context("--episode-index requires a value")?
+                        .parse::<u64>()
+                        .context("--episode-index must be an unsigned integer")?,
+                );
             }
             other => bail!("unknown argument: {other}"),
         }
@@ -255,6 +283,18 @@ fn main() -> Result<()> {
                 "suspension-acquisition-verified",
             )
         }
+        "mobility-randomized-batch" => {
+            let report = run_mobility_randomized_batch(
+                root_seed.context("--backend mobility-randomized-batch requires --seed")?,
+                episode_index.unwrap_or(0),
+                num_envs.context("--backend mobility-randomized-batch requires --num-envs")?,
+            )?;
+            ensure!(report.passed, "randomized Mobility batch failed");
+            (
+                serde_json::to_string_pretty(&report)? + "\n",
+                "mobility-randomized-batch",
+            )
+        }
         other => bail!("unknown backend: {other}"),
     };
     ensure!(
@@ -286,6 +326,11 @@ fn main() -> Result<()> {
     ensure!(
         backend == "suspension-acquisition-verify" || evidence_root.is_none(),
         "--evidence-root is valid only with suspension-acquisition-verify"
+    );
+    ensure!(
+        backend == "mobility-randomized-batch"
+            || (num_envs.is_none() && root_seed.is_none() && episode_index.is_none()),
+        "--num-envs, --seed, and --episode-index are valid only with mobility-randomized-batch"
     );
     if let Some(path) = output {
         if let Some(parent) = path.parent() {
