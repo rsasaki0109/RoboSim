@@ -2,6 +2,9 @@
 
 #![deny(missing_docs)]
 
+pub mod allan;
+#[cfg(test)]
+mod allan_imu_validation;
 pub mod camera;
 pub mod components;
 pub mod imu;

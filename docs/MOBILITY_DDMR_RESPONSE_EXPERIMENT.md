@@ -90,5 +90,8 @@ Complete evidence: `E:\RoboSim-external-data\mobility-ddmr-6291b0d7\response-exp
 SHA-256: `72ac819e2a987a249f5447ba201c14a6d61d36bbde16ea65079f0df8ed7b51c2`.
 This was a dirty build based on `3dbc897`, with exact experiment, reader and
 response source hashes in the artifact. Six focused DDMR tests and default-feature
-crate all-target Clippy passed. Full regression for the new response code remains
-pending; the earlier 133-test MuJoCo regression predates this addition.
+crate all-target Clippy passed. Full `cargo run -p xtask -- ci` subsequently passed
+with exit 0 for frozen commit `ca471c0baf683129976e659b7edf8ab8b441836d`, including
+361 fuzz cases and 10/10 Behavior CI seeds. Log:
+`E:\RNE-build\m3c-sensor\ddmr-response-v1-ci.log`. The earlier 133-test MuJoCo
+regression predates the response addition and is not substituted for this run.

@@ -25,8 +25,9 @@
 //!
 //! * `M` — scale-factor and axis-misalignment matrix, small-angle.
 //! * `b_turn_on` — fixed turn-on bias, constant for a run.
-//! * `b_gm` — bias instability as a first-order Gauss-Markov process with correlation
-//!   time `tau`, the flat minimum of an Allan deviation curve.
+//! * `b_gm` — a first-order Gauss-Markov bias with correlation time `tau` and
+//!   stationary standard deviation `bias_instability`. This is a finite-correlation
+//!   approximation, not a flicker-noise process or its flat Allan-deviation level.
 //! * `b_rrw` — rate random walk, the rising tail of an Allan deviation curve.
 //! * `n_white` — angle/velocity random walk, white noise whose standard deviation over
 //!   an interval scales as `sigma / sqrt(dt)`.
@@ -79,11 +80,14 @@ pub const GRAVITY_M_S2: Vec3 = Vec3::new(0.0, -9.81, 0.0);
 pub struct ImuAxisErrors {
     /// White-noise density in `unit / sqrt(Hz)`; angle or velocity random walk.
     pub random_walk: f64,
-    /// Standard deviation of the Gauss-Markov bias in `unit`; bias instability.
+    /// Stationary standard deviation of the Gauss-Markov bias in `unit`.
+    /// The compatibility-stable field name does not imply a flicker coefficient B.
     pub bias_instability: f64,
     /// Correlation time of the Gauss-Markov bias in seconds.
     pub bias_correlation_time_s: f64,
-    /// Rate random walk coefficient in `unit / s^1.5`.
+    /// Rate random walk coefficient in `unit / sqrt(s)` (equivalently `unit * sqrt(Hz)`).
+    /// For a gyro this is `rad / s^1.5`; for an accelerometer `m / s^2.5`.
+    /// Each state increment has standard deviation `rate_random_walk * sqrt(dt_s)`.
     pub rate_random_walk: f64,
     /// Fixed turn-on bias per axis in `unit`.
     pub turn_on_bias: Vec3,
