@@ -4,7 +4,7 @@ use super::*;
 use crate::observed::sensor_fixed_task_spec;
 
 /// One valid action transition. Reward is evaluator output, not an actor tensor.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct LearningTransition {
     /// Stable lane identity.
     pub lane_id: usize,
@@ -27,7 +27,7 @@ pub struct LearningTransition {
 }
 
 /// A failed lane has no fabricated observation, reward or terminal transition.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct LearningLaneFailure {
     /// Stable lane identity requiring explicit reset before further stepping.
     pub lane_id: usize,
@@ -38,7 +38,7 @@ pub struct LearningLaneFailure {
 }
 
 /// Successful samples and failed lanes are separate collections in stable order.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct LearningBatchStep {
     /// Only valid completed transitions may be offered to a learner.
     pub transitions: Vec<LearningTransition>,

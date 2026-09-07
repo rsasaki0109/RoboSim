@@ -309,7 +309,7 @@ fn validate_operations<'a>(
     Ok(())
 }
 
-fn evidence_digest<B, F>(
+pub(super) fn evidence_digest<B, F>(
     batch: &SensorFixedBatch<B, F>,
     output: serde_json::Value,
 ) -> Result<String>

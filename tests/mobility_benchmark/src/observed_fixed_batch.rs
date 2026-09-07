@@ -9,6 +9,7 @@ use rne_physics::{PhysicsBackend, PhysicsBackendManifest};
 mod learning;
 mod reference_learner;
 mod replay;
+mod training_session;
 pub use learning::{LearningBatchStep, LearningLaneFailure, LearningTransition};
 pub use reference_learner::SensorTableLearner;
 pub use replay::{
@@ -16,6 +17,7 @@ pub use replay::{
     record_fixed_batch_replay_with_noise_root, verify_fixed_batch_replay, FixedBatchOperation,
     FixedBatchReplay, FixedBatchReplayEvent, MAX_FIXED_REPLAY_BYTES,
 };
+pub use training_session::SensorLearningSession;
 
 /// One stable lane's completed transition or execution failure.
 #[derive(Clone, Debug, PartialEq)]
@@ -384,6 +386,44 @@ mod tests {
             assert_eq!(resumed.transitions[0].start_ticks, 10_000_000);
             assert_eq!(resumed.transitions[1].start_ticks, 0);
             assert_eq!(resumed.transitions[1].episode_index, 4);
+        }
+    }
+
+    #[test]
+    fn training_session_preserves_failures_and_replays_explicit_recovery() {
+        use std::sync::{
+            atomic::{AtomicU8, AtomicUsize, Ordering},
+            Arc,
+        };
+        for mode in [1, 2] {
+            let calls = AtomicUsize::new(0);
+            let factory = || {
+                let id = calls.fetch_add(1, Ordering::Relaxed);
+                Ok((
+                    FaultBackend {
+                        inner: RapierBackend::new(),
+                        fault: Arc::new(AtomicU8::new(if id == 1 { mode } else { 0 })),
+                    },
+                    RapierBackend::manifest(),
+                ))
+            };
+            let mut session = SensorLearningSession::new(factory, 620, 621, 622, 3, 2).unwrap();
+            let failed = session.step().unwrap();
+            assert_eq!(failed.failures.len(), 1);
+            assert_eq!(failed.failures[0].lane_id, 1);
+            assert_eq!(session.learner().updates(), 2);
+            let saved = session.checkpoint().unwrap();
+            assert!(session.step().is_err());
+            assert_eq!(saved, session.checkpoint().unwrap());
+            session.reset_lanes(&[(1, 3)]).unwrap();
+            assert!(session.step().unwrap().failures.is_empty());
+            assert_eq!(session.learner().updates(), 5);
+            let bytes = session.checkpoint().unwrap();
+            calls.store(0, Ordering::Relaxed);
+            let mut restored = SensorLearningSession::from_checkpoint(factory, 1, &bytes).unwrap();
+            assert_eq!(bytes, restored.checkpoint().unwrap());
+            assert_eq!(session.step().unwrap(), restored.step().unwrap());
+            assert_eq!(session.learner(), restored.learner());
         }
     }
 

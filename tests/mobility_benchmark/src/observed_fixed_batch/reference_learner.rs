@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 const ACTIONS_V: [f64; 5] = [0.0, 3.0, 12.0, 18.0, 24.0];
 type State = [u16; 3];
 
+mod checkpoint;
+
 /// Small sensor-only tabular Q learner for exercising the fallible boundary.
 ///
 /// Fixed alpha=0.1, discount=0.99 and epsilon=0.2; ties choose the lowest voltage.

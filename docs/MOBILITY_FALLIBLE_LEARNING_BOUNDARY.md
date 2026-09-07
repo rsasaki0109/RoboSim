@@ -125,3 +125,124 @@ The standalone evaluation example was added after that CI's lint/test phase;
 it separately passed MuJoCo-feature all-target Clippy and an actual example build.
 The experiment protocol and implementation were frozen in commit `07e7cbd`
 before any held-out evaluation; see `MOBILITY_REFERENCE_LEARNING_EXPERIMENT.md`.
+
+## Learner checkpoint boundary
+
+`SensorTableLearner::checkpoint(next_decision_index)` encodes schema v1; the
+bounded `from_checkpoint` constructor returns a replacement learner and the
+saved coordinate without mutating any existing learner or world. The payload
+binds the fixed algorithm/version, exact TaskSpec, exploration root, update count,
+next global decision coordinate and sorted Q table. Fixed learning hyperparameters
+have no momentum or other hidden optimizer state. The stateless exploration RNG
+needs its root and next coordinate, not an unrecorded stream cursor.
+
+Q values are stored as integer IEEE-754 bit patterns, preserving negative zero
+and small values exactly. The reader accepts at most 1 MiB and at most 5,940 state
+entries. It rejects nonfinite decoded values, invalid time/mask/speed bins,
+duplicate/unsorted states, inconsistent entry/update counts, unknown fields
+(including nested fields), unsupported schema/algorithm/TaskSpec and content hash
+mismatch. The format expects its serializer's numeric representations. SHA-256
+provides content integrity, not authenticity against someone who can rehash a
+modified checkpoint. It does not prove that Q values arose from a real training
+history, or that a caller supplied the correct next decision coordinate.
+
+This is deliberately **not a complete training-session snapshot**. Physics,
+sensors and lane episode clocks must be reconstructed from matching action/reset
+history, and their evidence verified before further learning. Tests serialize
+after 50 two-lane learning decisions including a partial reset; only then create
+fresh backends with a different worker count, replay and compare every prior
+transition, and continue another 50 decisions. Both the resumed transitions and
+the final 200-update learner must match uninterrupted execution exactly within
+each backend. These tests do not imply equality between Rapier and MuJoCo.
+
+A self-contained session artifact binding this checkpoint to world history is
+implemented below. Automatic recovery after unexpected learner/evidence failures
+and common Failure Capsule packaging remain pending. The held-out v1 experiment
+was not rerun or retuned for these additions.
+
+Checkpoint-focused validation: all three tests passed with `--features mujoco`
+(both backend resumes and corruption/bounds rejection), followed by MuJoCo-feature
+all-target Clippy with warnings denied. Full CI for this additional slice is in
+progress, separately logged at
+`E:\RNE-build\m3c-sensor\learner-checkpoint-ci.log`; the earlier completed CI above
+does not cover this later checkpoint implementation.
+
+## Replay-verified training sessions
+
+`SensorLearningSession` owns the physical batch, learner, next exploration
+coordinate and bounded operation history. Callers can step, reset selected lanes,
+inspect a read-only learner, encode a checkpoint or reconstruct from one. They
+cannot mutate the learner or worlds behind the recorded history. The schema v1
+session file includes backend identity, physical/noise/exploration roots, lane
+count, initial-world evidence, ordered training/reset operations and the final
+learner checkpoint. Worker count is intentionally not part of replay identity.
+
+Each train event binds the requested actions (including failed lanes), actual
+learning transitions/failures, resulting learner checkpoint digest, lane reset
+contracts, sensor observations and physical-state hashes. Actions are recomputed
+by the learner during replay rather than supplied by an unchecked caller. Reset
+events do not consume a decision coordinate or update. Decoding rejects files
+over 8 MiB, more than 1,024 operations, invalid reset masks, decision/history
+mismatch, unknown fields and corrupt digests before replay. The inner learner
+checkpoint retains its separate 1 MiB bound and schema/TaskSpec validation.
+
+Restoration creates fresh worlds and re-executes every operation, including
+online learning updates. Every event digest and the final learner bytes must
+match; a rehashed, structurally valid but incorrect learner or event is not enough
+to resume. The constructor returns no partially restored session on a mismatch.
+This is bounded replay recovery, not constant-time solver-state restoration or a
+signature proving the identity of a hardware capture.
+
+Per-lane solver errors/panics remain failures and permit only explicit reset of
+the affected lanes before the next step. Healthy transitions still update the
+learner. A failure can be recorded, but restoration requires the factory to
+reproduce it; nondeterministic/external faults must not be silently ignored.
+Preflight rejections (including the horizon and operation cap) do not advance
+physics or learning. Unexpected errors after progress but before a complete
+event invalidate the session and prevent incomplete checkpoints. Automatic
+recovery of those errors and their common Failure Capsule representation are
+not implemented yet.
+
+All four session-focused tests passed with the MuJoCo feature, followed by
+MuJoCo-feature all-target Clippy. Tests cover both backend resumes after partial
+reset and different worker counts, rehashed incorrect event/learner rejection,
+post-physics error and panic recovery, unchanged state after invalid reset/horizon
+or operation-cap rejection, and oversized/unknown-field rejection before backend
+construction. Full regression validation for the session remains pending. The
+already running `learner-checkpoint-ci.log` began before this code was added, so
+its early lint/test phases cannot establish coverage for this later addition.
+Per-step checkpoint/evidence work adds overhead that was not included in the
+earlier raw-learner v1 throughput measurement; that number must not be reused as
+session-checkpoint throughput.
+
+The 1,024-operation cap is an explicit remaining limitation: the prior v1
+experiment's 10,560 training decisions plus 31 resets do not fit in one current
+session. Longer verified jobs need a reviewed larger bounded format or verified
+segmentation; callers must not drop history and claim equivalent recovery.
+
+### Separate-process evidence
+
+The `learning_session_checkpoint` example takes `<rapier|mujoco> <record|resume>
+<path>`. Record saves after 30 two-lane learning decisions and one partial reset,
+then continues for 30 more. Resume reads the bounded file in a new process,
+verifies history with one worker instead of two, and performs the same
+continuation. It checks for 120 final updates and prints the continued-session
+digest. This is a fixed smoke fixture, not a general long-job launcher.
+
+Both backend record/resume process pairs exited 0 and produced identical final
+digests within each backend on 2026-09-08:
+
+- Rapier: `b9b59657a66a35ad5a012c17c00e3ae8191b4f4361f8c9f2b6b6c0d5d4a288b0`.
+  Saved artifact `E:\RNE-build\m3c-sensor\learning-session-rapier-v1.json`,
+  10,450 bytes, SHA-256
+  `7c0bffb3fb0295d19fadcfd466de94491c62a0d3f91898ca07226932e1e5bc0e`.
+- MuJoCo: `713d0af1e8f42904bb33635d1dca67f571f499ff23eccab09034fec6a0dc3f5c`.
+  Saved artifact `E:\RNE-build\m3c-sensor\learning-session-mujoco-v1.json`,
+  10,449 bytes, SHA-256
+  `7aac999107c1281e15cdcd54f1e2c91e453994d1896b460e63ba8fb22c429c95`.
+
+Attempting to record over the Rapier file failed with an already-exists error,
+and its SHA-256 remained unchanged. Attempting to resume that file with MuJoCo
+failed with an initial-world/backend mismatch. The example passed feature-enabled
+all-target Clippy and build checks. Full session regression CI remains pending;
+these process tests are focused evidence, not a substitute for the full goal.
