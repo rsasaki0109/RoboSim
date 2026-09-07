@@ -1,15 +1,15 @@
 # Mobility real-log source audit
 
-Status: source screening and first sensor archive inspection, 2026-09-07.
-One NCLT sensor archive acquired externally; no physical validation completed.
-Other candidate descriptions are not verified channel manifests.
+Status: source screening and bounded NCLT, F1TENTH and DDMR inspection, 2026-09-08.
+Data resides on external storage; no physical calibration qualification completed.
+Uninspected candidate descriptions are not verified channel manifests.
 
 ## Selection and limits
 
 | Primary source | Potential RNE use | Evidence gap / decision |
 | --- | --- | --- |
 | [Michigan NCLT](https://robots.engin.umich.edu/nclt/index.html) | Wheel/IMU replay and estimator timing checks | First bounded format-inspection candidate; not independent drivetrain or suspension validation. |
-| [Driving Data of a Real F1tenth Car](https://zenodo.org/records/12536536) | Velocity-command response identification candidate | Official API and README now inspected after earlier access errors. Command is body-frame; VICON velocity is world-frame. CC BY 4.0 declared. Bag contents remain uninspected. |
+| [Driving Data of a Real F1tenth Car](https://zenodo.org/records/12536536) | Velocity-command response identification candidate | One bag inspected with independent readers; electrical channels and reference timing/units remain unqualified. See the acquired evidence below. CC BY 4.0 declared. |
 | [KAIST Complex Urban Dataset](https://sites.google.com/view/complex-urban-dataset/home) | Navigation sensor replay candidate | Official page lists LiDAR, stereo and position sensors, but does not establish the actuator channels needed here. It declares CC BY-NC-SA 4.0; do not bundle under RNE's license. Not selected for dynamics identification. |
 
 NCLT's official update history says left/right wheel velocities were added to sensor
@@ -28,7 +28,116 @@ and report the result as independently measured velocity or slip. Published whee
 velocity is not automatically raw encoder counts. A Segway capture also does not
 establish skid-steer, trailing-caster, or Ackermann validity.
 
-## Acquired NCLT evidence
+## Acquired DDMR format evidence
+
+The author repository's [pinned CSV](https://github.com/RAI-Techno/ddmr_control/blob/6291b0d7faa5c7b7deb475e833c115c84d7123da/Data%20and%20Codes/Data.csv)
+was acquired with a 20,000,000-byte streaming bound on 2026-09-08.
+The exact 19,461,206 bytes matched Git blob SHA-1
+`427680e90bfde9d41b09068c78dafc807273e907` (including the Git blob header).
+Local SHA-256 is `c278dde8bfc38974bb2b1cc054160349da51456817c898ea2e052656aa75f60e`.
+Original file: `E:\RoboSim-external-data\mobility-ddmr-6291b0d7\Data.csv`.
+No notebooks or model weights were executed.
+
+A complete read-only CSV scan found 338,550 rows, each with five finite numeric
+fields: time (s), left/right voltage (V), left/right speed (rad/s). No malformed
+rows or non-increasing times occurred. Times span 0 to 3385.4900000000002 s.
+All adjacent differences match 0.01 s within 1 ns (decimal extrema
+0.0099999999997 and 0.0100000000003 s). Both voltage columns range from
+-5.808 to 10.664 V. Left speed ranges from -16.379961696524322 to
+33.17992241090824 rad/s; right from -17.639958750103116 to
+32.759923393048645 rad/s. Values and timestamps were not resampled or repaired.
+
+These are file-format checks only. A regular time column does not establish
+hardware capture timing. Commanded versus measured terminal voltage, encoder
+processing, clock construction, capture instrumentation and dataset-specific
+license scope still need qualification. There are no current or independent
+body-reference columns in this CSV. Do not use these checks to claim electrical,
+slip, suspension or real-world model accuracy. Keep raw data external and do not
+bundle it into the repository.
+
+### DDMR capture and evaluation qualification
+
+Read-only source inspection on 2026-09-08 reached the following decision:
+**retain as an unqualified command-to-wheel-response candidate, not an electrical
+parameter or vehicle-slip calibration dataset.**
+
+The pinned [identifier notebook](https://github.com/RAI-Techno/ddmr_control/blob/6291b0d7faa5c7b7deb475e833c115c84d7123da/Data%20and%20Codes/System_Identification_Model.ipynb),
+code cell 4, consumes the first 336,000 rows, ignores the time column, constructs
+150-row two-voltage windows, and targets the two speeds at each window's last row.
+It prepends an artificial zero-input/zero-target example. It then splits the
+constructed windows chronologically (60% training, then 67% of the remainder for
+validation), without a boundary purge. Adjacent windows across a partition share
+149 input rows. This is shared input history, not proof that target values leaked.
+The reported R-squared is not independent-capture or free-running physical-model
+validation. The notebook neither records hardware data nor establishes voltage
+measurement or encoder decoding. No notebook code or weights were executed.
+
+The complete GitHub file trees were inspected for `ddmr_control` at
+`6291b0d7faa5c7b7deb475e833c115c84d7123da`, the linked
+[exploration project](https://github.com/RAI-Techno/drl_autonomous_exploration/tree/2624fe1a9d04770552bc6acea9b6e963bdc00a4e),
+and its linked [LilyBot project](https://github.com/RAI-Techno/lilybot/tree/eb059ec6564267c7e245cdde75a1617f18d1f7b7).
+The trees were not truncated. No DDMR capture firmware or CSV recording script
+was identified there. LilyBot's `lily_go.launch` starts Gazebo with simulated
+time, not an instrumented real motor acquisition path. Its parts list links a
+Yahboom ROS expansion board and DFRobot FIT0493 motor. This narrows hardware
+candidates but does not pin the components/firmware used for the CSV capture.
+The DDMR root LICENSE identifies Apache License 2.0; no separate dataset license
+file appeared in the inspected tree. Keep the data external pending redistribution
+review rather than relabeling it as RNE-owned data.
+
+The [motor vendor](https://www.dfrobot.com/product-1462.html) lists 34:1 gearing
+and quadrature feedback with 374 pulses per output revolution. Whether acquisition
+counts one or multiple edges, and whether speed uses a fixed interval, remain
+unknown. Do not substitute a guessed 374 or 1496 counts/revolution into the recorded
+sensor contract. The [board documentation](https://www.yahboom.net/study/ROS-Driver-Board)
+lists encoder capture and PWM control tutorials, but does not bind a firmware
+version, configuration or voltage conversion to this dataset.
+
+The `recorded_ddmr` module now provides a bounded, source-hashed offline reader
+preserving the five recorded columns and unknown capture/receipt semantics.
+It retains the original time token alongside f64 seconds, accepts the exact
+unquoted numeric header with optional UTF-8 BOM and LF/CRLF, and rejects malformed,
+nonfinite, unordered or oversized input. Limits are 32 MiB, 500,000 records and
+512 bytes per data line. No automatic time conversion or voltage calibration occurs.
+
+`DdmrSeries::split` takes explicit raw-row cut indices before window construction.
+Each read-only partition builds its own past-only prediction windows. Positive
+history and future-horizon lengths are mandatory; a horizon of one targets the
+next recorded row, not necessarily a fixed number of seconds. Short partitions
+fail instead of yielding an empty evaluation. No warm-up history crosses a split.
+The `ddmr_source_check` example reports source integrity and window counts only:
+
+```text
+cargo run -p rne_mobility_benchmark --example ddmr_source_check -- <Data.csv> 203130 270840 150 1
+```
+
+For the pinned 338,550-row source these explicit cuts are 60%/20%/20%. They are an
+ingestion smoke configuration, not a tuned model or a frozen performance result.
+Synthetic tests cover source spelling/negative zero, line-ending hash differences,
+disjoint histories and future labels, split/window boundary errors, byte/row/line
+bounds, invalid numeric input and I/O errors.
+
+On 2026-09-08 the three focused reader/split tests and crate all-target Clippy
+(`-D warnings`, default features) passed. The example read all 338,550 real rows,
+reported the exact byte count and SHA-256 recorded above, and generated 202,980
+training windows plus 67,560 each for validation and test. It fitted no model and
+reported all physical-calibration, timing and voltage qualification flags false.
+This implementation postdates the full CI for commit `3dbc897`; that earlier
+full CI is not regression evidence for this reader.
+The subsequent MuJoCo-enabled crate library regression completed with 133 passed,
+0 failed and 2 intentionally ignored long-job tests. This run covered the reader
+and split, before adding the response identifier.
+
+The exploratory response identifier and its fixed protocol are described in
+[`MOBILITY_DDMR_RESPONSE_EXPERIMENT.md`](MOBILITY_DDMR_RESPONSE_EXPERIMENT.md).
+Any response fit must use raw-row-disjoint chronological training/validation/test
+segments, build windows only inside each segment, and disclose that one capture is
+not independent-session validation. Freeze model choice on training/validation
+only and compare held-out SI-unit errors with a persistence baseline. Do not fit
+motor resistance, torque constant, current dynamics or tire slip from these five
+columns. Physical parameter acceptance still needs a qualified acquisition source.
+
+## Acquired NCLT archive
 
 Acquired directly from the official page's
 [2013-01-10 sensor archive](https://s3.us-east-2.amazonaws.com/nclt.perl.engin.umich.edu/sensor_data/2013-01-10_sen.tar.gz):

@@ -270,5 +270,15 @@ digests within each backend on 2026-09-08:
 Attempting to record over the Rapier file failed with an already-exists error,
 and its SHA-256 remained unchanged. Attempting to resume that file with MuJoCo
 failed with an initial-world/backend mismatch. The example passed feature-enabled
-all-target Clippy and build checks. Full session regression CI remains pending;
-these process tests are focused evidence, not a substitute for the full goal.
+all-target Clippy and build checks.
+
+Full `cargo run -p xtask -- ci` completed with exit 0 for frozen commit
+`3dbc89715073bd33b8f8a7b99e6308674bc94d40` on 2026-09-08. Evidence log:
+`E:\RNE-build\m3c-sensor\learning-session-v2-ci.log`. This includes workspace
+checks, headless/OSS parity, 361 fuzz cases and 10/10 Behavior CI seeds.
+The two routinely ignored full-job session tests were separately run with the
+MuJoCo feature and passed (log `learning-session-v2-long.log` in the same directory).
+Each backend completed 42,240 learner updates over 32 four-lane episodes, restored
+10,591 journal operations with a changed worker count, and matched continuation.
+These are replay/recovery checks, not physical calibration or completion of the
+broader Mobility Foundation goal.

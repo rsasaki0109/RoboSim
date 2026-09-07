@@ -245,9 +245,12 @@ ticks, sensor-only actor tensors, evaluator reward, partial resets, CPU-parallel
 lanes, and exact reset/action replay. The new SI-unit evaluator separately reports
 open-loop backend gaps and final-speed acceptance; full workspace CI and the
 MuJoCo-enabled mobility suite passed on 2026-09-07.
-Fallible training integration, independent sensor-noise resets, broader per-wheel/
-Ackermann randomization, accelerated batching, and physical-log validation remain
-open. `TaskSpec` now has optional, separately validated actor, privileged-critic, and
+The longitudinal reference path now includes fallible training, independent physical/
+sensor-noise roots and replay-verified learner-session recovery; see
+[`MOBILITY_FALLIBLE_LEARNING_BOUNDARY.md`](MOBILITY_FALLIBLE_LEARNING_BOUNDARY.md).
+Full CI passed for that implementation on 2026-09-08. This does not close broader
+per-wheel/Ackermann randomization, accelerated batching, or physical-log validation.
+`TaskSpec` now has optional, separately validated actor, privileged-critic, and
 diagnostic observation spaces; the sensor-only Ackermann task declares its estimator and
 measurement actor inputs separately from rigid-body truth and timing diagnostics.
 
