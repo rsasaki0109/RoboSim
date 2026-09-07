@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod feedback;
+pub mod timed;
 
 /// Maximum scalar input records accepted by one analysis.
 pub const MAX_ALLAN_SAMPLES: usize = 1_000_000;

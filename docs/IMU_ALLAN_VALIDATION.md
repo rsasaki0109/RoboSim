@@ -79,10 +79,14 @@ predeclared 25% relative regression tolerance. The GM oracle sums the stationary
 AR(1) covariance matrix of adjacent averages, independently of the prefix-sum
 statistic. The test does not average axes together or claim a confidence level.
 On 2026-09-08, all seven focused Allan tests, all 86 sensor crate tests, doc-tests
-and sensor all-target Clippy passed. Workspace regression for this addition remains
-pending; the completed DDMR full CI predates these IMU changes.
+and sensor all-target Clippy passed. Full `cargo run -p xtask -- ci` subsequently
+passed with exit 0 for frozen commit `6d7e7d1c7e7dc4ee390d72a973e424ad46b80ae6`,
+including OSS parity, 361 fuzz cases and 10/10 Behavior CI seeds. Log:
+`E:\RNE-build\m3c-sensor\imu-allan-v1-ci.log`.
 
-Remaining work: physical profile validation and complete workspace regression.
+Remaining work: physical profile validation. The acquired long-duration source and
+its nonuniform timing and thermal limitations are documented in
+[IPIN static IMU source audit](IMU_IPIN_SOURCE_AUDIT.md).
 Handle startup explicitly: time-zero white noise uses a compatibility fallback, while time-zero GM
 draws a stationary bias; a positive-time zero-state start is different. Check frontend
 capture timestamps, latency, gaps and status before applying uniform-series analysis.
