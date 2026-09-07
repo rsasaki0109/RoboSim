@@ -27,6 +27,8 @@ use rne_mobility_benchmark::suspension_identification::{
 use rne_physics_rapier::RapierBackend;
 use std::path::PathBuf;
 
+mod fixed_cli;
+
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let mut output = None;
@@ -117,6 +119,27 @@ fn main() -> Result<()> {
             }
             other => bail!("unknown argument: {other}"),
         }
+    }
+    if backend.starts_with("fixed-") {
+        ensure!(
+            failure_replay.is_none()
+                && fault.is_none()
+                && acquisition_manifest.is_none()
+                && evidence_root.is_none()
+                && episode_index.is_none()
+                && lane_id.is_none(),
+            "fixed replay commands reject unrelated flags"
+        );
+        return fixed_cli::run(
+            &backend,
+            input
+                .as_deref()
+                .context("fixed replay command requires --input")?,
+            output.as_deref(),
+            root_seed,
+            num_envs,
+            num_workers.unwrap_or(1),
+        );
     }
     let sensor_episode_batch = matches!(
         backend.as_str(),

@@ -84,7 +84,9 @@ and not attested by this trace. A callback can of course capture caller-provided
 data; this typed boundary is not a process security sandbox.
 
 This is the control injection point for a future stateful reset/step wrapper,
-not yet that wrapper: the call still runs a whole episode. The episode batch above
+not itself that wrapper: the call still runs a whole episode. A separate
+[`SensorFixedEnvironment` primitive](MOBILITY_SYNCHRONOUS_ENV_DESIGN.md) now provides
+persistent 10 ms stepping; its training/batch contract is still incomplete. The episode batch above
 still uses the reference PI controller. Regression tests compare a supplied PI
 callback with the reference complete trace, demonstrate changed physical state
 under a zero-voltage policy, retain its failed verdict, verify voltage replay,

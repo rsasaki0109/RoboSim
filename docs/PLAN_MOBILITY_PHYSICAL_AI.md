@@ -358,16 +358,24 @@ and cross-backend results.
     latency/jitter, residual bias and a seeded encoder drop are reset parameters;
     the WorldRandom noise seed remains fixed, not an independent lane noise stream.
     A bounded CPU episode-parallel runner retains failed tasks and reproduces complete
-    serial/parallel artifacts on both backends. This does not yet provide a persistent
-    synchronous vector step API; see
+    serial/parallel artifacts on both backends. That episode runner is distinct from
+    the persistent synchronous vector step API described below; see
     [`MOBILITY_SENSOR_EPISODE_BATCH_V1.md`](MOBILITY_SENSOR_EPISODE_BATCH_V1.md).
     An external voltage-policy callback now receives only sensor-derived actor inputs.
     Exact voltage replay binds completed physical-state hashes; the common Failure
     Capsule additionally binds replay bytes and the verifying binary's build metadata.
     These are replay/provenance checks, not proof of physical calibration or attested
-    policy identity. Next extract persistent single-world state and implement a distinct
-    fixed-period reset/step contract, since actual event-driven sensor decisions have
-    variable intervals; see
+    policy identity. Persistent single-world state and a distinct 10 ms fixed-period
+    reset/step contract now share the existing 1 ms physics/sensor runtime without
+    changing saved event-driven voltage replays. The CPU batch supports explicit partial
+    reset, all-lane input preflight, per-lane execution failures and scheduling-independent
+    transitions. A fixed TaskSpec maps masked sensor-only tensors and integrates
+    evaluator tracking-error reward over all ten physics ticks, including stale-sensor
+    intervals. Bounded reset/action history replay binds backend, reset contracts,
+    observations, rewards and completed physical hashes; CLI-generated 331-operation
+    proofs are byte-identical across worker counts within each backend. A training
+    adapter, cross-backend fixed-task acceptance metrics and common Capsule integration
+    for this new replay format remain next steps; see
     [`MOBILITY_SYNCHRONOUS_ENV_DESIGN.md`](MOBILITY_SYNCHRONOUS_ENV_DESIGN.md).
     Broader per-wheel/Ackermann resets, physical-log acquisition, recorded/shadow/HIL
     validation, and the final real-vehicle exit gate remain open.

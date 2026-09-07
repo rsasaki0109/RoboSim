@@ -1,8 +1,161 @@
 # Mobility synchronous environment: implementation contract
 
-Status: design for the next implementation slice, **not an implemented API**.
+Status: persistent single-world and CPU batched stepping are implemented; the full
+training/batch contract below is **not yet complete**.
 The existing episode-parallel runner and policy callback are documented in
 [sensor episode batch v1](MOBILITY_SENSOR_EPISODE_BATCH_V1.md).
+
+## Implemented primitive
+
+`observed::SensorFixedEnvironment` owns a persistent physical world, drive state,
+pending wrench, frontends, bus and estimator. `step(voltage_v)` advances ten 1 ms
+ticks, returning an exact 10 ms boundary with optional sensor-only observation,
+original decision/capture timestamps, input age at the boundary and a freshness
+flag. The first reset observation is explicitly missing. After 330 steps the
+result is truncated; further stepping requires explicit reset, not autoreset.
+
+`reset(backend, manifest, episode_seed)` constructs replacement state before
+swapping it in. The caller supplies the backend and explicit reset seed. Invalid
+voltage leaves the current environment unchanged; errors after execution starts
+make it unusable until reset. The separately named privileged hash accessor is
+for evaluation and is not included in the actor result.
+
+The fixed actor/action/reward TaskSpec and bounded reset/action replay are now
+implemented. A training adapter remains pending; this is not yet a complete training
+integration.
+
+Validation (2026-09-07): full `cargo run -p xtask -- ci` exited successfully,
+including workspace format/Clippy/tests, headless and parity checks, fuzz smoke
+and Behavior CI (10/10 seeds). The feature-enabled MuJoCo mobility suite passed
+83 library tests and one CLI test, with feature-enabled Clippy also passing.
+Logs are retained on the external build drive as
+`E:/RNE-build/m3c-sensor/fixed-runtime-ci.log` and
+`E:/RNE-build/m3c-sensor/fixed-runtime-mujoco-tests.log`.
+These checks establish implementation/replay behavior, not physical calibration
+or cross-backend fixed-task acceptance.
+No old event-driven trace is relabeled as a fixed-period trace. The fixed runner
+and legacy controller/replay share the same extracted 1 ms runtime.
+
+Tests cover exact boundary alignment across different sensor reset seeds, stale
+and missing observations, horizon rejection, reset equivalence over full 330-step
+trajectories in Rapier and MuJoCo, invalid-action non-mutation and reset recovery
+after a deliberately injected post-step plant error. The injected error exercises
+the fail-closed wrapper; it is not evidence of every possible native solver fault.
+
+## Fixed TaskSpec and reward
+
+`sensor_fixed_task_spec()` declares `mobility_longitudinal_fixed_sensor_v1`, distinct
+from the event-driven trace contract. `SensorFixedObservation::actor_tensors()`
+returns ordered F64 tensors with matching shapes/units: validity/freshness, current
+and sensor timestamps, age, estimated pose/twist/uncertainty/health, measured motor
+voltage/current and the current scheduled speed target. Missing sensor inputs are
+zero placeholders with validity zero, never physical truth. The target is recomputed
+from current simulation time, even when the retained sensor estimate is older.
+
+Every step scores ten completed 1 ms physical updates, regardless of how many sensor
+updates arrived. Its raw diagnostic term is the sum of absolute true speed error
+times 0.001 s (meters), using the target at each integration interval's start.
+The target is 0 m/s for the first 300 ms, then 1 m/s. Reward is minus this integral
+normalized by 1 m, minus 0.001 per control step. Both the diagnostic term and scalar
+reward are outside actor tensors. There is no synthetic success termination;
+the 330-step horizon truncates and final physical acceptance is a separate gate.
+
+Generic TaskSpec validation now permits an empty termination-condition list only
+when a positive step budget is supplied. Empty unbounded tasks and zero horizons
+remain invalid. Existing serialized task schemas are unchanged; older validators
+that require a condition may reject this newly admitted truncation-only contract.
+
+The generic `randomization` field is not populated with a partial approximation:
+the joint reset distribution still lives in `SensorObservedContract`. Binding that
+reset contract, backend identity and full reset/action history into fixed-rollout
+evidence is handled by the replay proof below. Do not claim standalone TaskSpec
+captures all reset physics.
+
+## Bounded persistent operation replay
+
+`record_fixed_batch_replay` executes an explicit list of step/reset operations on
+fresh persistent worlds. Its v1 artifact binds the exact backend manifest and fixed
+TaskSpec, root seed, fixed WorldRandom noise seed (0), width, initial state projection
+and one evidence SHA-256 per operation. The projection covers actual joint-reset
+contracts, lane/episode identities, actor tensors, transition rewards/truncation and
+completed physical-state hashes. It also binds per-lane execution errors; poisoned
+lanes have an error marker instead of a successful physical-state hash.
+
+`verify_fixed_batch_replay` constructs fresh worlds, executes every operation and
+requires exact equality of the resulting proof. Worker topology is absent from the
+artifact. This tests scheduling independence within one backend, not exact equality
+between Rapier and MuJoCo. `validate_metadata` and `decode_fixed_batch_replay` check
+structure/integrity only; they cannot establish physical consistency.
+
+Limits are 16 MiB decoded JSON, 1–64 lanes and 1–1024 operations, with existing worker
+bounds. Each operation's action width/range and ordered reset mask is checked before
+constructing worlds. Terminal/poison preflight and constructor errors abort recording;
+lane execution errors can be followed by a reset. This proof is compact: it retains
+hashes, not raw projection traces, signed build provenance, backend snapshots or a
+common Failure Capsule. Those richer integration paths are not claimed here.
+
+Tests replay 330-step two-lane histories with an intervening partial reset on both
+backends and different worker counts. Tests also change commands, reset episode IDs
+and result digests, recompute the outer content hash, then require physical replay
+to reject them. Bounded decoding rejects oversized/unknown-field/schema inputs.
+
+## CLI reproduction on the external SSD
+
+With the existing external target/TEMP and MuJoCo environment configured:
+
+```powershell
+cargo run -p rne_mobility_benchmark --features mujoco -- --backend fixed-record-rapier --input tests/mobility_benchmark/fixtures/fixed-batch-operations.json --seed 42 --num-envs 2 --workers 1 --output E:\RNE-build\m3c-sensor\fixed-replay-rapier-workers-1.json
+cargo run -p rne_mobility_benchmark --features mujoco -- --backend fixed-verify-rapier --input E:\RNE-build\m3c-sensor\fixed-replay-rapier-workers-1.json --workers 2
+```
+
+Use `fixed-record-mujoco` / `fixed-verify-mujoco` for MuJoCo. Re-record with two
+workers and a different output filename to compare byte hashes. Both modes require
+`--input`; record additionally requires an explicit seed, width and new output
+filename. Verify forbids replacement seed/width/output flags. File input is bounded
+to 16 MiB. Output uses create-new semantics and never overwrites existing evidence;
+an IO failure can leave a partial new file, which must not be treated as a proof.
+
+The committed fixture runs 30 two-lane steps, resets only lane 1 to episode 7, then
+runs 300 more steps. Lane 0 reaches the 3.3 s horizon while lane 1 ends at 3.0 s of
+its new episode. Voltages are constant 3 V / 2 V; this is deterministic interface
+evidence, not a trained controller or successful task-acceptance claim.
+
+Verified CLI file SHA-256 values (each identical for workers 1 and 2):
+
+- Rapier: `cd933d113664a9267b6e3c278d9f77f67fbbb2cd1a920e89f89ebbd23e14cfbd`.
+- MuJoCo: `c20ded02811e42882bb8b7c99d92392ae18591563990fe4948e3b678cd994a7d`.
+
+Both recorded proofs also passed full physical re-execution with two workers.
+Files are retained externally at `E:\RNE-build\m3c-sensor\fixed-replay-{backend}-workers-{1,2}.json`.
+
+## Persistent CPU batch
+
+`observed_fixed_batch::SensorFixedBatch` constructs 1–64 independent fixed worlds
+at episode index zero, using `derive_episode_seed(root_seed, lane_id, episode_index)`.
+`step(&voltages_v)` advances each world by 10 ms using 1–16 scoped CPU workers.
+All input widths, voltages, poisoned states and terminal states are checked before
+any lane advances. Results remain in lane-ID order regardless of worker count.
+
+Execution is not an atomic physical transaction: each result retains either a
+completed transition or an error, so a failed lane cannot hide another lane's
+successful transition. Lane execution panics are caught after the environment has
+marked itself poisoned; only a fresh reset can recover it. Infrastructure panics
+outside lane execution return a batch error and do not promise partial evidence.
+
+`reset_lanes(&[(lane_id, episode_index)])` requires nonempty, increasing unique IDs
+in range. All replacement worlds are constructed before existing lanes are swapped,
+so factory failure preserves existing worlds. Factory side effects outside those
+worlds are caller-owned and are not rolled back. Unselected worlds retain their
+sensor queues, episode clocks and pending wrench. Each lane remains at exact 10 ms
+boundaries, but episode-local times may differ after partial reset; no global episode
+clock or automatic reset is implied.
+
+Five tests verify complete Rapier serial/parallel/single-world transitions over the
+330-step horizon, MuJoCo worker independence including final physical hashes, partial
+reset isolation, invalid action/mask rejection, atomic replacement construction and
+per-lane failure retention. The fault-injection backend delegates to real Rapier
+stepping then deliberately returns an error or panics, demonstrating recovery after
+actual physical progress without claiming that Rapier naturally emitted that error.
 
 ## Evidence driving the design
 

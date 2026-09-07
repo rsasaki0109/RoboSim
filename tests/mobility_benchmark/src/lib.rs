@@ -9,6 +9,7 @@ pub mod mobility_randomization;
 pub mod observed;
 pub mod observed_batch;
 pub mod observed_capsule;
+pub mod observed_fixed_batch;
 pub mod per_wheel;
 pub mod per_wheel_observed;
 pub mod road_excitation;

@@ -252,7 +252,8 @@ impl TerminationConditionSpec {
 #[non_exhaustive]
 #[serde(deny_unknown_fields)]
 pub struct TerminationSpec {
-    /// Conditions that produce `terminated = true`, in evaluation order.
+    /// Conditions that produce `terminated = true`, in evaluation order. May be
+    /// empty for a truncation-only task with a positive `max_episode_steps`.
     pub conditions: Vec<TerminationConditionSpec>,
     /// Optional action-step budget that produces `truncated = true`.
     pub max_episode_steps: Option<u64>,
@@ -748,10 +749,10 @@ fn validate_reward(reward: &RewardSpec) -> Result<(), TaskSpecValidationError> {
 }
 
 fn validate_termination(termination: &TerminationSpec) -> Result<(), TaskSpecValidationError> {
-    if termination.conditions.is_empty() {
+    if termination.conditions.is_empty() && termination.max_episode_steps.is_none() {
         return invalid(
             "termination.conditions",
-            "must contain at least one condition",
+            "must contain a condition or a positive step budget",
         );
     }
     let mut names = BTreeSet::new();
@@ -1009,6 +1010,21 @@ mod tests {
                 actual: TASK_SPEC_SCHEMA_VERSION + 1,
             }
         );
+    }
+
+    #[test]
+    fn truncation_only_task_requires_a_positive_horizon() {
+        let mut task = reference_task();
+        task.termination = TerminationSpec::new(vec![], Some(330));
+        task.validate().unwrap();
+        let encoded = serde_json::to_string(&task).unwrap();
+        let decoded: TaskSpec = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, task);
+        decoded.validate().unwrap();
+        task.termination.max_episode_steps = Some(0);
+        assert!(task.validate().is_err());
+        task.termination.max_episode_steps = None;
+        assert!(task.validate().is_err());
     }
 
     #[test]

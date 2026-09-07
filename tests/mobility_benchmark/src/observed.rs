@@ -61,7 +61,7 @@ const DRIVE_STEPS: u64 = 3_000;
 const TOTAL_STEPS: u64 = SETTLE_STEPS + DRIVE_STEPS;
 const TARGET_VELOCITY_M_S: f64 = 1.0;
 const MAXIMUM_VOLTAGE_V: f64 = 24.0;
-const WORLD_SEED: u64 = 0;
+pub(crate) const WORLD_SEED: u64 = 0;
 const ENCODER_COUNTS_PER_REVOLUTION: u32 = 2_048;
 const LEFT_ENCODER_STREAM: StreamId = StreamId::new(1_001);
 const RIGHT_ENCODER_STREAM: StreamId = StreamId::new(1_002);
@@ -641,126 +641,431 @@ pub fn replay_sensor_observed_trace<B: PhysicsBackend>(
     Ok(replay)
 }
 
-fn run_sensor_observed_execution<B: PhysicsBackend>(
-    mut backend: B,
-    manifest: PhysicsBackendManifest,
-    contract: SensorObservedContract,
-    replay: Option<&SensorObservedTrace>,
-    mut policy: Option<&mut SensorVoltagePolicy<'_>>,
-) -> Result<SensorObservedTrace> {
-    manifest.validate().context("backend manifest")?;
-    require_capabilities(
-        backend.capabilities(),
-        &[
-            PhysicsCapability::RigidBody,
-            PhysicsCapability::ContactForce,
-            PhysicsCapability::ExternalBodyWrench,
-            PhysicsCapability::ContactPointKinematics,
-        ],
-    )?;
-    ensure!(
-        manifest.capabilities == backend.capabilities(),
-        "backend manifest capability drift"
-    );
-    let task_spec = sensor_observed_task_spec();
-    task_spec.validate().context("TaskSpec")?;
-    contract.validate()?;
+/// Actor snapshot at an exact fixed-period boundary, with explicit missing data.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SensorFixedObservation {
+    /// Current simulation time, independent of the last sensor decision time.
+    pub time_ticks: u64,
+    /// Last accepted sensor-derived observation; absent immediately after reset.
+    /// Its decision timestamp is retained even when no new estimate is available.
+    pub latest: Option<SensorPolicyObservation>,
+    /// Capture time of the oldest input used by the retained estimate.
+    pub capture_ticks: Option<u64>,
+    /// Age of the retained estimate inputs at this fixed boundary, not at capture.
+    pub input_age_ticks: Option<u64>,
+    /// Whether an estimator update occurred during this control interval.
+    pub fresh_estimate: bool,
+}
 
-    let plant = contract
-        .physical_profile
-        .as_ref()
-        .map_or_else(plant_spec, |profile| profile.plant);
-    let mass_scale = plant.vehicle_mass_kg / plant_spec().vehicle_mass_kg;
-    let fixed_delta = SimDuration::from_ticks(SENSOR_OBSERVED_FIXED_DELTA_TICKS);
-    let dt_s = fixed_delta.as_seconds().value();
-    let gravity_m_s2 = Vec3::new(
-        -9.806_65 * plant.road_grade_rad.sin(),
-        -9.806_65 * plant.road_grade_rad.cos(),
-        0.0,
-    );
-    let physics_world = backend.create_world(PhysicsWorldDesc {
-        gravity_m_s2,
-        solver_iterations: 16,
-    })?;
-    let mut world = World::new();
-    if contract.physical_profile.is_some() {
-        world.insert_resource(
-            rne_sensor::SensorGravity::new(gravity_m_s2).context("finite sensor gravity")?,
-        );
+impl SensorFixedObservation {
+    /// Ordered F64 row-major tensors matching [`sensor_fixed_task_spec`]. Missing
+    /// sensor values use zero placeholders with `estimate_valid=0`; the current
+    /// clock and task target remain available without physical-truth access.
+    pub fn actor_tensors(&self) -> Vec<Vec<f64>> {
+        let actor = self.latest.as_ref().map(|value| &value.estimate);
+        let scalar = |value| vec![value];
+        vec![
+            scalar(f64::from(self.latest.is_some())),
+            scalar(f64::from(self.fresh_estimate)),
+            scalar(self.time_ticks as f64 / 1e9),
+            scalar(
+                self.latest
+                    .as_ref()
+                    .map_or(0.0, |value| value.decision_ticks as f64 / 1e9),
+            ),
+            scalar(self.capture_ticks.unwrap_or(0) as f64 / 1e9),
+            scalar(self.input_age_ticks.unwrap_or(0) as f64 / 1e9),
+            actor.map_or(vec![0.0; 2], |value| value.estimated_position_m.to_vec()),
+            scalar(actor.map_or(0.0, |value| value.estimated_yaw_rad)),
+            scalar(actor.map_or(0.0, |value| value.estimated_linear_velocity_m_s)),
+            scalar(actor.map_or(0.0, |value| value.estimated_angular_velocity_rad_s)),
+            actor.map_or(vec![0.0; 4], |value| {
+                value
+                    .position_covariance_m2
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .collect()
+            }),
+            scalar(actor.map_or(0.0, |value| value.yaw_variance_rad2)),
+            scalar(actor.map_or(0.0, |value| value.yaw_innovation_rad)),
+            scalar(actor.map_or(0.0, |value| f64::from(value.health_code))),
+            scalar(actor.map_or(0.0, |value| value.skipped_sequences as f64)),
+            scalar(
+                self.latest
+                    .as_ref()
+                    .map_or(0.0, |value| value.measured_motor_voltage_v),
+            ),
+            scalar(
+                self.latest
+                    .as_ref()
+                    .map_or(0.0, |value| value.measured_motor_current_a),
+            ),
+            scalar(fixed_target_velocity(self.time_ticks)),
+        ]
     }
-    world.insert_resource(WorldRandom::new(WORLD_SEED));
-    let ground = spawn_named(&mut world, "sensor_observed_ground");
-    world.entity_mut(ground).insert((
-        RigidBody {
-            body_type: RigidBodyType::Fixed,
-            ..RigidBody::default()
-        },
-        frictionless_collider(Vec3::new(20.0, 0.5, 5.0)),
-        Transform3::from_translation_rotation(Vec3::new(0.0, -0.5, 0.0), Quat::IDENTITY),
-    ));
-    let vehicle = spawn_named(&mut world, "sensor_observed_vehicle");
-    world.entity_mut(vehicle).insert((
-        RigidBody {
-            mass_kg: plant.vehicle_mass_kg,
-            ..RigidBody::default()
-        },
-        RigidBodyInertia {
-            center_of_mass_local_m: Vec3::ZERO,
-            ixx_kg_m2: 5.083_333_333_333_333 * mass_scale,
-            ixy_kg_m2: 0.0,
-            ixz_kg_m2: 0.0,
-            iyy_kg_m2: 11.333_333_333_334 * mass_scale,
-            iyz_kg_m2: 0.0,
-            izz_kg_m2: 10.416_666_666_666_666 * mass_scale,
-        },
-        frictionless_collider(Vec3::new(0.5, 0.25, 0.3)),
-        Transform3::from_translation_rotation(Vec3::new(0.0, 0.251, 0.0), Quat::IDENTITY),
-    ));
-    let rig = spawn_sensor_rig(&mut world, vehicle, &contract);
-    backend.sync_from_ecs(&mut world, physics_world)?;
+}
 
-    let mut estimator = WheelImuOdometry::new(
-        // Calibration is fixed: a hidden radius reset must not leak into odometry.
-        odometry_config(&contract, plant_spec().wheel.radius_m),
-        PoseSample::default(),
-    )?;
-    let mut bus = InMemoryDataBus::new();
-    sample_frontends(&mut world, SimTime::ZERO, &mut bus)?;
+/// Fixed-period actor/action/reward/horizon contract, distinct from event-driven
+/// voltage replay. All actor tensors are F64; validity and freshness are 0/1 masks.
+/// Joint reset distributions remain specified by `SensorObservedContract`, not
+/// duplicated as an incomplete generic TaskSpec randomization distribution.
+pub fn sensor_fixed_task_spec() -> TaskSpec {
+    let tensors = [
+        ("estimate_valid", vec![], "1"),
+        ("fresh_estimate", vec![], "1"),
+        ("time_s", vec![], "s"),
+        ("decision_time_s", vec![], "s"),
+        ("capture_time_s", vec![], "s"),
+        ("input_age_s", vec![], "s"),
+        ("estimated_position_m", vec![2], "m"),
+        ("estimated_yaw_rad", vec![], "rad"),
+        ("estimated_velocity_m_s", vec![], "m/s"),
+        ("estimated_yaw_rate_rad_s", vec![], "rad/s"),
+        ("position_covariance_m2", vec![2, 2], "m^2"),
+        ("yaw_variance_rad2", vec![], "rad^2"),
+        ("yaw_innovation_rad", vec![], "rad"),
+        ("health_code", vec![], "1"),
+        ("skipped_sequences", vec![], "1"),
+        ("measured_motor_voltage_v", vec![], "V"),
+        ("measured_motor_current_a", vec![], "A"),
+        ("target_velocity_m_s", vec![], "m/s"),
+    ]
+    .into_iter()
+    .map(|(name, shape, unit)| TensorSpec::new(name, TensorDType::F64, shape, unit))
+    .collect();
+    TaskSpec::new(
+        "mobility_longitudinal_fixed_sensor_v1",
+        0.01,
+        rne_ai::ObservationSpec::new(tensors),
+        sensor_observed_task_spec().action,
+        RewardSpec::weighted_sum(vec![
+            RewardTermSpec::new("privileged_tracking_error_integral_m", -1.0, "m"),
+            RewardTermSpec::new("control_step", -0.001, "1"),
+        ]),
+        TerminationSpec::new(vec![], Some(330)),
+        ResetSpec::splitmix64(true),
+    )
+}
 
-    let initial_position = *world
-        .get::<Transform3>(vehicle)
-        .context("initial vehicle transform")?;
-    let mut drive_state = LongitudinalDrivePathState::default();
-    let mut pending_wrench = None;
-    let mut command_voltage_v = 0.0;
-    let mut controller = VelocityController::new(&contract);
-    let mut samples = Vec::new();
-    let mut contact_drive_steps = 0_u64;
-    let mut squared_position_error_sum_m2 = 0.0;
-    let mut squared_velocity_error_sum_m2_s2 = 0.0;
-    let mut scoring_samples = 0_u64;
-    let mut maximum_measured_current_a = 0.0_f64;
-    let mut last_estimator_left_sequence = 0_u64;
+fn fixed_target_velocity(time_ticks: u64) -> f64 {
+    if time_ticks >= SETTLE_STEPS * SENSOR_OBSERVED_FIXED_DELTA_TICKS {
+        TARGET_VELOCITY_M_S
+    } else {
+        0.0
+    }
+}
 
-    for zero_based_step in 0..TOTAL_STEPS {
-        if let Some(wrench) = pending_wrench.take() {
-            backend.apply_external_body_wrench(physics_world, wrench)?;
+/// One fixed 10 ms transition; truncation is a horizon, not a success verdict.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SensorFixedStep {
+    /// Sensor-only actor snapshot at the completed boundary.
+    pub observation: SensorFixedObservation,
+    /// True at the 3.3 s physical horizon. Explicit reset is required afterward.
+    pub truncated: bool,
+    /// Evaluator reward: negative integrated true speed error (normalized by 1 m)
+    /// minus 0.001 per control step. Never included in actor tensors.
+    pub reward: f64,
+    /// Privileged sum of |completed-step speed - interval-start target| * 0.001 s.
+    /// Retained separately from actor observation for reward audit.
+    pub privileged_tracking_error_integral_m: f64,
+}
+
+/// Persistent fallible single-world fixed-period stepping primitive.
+///
+/// Unlike the event-driven reference trace, voltage decisions occur every 10 ms.
+/// Backend, sensor queues, drive state and estimator persist between calls. Reset
+/// reconstructs them all. Rewards are evaluator-only values under the fixed TaskSpec.
+pub struct SensorFixedEnvironment<B: PhysicsBackend> {
+    runtime: SensorObservedRuntime<B>,
+    latest: Option<SensorTickDecision>,
+    poisoned: bool,
+}
+
+impl<B: PhysicsBackend> std::fmt::Debug for SensorFixedEnvironment<B> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SensorFixedEnvironment")
+            .field("completed_steps", &self.runtime.completed_steps)
+            .field("poisoned", &self.poisoned)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<B: PhysicsBackend> SensorFixedEnvironment<B> {
+    pub(crate) fn reset_contract(&self) -> &SensorObservedContract {
+        &self.runtime.contract
+    }
+
+    /// Creates a fresh joint-reset world using an explicit reset seed. The
+    /// factory/caller supplies a backend; no previous world or sensor state is reused.
+    pub fn new(backend: B, manifest: PhysicsBackendManifest, episode_seed: u64) -> Result<Self> {
+        sensor_fixed_task_spec()
+            .validate()
+            .context("fixed sensor TaskSpec")?;
+        let mut contract = SensorObservedContract::randomized(episode_seed);
+        contract.physical_profile = Some(sample_physical_profile(episode_seed));
+        Ok(Self {
+            runtime: SensorObservedRuntime::new(backend, &manifest, contract)?,
+            latest: None,
+            poisoned: false,
+        })
+    }
+
+    /// Reconstructs the world at time zero. Construction failure leaves the old
+    /// instance unchanged; successful reset clears any poisoned or terminal state.
+    pub fn reset(
+        &mut self,
+        backend: B,
+        manifest: PhysicsBackendManifest,
+        episode_seed: u64,
+    ) -> Result<SensorFixedObservation> {
+        let replacement = Self::new(backend, manifest, episode_seed)?;
+        *self = replacement;
+        self.observation()
+    }
+
+    /// Returns the current actor snapshot without advancing physics. Immediately
+    /// after reset delayed sensors are missing, not fabricated from physical truth.
+    pub fn observation(&self) -> Result<SensorFixedObservation> {
+        ensure!(
+            !self.poisoned,
+            "fixed environment requires reset after execution error"
+        );
+        Ok(self.snapshot(false))
+    }
+
+    /// Holds one terminal-voltage command for ten 1 ms physics ticks. The command
+    /// enters drive evaluation after each physical step; pending wrench staging is
+    /// retained. Invalid actions are rejected before mutation. Execution errors
+    /// poison the world until reset, without claiming rollback. No autoreset occurs.
+    pub fn step(&mut self, command_voltage_v: f64) -> Result<SensorFixedStep> {
+        self.validate_action(command_voltage_v)?;
+        self.poisoned = true;
+        let mut fresh = false;
+        let mut tracking_error_integral_m = 0.0;
+        for _ in 0..10 {
+            let target = fixed_target_velocity(
+                self.runtime.completed_steps * SENSOR_OBSERVED_FIXED_DELTA_TICKS,
+            );
+            if let Some(decision) = self.runtime.tick(command_voltage_v)? {
+                self.latest = Some(decision);
+                fresh = true;
+            }
+            let body = self
+                .runtime
+                .world
+                .get::<RigidBody>(self.runtime.vehicle)
+                .context("fixed reward body unavailable")?;
+            tracking_error_integral_m += (body.linear_velocity_m_s.x - target).abs() * 0.001;
         }
-        backend.step(physics_world, fixed_delta)?;
-        backend.sync_to_ecs(&mut world, physics_world)?;
+        ensure!(
+            tracking_error_integral_m.is_finite(),
+            "non-finite fixed reward"
+        );
+        self.poisoned = false;
+        Ok(SensorFixedStep {
+            observation: self.snapshot(fresh),
+            truncated: self.runtime.completed_steps == TOTAL_STEPS,
+            reward: -tracking_error_integral_m - 0.001,
+            privileged_tracking_error_integral_m: tracking_error_integral_m,
+        })
+    }
+
+    pub(crate) fn validate_action(&self, command_voltage_v: f64) -> Result<()> {
+        ensure!(
+            !self.poisoned,
+            "fixed environment requires reset after execution error"
+        );
+        ensure!(
+            self.runtime.completed_steps < TOTAL_STEPS,
+            "fixed environment horizon reached; reset required"
+        );
+        ensure!(
+            command_voltage_v.is_finite()
+                && (-MAXIMUM_VOLTAGE_V..=MAXIMUM_VOLTAGE_V).contains(&command_voltage_v),
+            "fixed action must be finite and within voltage limits"
+        );
+        Ok(())
+    }
+
+    /// Privileged evaluator digest of completed rigid-body/joint state. Never
+    /// included in actor snapshots; not a hash of hidden sensor/backend internals.
+    pub fn privileged_physics_hash_v2(&self) -> Result<u64> {
+        ensure!(
+            !self.poisoned,
+            "fixed environment requires reset after execution error"
+        );
+        Ok(rne_physics::hash_physics_state_v2(&self.runtime.world))
+    }
+
+    fn snapshot(&self, fresh_estimate: bool) -> SensorFixedObservation {
+        let time_ticks = self.runtime.completed_steps * SENSOR_OBSERVED_FIXED_DELTA_TICKS;
+        let capture_ticks = self
+            .latest
+            .as_ref()
+            .map(|decision| decision.estimate.provenance.capture_ticks);
+        SensorFixedObservation {
+            time_ticks,
+            latest: self
+                .latest
+                .as_ref()
+                .map(|decision| decision.observation.clone()),
+            capture_ticks,
+            input_age_ticks: capture_ticks.map(|capture| time_ticks - capture),
+            fresh_estimate,
+        }
+    }
+}
+
+struct SensorObservedRuntime<B: PhysicsBackend> {
+    backend: B,
+    physics_world: rne_physics::PhysicsWorldId,
+    world: World,
+    vehicle: Entity,
+    rig: SensorRig,
+    contract: SensorObservedContract,
+    plant: LongitudinalMobilityPlantSpec,
+    estimator: WheelImuOdometry,
+    bus: InMemoryDataBus,
+    drive_state: LongitudinalDrivePathState,
+    pending_wrench: Option<rne_physics::ExternalBodyWrench>,
+    completed_steps: u64,
+    contact_drive_steps: u64,
+    last_estimator_left_sequence: u64,
+}
+
+#[derive(Clone, Debug)]
+struct SensorTickDecision {
+    estimate: rne_ai::WheelImuOdometryEstimate,
+    observation: SensorPolicyObservation,
+    motor_sequence: u64,
+}
+
+impl<B: PhysicsBackend> SensorObservedRuntime<B> {
+    fn new(
+        mut backend: B,
+        manifest: &PhysicsBackendManifest,
+        contract: SensorObservedContract,
+    ) -> Result<Self> {
+        manifest.validate().context("backend manifest")?;
+        require_capabilities(
+            backend.capabilities(),
+            &[
+                PhysicsCapability::RigidBody,
+                PhysicsCapability::ContactForce,
+                PhysicsCapability::ExternalBodyWrench,
+                PhysicsCapability::ContactPointKinematics,
+            ],
+        )?;
+        ensure!(
+            manifest.capabilities == backend.capabilities(),
+            "backend manifest capability drift"
+        );
+        let task_spec = sensor_observed_task_spec();
+        task_spec.validate().context("TaskSpec")?;
+        contract.validate()?;
+
+        let plant = contract
+            .physical_profile
+            .as_ref()
+            .map_or_else(plant_spec, |profile| profile.plant);
+        let mass_scale = plant.vehicle_mass_kg / plant_spec().vehicle_mass_kg;
+        let gravity_m_s2 = Vec3::new(
+            -9.806_65 * plant.road_grade_rad.sin(),
+            -9.806_65 * plant.road_grade_rad.cos(),
+            0.0,
+        );
+        let physics_world = backend.create_world(PhysicsWorldDesc {
+            gravity_m_s2,
+            solver_iterations: 16,
+        })?;
+        let mut world = World::new();
+        if contract.physical_profile.is_some() {
+            world.insert_resource(
+                rne_sensor::SensorGravity::new(gravity_m_s2).context("finite sensor gravity")?,
+            );
+        }
+        world.insert_resource(WorldRandom::new(WORLD_SEED));
+        let ground = spawn_named(&mut world, "sensor_observed_ground");
+        world.entity_mut(ground).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            frictionless_collider(Vec3::new(20.0, 0.5, 5.0)),
+            Transform3::from_translation_rotation(Vec3::new(0.0, -0.5, 0.0), Quat::IDENTITY),
+        ));
+        let vehicle = spawn_named(&mut world, "sensor_observed_vehicle");
+        world.entity_mut(vehicle).insert((
+            RigidBody {
+                mass_kg: plant.vehicle_mass_kg,
+                ..RigidBody::default()
+            },
+            RigidBodyInertia {
+                center_of_mass_local_m: Vec3::ZERO,
+                ixx_kg_m2: 5.083_333_333_333_333 * mass_scale,
+                ixy_kg_m2: 0.0,
+                ixz_kg_m2: 0.0,
+                iyy_kg_m2: 11.333_333_333_334 * mass_scale,
+                iyz_kg_m2: 0.0,
+                izz_kg_m2: 10.416_666_666_666_666 * mass_scale,
+            },
+            frictionless_collider(Vec3::new(0.5, 0.25, 0.3)),
+            Transform3::from_translation_rotation(Vec3::new(0.0, 0.251, 0.0), Quat::IDENTITY),
+        ));
+        let rig = spawn_sensor_rig(&mut world, vehicle, &contract);
+        backend.sync_from_ecs(&mut world, physics_world)?;
+
+        let estimator = WheelImuOdometry::new(
+            // Calibration is fixed: a hidden radius reset must not leak into odometry.
+            odometry_config(&contract, plant_spec().wheel.radius_m),
+            PoseSample::default(),
+        )?;
+        let mut bus = InMemoryDataBus::new();
+        sample_frontends(&mut world, SimTime::ZERO, &mut bus)?;
+
+        Ok(Self {
+            backend,
+            physics_world,
+            world,
+            vehicle,
+            rig,
+            contract,
+            plant,
+            estimator,
+            bus,
+            drive_state: LongitudinalDrivePathState::default(),
+            pending_wrench: None,
+            completed_steps: 0,
+            contact_drive_steps: 0,
+            last_estimator_left_sequence: 0,
+        })
+    }
+
+    fn tick(&mut self, command_voltage_v: f64) -> Result<Option<SensorTickDecision>> {
+        let fixed_delta = SimDuration::from_ticks(SENSOR_OBSERVED_FIXED_DELTA_TICKS);
+        let dt_s = fixed_delta.as_seconds().value();
+        if let Some(wrench) = self.pending_wrench.take() {
+            self.backend
+                .apply_external_body_wrench(self.physics_world, wrench)?;
+        }
+        self.backend.step(self.physics_world, fixed_delta)?;
+        self.backend
+            .sync_to_ecs(&mut self.world, self.physics_world)?;
 
         let carrier_patch = aggregate_wheel_contact_patch(
-            vehicle,
-            backend.contact_points(physics_world)?,
+            self.vehicle,
+            self.backend.contact_points(self.physics_world)?,
             Vec3::X,
             Vec3::Z,
         )?;
-        if zero_based_step >= SETTLE_STEPS && carrier_patch.is_some() {
-            contact_drive_steps += 1;
+        if self.completed_steps >= SETTLE_STEPS && carrier_patch.is_some() {
+            self.contact_drive_steps += 1;
         }
         let drive = evaluate_longitudinal_drive_path(
-            plant,
-            drive_state,
+            self.plant,
+            self.drive_state,
             LongitudinalDrivePathInput {
                 carrier_patch,
                 forward_world: Vec3::X,
@@ -769,59 +1074,71 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
             },
             dt_s,
         )?;
-        drive_state = drive.state;
-        pending_wrench = drive.tire_wrench;
-        for joint in rig.wheel_joints {
-            world.entity_mut(joint).insert(JointState::Revolute {
-                position_rad: drive_state.wheel_position_rad,
-                velocity_rad_s: drive_state.wheel_velocity_rad_s,
+        self.drive_state = drive.state;
+        self.pending_wrench = drive.tire_wrench;
+        for joint in self.rig.wheel_joints {
+            self.world.entity_mut(joint).insert(JointState::Revolute {
+                position_rad: self.drive_state.wheel_position_rad,
+                velocity_rad_s: self.drive_state.wheel_velocity_rad_s,
             });
         }
-        world
-            .entity_mut(rig.motor_entity)
+        self.world
+            .entity_mut(self.rig.motor_entity)
             .insert(drive.motor_telemetry);
 
-        let step = zero_based_step + 1;
+        self.completed_steps += 1;
+        let step = self.completed_steps;
         let decision_time = SimTime::from_ticks(step * SENSOR_OBSERVED_FIXED_DELTA_TICKS);
-        if let Some(sample) = &contract.randomization {
+        if let Some(sample) = &self.contract.randomization {
             let latency = sample.latency_ticks(decision_time.ticks());
-            for mut sensor in world
+            for mut sensor in self
+                .world
                 .query::<&mut IncrementalEncoderSensor>()
-                .iter_mut(&mut world)
+                .iter_mut(&mut self.world)
             {
                 sensor.latency_ticks = latency;
             }
-            for mut sensor in world.query::<&mut ImuFeedbackSensor>().iter_mut(&mut world) {
+            for mut sensor in self
+                .world
+                .query::<&mut ImuFeedbackSensor>()
+                .iter_mut(&mut self.world)
+            {
                 sensor.latency_ticks = latency;
             }
-            for mut sensor in world
+            for mut sensor in self
+                .world
                 .query::<&mut MotorElectricalFeedbackSensor>()
-                .iter_mut(&mut world)
+                .iter_mut(&mut self.world)
             {
                 sensor.latency_ticks = latency;
             }
         }
-        sample_frontends(&mut world, decision_time, &mut bus)?;
-        let Some(left_frame) =
-            bus.latest_available::<IncrementalEncoderFeedback>(LEFT_ENCODER_STREAM, decision_time)
+        sample_frontends(&mut self.world, decision_time, &mut self.bus)?;
+        let Some(left_frame) = self
+            .bus
+            .latest_available::<IncrementalEncoderFeedback>(LEFT_ENCODER_STREAM, decision_time)
         else {
-            continue;
+            return Ok(None);
         };
-        if left_frame.sequence <= last_estimator_left_sequence {
-            continue;
+        if left_frame.sequence <= self.last_estimator_left_sequence {
+            return Ok(None);
         }
-        let estimate = match estimator.update(&bus, rig.streams, decision_time) {
+        let estimate = match self
+            .estimator
+            .update(&self.bus, self.rig.streams, decision_time)
+        {
             Ok(estimate) => {
-                last_estimator_left_sequence = left_frame.sequence;
+                self.last_estimator_left_sequence = left_frame.sequence;
                 estimate
             }
             Err(
                 WheelImuOdometryError::MissingAvailableFrame { .. }
                 | WheelImuOdometryError::NoNewEncoderPair,
-            ) => continue,
+            ) => return Ok(None),
             Err(error) => return Err(error.into()),
         };
-        let motor = bus
+        let motor = self
+            .bus
             .latest_available::<MotorElectricalFeedback>(MOTOR_STREAM, decision_time)
             .context("motor feedback unavailable at estimator decision")?;
         let actor = WheelImuActorObservation::from_estimate(estimate, [0.0, 0.0]);
@@ -831,6 +1148,52 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
             } else {
                 0.0
             };
+
+        Ok(Some(SensorTickDecision {
+            estimate,
+            observation: SensorPolicyObservation {
+                estimate: actor,
+                decision_ticks: decision_time.ticks(),
+                measured_motor_voltage_v: motor.payload.terminal_voltage_v,
+                measured_motor_current_a: motor.payload.current_a,
+                target_velocity_m_s,
+            },
+            motor_sequence: motor.sequence,
+        }))
+    }
+}
+
+fn run_sensor_observed_execution<B: PhysicsBackend>(
+    backend: B,
+    manifest: PhysicsBackendManifest,
+    contract: SensorObservedContract,
+    replay: Option<&SensorObservedTrace>,
+    mut policy: Option<&mut SensorVoltagePolicy<'_>>,
+) -> Result<SensorObservedTrace> {
+    let task_spec = sensor_observed_task_spec();
+    let mut runtime = SensorObservedRuntime::new(backend, &manifest, contract.clone())?;
+    let vehicle = runtime.vehicle;
+    let initial_position = *runtime
+        .world
+        .get::<Transform3>(vehicle)
+        .context("initial vehicle transform")?;
+    let mut command_voltage_v = 0.0;
+    let mut controller = VelocityController::new(&contract);
+    let mut samples = Vec::new();
+    let mut squared_position_error_sum_m2 = 0.0;
+    let mut squared_velocity_error_sum_m2_s2 = 0.0;
+    let mut scoring_samples = 0_u64;
+    let mut maximum_measured_current_a = 0.0_f64;
+
+    for _ in 0..TOTAL_STEPS {
+        let Some(decision) = runtime.tick(command_voltage_v)? else {
+            continue;
+        };
+        let estimate = decision.estimate;
+        let actor = decision.observation.estimate;
+        let step = runtime.completed_steps;
+        let decision_time = SimTime::from_ticks(decision.observation.decision_ticks);
+        let target_velocity_m_s = decision.observation.target_velocity_m_s;
         command_voltage_v = if let Some(source) = replay {
             let decision = source
                 .samples
@@ -845,8 +1208,8 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
             policy(&SensorPolicyObservation {
                 estimate: actor,
                 decision_ticks: decision_time.ticks(),
-                measured_motor_voltage_v: motor.payload.terminal_voltage_v,
-                measured_motor_current_a: motor.payload.current_a,
+                measured_motor_voltage_v: decision.observation.measured_motor_voltage_v,
+                measured_motor_current_a: decision.observation.measured_motor_current_a,
                 target_velocity_m_s,
             })
             .context("sensor voltage policy")?
@@ -862,10 +1225,12 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
                 && (-MAXIMUM_VOLTAGE_V..=MAXIMUM_VOLTAGE_V).contains(&command_voltage_v),
             "policy action must be finite and within voltage limits"
         );
-        let transform = *world
+        let transform = *runtime
+            .world
             .get::<Transform3>(vehicle)
             .context("vehicle transform at actor decision")?;
-        let body = *world
+        let body = *runtime
+            .world
             .get::<RigidBody>(vehicle)
             .context("vehicle body at actor decision")?;
         let truth_distance_m = transform.translation.x - initial_position.translation.x;
@@ -876,7 +1241,8 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
                 (actor.estimated_linear_velocity_m_s - body.linear_velocity_m_s.x).powi(2);
             scoring_samples += 1;
         }
-        maximum_measured_current_a = maximum_measured_current_a.max(motor.payload.current_a.abs());
+        maximum_measured_current_a =
+            maximum_measured_current_a.max(decision.observation.measured_motor_current_a.abs());
         samples.push(SensorObservedSample {
             step,
             decision_ticks: decision_time.ticks(),
@@ -885,7 +1251,7 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
             left_encoder_sequence: estimate.provenance.left_sequence,
             right_encoder_sequence: estimate.provenance.right_sequence,
             imu_sequence: estimate.provenance.imu_sequence,
-            motor_sequence: motor.sequence,
+            motor_sequence: decision.motor_sequence,
             estimated_position_m: actor.estimated_position_m,
             estimated_yaw_rad: actor.estimated_yaw_rad,
             estimated_velocity_m_s: actor.estimated_linear_velocity_m_s,
@@ -894,8 +1260,8 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
             yaw_innovation_rad: actor.yaw_innovation_rad,
             health_code: actor.health_code,
             skipped_sequences: actor.skipped_sequences,
-            measured_motor_voltage_v: motor.payload.terminal_voltage_v,
-            measured_motor_current_a: motor.payload.current_a,
+            measured_motor_voltage_v: decision.observation.measured_motor_voltage_v,
+            measured_motor_current_a: decision.observation.measured_motor_current_a,
             target_velocity_m_s,
             command_voltage_v,
             privileged_forward_distance_m: truth_distance_m,
@@ -907,10 +1273,12 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
         scoring_samples > 0,
         "sensor-observed run omitted scoring samples"
     );
-    let final_transform = *world
+    let final_transform = *runtime
+        .world
         .get::<Transform3>(vehicle)
         .context("final vehicle transform")?;
-    let final_body = *world
+    let final_body = *runtime
+        .world
         .get::<RigidBody>(vehicle)
         .context("final vehicle body")?;
     let final_sample = samples.last().context("trace omitted final actor sample")?;
@@ -922,7 +1290,7 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
         metric(
             "contact_drive_fraction",
             "1",
-            contact_drive_steps as f64 / DRIVE_STEPS as f64,
+            runtime.contact_drive_steps as f64 / DRIVE_STEPS as f64,
             0.95,
             1.0,
         ),
@@ -1012,7 +1380,7 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
         fixed_delta_ticks: SENSOR_OBSERVED_FIXED_DELTA_TICKS,
         seed: WORLD_SEED,
         steps: TOTAL_STEPS,
-        privileged_final_physics_state_hash_v2: rne_physics::hash_physics_state_v2(&world),
+        privileged_final_physics_state_hash_v2: rne_physics::hash_physics_state_v2(&runtime.world),
         samples,
         passed: metrics.iter().all(|metric| metric.passed),
         metrics,
@@ -1436,6 +1804,155 @@ fn fnv1a64(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use rne_physics_rapier::RapierBackend;
+
+    #[test]
+    fn fixed_environment_preserves_boundaries_missing_data_and_reset_replay() {
+        let mut first =
+            SensorFixedEnvironment::new(RapierBackend::new(), RapierBackend::manifest(), 42)
+                .unwrap();
+        let mut second =
+            SensorFixedEnvironment::new(RapierBackend::new(), RapierBackend::manifest(), 43)
+                .unwrap();
+        assert_eq!(first.observation().unwrap().time_ticks, 0);
+        assert!(first.observation().unwrap().latest.is_none());
+        let mut recorded = Vec::new();
+        let mut missing_updates = 0;
+        for step in 1..=330 {
+            let result = first.step(3.0).unwrap();
+            let other = second.step(3.0).unwrap();
+            assert_eq!(result.observation.time_ticks, step * SENSOR_PERIOD_TICKS);
+            assert_eq!(result.observation.time_ticks, other.observation.time_ticks);
+            assert_eq!(result.truncated, step == 330);
+            let snapshot = &result.observation;
+            let latest = snapshot.latest.as_ref().unwrap();
+            assert!(snapshot.capture_ticks.unwrap() <= latest.decision_ticks);
+            assert!(latest.decision_ticks <= snapshot.time_ticks);
+            assert_eq!(
+                snapshot.input_age_ticks,
+                Some(snapshot.time_ticks - snapshot.capture_ticks.unwrap())
+            );
+            missing_updates += usize::from(!snapshot.fresh_estimate);
+            recorded.push(result);
+        }
+        assert!(missing_updates > 0);
+        let final_hash = first.privileged_physics_hash_v2().unwrap();
+        assert!(first.step(3.0).is_err());
+        assert_eq!(first.privileged_physics_hash_v2().unwrap(), final_hash);
+        let reset = first
+            .reset(RapierBackend::new(), RapierBackend::manifest(), 42)
+            .unwrap();
+        assert!(reset.latest.is_none());
+        assert_eq!(reset.time_ticks, 0);
+        for expected in recorded {
+            assert_eq!(first.step(3.0).unwrap(), expected);
+        }
+        assert_eq!(first.privileged_physics_hash_v2().unwrap(), final_hash);
+    }
+
+    #[test]
+    fn fixed_task_tensors_and_reward_match_the_actual_ten_tick_interval() {
+        let task = sensor_fixed_task_spec();
+        task.validate().unwrap();
+        assert_ne!(task.task_id, sensor_observed_task_spec().task_id);
+        assert!(task.termination.conditions.is_empty());
+        assert_eq!(task.termination.max_episode_steps, Some(330));
+        assert!(task
+            .observation
+            .tensors
+            .iter()
+            .all(|tensor| !tensor.name.contains("privileged") && !tensor.name.contains("truth")));
+        let mut env =
+            SensorFixedEnvironment::new(RapierBackend::new(), RapierBackend::manifest(), 42)
+                .unwrap();
+        let reset_values = env.observation().unwrap().actor_tensors();
+        assert_eq!(reset_values[0], vec![0.0]);
+        assert!(reset_values.iter().flatten().all(|value| *value == 0.0));
+        let mut contract = SensorObservedContract::randomized(42);
+        contract.physical_profile = Some(sample_physical_profile(42));
+        let mut oracle =
+            SensorObservedRuntime::new(RapierBackend::new(), &RapierBackend::manifest(), contract)
+                .unwrap();
+        let mut stale_intervals = 0;
+        for step in 0..330 {
+            let mut expected = 0.0;
+            for tick in 0..10 {
+                oracle.tick(3.0).unwrap();
+                let target = if step * 10 + tick >= 300 { 1.0 } else { 0.0 };
+                expected += (oracle
+                    .world
+                    .get::<RigidBody>(oracle.vehicle)
+                    .unwrap()
+                    .linear_velocity_m_s
+                    .x
+                    - target)
+                    .abs()
+                    * 0.001;
+            }
+            let transition = env.step(3.0).unwrap();
+            assert_eq!(transition.privileged_tracking_error_integral_m, expected);
+            assert_eq!(transition.reward, -expected - 0.001);
+            assert!(transition.reward.is_finite());
+            let values = transition.observation.actor_tensors();
+            assert_eq!(values.len(), task.observation.tensors.len());
+            for (value, tensor) in values.iter().zip(&task.observation.tensors) {
+                assert_eq!(value.len(), tensor.shape.iter().product::<usize>());
+                assert!(value.iter().all(|element| element.is_finite()));
+            }
+            assert_eq!(values[0], vec![1.0]);
+            assert_eq!(values[17], vec![if step + 1 >= 30 { 1.0 } else { 0.0 }]);
+            stale_intervals += usize::from(!transition.observation.fresh_estimate);
+        }
+        assert!(stale_intervals > 0);
+    }
+
+    #[test]
+    fn fixed_invalid_actions_do_not_mutate_and_execution_error_requires_reset() {
+        let mut env =
+            SensorFixedEnvironment::new(RapierBackend::new(), RapierBackend::manifest(), 42)
+                .unwrap();
+        let before = env.observation().unwrap();
+        let hash = env.privileged_physics_hash_v2().unwrap();
+        for voltage in [f64::NAN, f64::INFINITY, 24.01, -24.01] {
+            assert!(env.step(voltage).is_err());
+            assert_eq!(env.observation().unwrap(), before);
+            assert_eq!(env.privileged_physics_hash_v2().unwrap(), hash);
+        }
+        // Deliberately invalidate a private plant parameter to force an execution
+        // error after physics has begun, rather than an input-validation failure.
+        env.runtime.plant.vehicle_mass_kg = f64::NAN;
+        assert!(env.step(3.0).is_err());
+        assert!(env.observation().is_err());
+        assert!(env.privileged_physics_hash_v2().is_err());
+        assert!(env.step(3.0).is_err());
+        env.reset(RapierBackend::new(), RapierBackend::manifest(), 42)
+            .unwrap();
+        let mut fresh =
+            SensorFixedEnvironment::new(RapierBackend::new(), RapierBackend::manifest(), 42)
+                .unwrap();
+        assert_eq!(env.step(3.0).unwrap(), fresh.step(3.0).unwrap());
+        assert_eq!(
+            env.privileged_physics_hash_v2().unwrap(),
+            fresh.privileged_physics_hash_v2().unwrap()
+        );
+    }
+
+    #[cfg(feature = "mujoco")]
+    #[test]
+    fn fixed_mujoco_reset_replays_physics_and_actor_transitions() {
+        use rne_physics_mujoco::MuJoCoBackend;
+        let backend = || {
+            MuJoCoBackend::new(SimDuration::from_ticks(SENSOR_OBSERVED_FIXED_DELTA_TICKS)).unwrap()
+        };
+        let mut env =
+            SensorFixedEnvironment::new(backend(), MuJoCoBackend::manifest(), 42).unwrap();
+        let recorded: Vec<_> = (0..330).map(|_| env.step(3.0).unwrap()).collect();
+        let hash = env.privileged_physics_hash_v2().unwrap();
+        env.reset(backend(), MuJoCoBackend::manifest(), 42).unwrap();
+        for expected in recorded {
+            assert_eq!(env.step(3.0).unwrap(), expected);
+        }
+        assert_eq!(env.privileged_physics_hash_v2().unwrap(), hash);
+    }
 
     #[test]
     fn external_sensor_policy_matches_reference_controller_and_replays() {
