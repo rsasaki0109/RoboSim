@@ -9,7 +9,7 @@ Other candidate descriptions are not verified channel manifests.
 | Primary source | Potential RNE use | Evidence gap / decision |
 | --- | --- | --- |
 | [Michigan NCLT](https://robots.engin.umich.edu/nclt/index.html) | Wheel/IMU replay and estimator timing checks | First bounded format-inspection candidate; not independent drivetrain or suspension validation. |
-| [Driving Data of a Real F1tenth Car](https://zenodo.org/records/12536536) | Ackermann dynamic-model identification candidate | Search-indexed repository description explicitly targets identification. Record returned HTTP 429; file schema, size, license and reference independence remain unverified. No download selected yet. |
+| [Driving Data of a Real F1tenth Car](https://zenodo.org/records/12536536) | Velocity-command response identification candidate | Official API and README now inspected after earlier access errors. Command is body-frame; VICON velocity is world-frame. CC BY 4.0 declared. Bag contents remain uninspected. |
 | [KAIST Complex Urban Dataset](https://sites.google.com/view/complex-urban-dataset/home) | Navigation sensor replay candidate | Official page lists LiDAR, stereo and position sensors, but does not establish the actuator channels needed here. It declares CC BY-NC-SA 4.0; do not bundle under RNE's license. Not selected for dynamics identification. |
 
 NCLT's official update history says left/right wheel velocities were added to sensor
@@ -74,11 +74,119 @@ Official scripts were read as text, not executed:
   identifies timestamp, magnetic field, acceleration and rotation-rate columns,
   with plot units microseconds, Gauss, m/s squared and rad/s respectively.
 
-Next inspect documented sensor frames, time semantics and reference construction;
-do not infer these from similar-looking columns. A wheel/IMU replay importer remains
-unimplemented, and no suspension or drivetrain identification result is claimed.
+The paper's Sections 3, 4 and 7 and Tables 4/8 were inspected in the
+[author-hosted manuscript](https://s3.us-east-2.amazonaws.com/publications.perl.engin.umich.edu/ncarlevaris-2015a.pdf).
+UTIME denotes Unix microseconds. The body axes are forward/right/down, with its
+origin at the axle center; the IMU has identity mounting rotation but a nonzero
+lever arm. Microstrain values use its internal filter. Odometry fuses wheel,
+FOG and IMU inputs: it is not an independent reference for their validation.
+`odometry_mu.csv` represents relative image-event motion, whereas the 100 Hz file
+is relative to the run start. Do not integrate or compare these interchangeably.
+
+The 2018 wheel addition inherits the dataset timestamp convention; its README does
+not independently document acquisition-clock semantics. No measured arrival latency
+or synchronization uncertainty is inferred. A source-time replay must explicitly
+distinguish its scheduling policy from physical sensor latency.
+
+## Executable ingestion
+
+`rne_mobility_benchmark::recorded_nclt` now reads wheel and `ms25` CSVs through
+bounded `Read` inputs. Each requires nonempty input, exact column counts, 16-digit
+integer timestamps, strictly increasing times and finite numeric values. Limits are
+64 MiB per input, one million rows and 1,024 bytes per line. Invalid inputs fail as
+a whole. The output binds parsed samples to SHA-256 of the exact uncompressed bytes,
+including original line endings. Synthetic tests do not include redistributed data.
+
+Values remain in source coordinates and units (including magnetic field in Gauss).
+No resampling, gravity compensation, lever-arm correction, encoder-count synthesis,
+or measurement-noise estimation occurs. There is no DataBus replay bridge yet;
+this reader is not a replacement for that remaining work.
+
+The CLI is read-only and reports timestamps, interval extrema and a source digest:
+
+```powershell
+$env:CARGO_TARGET_DIR = 'E:\RNE-build\m3c-sensor'
+cargo run -p rne_mobility_benchmark --bin rne-nclt-audit -- wheels E:\RoboSim-external-data\mobility-nclt-2013-01-10\2013-01-10\wheels.csv
+cargo run -p rne_mobility_benchmark --bin rne-nclt-audit -- imu E:\RoboSim-external-data\mobility-nclt-2013-01-10\2013-01-10\ms25.csv
+```
+
+Only these two regular CSV members were subsequently extracted from the hash-checked
+archive into a previously absent external directory: 1,483,062 and 8,951,816 bytes.
+The initial no-extraction audit above describes the earlier inspection stage.
+The default benchmark binary remains `rne-mobility-benchmark`; adding this audit
+tool does not change existing `cargo run -p rne_mobility_benchmark` behavior.
+
+Both real files passed the CLI. Wheel counts/times match the initial scan. IMU
+has 48,324 rows spanning 1357847237276758 through 1357848263255151 microseconds,
+with adjacent intervals from 3,134 to 72,076 microseconds. Both file digests match
+an independent PowerShell `Get-FileHash -Algorithm SHA256` computation:
+
+- wheels: `5387898ac211c17502c23e0a231ced7b479c3123717317b3527ff9bd66d0a029`;
+- IMU: `9e504bbbc410c53a25c2da670fd2f03d3228154f1016026bd09e48123380498f`.
+
+Passing the ingestion checks is not a sensor-quality or dynamics acceptance gate.
+
+Validation of this ingestion slice: formatting and crate Clippy passed, the four
+reader tests and one audit-summary test passed, and MuJoCo-enabled tests passed
+(101 library tests plus one test in each CLI). The full `xtask ci` completed with
+exit code zero, including headless, OSS parity, 361 fuzz cases and 10/10 Behavior
+seeds. Logs are external: `E:\RNE-build\m3c-sensor\nclt-mujoco-tests.log` and
+`E:\RNE-build\m3c-sensor\nclt-ci.log`. Two repeated audit invocations for each real
+CSV produced identical output, with hashes independently checked by PowerShell.
+
+Next connect qualified source-frame samples to explicit replay scheduling and
+estimator inputs, with frame/time tests. No physical identification result is claimed.
+
+### Replay boundary review (not yet implemented)
+
+Inspection of `rne_ai::WheelImuOdometry::update` shows that it requires
+`IncrementalEncoderFeedback` and integrates differences of `raw_count`, not a wheel
+velocity field. Its `WheelImuOdometryConfig` also requires counter resolution and
+width. NCLT cannot satisfy this input contract without invented measurements.
+The older `WheelEncoderSample` also requires a realized angular position, which the
+recorded wheel-speed file does not provide. Neither payload is an honest shortcut.
+
+Similarly, `ImuFeedback` declares raw specific force, sample-phase error and known
+saturation status. Internally filtered `ms25` values and unavailable status metadata
+must not be relabeled nominal raw feedback. Keep the existing incremental-encoder
+estimator unchanged until an explicit measured-velocity estimation path is designed.
+
+The next replay slice should therefore:
+
+- publish source-typed wheel-speed and filtered-IMU payloads through the existing
+  extensible `FramePayload`/DataBus boundary, without adding NCLT dependencies to core;
+- retain source Unix timestamps in payloads and use one shared integer origin for
+  both streams, converting elapsed microseconds to nanosecond ticks with checked
+  subtraction and multiplication; separate stream origins would erase real skew;
+- declare replay availability delay as a chosen transport experiment, never measured
+  latency; preserve original source values, frames, filtering and unknown quality;
+- validate both streams before publishing, use deterministic tie ordering, and test
+  missing inputs, distinct start times, ties, delayed availability and reset/replay;
+- drive consumers through `latest_available`, never `latest`, and preserve source
+  digests plus replay policy in evidence. Reconstruct from original bytes when
+  provenance matters: public parsed structs can be modified after ingestion;
+- add a separately identified wheel-speed/gyro integration path with explicit
+  interpolation, gap, frame and uncertainty policies before claiming estimator replay.
+
+This is an integration requirement, not an additional completed benchmark gate.
 
 ## Identification design
+
+The F1TENTH record's [official API](https://zenodo.org/api/records/12536536)
+lists nine bags, from 84,985,680 to 192,694,601 bytes, and declares CC BY 4.0.
+The [README](https://zenodo.org/api/records/12536536/files/ReadMe.md/content)
+describes separate continuous runs, body-frame `/cmd_vel` commands and world-frame
+`/vrpn_client_node/Car_2_Tracking/twist` VICON measurements. Its opening paragraph
+instead spells the command topic `/vel_cmd`; verify actual bag connections rather
+than choosing from prose. No bag was downloaded during this metadata inspection.
+
+This supports investigating aggregate command-to-motion response. It does not yet
+establish measured steering, motor voltage/current, wheel forces or clock uncertainty.
+For longitudinal signed speed, a world-frame velocity norm loses reversal and
+lateral-motion information. Require orientation/frame evidence for projection or
+declare a narrower speed-magnitude metric, without calling it signed velocity.
+Inspect measurement derivation and timestamp alignment before treating VICON output
+as a qualified reference. Split by entire runs before identification.
 
 [Gonultas et al., IROS 2023](https://arxiv.org/abs/2308.03898v2) reports
 gradient-based identification of a front-steered vehicle and real F1TENTH lane-keeping

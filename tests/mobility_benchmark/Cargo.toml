@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+default-run = "rne-mobility-benchmark"
 
 [features]
 default = []
@@ -16,6 +17,11 @@ path = "src/lib.rs"
 [[bin]]
 name = "rne-mobility-benchmark"
 path = "src/main.rs"
+doc = false
+
+[[bin]]
+name = "rne-nclt-audit"
+path = "src/nclt_audit.rs"
 doc = false
 
 [dependencies]

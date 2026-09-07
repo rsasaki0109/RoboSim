@@ -12,6 +12,7 @@ pub mod observed_capsule;
 pub mod observed_fixed_batch;
 pub mod per_wheel;
 pub mod per_wheel_observed;
+pub mod recorded_nclt;
 pub mod road_excitation;
 pub mod suspension_acquisition;
 pub mod suspension_identification;
