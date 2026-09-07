@@ -2,8 +2,9 @@
 
 use anyhow::{bail, ensure, Context, Result};
 use rne_mobility_benchmark::observed_fixed_batch::{
-    decode_fixed_batch_replay, record_fixed_batch_replay, verify_fixed_batch_replay,
-    FixedBatchOperation, MAX_FIXED_REPLAY_BYTES,
+    decode_fixed_batch_replay, record_fixed_batch_replay,
+    record_fixed_batch_replay_with_noise_root, verify_fixed_batch_replay, FixedBatchOperation,
+    MAX_FIXED_REPLAY_BYTES,
 };
 use rne_physics::{PhysicsBackend, PhysicsBackendManifest};
 use std::{
@@ -18,6 +19,7 @@ pub(crate) fn run(
     seed: Option<u64>,
     width: Option<usize>,
     workers: usize,
+    noise_root_seed: Option<u64>,
 ) -> Result<()> {
     let record = match mode {
         "fixed-record-rapier" | "fixed-record-mujoco" => true,
@@ -31,7 +33,7 @@ pub(crate) fn run(
         );
     } else {
         ensure!(
-            output.is_none() && seed.is_none() && width.is_none(),
+            output.is_none() && seed.is_none() && width.is_none() && noise_root_seed.is_none(),
             "fixed verify accepts only --input and --workers"
         );
     }
@@ -44,7 +46,17 @@ pub(crate) fn run(
         bytes.len() <= MAX_FIXED_REPLAY_BYTES,
         "fixed input exceeds byte limit"
     );
-    let process = |factory| execute(factory, record, &bytes, output, seed, width, workers);
+    let process = |factory| {
+        execute(
+            factory,
+            record,
+            &bytes,
+            output,
+            (seed, noise_root_seed),
+            width,
+            workers,
+        )
+    };
     if mode.ends_with("-rapier") {
         use rne_physics_rapier::RapierBackend;
         process(|| Ok((RapierBackend::new(), RapierBackend::manifest())))
@@ -62,7 +74,7 @@ pub(crate) fn run(
                 record,
                 &bytes,
                 output,
-                seed,
+                (seed, noise_root_seed),
                 width,
                 workers,
             )
@@ -79,7 +91,7 @@ fn execute<B, F>(
     record: bool,
     bytes: &[u8],
     output: Option<&Path>,
-    seed: Option<u64>,
+    seeds: (Option<u64>, Option<u64>),
     width: Option<usize>,
     workers: usize,
 ) -> Result<()>
@@ -87,16 +99,28 @@ where
     B: PhysicsBackend,
     F: Fn() -> Result<(B, PhysicsBackendManifest)>,
 {
+    let (seed, noise_root_seed) = seeds;
     if record {
         let operations: Vec<FixedBatchOperation> =
             serde_json::from_slice(bytes).context("decode fixed operation array")?;
-        let replay = record_fixed_batch_replay(
-            factory,
-            seed.context("seed required")?,
-            width.context("width required")?,
-            workers,
-            &operations,
-        )?;
+        let replay = if let Some(noise_root) = noise_root_seed {
+            record_fixed_batch_replay_with_noise_root(
+                factory,
+                seed.context("seed required")?,
+                noise_root,
+                width.context("width required")?,
+                workers,
+                &operations,
+            )?
+        } else {
+            record_fixed_batch_replay(
+                factory,
+                seed.context("seed required")?,
+                width.context("width required")?,
+                workers,
+                &operations,
+            )?
+        };
         let path = output.context("output required")?;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -144,30 +168,76 @@ mod tests {
             Some(42),
             Some(2),
             1,
+            None,
         )
         .unwrap();
         let original = std::fs::read(&output).unwrap();
-        run("fixed-verify-rapier", &output, None, None, None, 2).unwrap();
+        run("fixed-verify-rapier", &output, None, None, None, 2, None).unwrap();
         assert!(run(
             "fixed-record-rapier",
             &operations,
             Some(&output),
             Some(43),
             Some(2),
-            2
+            2,
+            None
         )
         .is_err());
         assert_eq!(std::fs::read(&output).unwrap(), original);
-        assert!(run("fixed-verify-rapier", &output, None, Some(42), None, 2).is_err());
+        assert!(run(
+            "fixed-verify-rapier",
+            &output,
+            None,
+            Some(42),
+            None,
+            2,
+            None
+        )
+        .is_err());
         assert!(run(
             "fixed-record-rapier",
             &operations,
             Some(&output),
             None,
             Some(2),
-            2
+            2,
+            None
         )
         .is_err());
-        assert!(run("fixed-unknown", &operations, None, None, None, 1).is_err());
+        assert!(run("fixed-unknown", &operations, None, None, None, 1, None).is_err());
+        let noisy_output = directory.path().join("noisy.json");
+        run(
+            "fixed-record-rapier",
+            &operations,
+            Some(&noisy_output),
+            Some(42),
+            Some(2),
+            1,
+            Some(99),
+        )
+        .unwrap();
+        let noisy = decode_fixed_batch_replay(&std::fs::read(&noisy_output).unwrap()).unwrap();
+        assert_eq!(noisy.schema_version, 2);
+        assert_eq!(noisy.noise_root_seed, Some(99));
+        run(
+            "fixed-verify-rapier",
+            &noisy_output,
+            None,
+            None,
+            None,
+            2,
+            None,
+        )
+        .unwrap();
+        assert!(run(
+            "fixed-verify-rapier",
+            &noisy_output,
+            None,
+            None,
+            None,
+            2,
+            Some(99)
+        )
+        .is_err());
     }
 }

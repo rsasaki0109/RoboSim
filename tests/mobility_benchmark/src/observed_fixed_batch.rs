@@ -8,8 +8,9 @@ use rne_physics::{PhysicsBackend, PhysicsBackendManifest};
 
 mod replay;
 pub use replay::{
-    decode_fixed_batch_replay, record_fixed_batch_replay, verify_fixed_batch_replay,
-    FixedBatchOperation, FixedBatchReplay, FixedBatchReplayEvent, MAX_FIXED_REPLAY_BYTES,
+    decode_fixed_batch_replay, record_fixed_batch_replay,
+    record_fixed_batch_replay_with_noise_root, verify_fixed_batch_replay, FixedBatchOperation,
+    FixedBatchReplay, FixedBatchReplayEvent, MAX_FIXED_REPLAY_BYTES,
 };
 
 /// One stable lane's completed transition or execution failure.
@@ -43,6 +44,7 @@ pub struct SensorFixedBatch<B: PhysicsBackend, F> {
     factory: F,
     manifest: PhysicsBackendManifest,
     root_seed: u64,
+    noise_root_seed: Option<u64>,
     workers: usize,
 }
 
@@ -51,6 +53,7 @@ impl<B: PhysicsBackend, F> std::fmt::Debug for SensorFixedBatch<B, F> {
         f.debug_struct("SensorFixedBatch")
             .field("num_envs", &self.lanes.len())
             .field("root_seed", &self.root_seed)
+            .field("noise_root_seed", &self.noise_root_seed)
             .field("workers", &self.workers)
             .finish_non_exhaustive()
     }
@@ -64,6 +67,28 @@ where
     /// Constructs 1..=64 fresh worlds at episode index zero with 1..=16 workers.
     /// The factory must return independent backends with identical manifests.
     pub fn new(factory: F, root_seed: u64, num_envs: usize, workers: usize) -> Result<Self> {
+        Self::with_noise_policy(factory, root_seed, None, num_envs, workers)
+    }
+
+    /// Constructs worlds with a separate noise root. Noise seeds derive from
+    /// `(noise_root_seed, lane_id, episode_index)`, independently of reset parameters.
+    pub fn new_with_noise_root(
+        factory: F,
+        root_seed: u64,
+        noise_root_seed: u64,
+        num_envs: usize,
+        workers: usize,
+    ) -> Result<Self> {
+        Self::with_noise_policy(factory, root_seed, Some(noise_root_seed), num_envs, workers)
+    }
+
+    fn with_noise_policy(
+        factory: F,
+        root_seed: u64,
+        noise_root_seed: Option<u64>,
+        num_envs: usize,
+        workers: usize,
+    ) -> Result<Self> {
         ensure!(
             (1..=MAX_SENSOR_BATCH_LANES).contains(&num_envs),
             "invalid fixed batch width"
@@ -83,7 +108,14 @@ where
             }
             let episode_seed = derive_episode_seed(root_seed, lane_id as u64, 0);
             lanes.push(Lane {
-                environment: SensorFixedEnvironment::new(backend, manifest, episode_seed)?,
+                environment: SensorFixedEnvironment::new_with_noise_seed(
+                    backend,
+                    manifest,
+                    episode_seed,
+                    noise_root_seed.map_or(crate::observed::WORLD_SEED, |root| {
+                        derive_episode_seed(root, lane_id as u64, 0)
+                    }),
+                )?,
                 episode_index: 0,
                 episode_seed,
             });
@@ -93,6 +125,7 @@ where
             factory,
             manifest: expected_manifest.context("empty batch")?,
             root_seed,
+            noise_root_seed,
             workers,
         })
     }
@@ -197,7 +230,17 @@ where
                 "fixed reset backend identity drift"
             );
             let episode_seed = derive_episode_seed(self.root_seed, lane_id as u64, episode_index);
-            let environment = SensorFixedEnvironment::new(backend, manifest, episode_seed)?;
+            let noise_seed = self
+                .noise_root_seed
+                .map_or(crate::observed::WORLD_SEED, |root| {
+                    derive_episode_seed(root, lane_id as u64, episode_index)
+                });
+            let environment = SensorFixedEnvironment::new_with_noise_seed(
+                backend,
+                manifest,
+                episode_seed,
+                noise_seed,
+            )?;
             let observation = environment.observation()?;
             replacements.push((
                 lane_id,
@@ -222,6 +265,41 @@ where
 mod tests {
     use super::*;
     use rne_physics_rapier::RapierBackend;
+
+    #[test]
+    fn independent_noise_partial_reset_preserves_other_lane_and_width() {
+        let mut narrow = SensorFixedBatch::new_with_noise_root(factory, 42, 99, 2, 1).unwrap();
+        let mut wide = SensorFixedBatch::new_with_noise_root(factory, 42, 99, 3, 2).unwrap();
+        for _ in 0..6 {
+            assert_eq!(
+                narrow.step(&[3.0, 3.0]).unwrap(),
+                wide.step(&[3.0, 3.0, 3.0]).unwrap()[..2]
+            );
+        }
+        let continuing = narrow.lanes[1].environment.observation().unwrap();
+        let old_seed = narrow.lanes[0]
+            .environment
+            .reset_contract()
+            .sensor_noise_seed;
+        narrow.reset_lanes(&[(0, 4)]).unwrap();
+        wide.reset_lanes(&[(0, 4)]).unwrap();
+        assert_eq!(
+            narrow.lanes[1].environment.observation().unwrap(),
+            continuing
+        );
+        let new_seed = narrow.lanes[0]
+            .environment
+            .reset_contract()
+            .sensor_noise_seed;
+        assert_eq!(new_seed, derive_episode_seed(99, 0, 4));
+        assert_ne!(old_seed, new_seed);
+        for _ in 0..6 {
+            assert_eq!(
+                narrow.step(&[3.0, 3.0]).unwrap(),
+                wide.step(&[3.0, 3.0, 3.0]).unwrap()[..2]
+            );
+        }
+    }
 
     fn factory() -> Result<(RapierBackend, PhysicsBackendManifest)> {
         Ok((RapierBackend::new(), RapierBackend::manifest()))

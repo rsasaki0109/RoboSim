@@ -298,8 +298,9 @@ ownership, but trajectory batching alone does not supply our feedback step API.
    do not claim rollback. Horizon truncation is separate from task acceptance.
 6. Reset reconstructs all owned state, including queues, estimator history and
    pending force. Explicit `(root_seed, lane_id, episode_index)` derives the
-   reset seed. Record the fixed WorldRandom noise seed honestly until a separate
-   noise-stream contract is introduced. No hidden radius enters the estimator.
+   reset seed. Record the fixed WorldRandom noise seed for legacy v1, or the
+   independent noise root and derived seed contract described below for v2.
+   No hidden radius enters the estimator.
 7. Build batched stepping over these persistent runtimes. Validate the entire
    action batch and lane mask before advancing any lane. Keep stable lane IDs;
    no auto-reset in v1. Retain per-lane failure/terminal status when another
@@ -332,3 +333,76 @@ establish a fallible adapter boundary before reusing checkpoint infrastructure.
 
 This design does not close the broader goal's per-wheel/Ackermann randomization,
 real-log calibration, independent noise resets, HIL or throughput gates.
+
+## Independent frontend-noise seed: single-world, batch and replay
+
+`SensorFixedEnvironment::new_with_noise_seed` and `reset_with_noise_seed` accept
+an explicit frontend-noise seed independently of the episode reset seed. It is
+retained as `SensorObservedContract::sensor_noise_seed` and seeds the world's
+`WorldRandom`, which sensor-local noise keys mix with their own seeds. Physical
+parameters and sensor bias/latency/dropout reset parameters retain their existing
+episode-seed derivation. Neither seed becomes an actor tensor.
+
+The existing `new`/`reset` APIs still choose noise seed zero. Zero is omitted from
+serialized contracts, preserving the legacy nominal representation. Trace seed
+metadata must agree with the contract's declared noise seed. The caller must use
+the explicit reset method to reproduce a nonzero-noise episode; legacy reset
+intentionally restores the zero-noise contract.
+
+A 60-step open-loop test checks that changing only noise changes observations but
+not any completed physical-state hash, repeats identical seeded transitions, and
+replays observations after explicit reset. This does not assert unchanged physics
+under closed-loop control: different noisy observations can change actions.
+Targeted single-world test and Clippy passed. The additive
+`SensorFixedBatch::new_with_noise_root` now derives noise seeds using the existing
+`derive_episode_seed(noise_root, lane_id, episode_index)`, separately from the
+physical/sensor-parameter reset root. A partial reset derives a new noise seed
+only for selected lanes. Roots are explicit caller choices, not hidden time-based
+randomness; choosing a fixed noise root permits physical-parameter experiments
+with reproducible noise streams.
+
+`record_fixed_batch_replay_with_noise_root` emits schema v2 with an explicit
+`noise_root_seed`. Verification reconstructs it, including partial resets, and
+compares actual observation/physics/reset-contract evidence. Legacy schema v1
+omits the new root and preserves fixed noise seed zero. V2 keeps the legacy
+`world_noise_seed` field zero as a reserved compatibility field, not as the actual
+per-lane seed. Contradictory schema/root combinations are rejected.
+
+Batch worker/width/reset and root-tampering tests passed. CLI recording now accepts
+`--noise-root-seed` for `fixed-record-rapier` and `fixed-record-mujoco`. Omission
+retains legacy v1; an explicit value (including zero) selects derived-noise v2.
+Verification uses the recorded policy and rejects noise-root overrides. Other
+benchmark modes reject this flag. For example, with external build/TEMP settings:
+
+```powershell
+cargo run -p rne_mobility_benchmark -- --backend fixed-record-rapier --input tests/mobility_benchmark/fixtures/fixed-batch-operations.json --output E:\RNE-build\m3c-sensor\fixed-independent-noise-example.json --seed 42 --noise-root-seed 99 --num-envs 2 --workers 1
+cargo run -p rne_mobility_benchmark -- --backend fixed-verify-rapier --input E:\RNE-build\m3c-sensor\fixed-independent-noise-example.json --workers 2
+```
+
+Record output is create-new: existing evidence is never overwritten. The CLI
+record/verify/no-overwrite test passed, as did four independent-noise tests,
+including actual MuJoCo replay across worker counts with partial reset. Feature
+Clippy passed. Full `xtask ci` completed successfully: formatting, dependency
+boundaries, workspace Clippy/tests, example and RL smokes, headless checks, OSS
+parity, 361 fuzz cases and Behavior's 10/10 seeds. No retry or gate relaxation was
+needed in this run. The next learning integration contract is documented in
+[fallible learning boundary](MOBILITY_FALLIBLE_LEARNING_BOUNDARY.md); that adapter
+is not implemented by this seed/reset slice.
+Logs: `E:\RNE-build\m3c-sensor\independent-noise-mujoco-tests.log` and
+`E:\RNE-build\m3c-sensor\independent-noise-ci.log`.
+
+### Executed CLI compatibility evidence
+
+Previously recorded v1 files `fixed-replay-rapier-workers-1.json` and
+`fixed-replay-mujoco-workers-1.json` under the same external build directory
+replayed exactly with the changed implementation and two workers (331 operations
+each). New v2 recordings used reset root 42, noise root 99, two lanes and one
+worker; both replayed exactly with two workers over the same 331-operation fixture.
+
+- `independent-noise-v2-rapier.json`: content digest
+  `sha256:0c8ba1fedfe9c909797247b0591fa7d974ca15ede916a1df5e6634ec8d4e5086`.
+- `independent-noise-v2-mujoco.json`: content digest
+  `sha256:a01213845c06a3d8eb8837e028f2f3ef80783980c82ff3f106ee86424376d3d4`.
+
+These are exact within-backend replay results, not equality between solvers or
+physical calibration. The raw evidence remains on the external SSD.

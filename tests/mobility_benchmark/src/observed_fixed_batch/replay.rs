@@ -51,8 +51,13 @@ pub struct FixedBatchReplay {
     pub task_spec: rne_ai::TaskSpec,
     /// Explicit root seed for lane/episode reset derivation.
     pub root_seed: u64,
-    /// Fixed sensor-noise WorldRandom seed; reset-profile seeds vary independently.
+    /// Legacy v1 fixed WorldRandom seed. Must remain zero; in v2 the optional
+    /// noise root below replaces this field's seed-selection behavior.
     pub world_noise_seed: u64,
+    /// Independent lane/episode noise root in schema v2. Absent in legacy v1,
+    /// which uses `world_noise_seed` zero. V2 retains that legacy field as zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise_root_seed: Option<u64>,
     /// Number of persistent worlds.
     pub num_envs: usize,
     /// Initial reset projection, including complete joint-reset contracts.
@@ -68,7 +73,8 @@ impl FixedBatchReplay {
     /// Does not prove that recorded outcomes follow from the commands.
     pub fn validate_metadata(&self) -> Result<()> {
         ensure!(
-            self.kind == "rne_fixed_sensor_batch_replay" && self.schema_version == 1,
+            self.kind == "rne_fixed_sensor_batch_replay"
+                && self.schema_version == if self.noise_root_seed.is_some() { 2 } else { 1 },
             "fixed replay kind/schema mismatch"
         );
         ensure!(
@@ -126,8 +132,53 @@ where
     B: PhysicsBackend,
     F: Fn() -> Result<(B, PhysicsBackendManifest)>,
 {
+    record_with_noise_policy(factory, root_seed, None, num_envs, workers, operations)
+}
+
+/// Records schema-v2 evidence with independently controlled lane/episode noise.
+/// Reset operations derive new noise seeds only for selected lanes.
+pub fn record_fixed_batch_replay_with_noise_root<B, F>(
+    factory: F,
+    root_seed: u64,
+    noise_root_seed: u64,
+    num_envs: usize,
+    workers: usize,
+    operations: &[FixedBatchOperation],
+) -> Result<FixedBatchReplay>
+where
+    B: PhysicsBackend,
+    F: Fn() -> Result<(B, PhysicsBackendManifest)>,
+{
+    record_with_noise_policy(
+        factory,
+        root_seed,
+        Some(noise_root_seed),
+        num_envs,
+        workers,
+        operations,
+    )
+}
+
+fn record_with_noise_policy<B, F>(
+    factory: F,
+    root_seed: u64,
+    noise_root_seed: Option<u64>,
+    num_envs: usize,
+    workers: usize,
+    operations: &[FixedBatchOperation],
+) -> Result<FixedBatchReplay>
+where
+    B: PhysicsBackend,
+    F: Fn() -> Result<(B, PhysicsBackendManifest)>,
+{
     validate_operations(num_envs, operations.iter())?;
-    let mut batch = SensorFixedBatch::new(factory, root_seed, num_envs, workers)?;
+    let mut batch = SensorFixedBatch::with_noise_policy(
+        factory,
+        root_seed,
+        noise_root_seed,
+        num_envs,
+        workers,
+    )?;
     let initial_evidence_sha256 = evidence_digest(&batch, serde_json::Value::Null)?;
     let mut events = Vec::with_capacity(operations.len());
     for operation in operations {
@@ -157,11 +208,12 @@ where
     }
     let mut replay = FixedBatchReplay {
         kind: "rne_fixed_sensor_batch_replay".into(),
-        schema_version: 1,
+        schema_version: if noise_root_seed.is_some() { 2 } else { 1 },
         backend: batch.manifest.clone(),
         task_spec: sensor_fixed_task_spec(),
         root_seed,
         world_noise_seed: crate::observed::WORLD_SEED,
+        noise_root_seed,
         num_envs,
         initial_evidence_sha256,
         events,
@@ -202,9 +254,10 @@ where
         );
         Ok((backend, manifest))
     };
-    let actual = record_fixed_batch_replay(
+    let actual = record_with_noise_policy(
         checked_factory,
         source.root_seed,
+        source.noise_root_seed,
         source.num_envs,
         workers,
         &operations,
@@ -296,6 +349,79 @@ fn is_digest(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "mujoco")]
+    #[test]
+    fn independent_noise_mujoco_replays_across_workers_and_reset() {
+        let factory = || -> Result<_> {
+            Ok((
+                rne_physics_mujoco::MuJoCoBackend::new(rne_core::SimDuration::from_ticks(
+                    1_000_000,
+                ))?,
+                rne_physics_mujoco::MuJoCoBackend::manifest(),
+            ))
+        };
+        let mut operations = vec![
+            FixedBatchOperation::Step {
+                actions_v: vec![3.0, 3.0]
+            };
+            6
+        ];
+        operations.push(FixedBatchOperation::Reset {
+            lanes: vec![(0, 4)],
+        });
+        operations.extend(vec![
+            FixedBatchOperation::Step {
+                actions_v: vec![3.0, 3.0]
+            };
+            6
+        ]);
+        let source =
+            record_fixed_batch_replay_with_noise_root(factory, 42, 99, 2, 1, &operations).unwrap();
+        verify_fixed_batch_replay(factory, 2, &source).unwrap();
+    }
+
+    #[test]
+    fn independent_noise_replay_is_worker_invariant_and_binds_root() {
+        let mut operations = vec![
+            FixedBatchOperation::Step {
+                actions_v: vec![3.0, 3.0]
+            };
+            6
+        ];
+        operations.push(FixedBatchOperation::Reset {
+            lanes: vec![(0, 4)],
+        });
+        operations.extend(vec![
+            FixedBatchOperation::Step {
+                actions_v: vec![3.0, 3.0]
+            };
+            6
+        ]);
+        let source =
+            record_fixed_batch_replay_with_noise_root(factory, 42, 99, 2, 1, &operations).unwrap();
+        assert_eq!(source.schema_version, 2);
+        verify_fixed_batch_replay(factory, 2, &source).unwrap();
+        let changed =
+            record_fixed_batch_replay_with_noise_root(factory, 42, 100, 2, 2, &operations).unwrap();
+        assert_ne!(
+            source.initial_evidence_sha256,
+            changed.initial_evidence_sha256
+        );
+        assert_ne!(source.events, changed.events);
+        let mut forged = source.clone();
+        forged.noise_root_seed = Some(100);
+        forged.content_sha256 = content_digest(&forged).unwrap();
+        forged.validate_metadata().unwrap();
+        assert!(verify_fixed_batch_replay(factory, 1, &forged).is_err());
+        forged.schema_version = 1;
+        forged.content_sha256 = content_digest(&forged).unwrap();
+        assert!(forged.validate_metadata().is_err());
+        assert_eq!(
+            decode_fixed_batch_replay(&serde_json::to_vec(&source).unwrap()).unwrap(),
+            source
+        );
+    }
+
     use rne_physics_rapier::RapierBackend;
 
     fn factory() -> Result<(RapierBackend, PhysicsBackendManifest)> {

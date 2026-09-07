@@ -72,6 +72,10 @@ const MOTOR_STREAM: StreamId = StreamId::new(1_004);
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SensorObservedContract {
+    /// Independent WorldRandom seed for sampled frontend noise, not reset parameters.
+    /// Zero preserves previously recorded nominal evidence.
+    #[serde(default, skip_serializing_if = "zero_noise_seed")]
+    pub sensor_noise_seed: u64,
     /// Optional physical reset profile; never supplied to the actor or estimator.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub physical_profile: Option<crate::mobility_randomization::RandomizedMobilityProfile>,
@@ -96,9 +100,14 @@ pub struct SensorObservedContract {
     pub left_encoder_drop_sequence: Option<u64>,
 }
 
+fn zero_noise_seed(seed: &u64) -> bool {
+    *seed == 0
+}
+
 impl SensorObservedContract {
     fn nominal() -> Self {
         Self {
+            sensor_noise_seed: WORLD_SEED,
             physical_profile: None,
             randomization: None,
             encoder_counts_per_revolution: ENCODER_COUNTS_PER_REVOLUTION,
@@ -133,6 +142,7 @@ impl SensorObservedContract {
                 .episode_seed;
             expected.physical_profile = Some(sample_physical_profile(seed));
         }
+        expected.sensor_noise_seed = self.sensor_noise_seed;
         ensure!(*self == expected, "sensor/controller contract drift");
         if let Some(sequence) = self.left_encoder_drop_sequence {
             ensure!(sequence > 1, "invalid encoder drop sequence");
@@ -320,7 +330,10 @@ impl SensorObservedTrace {
             self.fixed_delta_ticks == SENSOR_OBSERVED_FIXED_DELTA_TICKS,
             "fixed-step mismatch"
         );
-        ensure!(self.seed == WORLD_SEED, "seed mismatch");
+        ensure!(
+            self.seed == self.contract.sensor_noise_seed,
+            "seed mismatch"
+        );
         ensure!(self.steps == TOTAL_STEPS, "step-count mismatch");
         ensure!(self.samples.len() > 100, "trace omitted actor decisions");
         ensure!(
@@ -803,11 +816,24 @@ impl<B: PhysicsBackend> SensorFixedEnvironment<B> {
     /// Creates a fresh joint-reset world using an explicit reset seed. The
     /// factory/caller supplies a backend; no previous world or sensor state is reused.
     pub fn new(backend: B, manifest: PhysicsBackendManifest, episode_seed: u64) -> Result<Self> {
+        Self::new_with_noise_seed(backend, manifest, episode_seed, WORLD_SEED)
+    }
+
+    /// Creates a fresh world with independently specified reset and frontend-noise
+    /// seeds. Identical seeds reproduce both; changing only noise does not change
+    /// reset parameters. Actor tensors contain neither seed nor physical parameters.
+    pub fn new_with_noise_seed(
+        backend: B,
+        manifest: PhysicsBackendManifest,
+        episode_seed: u64,
+        sensor_noise_seed: u64,
+    ) -> Result<Self> {
         sensor_fixed_task_spec()
             .validate()
             .context("fixed sensor TaskSpec")?;
         let mut contract = SensorObservedContract::randomized(episode_seed);
         contract.physical_profile = Some(sample_physical_profile(episode_seed));
+        contract.sensor_noise_seed = sensor_noise_seed;
         Ok(Self {
             runtime: SensorObservedRuntime::new(backend, &manifest, contract)?,
             latest: None,
@@ -824,6 +850,21 @@ impl<B: PhysicsBackend> SensorFixedEnvironment<B> {
         episode_seed: u64,
     ) -> Result<SensorFixedObservation> {
         let replacement = Self::new(backend, manifest, episode_seed)?;
+        *self = replacement;
+        self.observation()
+    }
+
+    /// Reconstructs at time zero using explicit independent noise and reset seeds.
+    /// Failure preserves the previous world; success clears poisoned state.
+    pub fn reset_with_noise_seed(
+        &mut self,
+        backend: B,
+        manifest: PhysicsBackendManifest,
+        episode_seed: u64,
+        sensor_noise_seed: u64,
+    ) -> Result<SensorFixedObservation> {
+        let replacement =
+            Self::new_with_noise_seed(backend, manifest, episode_seed, sensor_noise_seed)?;
         *self = replacement;
         self.observation()
     }
@@ -989,7 +1030,7 @@ impl<B: PhysicsBackend> SensorObservedRuntime<B> {
                 rne_sensor::SensorGravity::new(gravity_m_s2).context("finite sensor gravity")?,
             );
         }
-        world.insert_resource(WorldRandom::new(WORLD_SEED));
+        world.insert_resource(WorldRandom::new(contract.sensor_noise_seed));
         let ground = spawn_named(&mut world, "sensor_observed_ground");
         world.entity_mut(ground).insert((
             RigidBody {
@@ -1379,9 +1420,9 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
         schema_version: SENSOR_OBSERVED_TRACE_SCHEMA_VERSION,
         backend: manifest,
         task_spec,
+        seed: contract.sensor_noise_seed,
         contract,
         fixed_delta_ticks: SENSOR_OBSERVED_FIXED_DELTA_TICKS,
-        seed: WORLD_SEED,
         steps: TOTAL_STEPS,
         privileged_final_physics_state_hash_v2: rne_physics::hash_physics_state_v2(&runtime.world),
         samples,
@@ -1807,6 +1848,57 @@ fn fnv1a64(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use rne_physics_rapier::RapierBackend;
+
+    #[test]
+    fn independent_noise_seed_changes_observations_not_open_loop_physics() {
+        let make = |noise_seed| {
+            SensorFixedEnvironment::new_with_noise_seed(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                42,
+                noise_seed,
+            )
+            .unwrap()
+        };
+        let mut first = make(17);
+        let mut repeat = make(17);
+        let mut other = make(18);
+        assert_eq!(
+            first.reset_contract().physical_profile,
+            other.reset_contract().physical_profile
+        );
+        assert_eq!(
+            first.reset_contract().randomization,
+            other.reset_contract().randomization
+        );
+        let mut different = false;
+        let mut results = Vec::new();
+        for _ in 0..60 {
+            let a = first.step(3.0).unwrap();
+            let b = repeat.step(3.0).unwrap();
+            let c = other.step(3.0).unwrap();
+            assert_eq!(a, b);
+            different |= a.observation != c.observation;
+            assert_eq!(
+                first.privileged_physics_hash_v2().unwrap(),
+                other.privileged_physics_hash_v2().unwrap()
+            );
+            results.push(a);
+        }
+        assert!(different, "noise seed did not reach actor observations");
+        first
+            .reset_with_noise_seed(RapierBackend::new(), RapierBackend::manifest(), 42, 17)
+            .unwrap();
+        for expected in results {
+            assert_eq!(first.step(3.0).unwrap(), expected);
+        }
+        let nominal = serde_json::to_value(SensorObservedContract::nominal()).unwrap();
+        assert!(nominal.get("sensor_noise_seed").is_none());
+        let restored: SensorObservedContract =
+            serde_json::from_value(serde_json::to_value(first.reset_contract()).unwrap()).unwrap();
+        restored.validate().unwrap();
+        assert_eq!(restored.sensor_noise_seed, 17);
+    }
 
     #[test]
     fn fixed_environment_preserves_boundaries_missing_data_and_reset_replay() {

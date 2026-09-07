@@ -40,6 +40,7 @@ fn main() -> Result<()> {
     let mut num_envs = None;
     let mut num_workers = None;
     let mut root_seed = None;
+    let mut noise_root_seed = None;
     let mut episode_index = None;
     let mut lane_id = None;
     let mut backend = "analytic".to_string();
@@ -101,6 +102,15 @@ fn main() -> Result<()> {
                         .context("--workers must be an unsigned integer")?,
                 );
             }
+            "--noise-root-seed" => {
+                ensure!(noise_root_seed.is_none(), "duplicate --noise-root-seed");
+                noise_root_seed = Some(
+                    args.next()
+                        .context("--noise-root-seed requires a value")?
+                        .parse::<u64>()
+                        .context("--noise-root-seed must be an unsigned integer")?,
+                );
+            }
             "--episode-index" => {
                 episode_index = Some(
                     args.next()
@@ -139,8 +149,13 @@ fn main() -> Result<()> {
             root_seed,
             num_envs,
             num_workers.unwrap_or(1),
+            noise_root_seed,
         );
     }
+    ensure!(
+        noise_root_seed.is_none(),
+        "--noise-root-seed requires fixed replay recording"
+    );
     let sensor_episode_batch = matches!(
         backend.as_str(),
         "sensor-episode-batch-rapier" | "sensor-episode-batch-mujoco"
