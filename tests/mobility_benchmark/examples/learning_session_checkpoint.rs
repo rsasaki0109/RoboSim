@@ -1,7 +1,9 @@
 //! Separate-process checkpoint smoke. Data paths are explicit; never overwrite.
 
 use anyhow::{ensure, Context, Result};
-use rne_mobility_benchmark::observed_fixed_batch::SensorLearningSession;
+use rne_mobility_benchmark::observed_fixed_batch::{
+    SensorLearningSession, MAX_LEARNING_SESSION_BYTES,
+};
 use rne_physics::{PhysicsBackend, PhysicsBackendManifest};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
@@ -36,11 +38,12 @@ where
         "resume" => {
             let file = std::fs::File::open(path)?;
             ensure!(
-                file.metadata()?.len() <= 8 * 1024 * 1024,
-                "checkpoint exceeds 8 MiB"
+                file.metadata()?.len() <= MAX_LEARNING_SESSION_BYTES as u64,
+                "checkpoint exceeds session byte limit"
             );
             let mut bytes = Vec::new();
-            file.take(8 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+            file.take(MAX_LEARNING_SESSION_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)?;
             // A different worker count and fresh process must reproduce history.
             SensorLearningSession::from_checkpoint(factory, 1, &bytes)?
         }

@@ -17,7 +17,7 @@ pub use replay::{
     record_fixed_batch_replay_with_noise_root, verify_fixed_batch_replay, FixedBatchOperation,
     FixedBatchReplay, FixedBatchReplayEvent, MAX_FIXED_REPLAY_BYTES,
 };
-pub use training_session::SensorLearningSession;
+pub use training_session::{SensorLearningSession, MAX_LEARNING_SESSION_BYTES};
 
 /// One stable lane's completed transition or execution failure.
 #[derive(Clone, Debug, PartialEq)]

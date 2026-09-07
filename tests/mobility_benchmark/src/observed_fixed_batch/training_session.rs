@@ -4,8 +4,18 @@ use super::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const MAX_BYTES: usize = 8 * 1024 * 1024;
-const MAX_EVENTS: usize = 1024;
+/// Maximum input size of a v2 learning session (32 MiB); v1 retains its 8 MiB cap.
+pub const MAX_LEARNING_SESSION_BYTES: usize = 32 * 1024 * 1024;
+const MAX_BYTES: usize = MAX_LEARNING_SESSION_BYTES;
+const MAX_EVENTS: usize = 16 * 1024;
+
+fn limits(version: u32) -> Result<(usize, usize)> {
+    match version {
+        1 => Ok((1024, 8 * 1024 * 1024)),
+        2 => Ok((MAX_EVENTS, MAX_BYTES)),
+        _ => anyhow::bail!("unsupported session schema"),
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
@@ -45,12 +55,13 @@ fn digest(value: &impl Serialize) -> Result<String> {
 
 /// Bounded online-learning session whose checkpoint binds learner and world history.
 ///
-/// Restoration re-executes at most 1,024 operations from fresh worlds, validates
+/// Restoration re-executes at most 16,384 operations from fresh worlds, validates
 /// each physical/sensor/output/learner digest and the final learner checkpoint,
 /// then returns live worlds. It does not trust a hash as proof of execution.
 /// Worker count may change; backend identity may not. No solver handles or hidden
 /// physical parameters enter the learner. This is not an O(1) solver snapshot.
 pub struct SensorLearningSession<B: PhysicsBackend, F> {
+    format_version: u32,
     batch: SensorFixedBatch<B, F>,
     learner: SensorTableLearner,
     exploration_root: u64,
@@ -63,6 +74,7 @@ pub struct SensorLearningSession<B: PhysicsBackend, F> {
 impl<B: PhysicsBackend, F> std::fmt::Debug for SensorLearningSession<B, F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SensorLearningSession")
+            .field("format_version", &self.format_version)
             .field("batch", &self.batch)
             .field("learner", &self.learner)
             .field("next_decision", &self.next_decision)
@@ -95,6 +107,7 @@ where
         )?;
         let initial_sha256 = replay::evidence_digest(&batch, serde_json::Value::Null)?;
         Ok(Self {
+            format_version: 2,
             batch,
             learner: SensorTableLearner::new(exploration_root),
             exploration_root,
@@ -116,7 +129,7 @@ where
             "session has an unrecorded execution/update failure"
         );
         ensure!(
-            self.events.len() < MAX_EVENTS,
+            self.events.len() < limits(self.format_version)?.0,
             "session operation limit reached"
         );
         Ok(())
@@ -191,14 +204,15 @@ where
         Ok(observations)
     }
 
-    /// Encodes at most 8 MiB of history and learner state. No filesystem is touched.
-    /// History cannot be discarded to bypass the 1,024-operation bound. A failed
+    /// Encodes at most 32 MiB and 16,384 operations in v2. No filesystem is touched.
+    /// Restored v1 sessions keep their original 8 MiB / 1,024-operation bounds and
+    /// serialization; no implicit upgrade occurs. History cannot be discarded. A failed
     /// lane can be saved, but restoration requires that failure to reproduce.
     /// Digests are corruption checks, not signatures or proof of hardware behavior.
     pub fn checkpoint(&self) -> Result<Vec<u8>> {
         ensure!(self.usable, "cannot checkpoint unrecorded partial progress");
         let mut snapshot = Snapshot {
-            schema_version: 1,
+            schema_version: self.format_version,
             backend: self.batch.manifest.clone(),
             physical_root: self.batch.root_seed,
             noise_root: self
@@ -214,7 +228,10 @@ where
         };
         snapshot.content_sha256 = digest(&snapshot)?;
         let bytes = serde_json::to_vec(&snapshot)?;
-        ensure!(bytes.len() <= MAX_BYTES, "session exceeds 8 MiB");
+        ensure!(
+            bytes.len() <= limits(self.format_version)?.1,
+            "session exceeds schema byte limit"
+        );
         Ok(bytes)
     }
 
@@ -224,16 +241,20 @@ where
     /// but execution-invalid artifact is rejected. A replay mismatch never yields
     /// a partially restored session. Old worlds are not mutated or reused.
     pub fn from_checkpoint(factory: F, workers: usize, bytes: &[u8]) -> Result<Self> {
-        ensure!(bytes.len() <= MAX_BYTES, "session exceeds 8 MiB");
+        ensure!(bytes.len() <= MAX_BYTES, "session exceeds 32 MiB");
         let mut snapshot: Snapshot = serde_json::from_slice(bytes)?;
+        let (event_limit, byte_limit) = limits(snapshot.schema_version)?;
+        ensure!(
+            bytes.len() <= byte_limit,
+            "session exceeds schema byte limit"
+        );
         ensure!(
             serde_json::from_slice::<serde_json::Value>(bytes)? == serde_json::to_value(&snapshot)?,
             "unsupported session fields or representations"
         );
         ensure!(
-            snapshot.schema_version == 1
-                && (1..=MAX_SENSOR_BATCH_LANES).contains(&snapshot.num_envs)
-                && snapshot.events.len() <= MAX_EVENTS,
+            (1..=MAX_SENSOR_BATCH_LANES).contains(&snapshot.num_envs)
+                && snapshot.events.len() <= event_limit,
             "invalid session schema/size"
         );
         snapshot.backend.validate()?;
@@ -277,6 +298,7 @@ where
                 && restored.initial_sha256 == snapshot.initial_sha256,
             "session initial world/backend mismatch"
         );
+        restored.format_version = snapshot.schema_version;
         for expected in snapshot.events {
             match &expected.operation {
                 Operation::Train => {
@@ -319,6 +341,15 @@ mod tests {
         let bytes = live.checkpoint().unwrap();
         let mut restored = SensorLearningSession::from_checkpoint(factory, 1, &bytes).unwrap();
         assert_eq!(bytes, restored.checkpoint().unwrap());
+        let mut legacy: Snapshot = serde_json::from_slice(&bytes).unwrap();
+        legacy.schema_version = 1;
+        legacy.content_sha256.clear();
+        legacy.content_sha256 = digest(&legacy).unwrap();
+        let legacy_bytes = serde_json::to_vec(&legacy).unwrap();
+        let legacy_session =
+            SensorLearningSession::from_checkpoint(factory, 1, &legacy_bytes).unwrap();
+        assert_eq!(legacy_session.format_version, 1);
+        assert_eq!(legacy_bytes, legacy_session.checkpoint().unwrap());
         for _ in 0..30 {
             assert_eq!(live.step().unwrap(), restored.step().unwrap());
         }
@@ -403,6 +434,68 @@ mod tests {
             Ok((
                 rne_physics_rapier::RapierBackend::new(),
                 rne_physics_rapier::RapierBackend::manifest(),
+            ))
+        });
+    }
+
+    fn full_training_job<B, F>(factory: F)
+    where
+        B: PhysicsBackend,
+        F: Fn() -> Result<(B, PhysicsBackendManifest)> + Copy,
+    {
+        // Recovery qualification only: these are not held-out performance seeds.
+        let mut session = SensorLearningSession::new(factory, 5000, 5001, 5002, 4, 2).unwrap();
+        for episode in 0..32 {
+            if episode != 0 {
+                session
+                    .reset_lanes(&(0..4).map(|lane| (lane, episode)).collect::<Vec<_>>())
+                    .unwrap();
+            }
+            for _ in 0..330 {
+                assert!(session.step().unwrap().failures.is_empty());
+            }
+        }
+        assert_eq!(session.events.len(), 10_591);
+        assert_eq!(session.learner().updates(), 42_240);
+        let bytes = session.checkpoint().unwrap();
+        assert!(bytes.len() <= MAX_BYTES);
+        let mut restored = SensorLearningSession::from_checkpoint(factory, 1, &bytes).unwrap();
+        assert_eq!(bytes, restored.checkpoint().unwrap());
+        let reset = (0..4).map(|lane| (lane, 32)).collect::<Vec<_>>();
+        session.reset_lanes(&reset).unwrap();
+        restored.reset_lanes(&reset).unwrap();
+        assert_eq!(session.step().unwrap(), restored.step().unwrap());
+        assert_eq!(
+            session.checkpoint().unwrap(),
+            restored.checkpoint().unwrap()
+        );
+        eprintln!(
+            "full training job verified: operations=10591 updates=42240 checkpoint_bytes={}",
+            bytes.len()
+        );
+    }
+
+    #[test]
+    #[ignore = "long physical training/replay qualification; run explicitly"]
+    fn training_session_full_training_job_rapier() {
+        full_training_job(|| {
+            Ok((
+                rne_physics_rapier::RapierBackend::new(),
+                rne_physics_rapier::RapierBackend::manifest(),
+            ))
+        });
+    }
+
+    #[cfg(feature = "mujoco")]
+    #[test]
+    #[ignore = "long physical training/replay qualification; run explicitly"]
+    fn training_session_full_training_job_mujoco() {
+        full_training_job(|| {
+            Ok((
+                rne_physics_mujoco::MuJoCoBackend::new(rne_core::SimDuration::from_ticks(
+                    1_000_000,
+                ))?,
+                rne_physics_mujoco::MuJoCoBackend::manifest(),
             ))
         });
     }

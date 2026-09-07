@@ -162,17 +162,17 @@ was not rerun or retuned for these additions.
 
 Checkpoint-focused validation: all three tests passed with `--features mujoco`
 (both backend resumes and corruption/bounds rejection), followed by MuJoCo-feature
-all-target Clippy with warnings denied. Full CI for this additional slice is in
-progress, separately logged at
-`E:\RNE-build\m3c-sensor\learner-checkpoint-ci.log`; the earlier completed CI above
-does not cover this later checkpoint implementation.
+all-target Clippy with warnings denied. Full CI for this checkpoint slice completed
+with exit 0 and no retries, including 361 fuzz cases and Behavior CI 10/10,
+separately logged at `E:\RNE-build\m3c-sensor\learner-checkpoint-ci.log`. Its early
+lint/test phases preceded the later session implementation and v2 expansion.
 
 ## Replay-verified training sessions
 
 `SensorLearningSession` owns the physical batch, learner, next exploration
 coordinate and bounded operation history. Callers can step, reset selected lanes,
 inspect a read-only learner, encode a checkpoint or reconstruct from one. They
-cannot mutate the learner or worlds behind the recorded history. The schema v1
+cannot mutate the learner or worlds behind the recorded history. The versioned
 session file includes backend identity, physical/noise/exploration roots, lane
 count, initial-world evidence, ordered training/reset operations and the final
 learner checkpoint. Worker count is intentionally not part of replay identity.
@@ -181,8 +181,8 @@ Each train event binds the requested actions (including failed lanes), actual
 learning transitions/failures, resulting learner checkpoint digest, lane reset
 contracts, sensor observations and physical-state hashes. Actions are recomputed
 by the learner during replay rather than supplied by an unchecked caller. Reset
-events do not consume a decision coordinate or update. Decoding rejects files
-over 8 MiB, more than 1,024 operations, invalid reset masks, decision/history
+events do not consume a decision coordinate or update. Decoding enforces a
+schema-specific byte/operation cap, rejects invalid reset masks, decision/history
 mismatch, unknown fields and corrupt digests before replay. The inner learner
 checkpoint retains its separate 1 MiB bound and schema/TaskSpec validation.
 
@@ -209,16 +209,42 @@ reset and different worker counts, rehashed incorrect event/learner rejection,
 post-physics error and panic recovery, unchanged state after invalid reset/horizon
 or operation-cap rejection, and oversized/unknown-field rejection before backend
 construction. Full regression validation for the session remains pending. The
-already running `learner-checkpoint-ci.log` began before this code was added, so
+completed `learner-checkpoint-ci.log` run began before this code was added, so
 its early lint/test phases cannot establish coverage for this later addition.
 Per-step checkpoint/evidence work adds overhead that was not included in the
 earlier raw-learner v1 throughput measurement; that number must not be reused as
 session-checkpoint throughput.
 
-The 1,024-operation cap is an explicit remaining limitation: the prior v1
-experiment's 10,560 training decisions plus 31 resets do not fit in one current
-session. Longer verified jobs need a reviewed larger bounded format or verified
-segmentation; callers must not drop history and claim equivalent recovery.
+New sessions use schema v2: at most 16,384 operations and 32 MiB. This capacity
+covers the prior experiment's 10,560 training decisions plus 31 resets. Existing
+schema v1 files remain byte-stable on restoration and keep their original 1,024
+operations / 8 MiB limits; restoration does not silently upgrade them. Both
+versions retain the same event/learner evidence semantics and exact replay checks.
+The reader rejects unsupported versions. The fixed smoke example now uses the
+exported `MAX_LEARNING_SESSION_BYTES` input bound rather than a divergent constant.
+After rebuilding that example with v2 support, both previously saved v1 files
+were resumed in separate processes. Their 120-update continuation digests matched
+the values below exactly, and SHA-256 checks confirmed neither file changed.
+
+Four short session tests and MuJoCo-feature all-target Clippy passed after the v2
+change, including v1 round-trip preservation. Two long tests are deliberately
+excluded from routine tests and must be run explicitly with
+`cargo test -p rne_mobility_benchmark --features mujoco training_session_full_training_job -- --ignored --nocapture --test-threads=1`.
+Both passed explicitly (2 passed, 0 failed, exit 0), logged to
+`E:\RNE-build\m3c-sensor\learning-session-v2-long.log`. Each backend trains 32
+episodes on four lanes (42,240 updates), checkpoints all 10,591 operations,
+reconstructs with a different worker count, checks byte identity, then resets and
+continues both copies. Recovery-test roots 5000/5001/5002 are not the prior
+held-out performance seeds; this does not repeat or retune that evaluation.
+The full-job checkpoints were 1,624,973 bytes for MuJoCo and 1,624,104 bytes for
+Rapier. Both restored byte-identically and continued identically after a reset.
+The combined long tests took 978.34 s, including both backends, learning, full
+history verification and continuation checks, with other validation work also
+running on the host. This is not a standalone throughput benchmark. Per-step
+checkpoint/evidence overhead warrants profiling; the earlier raw learner's
+updates-per-second figure does not characterize this journaled session.
+Arbitrary unbounded training and constant-time snapshots are still unsupported;
+history must not be discarded to claim equivalent recovery.
 
 ### Separate-process evidence
 
