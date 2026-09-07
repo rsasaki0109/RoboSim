@@ -1,10 +1,10 @@
 # Recorded mobility source replay v1
 
-Status: additive NCLT DataBus replay implemented; estimator integration and physical
-accuracy validation remain pending. See the [source audit](MOBILITY_REAL_LOG_SOURCE_AUDIT.md)
+Status: additive NCLT DataBus replay and a separate planar velocity-input baseline
+implemented; physical accuracy validation remains pending. See the [source audit](MOBILITY_REAL_LOG_SOURCE_AUDIT.md)
 for acquisition hashes, source definitions and limitations.
 
-The next estimator's lag, integration and missing-interval contract is specified in
+The estimator's lag, integration and missing-interval contract is specified in
 [measured-velocity estimator design](MOBILITY_MEASURED_VELOCITY_ESTIMATOR_DESIGN.md).
 
 `recorded_nclt::replay::NcltReplay` reads both original CSV inputs through the bounded

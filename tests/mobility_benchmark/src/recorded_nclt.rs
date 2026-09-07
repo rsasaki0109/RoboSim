@@ -9,6 +9,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::Read;
 
+pub mod estimation;
 pub mod replay;
 
 /// Maximum uncompressed input size accepted by each reader.

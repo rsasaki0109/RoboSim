@@ -179,7 +179,8 @@ The [README](https://zenodo.org/api/records/12536536/files/ReadMe.md/content)
 describes separate continuous runs, body-frame `/cmd_vel` commands and world-frame
 `/vrpn_client_node/Car_2_Tracking/twist` VICON measurements. Its opening paragraph
 instead spells the command topic `/vel_cmd`; verify actual bag connections rather
-than choosing from prose. No bag was downloaded during this metadata inspection.
+than choosing from prose. That initial metadata inspection did not download a bag;
+the subsequent bounded acquisition below supersedes the metadata-only status.
 
 This supports investigating aggregate command-to-motion response. It does not yet
 establish measured steering, motor voltage/current, wheel forces or clock uncertainty.
@@ -212,6 +213,100 @@ alone cannot identify motor electrical parameters. Do not manufacture missing
 force, current, steering measurements or timestamp uncertainty from model output.
 Without independent reference measurements, report replay consistency rather than
 physical accuracy.
+
+### F1TENTH bounded acquisition and preliminary byte audit
+
+One run was acquired from the official API content link, with a 90,000,000-byte
+download cap, into the previously absent external directory
+`E:\RoboSim-external-data\mobility-f1tenth-12536536`. No ROS runtime, bagpy, image
+extraction or additional package installation was needed. The bag itself includes
+scan messages; they were not extracted into a separate dataset.
+
+- File: `ex-hard-r2_2023-06-12-19-59-52.bag`, exactly 84,985,680 bytes.
+- Official MD5, verified: `1f0e930d8d0bf2106fac9d34a94b9c21`.
+- Locally computed SHA-256:
+  `3ba7b5c13da68227bf8af27370e7205f142dca4ca3340c8b1b51feba70cc22ac`.
+- Attribution: Giannis Badakis, Michalis Galanis and Zengjie Zhang,
+  *Driving Data of a Real F1tenth Car*, Zenodo record 12536536, CC BY 4.0.
+
+A read-only, bounded standard-library byte audit, following the record layout in
+the [official ROS implementation](https://github.com/ros/ros_comm/blob/noetic-devel/tools/rosbag/src/rosbag/bag.py),
+found ROS bag v2, 105 uncompressed chunks and 25 connections. Message definitions
+were treated as text, not executed. Selected message counts from walking chunks
+agree with the connection-index totals:
+
+| Topic | Type | Messages |
+| --- | --- | ---: |
+| `/cmd_vel` | `geometry_msgs/Twist` | 9,853 |
+| `/commands/motor/speed` | `std_msgs/Float64` | 9,855 |
+| `/sensors/core` | `vesc_msgs/VescStateStamped` | 6,032 |
+| `/vrpn_client_node/Car_2_Tracking/pose` | `geometry_msgs/PoseStamped` | 13,426 |
+| `/vrpn_client_node/Car_2_Tracking/twist` | `geometry_msgs/TwistStamped` | 13,402 |
+
+The VESC embedded definition includes input voltage, motor/input current, electrical
+RPM and duty cycle. Thus telemetry is present, contrary to what the metadata alone
+could establish. Presence is **not qualification**: preliminary decoding found input
+voltage and PCB temperature identically zero, duty cycle from -0.194 to 0.569 despite
+the embedded comment's 0-to-1 range, and fault values spanning 0 through 255 despite
+only codes 0 through 6 being declared. Treat these as unresolved decoding/driver/
+record-quality anomalies, not physical fault diagnoses or usable motor calibration.
+
+VICON pose/twist report `world`; VESC's frame string is empty. For VICON pose,
+`bag_time - header_stamp` ranges from -63.775767420 to -62.780972095 s; for VICON
+twist, -63.775357363 to -62.906228216 s; for VESC, -63.775798446 to -63.445731478 s.
+These are differences between recorded clock fields, not negative physical latency.
+The unstamped command messages have no capture timestamp. Do not erase these
+differences by independently zeroing each stream or fitting an unexplained offset.
+
+Next, validate decoding through an independent reader and synthetic format fixtures,
+inspect the acquisition/driver time conventions, and determine whether a justified
+common-clock mapping exists. Verify VICON velocity derivation and orientation before
+body projection. Electrical RPM needs pole-pair/transmission/sign calibration; servo
+commands are not measured steering. Do not fit voltage-driven electrical parameters
+from the zero-voltage channel. No parameter fit, held-out score or physical pass is
+claimed from this preliminary inspection.
+
+Independent reader check: the already available `rosbags` 0.11.3 ROS1 reader and
+its generated typed deserializer reproduced all five selected message counts and
+all three header-versus-bag timestamp ranges exactly. It independently confirmed
+6,032/6,032 zero input-voltage values and 5,861/6,032 fault values outside codes
+0 through 6 (observed range 0 through 255). This rules out the initial manual byte
+parser as the sole explanation, not driver/firmware or recording defects.
+The missing `lz4` 4.4.5 dependency (99 kB wheel) was installed without pip caching
+only under the external acquisition directory's `reader-deps`; no existing Python
+environment was modified. Calls used `-B` to avoid bytecode cache writes. Reader
+agreement does not qualify the channel or resolve clock synchronization.
+
+Reference angular velocity also needs qualification. The
+[published Noetic driver source](https://docs.ros.org/en/noetic/api/vrpn_client_ros/html/vrpn__client__ros_8cpp_source.html)
+converts `vel_quat` to roll/pitch/yaw and assigns these directly to twist angular
+fields without dividing by `vel_quat_dt`. Its header stamp can use either server
+time or ROS current time. The bag's exact deployed driver version and configuration
+are not established, so this is a concrete investigation lead, not proof that the
+same defect produced this capture. Do not treat the angular fields as calibrated
+rad/s, silently apply a guessed sample-rate multiplier, or infer synchronization
+from the topic/type names. Independently checked pose differences and documented
+server/driver conventions are required before selecting a yaw-rate reference.
+
+The independent audit is reproducible with `scripts/audit_f1tenth_source.py`.
+It verifies the pinned size and SHA-256 before parsing; it rejects different
+captures instead of silently assuming their schemas or calibration. It checks
+decoded counts against the source connection index and prints a stable JSON digest.
+Only the five listed channels are deserialized; no dataset is exported or fitted.
+Use the external dependency directory and disable bytecode writes:
+
+```powershell
+$env:TEMP = 'E:\RNE-build\tmp'
+$env:TMP = $env:TEMP
+$env:PYTHONPATH = 'E:\RoboSim-external-data\mobility-f1tenth-12536536\reader-deps'
+python -B scripts/audit_f1tenth_source.py E:\RoboSim-external-data\mobility-f1tenth-12536536\ex-hard-r2_2023-06-12-19-59-52.bag
+python -B -m unittest discover -s scripts -p test_audit_f1tenth_source.py -v
+```
+
+The chosen Python must provide `rosbags==0.11.3` and its dependencies. Synthetic
+audit tests do not import rosbags and do not require physical data. The captured
+report is `E:\RNE-build\m3c-sensor\f1tenth-independent-audit.json`, with digest
+`f0427731ef2388e97dc29fa1906385fa18db57786a4409c9e97673193d418710`.
 
 The existing [suspension identification gate](MOBILITY_SUSPENSION_IDENTIFICATION_V1.md)
 requires strut displacement, velocity and generalized force plus acquisition evidence.
