@@ -7,6 +7,30 @@ The existing episode-parallel runner and policy callback are documented in
 
 ## Implemented primitive
 
+`observed::fixed_evaluation` additionally executes complete 330-command histories
+on fresh worlds and reports integrated absolute tracking error (m), physical
+horizon speed (m/s), and final state hashes. Cross-backend evaluation uses the
+same explicit reset and voltage history, with separate gap and final-speed
+verdicts. The gap budgets are 0.10 m accumulated error and 0.10 m/s final speed;
+these are engineering regression budgets, not measured real-vehicle accuracy.
+Final speed retains the existing 1.0 +/- 0.1 m/s gate. Matching failures remain
+failed final-speed results. Reports are diagnostic values, not authenticated
+evidence; comparison executes both worlds rather than trusting imported verdicts.
+This open-loop check does not replace closed-loop policy evaluation, real-log
+calibration, complete-task acceptance, or common Capsule verification.
+
+The three targeted tests and MuJoCo-enabled Clippy passed on 2026-09-07.
+For reset seeds 42/43/44, a 0 V settling interval followed by 3 V produced maximum
+cross-backend gaps of 0.007016 m accumulated error and 0.002509 m/s final speed
+(rounded upward). Both backends failed the final-speed gate for all three cases;
+these runs are retained, not described as successful tracking. Evidence:
+`E:/RNE-build/m3c-sensor/fixed-si-evaluation-tests.log` and `fixed-si-clippy.log`.
+Workspace-wide validation for this evaluator addition also passed: full `xtask ci`
+exited with code zero, including headless, OSS parity, fuzz smoke (361 cases), and
+Behavior CI (10/10 seeds). The MuJoCo-enabled mobility suite passed 86 library tests
+and one CLI test. Full logs: `E:/RNE-build/m3c-sensor/fixed-si-ci.log` and
+`E:/RNE-build/m3c-sensor/fixed-si-mujoco-tests.log`.
+
 `observed::SensorFixedEnvironment` owns a persistent physical world, drive state,
 pending wrench, frontends, bus and estimator. `step(voltage_v)` advances ten 1 ms
 ticks, returning an exact 10 ms boundary with optional sensor-only observation,

@@ -641,6 +641,9 @@ pub fn replay_sensor_observed_trace<B: PhysicsBackend>(
     Ok(replay)
 }
 
+/// SI-unit evaluation of complete fixed-period voltage histories.
+pub mod fixed_evaluation;
+
 /// Actor snapshot at an exact fixed-period boundary, with explicit missing data.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SensorFixedObservation {

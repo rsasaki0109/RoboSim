@@ -232,8 +232,15 @@ The first additive M4 subgate is implemented as the deterministic ordered CPU re
 batch in [`MOBILITY_DOMAIN_RANDOMIZATION_V1.md`](MOBILITY_DOMAIN_RANDOMIZATION_V1.md).
 It freezes lane/episode seed derivation and typed motor, transmission, wheel, tire, road,
 mass, and suspension parameter sampling with replay-verified per-lane evidence. It does
-not yet close M4: the reference rollout is analytic and open loop, suspension is retained
-but not excited, and backend TaskSpec, sensor, and accelerated batch integration remain
+not yet close M4: that initial reference rollout is analytic and open loop, and its
+suspension parameters are retained but not excited. Subsequent longitudinal Rapier/
+MuJoCo environments now provide persistent 10 ms stepping over 1 ms physics/sensor
+ticks, sensor-only actor tensors, evaluator reward, partial resets, CPU-parallel
+lanes, and exact reset/action replay. The new SI-unit evaluator separately reports
+open-loop backend gaps and final-speed acceptance; full workspace CI and the
+MuJoCo-enabled mobility suite passed on 2026-09-07.
+Fallible training integration, independent sensor-noise resets, broader per-wheel/
+Ackermann randomization, accelerated batching, and physical-log validation remain
 open. `TaskSpec` now has optional, separately validated actor, privileged-critic, and
 diagnostic observation spaces; the sensor-only Ackermann task declares its estimator and
 measurement actor inputs separately from rigid-body truth and timing diagnostics.
