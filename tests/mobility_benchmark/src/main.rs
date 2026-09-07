@@ -36,6 +36,7 @@ fn main() -> Result<()> {
     let mut acquisition_manifest = None;
     let mut evidence_root = None;
     let mut num_envs = None;
+    let mut num_workers = None;
     let mut root_seed = None;
     let mut episode_index = None;
     let mut lane_id = None;
@@ -90,6 +91,14 @@ fn main() -> Result<()> {
                         .context("--seed must be an unsigned integer")?,
                 );
             }
+            "--workers" => {
+                num_workers = Some(
+                    args.next()
+                        .context("--workers requires a value")?
+                        .parse::<usize>()
+                        .context("--workers must be an unsigned integer")?,
+                );
+            }
             "--episode-index" => {
                 episode_index = Some(
                     args.next()
@@ -109,6 +118,14 @@ fn main() -> Result<()> {
             other => bail!("unknown argument: {other}"),
         }
     }
+    let sensor_episode_batch = matches!(
+        backend.as_str(),
+        "sensor-episode-batch-rapier" | "sensor-episode-batch-mujoco"
+    );
+    ensure!(
+        sensor_episode_batch || num_workers.is_none(),
+        "--workers requires a sensor episode batch"
+    );
     if backend.starts_with("sensor-capsule-") {
         ensure!(
             failure_replay.is_none()
@@ -183,6 +200,30 @@ fn main() -> Result<()> {
         "mujoco" => run_mujoco()?,
         "compare" => run_comparison(failure_replay.as_deref())?,
         "sensor-mujoco" => run_sensor_mujoco()?,
+        "sensor-episode-batch-rapier" => {
+            let report = rne_mobility_benchmark::observed_batch::run_sensor_episode_batch(
+                || Ok((RapierBackend::new(), RapierBackend::manifest())),
+                root_seed.context("sensor episode batch requires --seed")?,
+                episode_index.unwrap_or(0),
+                num_envs.context("sensor episode batch requires --num-envs")?,
+                num_workers.unwrap_or(1),
+            )?;
+            eprintln!(
+                "episode batch: failed_lanes={} total={}",
+                report.failed_lanes,
+                report.lanes.len()
+            );
+            (
+                serde_json::to_string_pretty(&report)? + "\n",
+                "sensor-episode-batch-rapier",
+            )
+        }
+        "sensor-episode-batch-mujoco" => run_sensor_episode_batch_mujoco(
+            root_seed.context("sensor episode batch requires --seed")?,
+            episode_index.unwrap_or(0),
+            num_envs.context("sensor episode batch requires --num-envs")?,
+            num_workers.unwrap_or(1),
+        )?,
         "sensor-replay-rapier" => {
             let source = rne_mobility_benchmark::observed::read_sensor_observed_trace(
                 input.as_deref().context("sensor replay requires --input")?,
@@ -445,11 +486,12 @@ fn main() -> Result<()> {
         "sensor reset comparison takes an episode seed directly, without --episode-index"
     );
     ensure!(
-        backend == "mobility-randomized-batch" || num_envs.is_none(),
-        "--num-envs is valid only with mobility-randomized-batch"
+        backend == "mobility-randomized-batch" || sensor_episode_batch || num_envs.is_none(),
+        "--num-envs requires a batch backend"
     );
     ensure!(
         backend == "mobility-randomized-batch"
+            || sensor_episode_batch
             || backend == "sensor-randomized-compare"
             || backend == "mobility-sensor-randomized-compare"
             || backend == "mobility-sensor-randomized-rapier"
@@ -1030,6 +1072,49 @@ fn run_sensor_comparison(
         serde_json::to_string_pretty(&comparison)? + "\n",
         "sensor-rapier-vs-mujoco",
     ))
+}
+
+#[cfg(feature = "mujoco")]
+fn run_sensor_episode_batch_mujoco(
+    root_seed: u64,
+    episode_index: u64,
+    num_envs: usize,
+    num_workers: usize,
+) -> Result<(String, &'static str)> {
+    use rne_physics_mujoco::MuJoCoBackend;
+    let report = rne_mobility_benchmark::observed_batch::run_sensor_episode_batch(
+        || {
+            Ok((
+                MuJoCoBackend::new(rne_core::SimDuration::from_ticks(
+                    rne_mobility_benchmark::observed::SENSOR_OBSERVED_FIXED_DELTA_TICKS,
+                ))?,
+                MuJoCoBackend::manifest(),
+            ))
+        },
+        root_seed,
+        episode_index,
+        num_envs,
+        num_workers,
+    )?;
+    eprintln!(
+        "sensor episode batch: failed_lanes={} total={}",
+        report.failed_lanes,
+        report.lanes.len()
+    );
+    Ok((
+        serde_json::to_string_pretty(&report)? + "\n",
+        "sensor-episode-batch-mujoco",
+    ))
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_sensor_episode_batch_mujoco(
+    _root_seed: u64,
+    _episode_index: u64,
+    _num_envs: usize,
+    _num_workers: usize,
+) -> Result<(String, &'static str)> {
+    bail!("MuJoCo sensor episode batch requires --features mujoco")
 }
 
 #[cfg(feature = "mujoco")]

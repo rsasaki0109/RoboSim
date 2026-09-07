@@ -352,11 +352,25 @@ and cross-backend results.
     Mobility parameter sampling, conservative physical-range validation, a bounded ordered
     CPU reference batch, exact applied-profile evidence, and full lane replay/digest
     verification; see
-    [`MOBILITY_DOMAIN_RANDOMIZATION_V1.md`](MOBILITY_DOMAIN_RANDOMIZATION_V1.md). Next,
-    apply those profiles to the shared Rapier/MuJoCo TaskSpec, randomize sensor
-    calibration/timing/faults, and prove single-lane/batch equivalence before adding an
-    accelerator. Physical-log acquisition, recorded/shadow/HIL validation, and the final
-    real-vehicle exit gate remain open.
+    [`MOBILITY_DOMAIN_RANDOMIZATION_V1.md`](MOBILITY_DOMAIN_RANDOMIZATION_V1.md).
+    Joint physical/sensor resets now run on the longitudinal Rapier/MuJoCo fixture,
+    including applied grade gravity and fixed nominal estimator calibration. Sensor
+    latency/jitter, residual bias and a seeded encoder drop are reset parameters;
+    the WorldRandom noise seed remains fixed, not an independent lane noise stream.
+    A bounded CPU episode-parallel runner retains failed tasks and reproduces complete
+    serial/parallel artifacts on both backends. This does not yet provide a persistent
+    synchronous vector step API; see
+    [`MOBILITY_SENSOR_EPISODE_BATCH_V1.md`](MOBILITY_SENSOR_EPISODE_BATCH_V1.md).
+    An external voltage-policy callback now receives only sensor-derived actor inputs.
+    Exact voltage replay binds completed physical-state hashes; the common Failure
+    Capsule additionally binds replay bytes and the verifying binary's build metadata.
+    These are replay/provenance checks, not proof of physical calibration or attested
+    policy identity. Next extract persistent single-world state and implement a distinct
+    fixed-period reset/step contract, since actual event-driven sensor decisions have
+    variable intervals; see
+    [`MOBILITY_SYNCHRONOUS_ENV_DESIGN.md`](MOBILITY_SYNCHRONOUS_ENV_DESIGN.md).
+    Broader per-wheel/Ackermann resets, physical-log acquisition, recorded/shadow/HIL
+    validation, and the final real-vehicle exit gate remain open.
 
 Every PR is independently headless-testable, documents new public contracts, runs format,
 Clippy, workspace tests, and `xtask ci-headless`, and removes its isolated build directory

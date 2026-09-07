@@ -568,8 +568,46 @@ fn run_sensor_observed_configured<B: PhysicsBackend>(
     manifest: PhysicsBackendManifest,
     contract: SensorObservedContract,
 ) -> Result<SensorObservedTrace> {
-    run_sensor_observed_execution(backend, manifest, contract, None)
+    run_sensor_observed_execution(backend, manifest, contract, None, None)
 }
+
+/// Controller-visible inputs at an accepted sensor decision. No physical truth,
+/// backend state or hidden reset parameters are available through this value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SensorPolicyObservation {
+    /// Sensor-only odometry and its uncertainty/health.
+    pub estimate: WheelImuActorObservation,
+    /// Simulation time of this decision, in nanosecond ticks.
+    pub decision_ticks: u64,
+    /// Latest available measured terminal voltage, in volts.
+    pub measured_motor_voltage_v: f64,
+    /// Latest available measured current, in amperes.
+    pub measured_motor_current_a: f64,
+    /// Task-provided target velocity, not a physical measurement.
+    pub target_velocity_m_s: f64,
+}
+
+/// Runs a fresh joint-reset episode with an external sensor-only voltage policy.
+///
+/// The callback runs once per accepted estimator update (not every physics tick).
+/// Initial voltage is zero; returned voltage is held until the next decision and
+/// enters the next drive-path evaluation with the existing wrench staging.
+/// Non-finite or out-of-range (+/-24 V) actions and callback errors abort the run
+/// before the action is applied. The returned trace is privileged evaluator output,
+/// never callback input. Contract PI gains describe the reference controller only;
+/// this API executes the supplied policy, whose identity is caller-owned.
+pub fn run_mobility_sensor_policy<B: PhysicsBackend>(
+    backend: B,
+    manifest: PhysicsBackendManifest,
+    episode_seed: u64,
+    mut policy: impl FnMut(&SensorPolicyObservation) -> Result<f64>,
+) -> Result<SensorObservedTrace> {
+    let mut contract = SensorObservedContract::randomized(episode_seed);
+    contract.physical_profile = Some(sample_physical_profile(episode_seed));
+    run_sensor_observed_execution(backend, manifest, contract, None, Some(&mut policy))
+}
+
+type SensorVoltagePolicy<'a> = dyn FnMut(&SensorPolicyObservation) -> Result<f64> + 'a;
 
 /// Replays recorded terminal-voltage decisions on a fresh instance of the same backend.
 ///
@@ -589,8 +627,13 @@ pub fn replay_sensor_observed_trace<B: PhysicsBackend>(
         manifest == source.backend,
         "replay backend identity mismatch"
     );
-    let replay =
-        run_sensor_observed_execution(backend, manifest, source.contract.clone(), Some(source))?;
+    let replay = run_sensor_observed_execution(
+        backend,
+        manifest,
+        source.contract.clone(),
+        Some(source),
+        None,
+    )?;
     ensure!(
         replay == *source,
         "voltage replay differs from recorded evidence"
@@ -603,6 +646,7 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
     manifest: PhysicsBackendManifest,
     contract: SensorObservedContract,
     replay: Option<&SensorObservedTrace>,
+    mut policy: Option<&mut SensorVoltagePolicy<'_>>,
 ) -> Result<SensorObservedTrace> {
     manifest.validate().context("backend manifest")?;
     require_capabilities(
@@ -797,6 +841,15 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
                 "replay voltage decision timing mismatch"
             );
             decision.command_voltage_v
+        } else if let Some(policy) = policy.as_mut() {
+            policy(&SensorPolicyObservation {
+                estimate: actor,
+                decision_ticks: decision_time.ticks(),
+                measured_motor_voltage_v: motor.payload.terminal_voltage_v,
+                measured_motor_current_a: motor.payload.current_a,
+                target_velocity_m_s,
+            })
+            .context("sensor voltage policy")?
         } else {
             controller.update(
                 actor.estimated_linear_velocity_m_s,
@@ -804,6 +857,11 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
                 SENSOR_PERIOD_TICKS as f64 / 1_000_000_000.0,
             )
         };
+        ensure!(
+            command_voltage_v.is_finite()
+                && (-MAXIMUM_VOLTAGE_V..=MAXIMUM_VOLTAGE_V).contains(&command_voltage_v),
+            "policy action must be finite and within voltage limits"
+        );
         let transform = *world
             .get::<Transform3>(vehicle)
             .context("vehicle transform at actor decision")?;
@@ -1378,6 +1436,98 @@ fn fnv1a64(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use rne_physics_rapier::RapierBackend;
+
+    #[test]
+    fn external_sensor_policy_matches_reference_controller_and_replays() {
+        let source = run_randomized_mobility_sensor_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            42,
+        )
+        .unwrap();
+        let mut controller = VelocityController::new(&SensorObservedContract::randomized(42));
+        let mut decisions = Vec::new();
+        let trace = run_mobility_sensor_policy(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            42,
+            |observation| {
+                decisions.push(observation.decision_ticks);
+                Ok(controller.update(
+                    observation.estimate.estimated_linear_velocity_m_s,
+                    observation.target_velocity_m_s,
+                    SENSOR_PERIOD_TICKS as f64 / 1_000_000_000.0,
+                ))
+            },
+        )
+        .unwrap();
+        assert_eq!(trace, source);
+        assert_eq!(
+            decisions,
+            trace
+                .samples
+                .iter()
+                .map(|sample| sample.decision_ticks)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            trace,
+            replay_sensor_observed_trace(RapierBackend::new(), RapierBackend::manifest(), &trace)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn external_sensor_policy_rejects_invalid_actions_immediately() {
+        for voltage in [f64::NAN, f64::INFINITY, -24.01, 24.01] {
+            let mut calls = 0;
+            let result = run_mobility_sensor_policy(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                42,
+                |_| {
+                    calls += 1;
+                    Ok(voltage)
+                },
+            );
+            assert!(result.unwrap_err().to_string().contains("voltage limits"));
+            assert_eq!(calls, 1);
+        }
+        let result =
+            run_mobility_sensor_policy(RapierBackend::new(), RapierBackend::manifest(), 42, |_| {
+                anyhow::bail!("intentional policy error")
+            });
+        assert!(format!("{:#}", result.unwrap_err()).contains("intentional policy error"));
+    }
+
+    #[test]
+    fn external_sensor_policy_changes_physics_without_filtering_failed_tasks() {
+        let trace =
+            run_mobility_sensor_policy(RapierBackend::new(), RapierBackend::manifest(), 42, |_| {
+                Ok(0.0)
+            })
+            .unwrap();
+        assert!(!trace.passed);
+        assert!(trace
+            .samples
+            .iter()
+            .all(|sample| sample.command_voltage_v == 0.0));
+        let baseline = run_randomized_mobility_sensor_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            42,
+        )
+        .unwrap();
+        assert_ne!(
+            trace.privileged_final_physics_state_hash_v2,
+            baseline.privileged_final_physics_state_hash_v2
+        );
+        assert_eq!(
+            trace,
+            replay_sensor_observed_trace(RapierBackend::new(), RapierBackend::manifest(), &trace)
+                .unwrap()
+        );
+    }
 
     #[test]
     fn bounded_voltage_replay_decoder_rejects_invalid_evidence() {

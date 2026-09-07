@@ -150,6 +150,9 @@ now applies seeded gyro/current offsets, common transport latency/jitter, and an
 dropout through the sensor-only controller. Its joint-reset API now combines those sensor
 resets with a randomized longitudinal chassis while retaining nominal estimator calibration.
 Neither runner executes lanes concurrently or reports hardware throughput.
+A separate [CPU-parallel sensor episode runner](MOBILITY_SENSOR_EPISODE_BATCH_V1.md)
+now executes independent joint physical/sensor longitudinal episodes concurrently;
+it is not a lockstep vectorized policy interface or a throughput claim.
 
 The next gate extends joint resets to the per-wheel skid and Ackermann fixtures,
 independent transport jitter, LiDAR, and camera faults, then proves single-lane versus ordered-batch
