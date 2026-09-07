@@ -24,6 +24,7 @@ rne_ai = { workspace = true }
 rne_core = { workspace = true }
 rne_data = { workspace = true }
 rne_ecs = { workspace = true }
+rne_log = { workspace = true }
 rne_math = { workspace = true }
 rne_physics = { workspace = true }
 rne_physics_mujoco = { version = "=0.2.0", path = "../../crates/rne_physics_mujoco", optional = true }
@@ -33,4 +34,10 @@ rne_sensor = { workspace = true }
 rne_world = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
 sha2 = { workspace = true }

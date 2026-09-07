@@ -7,6 +7,7 @@ pub mod diff_caster;
 pub mod identified_suspension_road;
 pub mod mobility_randomization;
 pub mod observed;
+pub mod observed_capsule;
 pub mod per_wheel;
 pub mod per_wheel_observed;
 pub mod road_excitation;

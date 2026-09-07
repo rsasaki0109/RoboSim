@@ -135,7 +135,7 @@ cargo run -p rne_mobility_benchmark --features mujoco -- `
   --output E:\RNE-build\m3c-sensor\sensor-randomized-compare.json
 ```
 
-Two independent seed-42 CLI runs, after correcting latency acceptance to use the
+Historical schema-1 evidence: two independent seed-42 CLI runs, after correcting latency acceptance to use the
 declared contract bounds, produced byte-identical 695,590-byte comparison files
 (SHA-256 `B203D06E6BF3775271BF88C29BF6E1254ED9E3F86C9EE3CFDC0C7917DFF0151A`).
 The sample used 3 ms base latency, up to 2 ms added jitter, a 0.000960431 rad/s
@@ -182,7 +182,7 @@ cargo run -p rne_mobility_benchmark --features mujoco -- `
 `--num-envs` are rejected for this single-episode CLI. A batch caller must derive
 lane-local seeds before invoking the runner. The CLI does not claim vectorized execution.
 
-Two independent seed-42 joint CLI runs, after the latency-scoring correction,
+Historical schema-1 evidence: two independent seed-42 joint CLI runs, after the latency-scoring correction,
 produced byte-identical 705,897-byte outputs:
 digest `fnv1a64:b5cc9293e13e63d9`, SHA-256
 `B11CD5A148E4D20AF1BC1A36929E1BC61E8CBD6963365D55C268B6C859D4FA52`.
@@ -217,12 +217,97 @@ scoring and its digest, must match. Recomputed hashes alone do not establish rep
 changing recorded voltages and rehashing the source is rejected when the physical
 result differs. A reproducibly failed task remains failed after successful replay.
 
-The remaining gate adds a bounded file reader/CLI and build provenance, then packages
-the verified voltage replay and failed metric report as references in the common
-capsule. The generic wheel-velocity replayer is not modified or used for this voltage
-fixture. Cross-backend agreement and single-backend exact replay remain distinct checks.
+Schema 2 now includes `privileged_final_physics_state_hash_v2` at the final completed
+physics step. It uses the existing versioned physics hash (rigid-body position,
+orientation, linear/angular velocity and joint state, quantized to 1e-6). It is not
+a hash of the JSON file or of every hidden backend/sensor state. Full trace equality
+and this physical-state digest are both checked during replay. Old schema-1 traces
+are explicitly rejected, since they lack that evidence; regenerate them instead of
+inventing a missing state hash. The comparison envelope is also schema 2.
 
-Validation on Windows (2026-09-07): the frozen voltage-replay worktree completed
+The file reader consumes at most 2 MiB plus one sentinel byte before parsing. The
+decoder rejects oversized input, unknown fields, schema drift and invalid trace
+integrity. Decoding alone does not establish physical replay.
+
+After setting the external-SSD environment above:
+
+```powershell
+cargo run -p rne_mobility_benchmark --features mujoco -- `
+  --backend mobility-sensor-randomized-rapier --seed 42 `
+  --output E:\RNE-build\m3c-sensor\voltage-source-v2.json
+cargo run -p rne_mobility_benchmark --features mujoco -- `
+  --backend sensor-replay-rapier `
+  --input E:\RNE-build\m3c-sensor\voltage-source-v2.json `
+  --output E:\RNE-build\m3c-sensor\voltage-replayed-v2.json
+```
+
+`sensor-replay-mujoco` provides the corresponding same-backend path for a MuJoCo
+trace, with the feature enabled. A comparison envelope is not a single trace and
+cannot be used as replay input. The CLI reports replay equality separately from
+task success, preserving this seed's failed task verdict.
+
+Schema-2 file replay validation: Rapier's joint-reset failure produced byte-identical
+333,777-byte source/replay files (SHA-256
+`C387DA78BDB15808565B62275153995605D82546D5999F2667196B9D79B698F7`).
+MuJoCo's nominal successful fixture produced byte-identical 329,509-byte files
+(`26AAAF90782E918CEFDF4D1E0D0166F3191F96D856471BA8BF370A3BA83D6FC8`).
+The MuJoCo joint-reset failure is also covered by the exact-replay unit test.
+All three voltage-replay unit tests and MuJoCo-enabled targeted Clippy passed.
+
+`observed_capsule::SensorObservedFailureBundle` now packages the verified failed
+voltage replay using the common `rne_log::FailureCapsule`, without a new envelope
+schema. Creation reruns the voltage trace, rejects successful tasks, and references
+the exact `voltage-replay.json` bytes by SHA-256. The replay contains the full sorted
+unit-bearing metric report; the first failed metric identifies the final-acceptance
+failure. The capsule's zero-based failure step is `trace.steps - 1`, its timestamp
+is `trace.steps * fixed_delta_ticks`, and its state digest is the final physical
+state hash, not the artifact hash or last sensor-capture hash.
+
+`write_new` creates `capsule.json` and `voltage-replay.json` in a new directory and
+refuses existing destinations. Partial files may remain after an I/O failure;
+the writer never deletes existing data. `read` bounds the capsule to 64 KiB and
+replay to 2 MiB. `validate_metadata` reconstructs the expected envelope from its
+replay and rejects timing, digest, backend, metric and count mismatches.
+`verify_replay` additionally requires the caller's expected `BuildMetadata` and
+executes the recorded voltages again. Metadata validation alone is not replay proof.
+
+Build provenance is supplied by the producer, not independently attested by the
+bundle. Unit tests use explicitly synthetic build labels. The CLI now embeds the
+revision, compiler, target, profile and Cargo.lock SHA-256 at build time. It refuses
+a binary compiled with dirty or unavailable Git provenance (the intentionally
+local-only `HANDOFF_CODEX.md` is excluded). Commit source changes and rebuild before
+producing capsules. Runtime checkout state is never substituted for the binary's
+embedded provenance. These fields identify the build that re-executed and verified
+the source trace, not necessarily the build that originally recorded it; they are
+not a signature or an exhaustive compiler-flags/environment fingerprint.
+
+Using the same clean-build executable and the external-SSD settings above:
+
+```powershell
+cargo run -p rne_mobility_benchmark --features mujoco -- `
+  --backend sensor-capsule-create-rapier `
+  --input E:\RNE-build\m3c-sensor\voltage-source-v2.json `
+  --output E:\RNE-build\m3c-sensor\voltage-failure-capsule-v2
+cargo run -p rne_mobility_benchmark --features mujoco -- `
+  --backend sensor-capsule-verify-rapier `
+  --input E:\RNE-build\m3c-sensor\voltage-failure-capsule-v2
+```
+
+The output directory must not already exist; its parent must exist. Verification
+does not accept an output path and never rewrites the capsule. The `-mujoco`
+variants require the MuJoCo feature and a failed MuJoCo source trace. Both variants
+require matching embedded build metadata before replaying. A successful verification
+means that the failure reproduced, not that the task passed.
+
+The schema-2/capsule/build-provenance slice passed all 63 Mobility library tests
+with MuJoCo enabled and targeted Clippy with warnings denied. Full-workspace CI
+evidence below predates this extension and must not be interpreted as its final CI.
+
+The generic wheel-velocity replayer is not
+modified or used for this voltage fixture. Cross-backend agreement and
+single-backend exact replay remain distinct checks.
+
+Validation on Windows (2026-09-07), before the schema-2 extension: the frozen voltage-replay worktree completed
 `cargo run -p xtask -- ci` with exit code 0, including workspace Clippy/tests,
 example and RL smokes, headless checks, parity, fuzz, and 10/10 behavior seeds.
 The separate MuJoCo-enabled voltage-replay tests passed for both backends.

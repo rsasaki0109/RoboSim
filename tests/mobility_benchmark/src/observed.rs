@@ -41,11 +41,14 @@ use crate::MobilityBenchmarkMetric;
 /// Artifact discriminator for one sensor-observed backend trace.
 pub const SENSOR_OBSERVED_TRACE_KIND: &str = "rne_mobility_sensor_observed_trace";
 /// Current sensor-observed trace schema version.
-pub const SENSOR_OBSERVED_TRACE_SCHEMA_VERSION: u32 = 1;
+pub const SENSOR_OBSERVED_TRACE_SCHEMA_VERSION: u32 = 2;
 /// Artifact discriminator for a sensor-observed cross-backend comparison.
 pub const SENSOR_OBSERVED_COMPARISON_KIND: &str = "rne_mobility_sensor_observed_comparison";
 /// Current sensor-observed comparison schema version.
-pub const SENSOR_OBSERVED_COMPARISON_SCHEMA_VERSION: u32 = 1;
+pub const SENSOR_OBSERVED_COMPARISON_SCHEMA_VERSION: u32 = 2;
+
+/// Maximum accepted serialized single-backend replay size (2 MiB).
+pub const MAX_SENSOR_OBSERVED_TRACE_BYTES: usize = 2 * 1024 * 1024;
 /// Stable task identity for the longitudinal sensor-only controller.
 pub const SENSOR_OBSERVED_TASK_ID: &str = "mobility_longitudinal_sensor_observed_v1";
 /// One millisecond physics integration step in simulation ticks.
@@ -279,6 +282,9 @@ pub struct SensorObservedTrace {
     pub seed: u64,
     /// Number of completed physics steps.
     pub steps: u64,
+    /// Final completed-step physics hash from `hash_physics_state_v2`.
+    /// This quantized rigid-body/joint digest is privileged, not an actor input.
+    pub privileged_final_physics_state_hash_v2: u64,
     /// Every accepted estimator update in decision order.
     pub samples: Vec<SensorObservedSample>,
     /// Ordered unit-bearing acceptance metrics.
@@ -371,6 +377,30 @@ impl SensorObservedTrace {
         );
         Ok(())
     }
+}
+
+/// Decodes a size-bounded trace and verifies its schema, contract and integrity.
+/// This does not run physics; use [`replay_sensor_observed_trace`] for replay proof.
+pub fn decode_sensor_observed_trace(bytes: &[u8]) -> Result<SensorObservedTrace> {
+    ensure!(
+        bytes.len() <= MAX_SENSOR_OBSERVED_TRACE_BYTES,
+        "sensor replay exceeds byte limit"
+    );
+    let trace: SensorObservedTrace =
+        serde_json::from_slice(bytes).context("decode sensor replay")?;
+    trace.validate()?;
+    Ok(trace)
+}
+
+/// Reads at most the replay byte limit plus one sentinel byte before decoding.
+pub fn read_sensor_observed_trace(path: &std::path::Path) -> Result<SensorObservedTrace> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .with_context(|| format!("open replay {}", path.display()))?
+        .take(MAX_SENSOR_OBSERVED_TRACE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    decode_sensor_observed_trace(&bytes)
 }
 
 /// Two complete sensor-observed traces with explicit SI-unit tolerances.
@@ -924,6 +954,7 @@ fn run_sensor_observed_execution<B: PhysicsBackend>(
         fixed_delta_ticks: SENSOR_OBSERVED_FIXED_DELTA_TICKS,
         seed: WORLD_SEED,
         steps: TOTAL_STEPS,
+        privileged_final_physics_state_hash_v2: rne_physics::hash_physics_state_v2(&world),
         samples,
         passed: metrics.iter().all(|metric| metric.passed),
         metrics,
@@ -1347,6 +1378,38 @@ fn fnv1a64(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use rne_physics_rapier::RapierBackend;
+
+    #[test]
+    fn bounded_voltage_replay_decoder_rejects_invalid_evidence() {
+        let source = run_randomized_mobility_sensor_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            42,
+        )
+        .unwrap();
+        let bytes = serde_json::to_vec(&source).unwrap();
+        assert_eq!(decode_sensor_observed_trace(&bytes).unwrap(), source);
+        assert!(
+            decode_sensor_observed_trace(&vec![b' '; MAX_SENSOR_OBSERVED_TRACE_BYTES + 1]).is_err()
+        );
+        let mut value = serde_json::to_value(&source).unwrap();
+        value["unknown"] = true.into();
+        assert!(decode_sensor_observed_trace(&serde_json::to_vec(&value).unwrap()).is_err());
+        let mut legacy = source.clone();
+        legacy.schema_version = 1;
+        legacy.content_digest = trace_digest(&legacy).unwrap();
+        assert!(decode_sensor_observed_trace(&serde_json::to_vec(&legacy).unwrap()).is_err());
+        let mut forged = source;
+        forged.privileged_final_physics_state_hash_v2 ^= 1;
+        forged.content_digest = trace_digest(&forged).unwrap();
+        forged.validate().unwrap();
+        assert!(replay_sensor_observed_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            &forged
+        )
+        .is_err());
+    }
 
     #[test]
     fn voltage_replay_reproduces_failure_and_rejects_changed_commands() {

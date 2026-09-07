@@ -109,6 +109,26 @@ fn main() -> Result<()> {
             other => bail!("unknown argument: {other}"),
         }
     }
+    if backend.starts_with("sensor-capsule-") {
+        ensure!(
+            failure_replay.is_none()
+                && fault.is_none()
+                && acquisition_manifest.is_none()
+                && evidence_root.is_none()
+                && num_envs.is_none()
+                && root_seed.is_none()
+                && episode_index.is_none()
+                && lane_id.is_none(),
+            "capsule commands accept only --input and --output"
+        );
+        return run_sensor_capsule(
+            &backend,
+            input
+                .as_deref()
+                .context("capsule command requires --input")?,
+            output.as_deref(),
+        );
+    }
     let (json, label) = match backend.as_str() {
         "analytic" => {
             let report = run_mobility_benchmark()?;
@@ -163,6 +183,36 @@ fn main() -> Result<()> {
         "mujoco" => run_mujoco()?,
         "compare" => run_comparison(failure_replay.as_deref())?,
         "sensor-mujoco" => run_sensor_mujoco()?,
+        "sensor-replay-rapier" => {
+            let source = rne_mobility_benchmark::observed::read_sensor_observed_trace(
+                input.as_deref().context("sensor replay requires --input")?,
+            )?;
+            let replay = rne_mobility_benchmark::observed::replay_sensor_observed_trace(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                &source,
+            )?;
+            eprintln!("voltage replay exact; task_passed={}", replay.passed);
+            (
+                serde_json::to_string_pretty(&replay)? + "\n",
+                "sensor-voltage-replay-rapier",
+            )
+        }
+        "sensor-replay-mujoco" => {
+            run_sensor_replay_mujoco(input.as_deref().context("sensor replay requires --input")?)?
+        }
+        "mobility-sensor-randomized-rapier" => {
+            let trace = rne_mobility_benchmark::observed::run_randomized_mobility_sensor_trace(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                root_seed.context("joint reset requires --seed (episode seed)")?,
+            )?;
+            eprintln!("joint reset: task_passed={}", trace.passed);
+            (
+                serde_json::to_string_pretty(&trace)? + "\n",
+                "mobility-sensor-randomized-rapier",
+            )
+        }
         "sensor-compare" => run_sensor_comparison(None, false)?,
         "sensor-randomized-compare" => run_sensor_comparison(
             Some(root_seed.context("sensor-randomized-compare requires --seed (episode seed)")?),
@@ -366,8 +416,10 @@ fn main() -> Result<()> {
             "suspension-identification"
                 | "identified-road-compare"
                 | "suspension-acquisition-verify"
+                | "sensor-replay-rapier"
+                | "sensor-replay-mujoco"
         ) || input.is_none(),
-        "--input is valid only with an identification backend"
+        "--input requires an identification or sensor-replay backend"
     );
     ensure!(
         backend == "suspension-acquisition-verify" || acquisition_manifest.is_none(),
@@ -386,7 +438,9 @@ fn main() -> Result<()> {
     ensure!(
         !matches!(
             backend.as_str(),
-            "sensor-randomized-compare" | "mobility-sensor-randomized-compare"
+            "sensor-randomized-compare"
+                | "mobility-sensor-randomized-compare"
+                | "mobility-sensor-randomized-rapier"
         ) || episode_index.is_none(),
         "sensor reset comparison takes an episode seed directly, without --episode-index"
     );
@@ -398,6 +452,7 @@ fn main() -> Result<()> {
         backend == "mobility-randomized-batch"
             || backend == "sensor-randomized-compare"
             || backend == "mobility-sensor-randomized-compare"
+            || backend == "mobility-sensor-randomized-rapier"
             || randomized_backend
             || (root_seed.is_none() && episode_index.is_none()),
         "--seed and --episode-index require a randomized Mobility backend"
@@ -415,6 +470,71 @@ fn main() -> Result<()> {
         println!("{label} mobility evidence written: {}", path.display());
     } else {
         print!("{json}");
+    }
+    Ok(())
+}
+
+fn run_sensor_capsule(
+    mode: &str,
+    input: &std::path::Path,
+    output: Option<&std::path::Path>,
+) -> Result<()> {
+    match mode {
+        "sensor-capsule-create-rapier" | "sensor-capsule-verify-rapier" => capsule_operation(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            mode == "sensor-capsule-create-rapier",
+            input,
+            output,
+        ),
+        #[cfg(feature = "mujoco")]
+        "sensor-capsule-create-mujoco" | "sensor-capsule-verify-mujoco" => {
+            use rne_physics_mujoco::MuJoCoBackend;
+            capsule_operation(
+                MuJoCoBackend::new(rne_core::SimDuration::from_ticks(
+                    rne_mobility_benchmark::observed::SENSOR_OBSERVED_FIXED_DELTA_TICKS,
+                ))?,
+                MuJoCoBackend::manifest(),
+                mode == "sensor-capsule-create-mujoco",
+                input,
+                output,
+            )
+        }
+        _ => bail!("unsupported capsule command {mode}; MuJoCo commands require --features mujoco"),
+    }
+}
+
+fn capsule_operation<B: rne_physics::PhysicsBackend>(
+    backend: B,
+    manifest: rne_physics::PhysicsBackendManifest,
+    create: bool,
+    input: &std::path::Path,
+    output: Option<&std::path::Path>,
+) -> Result<()> {
+    use rne_mobility_benchmark::observed_capsule::{
+        compiled_capsule_build, SensorObservedFailureBundle,
+    };
+    let build = compiled_capsule_build()?;
+    if create {
+        let destination = output.context("capsule creation requires --output (new directory)")?;
+        let source = rne_mobility_benchmark::observed::read_sensor_observed_trace(input)?;
+        let bundle = SensorObservedFailureBundle::create(backend, manifest, &source, build)?;
+        bundle.write_new(destination)?;
+        println!(
+            "verified failed voltage replay packaged: {}",
+            destination.display()
+        );
+    } else {
+        ensure!(
+            output.is_none(),
+            "capsule verification does not accept --output"
+        );
+        let bundle = SensorObservedFailureBundle::read(input)?;
+        bundle.verify_replay(backend, manifest, &build)?;
+        println!(
+            "failure capsule replay verified; task remains failed: {}",
+            input.display()
+        );
     }
     Ok(())
 }
@@ -910,6 +1030,31 @@ fn run_sensor_comparison(
         serde_json::to_string_pretty(&comparison)? + "\n",
         "sensor-rapier-vs-mujoco",
     ))
+}
+
+#[cfg(feature = "mujoco")]
+fn run_sensor_replay_mujoco(input: &std::path::Path) -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::observed::{
+        read_sensor_observed_trace, replay_sensor_observed_trace, SENSOR_OBSERVED_FIXED_DELTA_TICKS,
+    };
+    use rne_physics_mujoco::MuJoCoBackend;
+    let source = read_sensor_observed_trace(input)?;
+    let replay = replay_sensor_observed_trace(
+        MuJoCoBackend::new(SimDuration::from_ticks(SENSOR_OBSERVED_FIXED_DELTA_TICKS))?,
+        MuJoCoBackend::manifest(),
+        &source,
+    )?;
+    eprintln!("voltage replay exact; task_passed={}", replay.passed);
+    Ok((
+        serde_json::to_string_pretty(&replay)? + "\n",
+        "sensor-voltage-replay-mujoco",
+    ))
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_sensor_replay_mujoco(_input: &std::path::Path) -> Result<(String, &'static str)> {
+    bail!("MuJoCo voltage replay requires --features mujoco")
 }
 
 #[cfg(not(feature = "mujoco"))]
