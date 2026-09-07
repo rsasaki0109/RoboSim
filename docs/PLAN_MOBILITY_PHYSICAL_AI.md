@@ -5,6 +5,12 @@ differential-drive trailing-caster, four-wheel Ackermann suspension/split-fricti
 rough-road/lift, and Ackermann sensor-loop subgates implemented; physical logs and later
 milestones remain
 
+Real-log acquisition is now scoped by the
+[source audit](MOBILITY_REAL_LOG_SOURCE_AUDIT.md): inspect bounded NCLT sensor data
+for replay first, qualify a separate Ackermann identification source, and keep
+odometry-derived references distinct from independent truth. No physical-validation
+gate is closed by that source screening.
+
 Implemented M0 evidence:
 
 - wheel encoder payloads now read completed joint coordinates instead of actuator targets;
