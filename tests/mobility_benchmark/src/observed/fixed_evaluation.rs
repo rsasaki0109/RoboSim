@@ -6,6 +6,68 @@
 
 use super::*;
 
+/// Evaluator-only snapshot at a completed 10 ms boundary. Wheel velocity is the
+/// completed drive state, while the estimate may describe older sensor captures.
+/// Differences are diagnostic accounting terms, not identified causal effects.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FixedVelocityDiagnostic {
+    /// Completed simulation boundary in nanosecond ticks.
+    pub time_ticks: u64,
+    /// Voltage held during the interval that just ended (not the next action).
+    pub interval_command_voltage_v: f64,
+    /// Target at this boundary; the reward uses interval-start targets instead.
+    pub target_velocity_m_s: f64,
+    /// Latest sensor-derived speed, missing when no estimate has been accepted.
+    pub estimated_velocity_m_s: Option<f64>,
+    /// Original decision timestamp of the retained sensor estimate.
+    pub estimate_decision_ticks: Option<u64>,
+    /// Oldest input capture used by the retained estimate.
+    pub capture_ticks: Option<u64>,
+    /// Age of those inputs at this boundary, not at their original decision.
+    pub input_age_ticks: Option<u64>,
+    /// True carrier forward speed at this boundary.
+    pub true_velocity_m_s: f64,
+    /// True carrier speed change over the completed 10 ms interval, divided by 0.01 s.
+    pub mean_acceleration_m_s2: f64,
+    /// Completed wheel angular speed multiplied by the physical reset radius.
+    pub physical_wheel_surface_velocity_m_s: f64,
+    /// Same angular speed multiplied by the fixed nominal estimator radius.
+    pub nominal_wheel_surface_velocity_m_s: f64,
+}
+
+/// Algebraic decomposition of target-minus-true speed at one boundary.
+/// Terms sum to the total within floating-point tolerance. The measurement term
+/// includes latency, quantization, filtering and calibration effects; the wheel
+/// term is peripheral-minus-carrier speed, not a normalized tire slip ratio.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FixedVelocityErrorBudget {
+    /// Target minus retained sensor estimate: controller-visible tracking error.
+    pub controller_error_m_s: f64,
+    /// Retained estimate minus current nominal-radius wheel surface speed.
+    pub measurement_history_residual_m_s: f64,
+    /// Nominal-radius minus physical-radius wheel surface speed.
+    pub radius_scale_difference_m_s: f64,
+    /// Physical wheel surface speed minus carrier speed.
+    pub wheel_carrier_difference_m_s: f64,
+}
+
+impl FixedVelocityDiagnostic {
+    /// Decomposes speed error without inserting physical truth into actor inputs.
+    /// Returns `None` when the sensor estimate is missing, never a fabricated zero.
+    pub fn error_budget(&self) -> Option<FixedVelocityErrorBudget> {
+        let estimate = self.estimated_velocity_m_s?;
+        Some(FixedVelocityErrorBudget {
+            controller_error_m_s: self.target_velocity_m_s - estimate,
+            measurement_history_residual_m_s: estimate - self.nominal_wheel_surface_velocity_m_s,
+            radius_scale_difference_m_s: self.nominal_wheel_surface_velocity_m_s
+                - self.physical_wheel_surface_velocity_m_s,
+            wheel_carrier_difference_m_s: self.physical_wheel_surface_velocity_m_s
+                - self.true_velocity_m_s,
+        })
+    }
+}
+
 /// Complete fixed-horizon evaluator result, never an actor observation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -20,6 +82,8 @@ pub struct FixedVoltageEvaluation {
     pub task_spec: TaskSpec,
     /// All 330 commands, including the settling interval, in temporal order.
     pub actions_v: Vec<f64>,
+    /// All 330 completed-boundary diagnostics, separate from callback observations.
+    pub privileged_velocity_diagnostics: Vec<FixedVelocityDiagnostic>,
     /// Completed physical time, in nanosecond ticks.
     pub time_ticks: u64,
     /// Sum of ten-tick right-end speed-error integrals over the entire episode.
@@ -74,8 +138,16 @@ pub fn evaluate_fixed_sensor_policy<B: PhysicsBackend>(
     let mut environment = SensorFixedEnvironment::new(backend, manifest.clone(), episode_seed)?;
     let mut observation = environment.observation()?;
     let mut actions_v = Vec::with_capacity(330);
+    let mut diagnostics = Vec::with_capacity(330);
     let mut integral_m = 0.0;
     for index in 0..330 {
+        let prior_velocity_m_s = environment
+            .runtime
+            .world
+            .get::<RigidBody>(environment.runtime.vehicle)
+            .context("fixed diagnostic body missing")?
+            .linear_velocity_m_s
+            .x;
         let action = policy(&observation)
             .with_context(|| format!("fixed sensor policy decision {index}"))?;
         let transition = environment.step(action)?;
@@ -86,6 +158,47 @@ pub fn evaluate_fixed_sensor_policy<B: PhysicsBackend>(
         integral_m += transition.privileged_tracking_error_integral_m;
         actions_v.push(action);
         observation = transition.observation;
+        let velocity_m_s = environment
+            .runtime
+            .world
+            .get::<RigidBody>(environment.runtime.vehicle)
+            .context("fixed diagnostic body missing")?
+            .linear_velocity_m_s
+            .x;
+        let wheel_velocity_rad_s = environment.runtime.drive_state.wheel_velocity_rad_s;
+        let diagnostic = FixedVelocityDiagnostic {
+            time_ticks: observation.time_ticks,
+            interval_command_voltage_v: action,
+            target_velocity_m_s: fixed_target_velocity(observation.time_ticks),
+            estimated_velocity_m_s: observation
+                .latest
+                .as_ref()
+                .map(|latest| latest.estimate.estimated_linear_velocity_m_s),
+            estimate_decision_ticks: observation
+                .latest
+                .as_ref()
+                .map(|latest| latest.decision_ticks),
+            capture_ticks: observation.capture_ticks,
+            input_age_ticks: observation.input_age_ticks,
+            true_velocity_m_s: velocity_m_s,
+            mean_acceleration_m_s2: (velocity_m_s - prior_velocity_m_s) / 0.01,
+            physical_wheel_surface_velocity_m_s: wheel_velocity_rad_s
+                * environment.runtime.plant.wheel.radius_m,
+            nominal_wheel_surface_velocity_m_s: wheel_velocity_rad_s * plant_spec().wheel.radius_m,
+        };
+        ensure!(
+            [
+                diagnostic.true_velocity_m_s,
+                diagnostic.mean_acceleration_m_s2,
+                diagnostic.physical_wheel_surface_velocity_m_s,
+                diagnostic.nominal_wheel_surface_velocity_m_s,
+            ]
+            .iter()
+            .all(|value| value.is_finite())
+                && diagnostic.estimated_velocity_m_s.is_none_or(f64::is_finite),
+            "non-finite fixed diagnostic"
+        );
+        diagnostics.push(diagnostic);
     }
     let velocity_m_s = environment
         .runtime
@@ -104,6 +217,7 @@ pub fn evaluate_fixed_sensor_policy<B: PhysicsBackend>(
         reset_contract: environment.reset_contract().clone(),
         task_spec: sensor_fixed_task_spec(),
         actions_v,
+        privileged_velocity_diagnostics: diagnostics,
         time_ticks: environment.observation()?.time_ticks,
         tracking_error_integral_m: integral_m,
         final_velocity_m_s: velocity_m_s,
@@ -223,6 +337,59 @@ mod tests {
 
     fn rapier() -> (RapierBackend, PhysicsBackendManifest) {
         (RapierBackend::new(), RapierBackend::manifest())
+    }
+
+    #[test]
+    fn fixed_diagnostics_preserve_timing_and_account_for_total_speed_error() {
+        let (backend, manifest) = rapier();
+        let report = evaluate_fixed_reference_policy(backend, manifest, 42).unwrap();
+        assert_eq!(report.privileged_velocity_diagnostics.len(), 330);
+        let mut previous_velocity = 0.0;
+        for (index, diagnostic) in report.privileged_velocity_diagnostics.iter().enumerate() {
+            assert_eq!(diagnostic.time_ticks, (index as u64 + 1) * 10_000_000);
+            assert_eq!(
+                diagnostic.interval_command_voltage_v,
+                report.actions_v[index]
+            );
+            assert!(
+                diagnostic.capture_ticks.unwrap() <= diagnostic.estimate_decision_ticks.unwrap()
+            );
+            assert!(diagnostic.estimate_decision_ticks.unwrap() <= diagnostic.time_ticks);
+            assert_eq!(
+                diagnostic.input_age_ticks,
+                Some(diagnostic.time_ticks - diagnostic.capture_ticks.unwrap())
+            );
+            assert!(
+                (diagnostic.mean_acceleration_m_s2 * 0.01
+                    - (diagnostic.true_velocity_m_s - previous_velocity))
+                    .abs()
+                    < 1e-12
+            );
+            previous_velocity = diagnostic.true_velocity_m_s;
+            let budget = diagnostic.error_budget().unwrap();
+            let sum = budget.controller_error_m_s
+                + budget.measurement_history_residual_m_s
+                + budget.radius_scale_difference_m_s
+                + budget.wheel_carrier_difference_m_s;
+            assert!(
+                (sum - (diagnostic.target_velocity_m_s - diagnostic.true_velocity_m_s)).abs()
+                    < 1e-12
+            );
+        }
+        let terminal = report.privileged_velocity_diagnostics.last().unwrap();
+        assert_eq!(terminal.true_velocity_m_s, report.final_velocity_m_s);
+        let mut missing = terminal.clone();
+        missing.estimated_velocity_m_s = None;
+        assert!(missing.error_budget().is_none());
+        // Current boundary target changes at 0.3 s, independently of old sensor targets.
+        assert_eq!(
+            report.privileged_velocity_diagnostics[28].target_velocity_m_s,
+            0.0
+        );
+        assert_eq!(
+            report.privileged_velocity_diagnostics[29].target_velocity_m_s,
+            1.0
+        );
     }
 
     #[test]

@@ -7,6 +7,48 @@ The existing episode-parallel runner and policy callback are documented in
 
 ## Implemented primitive
 
+The fixed evaluator now records 330 evaluator-only velocity diagnostic snapshots
+at completed 10 ms boundaries. They contain physical carrier speed, mean interval
+acceleration, wheel surface speed using both physical and nominal estimator radii,
+the retained sensor estimate and its original decision/capture/age timestamps.
+The voltage belongs to the interval just completed, not the next action. The
+boundary target is distinct from the reward's interval-start target.
+
+An algebraic error budget splits target-minus-carrier speed into target-minus-
+estimate, estimate-minus-current-nominal-wheel-speed, nominal-minus-physical-wheel-
+speed and physical-wheel-minus-carrier-speed. The second term includes stale
+measurement/filter/quantization effects; it is not a pure calibration residual.
+The last term is a speed difference, not normalized tire slip or causal attribution.
+Missing estimates produce no budget. Diagnostic records do not enter the callback.
+This adds a required diagnostic field to the diagnostic evaluation JSON (which is
+not a versioned replay contract); existing fixed batch replay and actor TaskSpec
+formats remain unchanged.
+
+Nine evaluator tests and MuJoCo-enabled Clippy passed for this addition. Comparing
+seeds 42/43/44 on both backends with the saved pre-diagnostic policy log shows all
+previous report fields unchanged, including action histories, integral rewards and
+terminal physical hashes. New evidence: `E:/RNE-build/m3c-sensor/fixed-diagnostic-tests.log`
+and `E:/RNE-build/m3c-sensor/fixed-diagnostic-clippy.log`.
+For Rapier seed 42, the terminal 0.11045 m/s error decomposes into approximately
+0.07961 controller-visible error + 0.00894 measurement-history residual + 0.02982
+radius-scale difference - 0.00792 wheel/carrier difference. Input age is 10 ms and
+the final interval's mean acceleration is 0.0672 m/s^2. This does not establish
+steady-state behavior or causal dominance; it rules out treating backend agreement
+as task success and makes the remaining tracking and estimation errors explicit.
+The saved diagnostic histories also show no +/-24 V command saturation in any of
+the six seed/backend runs. From 2.3 s to 3.3 s, carrier speed increased by
+0.06774--0.07209 m/s. Rapier seed 42 rose from 0.818376 to 0.889553 m/s while its
+retained estimate rose from 0.859029 to 0.920388 m/s. Thus the terminal error is
+not evidence of a settled equilibrium: convergence and estimator error both need
+separate assessment. This observation does not authorize lengthening the fixed
+task horizon or changing acceptance thresholds to hide failed cases.
+Full workspace validation for this diagnostic addition passed on 2026-09-07:
+`xtask ci` exited with code zero, including workspace tests, headless checks,
+OSS parity, fuzz smoke and Behavior CI (10/10 seeds). The MuJoCo-enabled mobility
+suite passed 92 library tests and one CLI test. Logs:
+`E:/RNE-build/m3c-sensor/fixed-diagnostic-ci.log` and
+`E:/RNE-build/m3c-sensor/fixed-diagnostic-mujoco-tests.log`.
+
 The fixed evaluator also accepts a fallible external sensor-only policy. Each of
 330 callbacks sees the exact previous transition snapshot (time zero/missing data
 on the first call), preserving freshness and capture age. Rewards and physical
