@@ -308,6 +308,60 @@ audit tests do not import rosbags and do not require physical data. The captured
 report is `E:\RNE-build\m3c-sensor\f1tenth-independent-audit.json`, with digest
 `f0427731ef2388e97dc29fa1906385fa18db57786a4409c9e97673193d418710`.
 
+### Pose/twist consistency diagnostic
+
+`scripts/audit_f1tenth_reference.py` uses the same pinned source and independent
+reader, preserving header timestamps and the declared `world` frame. It compares
+successive pose differences with the latest twist at or before the interval end.
+The policy was fixed before evaluating: pose intervals 1..50 ms and twist age at
+most 20 ms. These are retrospective interval averages versus endpoint samples,
+not identical measurements or online observations. No command-time mapping is used.
+
+There are 13,225 paired intervals, 148 excluded pose intervals and 52 missing/stale
+twist pairs. World-planar velocity-difference RMS is 0.850751351 m/s. Pose-heading
+rate RMS is 1.466426217 rad/s, while recorded angular-z RMS is 0.012536505 in its
+unqualified units. The unscaled angular difference RMS is 1.455188522. A diagnostic
+through-origin scale is 104.952102266; it is neither applied nor accepted as a
+calibration. Timing, finite-difference noise, interval-versus-point comparison and
+driver conventions may contribute. These results do not establish independent
+accuracy and do not identify the capture's exact driver version or fault cause.
+
+Run with the same external environment as above:
+
+```powershell
+python -B scripts/audit_f1tenth_reference.py E:\RoboSim-external-data\mobility-f1tenth-12536536\ex-hard-r2_2023-06-12-19-59-52.bag
+python -B -m unittest discover -s scripts -p 'test_audit_f1tenth*.py' -v
+```
+
+The initial eight synthetic audit tests passed. Schema-v1 evidence is
+`E:\RNE-build\m3c-sensor\f1tenth-reference-audit.json`, digest
+`ef74cece68e453d8d24ede31e27a350bfaf738b5caeb6f36a25d365b93eecacb`.
+Next, distinguish sample/clock jitter from velocity derivation effects with
+interval-integrated comparisons; do not select a larger smoothing window merely
+to make residuals pass. Independent reference calibration and command-clock
+qualification remain prerequisites for physical identification.
+
+The schema-v2 diagnostic additionally integrates zero-order-held world-frame
+twist over each complete pose interval, splitting at source events and the same
+20 ms expiry. Any positive-duration uncovered part rejects the entire pair; an
+observation at the endpoint cannot fill an earlier gap. The original endpoint
+diagnostic remains in the report without changing its policy or metrics.
+
+For 13,194 fully observed intervals (148 interval exclusions, 83 coverage exclusions),
+planar displacement-difference RMS is 0.003055050 m. This has different units and
+a different accepted population from the 0.850751351 m/s endpoint comparison;
+do not describe the two numbers as an accuracy improvement. Pose-heading increment
+RMS is 0.012544661 rad, whereas integrated recorded angular-z RMS is 0.000127213
+in unqualified integrated units. The exploratory through-origin angular scale is
+95.680780098 and remains unapplied. The angular discrepancy persists with the
+interval-integrated comparison; its cause and a valid correction remain unproven.
+
+All 11 synthetic audit tests passed. Schema-v2 evidence is
+`E:\RNE-build\m3c-sensor\f1tenth-reference-integral-audit.json`, digest
+`c9050e373ff763e0e9ea390adbf5ca185d5383f6b9a5925e1f6beb72b32fa49d`.
+Neither diagnostic performs clock synchronization, independent reference
+qualification, electrical identification or an acceptance-threshold fit.
+
 The existing [suspension identification gate](MOBILITY_SUSPENSION_IDENTIFICATION_V1.md)
 requires strut displacement, velocity and generalized force plus acquisition evidence.
 None of these candidate descriptions establishes that contract. Keep its physical
