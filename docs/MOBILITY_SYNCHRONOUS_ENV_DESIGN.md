@@ -7,6 +7,32 @@ The existing episode-parallel runner and policy callback are documented in
 
 ## Implemented primitive
 
+The fixed evaluator also accepts a fallible external sensor-only policy. Each of
+330 callbacks sees the exact previous transition snapshot (time zero/missing data
+on the first call), preserving freshness and capture age. Rewards and physical
+state are not callback arguments. Captured commands can be physically replayed
+through the existing voltage-history evaluator. This is an interface boundary,
+not an attestation of a callback's external state or policy identity.
+
+The reference PI baseline reuses nominal gains and anti-windup at a fixed 10 ms
+period. Missing estimates clear integral state and command zero; stale estimates
+are held while the integral advances. Target changes follow the current clock,
+not a stale estimate's target. Each run resets controller state. This intentionally
+differs from the older event-driven controller schedule. Neither baseline nor
+replay implies a safe controller or passing task. Reference-policy comparison runs
+an independent fresh controller on each backend; voltage histories may differ.
+The eight evaluator tests and MuJoCo-enabled Clippy passed. For seeds 42/43/44,
+maximum closed-loop backend gaps were 0.001794 m integrated error and 0.001331 m/s
+final speed (rounded upward). Seed 43 passed both final-speed gates; seeds 42/44
+failed on both backends at about 0.889 m/s. No acceptance threshold was relaxed.
+Evidence is in `E:/RNE-build/m3c-sensor/fixed-policy-tests.log` and
+`E:/RNE-build/m3c-sensor/fixed-policy-clippy.log`. Full CI for this addition exited
+with code zero on 2026-09-07, including workspace tests, headless checks, OSS parity,
+fuzz smoke and Behavior CI (10/10 seeds). The MuJoCo-enabled mobility suite passed
+91 library tests and one CLI test. Logs: `E:/RNE-build/m3c-sensor/fixed-policy-ci.log`
+and `E:/RNE-build/m3c-sensor/fixed-policy-mujoco-tests.log`. This verifies the
+implementation and replay contracts, not universal success of the PI baseline.
+
 `observed::fixed_evaluation` additionally executes complete 330-command histories
 on fresh worlds and reports integrated absolute tracking error (m), physical
 horizon speed (m/s), and final state hashes. Cross-backend evaluation uses the
