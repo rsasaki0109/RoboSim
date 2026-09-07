@@ -813,6 +813,10 @@ impl<B: PhysicsBackend> SensorFixedEnvironment<B> {
         &self.runtime.contract
     }
 
+    pub(crate) fn reject_learning_output(&mut self) {
+        self.poisoned = true;
+    }
+
     /// Creates a fresh joint-reset world using an explicit reset seed. The
     /// factory/caller supplies a backend; no previous world or sensor state is reused.
     pub fn new(backend: B, manifest: PhysicsBackendManifest, episode_seed: u64) -> Result<Self> {

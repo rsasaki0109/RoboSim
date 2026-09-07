@@ -6,7 +6,11 @@ use anyhow::{ensure, Context, Result};
 use rne_ai::derive_episode_seed;
 use rne_physics::{PhysicsBackend, PhysicsBackendManifest};
 
+mod learning;
+mod reference_learner;
 mod replay;
+pub use learning::{LearningBatchStep, LearningLaneFailure, LearningTransition};
+pub use reference_learner::SensorTableLearner;
 pub use replay::{
     decode_fixed_batch_replay, record_fixed_batch_replay,
     record_fixed_batch_replay_with_noise_root, verify_fixed_batch_replay, FixedBatchOperation,
@@ -303,6 +307,84 @@ mod tests {
 
     fn factory() -> Result<(RapierBackend, PhysicsBackendManifest)> {
         Ok((RapierBackend::new(), RapierBackend::manifest()))
+    }
+
+    #[test]
+    fn learning_projection_preserves_clock_preflight_and_truncation() {
+        let mut batch = SensorFixedBatch::new_with_noise_root(factory, 42, 99, 2, 2).unwrap();
+        assert!(batch.step_learning(&[3.0, f64::NAN]).is_err());
+        assert_eq!(batch.observations()[0].as_ref().unwrap().time_ticks, 0);
+        for index in 0..330 {
+            let output = batch.step_learning(&[3.0, 3.0]).unwrap();
+            assert!(output.failures.is_empty());
+            assert_eq!(output.transitions.len(), 2);
+            for transition in output.transitions {
+                assert_eq!(transition.start_ticks, index * 10_000_000);
+                assert_eq!(transition.end_ticks, (index + 1) * 10_000_000);
+                assert_eq!(transition.truncated, index == 329);
+                assert_eq!(
+                    transition.observation.len(),
+                    crate::observed::sensor_fixed_task_spec()
+                        .observation
+                        .tensors
+                        .len()
+                );
+            }
+        }
+        assert!(batch.step_learning(&[3.0, 3.0]).is_err());
+    }
+
+    #[test]
+    fn learning_projection_excludes_failed_steps_and_retains_healthy_lanes() {
+        use std::sync::{
+            atomic::{AtomicU8, AtomicUsize, Ordering},
+            Arc,
+        };
+        for mode in [1, 2] {
+            let calls = AtomicUsize::new(0);
+            let failing = Arc::new(AtomicU8::new(0));
+            let factory = || {
+                let id = calls.fetch_add(1, Ordering::Relaxed);
+                Ok((
+                    FaultBackend {
+                        inner: RapierBackend::new(),
+                        fault: if id == 1 {
+                            failing.clone()
+                        } else {
+                            Arc::new(AtomicU8::new(0))
+                        },
+                    },
+                    RapierBackend::manifest(),
+                ))
+            };
+            let mut batch = SensorFixedBatch::new_with_noise_root(factory, 42, 99, 3, 2).unwrap();
+            let mut learner = SensorTableLearner::new(71);
+            failing.store(mode, Ordering::Relaxed);
+            let result = learner.train_step(&mut batch, 0).unwrap();
+            assert_eq!(learner.updates(), 2);
+            assert_eq!(
+                result
+                    .transitions
+                    .iter()
+                    .map(|t| t.lane_id)
+                    .collect::<Vec<_>>(),
+                vec![0, 2]
+            );
+            assert_eq!(result.failures.len(), 1);
+            assert_eq!(result.failures[0].lane_id, 1);
+            assert!(batch.step_learning(&[3.0; 3]).is_err());
+            assert_eq!(
+                batch.observations()[0].as_ref().unwrap().time_ticks,
+                10_000_000
+            );
+            batch.reset_lanes(&[(1, 4)]).unwrap();
+            let resumed = learner.train_step(&mut batch, 1).unwrap();
+            assert_eq!(learner.updates(), 5);
+            assert!(resumed.failures.is_empty());
+            assert_eq!(resumed.transitions[0].start_ticks, 10_000_000);
+            assert_eq!(resumed.transitions[1].start_ticks, 0);
+            assert_eq!(resumed.transitions[1].episode_index, 4);
+        }
     }
 
     struct FaultBackend {
