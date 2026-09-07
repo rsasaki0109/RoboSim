@@ -7,6 +7,10 @@ The existing episode-parallel runner and policy callback are documented in
 
 ## Implemented primitive
 
+Bounded, disjoint-seed PI parameter selection is described in
+[PI selection v1](MOBILITY_PI_SELECTION_V1.md). It consumes the fixed evaluator;
+it does not yet supply the planned general fallible parallel training adapter.
+
 The fixed evaluator now records 330 evaluator-only velocity diagnostic snapshots
 at completed 10 ms boundaries. They contain physical carrier speed, mean interval
 acceleration, wheel surface speed using both physical and nominal estimator radii,

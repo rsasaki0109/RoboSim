@@ -6,6 +6,9 @@
 
 use super::*;
 
+/// Bounded PI parameter selection with disjoint training and evaluation seeds.
+pub mod tuning;
+
 /// Evaluator-only snapshot at a completed 10 ms boundary. Wheel velocity is the
 /// completed drive state, while the estimate may describe older sensor captures.
 /// Differences are diagnostic accounting terms, not identified causal effects.
@@ -237,7 +240,25 @@ pub fn evaluate_fixed_reference_policy<B: PhysicsBackend>(
     manifest: PhysicsBackendManifest,
     episode_seed: u64,
 ) -> Result<FixedVoltageEvaluation> {
-    let mut controller = VelocityController::new(&SensorObservedContract::nominal());
+    evaluate_fixed_pi_policy(backend, manifest, episode_seed, 15.0, 20.0)
+}
+
+/// Evaluates finite PI gains in [0, 100] with unchanged nominal calibration,
+/// anti-windup, integral bounds, voltage limits, missing/stale handling and horizon.
+/// Gains are policy parameters, never changes to the physical reset contract.
+pub fn evaluate_fixed_pi_policy<B: PhysicsBackend>(
+    backend: B,
+    manifest: PhysicsBackendManifest,
+    episode_seed: u64,
+    kp_v_s_m: f64,
+    ki_v_m: f64,
+) -> Result<FixedVoltageEvaluation> {
+    tuning::PiGains { kp_v_s_m, ki_v_m }.validate()?;
+    let mut controller = VelocityController {
+        kp_v_s_m,
+        ki_v_m,
+        integral_error_m: 0.0,
+    };
     evaluate_fixed_sensor_policy(backend, manifest, episode_seed, |observation| {
         let Some(latest) = &observation.latest else {
             return Ok(controller.update(0.0, 0.0, 0.01));
