@@ -9,6 +9,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::Read;
 
+pub mod replay;
+
 /// Maximum uncompressed input size accepted by each reader.
 pub const MAX_NCLT_CSV_BYTES: usize = 64 * 1024 * 1024;
 const MAX_ROWS: usize = 1_000_000;

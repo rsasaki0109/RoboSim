@@ -99,8 +99,9 @@ including original line endings. Synthetic tests do not include redistributed da
 
 Values remain in source coordinates and units (including magnetic field in Gauss).
 No resampling, gravity compensation, lever-arm correction, encoder-count synthesis,
-or measurement-noise estimation occurs. There is no DataBus replay bridge yet;
-this reader is not a replacement for that remaining work.
+or measurement-noise estimation occurs. The additive
+[source-time DataBus replay](MOBILITY_RECORDED_REPLAY_V1.md) preserves that boundary;
+measured-velocity state estimation remains separate follow-up work.
 
 The CLI is read-only and reports timestamps, interval extrema and a source digest:
 
@@ -137,7 +138,7 @@ CSV produced identical output, with hashes independently checked by PowerShell.
 Next connect qualified source-frame samples to explicit replay scheduling and
 estimator inputs, with frame/time tests. No physical identification result is claimed.
 
-### Replay boundary review (not yet implemented)
+### Replay and estimator boundary review
 
 Inspection of `rne_ai::WheelImuOdometry::update` shows that it requires
 `IncrementalEncoderFeedback` and integrates differences of `raw_count`, not a wheel
@@ -151,7 +152,7 @@ saturation status. Internally filtered `ms25` values and unavailable status meta
 must not be relabeled nominal raw feedback. Keep the existing incremental-encoder
 estimator unchanged until an explicit measured-velocity estimation path is designed.
 
-The next replay slice should therefore:
+The replay contract and remaining estimator requirements are:
 
 - publish source-typed wheel-speed and filtered-IMU payloads through the existing
   extensible `FramePayload`/DataBus boundary, without adding NCLT dependencies to core;
