@@ -117,6 +117,11 @@ checks the Bellman update, zero finite-horizon continuation, changed greedy acti
 and read-only evaluation. Invalid sample updates are atomic. Injected post-step
 errors and panics in lane 1 produce exactly two updates from healthy lanes; an
 explicit partial reset then permits three further updates. These tests measure
-integration correctness, not task success or generalization. Full CI is in
-progress; its log is on the external SSD at
-`E:\RNE-build\m3c-sensor\reference-learner-ci.log`.
+integration correctness, not task success or generalization. Full CI completed
+without retries (exit 0), including workspace Clippy/tests, example and RL smokes,
+headless validation, OSS parity, 361 fuzz cases and Behavior CI 10/10. Its log is
+on the external SSD at `E:\RNE-build\m3c-sensor\reference-learner-ci.log`.
+The standalone evaluation example was added after that CI's lint/test phase;
+it separately passed MuJoCo-feature all-target Clippy and an actual example build.
+The experiment protocol and implementation were frozen in commit `07e7cbd`
+before any held-out evaluation; see `MOBILITY_REFERENCE_LEARNING_EXPERIMENT.md`.
