@@ -51,6 +51,11 @@ The configured directory itself must be a real directory, not a symlink or
 junction. Paths containing spaces are passed directly to Cargo without shell
 interpolation.
 
+Nested parity checks for `physics-conformance` and `scenario-scale` reuse the
+currently running `xtask` executable. This avoids asking Cargo to replace an
+executable that Windows still has open during `ci`; the catalog retains the
+standalone Cargo commands for manual reproduction.
+
 ## One coordinated simulation
 
 Example 74 advances the robot episode and backend-neutral traffic runtime with

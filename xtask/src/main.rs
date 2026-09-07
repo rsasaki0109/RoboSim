@@ -4208,7 +4208,11 @@ fn run_step(command: &str) -> anyhow::Result<()> {
 /// Runs a catalog command while retaining its output for a parity report.
 fn run_step_capture(command: &str) -> anyhow::Result<(bool, String)> {
     println!("$ {command}");
-    let output = if cfg!(windows) {
+    // Reuse the running binary for nested catalog checks. Re-entering Cargo can
+    // attempt to replace this executable while Windows still has it mapped.
+    let output = if let Some(subcommand) = parity_xtask_subcommand(command) {
+        Command::new(env::current_exe()?).arg(subcommand).output()?
+    } else if cfg!(windows) {
         Command::new("cmd").args(["/C", command]).output()?
     } else {
         Command::new("sh").arg("-c").arg(command).output()?
@@ -4218,6 +4222,14 @@ fn run_step_capture(command: &str) -> anyhow::Result<(bool, String)> {
     print!("{stdout}");
     eprint!("{stderr}");
     Ok((output.status.success(), format!("{stdout}\n{stderr}")))
+}
+
+fn parity_xtask_subcommand(command: &str) -> Option<&'static str> {
+    match command {
+        "cargo run --locked -q -p xtask -- physics-conformance" => Some("physics-conformance"),
+        "cargo run --locked -q -p xtask -- scenario-scale" => Some("scenario-scale"),
+        _ => None,
+    }
 }
 
 fn run_program(program: &Path, args: &[&str]) -> anyhow::Result<()> {
@@ -4268,6 +4280,27 @@ fn find_cargo_tomls(dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn parity_nested_xtask_checks_reuse_the_running_binary() {
+        assert_eq!(
+            super::parity_xtask_subcommand("cargo run --locked -q -p xtask -- physics-conformance"),
+            Some("physics-conformance")
+        );
+        assert_eq!(
+            super::parity_xtask_subcommand("cargo run --locked -q -p xtask -- scenario-scale"),
+            Some("scenario-scale")
+        );
+        assert_eq!(
+            super::parity_xtask_subcommand("cargo run --locked -q -p rne_asset_cli -- run scene"),
+            None
+        );
+        assert_eq!(
+            super::parity_xtask_subcommand(
+                "cargo run --locked -q -p xtask -- physics-conformance --unknown"
+            ),
+            None
+        );
+    }
     use super::{
         build_cargo_sbom, configured_artifacts_dir, default_behavior_seeds, extract_hero_digest,
         frame_delta_ratio, hero_contact_sheet_filter, parse_seed_range, parse_smoke_partition,
