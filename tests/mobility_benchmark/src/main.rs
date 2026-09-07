@@ -7,7 +7,9 @@ use rne_mobility_benchmark::backend::run_backend_mobility_trace;
 use rne_mobility_benchmark::diff_caster::run_differential_caster_trace;
 #[cfg(feature = "mujoco")]
 use rne_mobility_benchmark::identified_suspension_road::run_identified_suspension_road_evidence;
-use rne_mobility_benchmark::mobility_randomization::run_mobility_randomized_batch;
+use rne_mobility_benchmark::mobility_randomization::{
+    run_mobility_randomized_backend_trace, run_mobility_randomized_batch,
+};
 use rne_mobility_benchmark::observed::run_sensor_observed_trace;
 use rne_mobility_benchmark::per_wheel::run_per_wheel_skid_trace;
 use rne_mobility_benchmark::per_wheel_observed::{
@@ -36,6 +38,7 @@ fn main() -> Result<()> {
     let mut num_envs = None;
     let mut root_seed = None;
     let mut episode_index = None;
+    let mut lane_id = None;
     let mut backend = "analytic".to_string();
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -95,6 +98,14 @@ fn main() -> Result<()> {
                         .context("--episode-index must be an unsigned integer")?,
                 );
             }
+            "--lane-id" => {
+                lane_id = Some(
+                    args.next()
+                        .context("--lane-id requires a value")?
+                        .parse::<u64>()
+                        .context("--lane-id must be an unsigned integer")?,
+                );
+            }
             other => bail!("unknown argument: {other}"),
         }
     }
@@ -152,7 +163,18 @@ fn main() -> Result<()> {
         "mujoco" => run_mujoco()?,
         "compare" => run_comparison(failure_replay.as_deref())?,
         "sensor-mujoco" => run_sensor_mujoco()?,
-        "sensor-compare" => run_sensor_comparison()?,
+        "sensor-compare" => run_sensor_comparison(None, false)?,
+        "sensor-randomized-compare" => run_sensor_comparison(
+            Some(root_seed.context("sensor-randomized-compare requires --seed (episode seed)")?),
+            false,
+        )?,
+        "mobility-sensor-randomized-compare" => run_sensor_comparison(
+            Some(
+                root_seed
+                    .context("mobility-sensor-randomized-compare requires --seed (episode seed)")?,
+            ),
+            true,
+        )?,
         "skid-mujoco" => run_skid_mujoco()?,
         "skid-compare" => run_skid_comparison()?,
         "skid-sensor-mujoco" => run_skid_sensor_mujoco()?,
@@ -295,6 +317,34 @@ fn main() -> Result<()> {
                 "mobility-randomized-batch",
             )
         }
+        "mobility-randomized-backend-rapier" => {
+            let trace = run_mobility_randomized_backend_trace(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                root_seed
+                    .context("--backend mobility-randomized-backend-rapier requires --seed")?,
+                lane_id.unwrap_or(0),
+                episode_index.unwrap_or(0),
+            )?;
+            ensure!(
+                trace.trace.passed,
+                "randomized Rapier Mobility trace failed"
+            );
+            (
+                serde_json::to_string_pretty(&trace)? + "\n",
+                "mobility-randomized-backend-rapier",
+            )
+        }
+        "mobility-randomized-backend-mujoco" => run_mobility_randomized_backend_mujoco(
+            root_seed.context("--backend mobility-randomized-backend-mujoco requires --seed")?,
+            lane_id.unwrap_or(0),
+            episode_index.unwrap_or(0),
+        )?,
+        "mobility-randomized-backend-compare" => run_mobility_randomized_backend_comparison(
+            root_seed.context("--backend mobility-randomized-backend-compare requires --seed")?,
+            lane_id.unwrap_or(0),
+            episode_index.unwrap_or(0),
+        )?,
         other => bail!("unknown backend: {other}"),
     };
     ensure!(
@@ -327,10 +377,34 @@ fn main() -> Result<()> {
         backend == "suspension-acquisition-verify" || evidence_root.is_none(),
         "--evidence-root is valid only with suspension-acquisition-verify"
     );
+    let randomized_backend = matches!(
+        backend.as_str(),
+        "mobility-randomized-backend-rapier"
+            | "mobility-randomized-backend-mujoco"
+            | "mobility-randomized-backend-compare"
+    );
+    ensure!(
+        !matches!(
+            backend.as_str(),
+            "sensor-randomized-compare" | "mobility-sensor-randomized-compare"
+        ) || episode_index.is_none(),
+        "sensor reset comparison takes an episode seed directly, without --episode-index"
+    );
+    ensure!(
+        backend == "mobility-randomized-batch" || num_envs.is_none(),
+        "--num-envs is valid only with mobility-randomized-batch"
+    );
     ensure!(
         backend == "mobility-randomized-batch"
-            || (num_envs.is_none() && root_seed.is_none() && episode_index.is_none()),
-        "--num-envs, --seed, and --episode-index are valid only with mobility-randomized-batch"
+            || backend == "sensor-randomized-compare"
+            || backend == "mobility-sensor-randomized-compare"
+            || randomized_backend
+            || (root_seed.is_none() && episode_index.is_none()),
+        "--seed and --episode-index require a randomized Mobility backend"
+    );
+    ensure!(
+        randomized_backend || lane_id.is_none(),
+        "--lane-id requires a randomized physics backend"
     );
     if let Some(path) = output {
         if let Some(parent) = path.parent() {
@@ -338,7 +412,7 @@ fn main() -> Result<()> {
                 .with_context(|| format!("create {}", parent.display()))?;
         }
         std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
-        println!("{label} mobility benchmark passed: {}", path.display());
+        println!("{label} mobility evidence written: {}", path.display());
     } else {
         print!("{json}");
     }
@@ -776,19 +850,58 @@ fn run_sensor_mujoco() -> Result<(String, &'static str)> {
 }
 
 #[cfg(feature = "mujoco")]
-fn run_sensor_comparison() -> Result<(String, &'static str)> {
+fn run_sensor_comparison(
+    episode_seed: Option<u64>,
+    physical_reset: bool,
+) -> Result<(String, &'static str)> {
     use rne_core::SimDuration;
     use rne_mobility_benchmark::observed::{
-        compare_sensor_observed_traces, SENSOR_OBSERVED_FIXED_DELTA_TICKS,
+        compare_sensor_observed_traces, run_randomized_mobility_sensor_trace,
+        run_randomized_sensor_observed_trace, SENSOR_OBSERVED_FIXED_DELTA_TICKS,
     };
     use rne_physics_mujoco::MuJoCoBackend;
 
-    let rapier = run_sensor_observed_trace(RapierBackend::new(), RapierBackend::manifest())?;
-    let mujoco = run_sensor_observed_trace(
-        MuJoCoBackend::new(SimDuration::from_ticks(SENSOR_OBSERVED_FIXED_DELTA_TICKS))?,
-        MuJoCoBackend::manifest(),
-    )?;
+    let mujoco_backend =
+        MuJoCoBackend::new(SimDuration::from_ticks(SENSOR_OBSERVED_FIXED_DELTA_TICKS))?;
+    let (rapier, mujoco) = if let Some(seed) = episode_seed {
+        if physical_reset {
+            (
+                run_randomized_mobility_sensor_trace(
+                    RapierBackend::new(),
+                    RapierBackend::manifest(),
+                    seed,
+                )?,
+                run_randomized_mobility_sensor_trace(
+                    mujoco_backend,
+                    MuJoCoBackend::manifest(),
+                    seed,
+                )?,
+            )
+        } else {
+            (
+                run_randomized_sensor_observed_trace(
+                    RapierBackend::new(),
+                    RapierBackend::manifest(),
+                    seed,
+                )?,
+                run_randomized_sensor_observed_trace(
+                    mujoco_backend,
+                    MuJoCoBackend::manifest(),
+                    seed,
+                )?,
+            )
+        }
+    } else {
+        (
+            run_sensor_observed_trace(RapierBackend::new(), RapierBackend::manifest())?,
+            run_sensor_observed_trace(mujoco_backend, MuJoCoBackend::manifest())?,
+        )
+    };
     let comparison = compare_sensor_observed_traces(rapier, mujoco)?;
+    eprintln!(
+        "sensor comparison: backend_agreement={} first_task_passed={} second_task_passed={}",
+        comparison.passed, comparison.first.passed, comparison.second.passed
+    );
     ensure!(
         comparison.passed,
         "sensor-observed cross-backend verdict failed"
@@ -805,7 +918,10 @@ fn run_sensor_mujoco() -> Result<(String, &'static str)> {
 }
 
 #[cfg(not(feature = "mujoco"))]
-fn run_sensor_comparison() -> Result<(String, &'static str)> {
+fn run_sensor_comparison(
+    _episode_seed: Option<u64>,
+    _physical_reset: bool,
+) -> Result<(String, &'static str)> {
     bail!("sensor-observed backend comparison requires --features mujoco")
 }
 
@@ -819,6 +935,88 @@ fn run_mujoco() -> Result<(String, &'static str)> {
     let trace = run_backend_mobility_trace(backend, MuJoCoBackend::manifest())?;
     ensure!(trace.passed, "MuJoCo mobility benchmark verdict failed");
     Ok((serde_json::to_string_pretty(&trace)? + "\n", "mujoco"))
+}
+
+#[cfg(feature = "mujoco")]
+fn run_mobility_randomized_backend_mujoco(
+    root_seed: u64,
+    lane_id: u64,
+    episode_index: u64,
+) -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::backend::BACKEND_MOBILITY_FIXED_DELTA_TICKS;
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let trace = run_mobility_randomized_backend_trace(
+        MuJoCoBackend::new(SimDuration::from_ticks(BACKEND_MOBILITY_FIXED_DELTA_TICKS))?,
+        MuJoCoBackend::manifest(),
+        root_seed,
+        lane_id,
+        episode_index,
+    )?;
+    ensure!(
+        trace.trace.passed,
+        "randomized MuJoCo Mobility trace failed"
+    );
+    Ok((
+        serde_json::to_string_pretty(&trace)? + "\n",
+        "mobility-randomized-backend-mujoco",
+    ))
+}
+
+#[cfg(feature = "mujoco")]
+fn run_mobility_randomized_backend_comparison(
+    root_seed: u64,
+    lane_id: u64,
+    episode_index: u64,
+) -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::backend::BACKEND_MOBILITY_FIXED_DELTA_TICKS;
+    use rne_mobility_benchmark::mobility_randomization::compare_mobility_randomized_backend_traces;
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let rapier = run_mobility_randomized_backend_trace(
+        RapierBackend::new(),
+        RapierBackend::manifest(),
+        root_seed,
+        lane_id,
+        episode_index,
+    )?;
+    let mujoco = run_mobility_randomized_backend_trace(
+        MuJoCoBackend::new(SimDuration::from_ticks(BACKEND_MOBILITY_FIXED_DELTA_TICKS))?,
+        MuJoCoBackend::manifest(),
+        root_seed,
+        lane_id,
+        episode_index,
+    )?;
+    let comparison = compare_mobility_randomized_backend_traces(rapier, mujoco)?;
+    ensure!(
+        comparison.passed,
+        "randomized cross-backend Mobility verdict failed: {:#?}",
+        comparison.metrics
+    );
+    Ok((
+        serde_json::to_string_pretty(&comparison)? + "\n",
+        "mobility-randomized-backend-compare",
+    ))
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_mobility_randomized_backend_mujoco(
+    _root_seed: u64,
+    _lane_id: u64,
+    _episode_index: u64,
+) -> Result<(String, &'static str)> {
+    bail!("randomized MuJoCo backend requires --features mujoco")
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_mobility_randomized_backend_comparison(
+    _root_seed: u64,
+    _lane_id: u64,
+    _episode_index: u64,
+) -> Result<(String, &'static str)> {
+    bail!("randomized backend comparison requires --features mujoco")
 }
 
 #[cfg(feature = "mujoco")]

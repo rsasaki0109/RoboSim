@@ -7,7 +7,7 @@ use rne_ai::{
     TerminationSpec, WheelImuActorObservation, WheelImuOdometry, WheelImuOdometryConfig,
     WheelImuOdometryError, WheelImuOdometryHealth, WheelImuOdometryStreams,
 };
-use rne_core::{SimDuration, SimTime};
+use rne_core::{KeyedRandom, SimDuration, SimTime};
 use rne_data::{
     DataBus, InMemoryDataBus, IncrementalEncoderFeedback, MotorElectricalFeedback, PoseSample,
     StreamId,
@@ -69,6 +69,12 @@ const MOTOR_STREAM: StreamId = StreamId::new(1_004);
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SensorObservedContract {
+    /// Optional physical reset profile; never supplied to the actor or estimator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physical_profile: Option<crate::mobility_randomization::RandomizedMobilityProfile>,
+    /// Optional frozen reset sample; absent preserves the nominal contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub randomization: Option<SensorObservedRandomization>,
     /// Decoded quadrature counts per wheel revolution.
     pub encoder_counts_per_revolution: u32,
     /// Signed hardware counter width.
@@ -90,6 +96,8 @@ pub struct SensorObservedContract {
 impl SensorObservedContract {
     fn nominal() -> Self {
         Self {
+            physical_profile: None,
+            randomization: None,
             encoder_counts_per_revolution: ENCODER_COUNTS_PER_REVOLUTION,
             encoder_counter_bits: 32,
             sensor_period_ticks: SENSOR_PERIOD_TICKS,
@@ -102,13 +110,81 @@ impl SensorObservedContract {
     }
 
     fn validate(&self) -> Result<()> {
-        let mut expected = Self::nominal();
-        expected.left_encoder_drop_sequence = self.left_encoder_drop_sequence;
+        let mut expected = if let Some(sample) = &self.randomization {
+            ensure!(
+                *sample == SensorObservedRandomization::sample(sample.episode_seed),
+                "sensor reset sample drift"
+            );
+            Self::randomized(sample.episode_seed)
+        } else {
+            Self::nominal()
+        };
+        if self.randomization.is_none() {
+            expected.left_encoder_drop_sequence = self.left_encoder_drop_sequence;
+        }
+        if self.physical_profile.is_some() {
+            let seed = self
+                .randomization
+                .as_ref()
+                .context("physical reset requires sensor seed")?
+                .episode_seed;
+            expected.physical_profile = Some(sample_physical_profile(seed));
+        }
         ensure!(*self == expected, "sensor/controller contract drift");
         if let Some(sequence) = self.left_encoder_drop_sequence {
             ensure!(sequence > 1, "invalid encoder drop sequence");
         }
         Ok(())
+    }
+
+    fn randomized(episode_seed: u64) -> Self {
+        let sample = SensorObservedRandomization::sample(episode_seed);
+        let mut contract = Self::nominal();
+        contract.sensor_latency_ticks = sample.base_latency_ticks;
+        contract.left_encoder_drop_sequence = Some(sample.drop_sequence);
+        contract.randomization = Some(sample);
+        contract
+    }
+
+    fn maximum_latency_ticks(&self) -> u64 {
+        self.sensor_latency_ticks + self.randomization.as_ref().map_or(0, |s| s.jitter_ticks)
+    }
+}
+
+/// Frozen sensor reset parameters, derived without consuming any simulation RNG stream.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SensorObservedRandomization {
+    /// Explicit lane-local episode seed supplied by the caller.
+    pub episode_seed: u64,
+    /// Common capture-to-availability baseline, in nanosecond ticks.
+    pub base_latency_ticks: u64,
+    /// Maximum added per-capture transport jitter, in nanosecond ticks.
+    pub jitter_ticks: u64,
+    /// Physical gyro offset remaining after nominal estimator calibration.
+    pub residual_gyro_bias_rad_s: f64,
+    /// Physical current frontend offset, in amperes.
+    pub current_offset_a: f64,
+    /// Attempted left encoder sequence dropped once during the episode.
+    pub drop_sequence: u64,
+}
+
+impl SensorObservedRandomization {
+    fn sample(episode_seed: u64) -> Self {
+        let rng = KeyedRandom::new(episode_seed, 0x5345_4e53_4f52);
+        Self {
+            episode_seed,
+            base_latency_ticks: (1 + (rng.sample_f64(0, 0, 0, 0.0, 3.0) as u64)) * 1_000_000,
+            jitter_ticks: 2_000_000,
+            residual_gyro_bias_rad_s: rng.sample_f64(0, 0, 1, -0.002, 0.002),
+            current_offset_a: rng.sample_f64(0, 0, 2, -0.1, 0.1),
+            drop_sequence: 50 + rng.sample_f64(0, 0, 3, 0.0, 100.0) as u64,
+        }
+    }
+
+    fn latency_ticks(&self, capture_ticks: u64) -> u64 {
+        let rng = KeyedRandom::new(self.episode_seed, 0x5345_4e53_4f52);
+        self.base_latency_ticks + (rng.sample_f64(capture_ticks, 0, 4, 0.0, 3.0) as u64) * 1_000_000
     }
 }
 
@@ -262,7 +338,7 @@ impl SensorObservedTrace {
                 sample.capture_ticks <= sample.decision_ticks
                     && sample.maximum_input_age_ticks
                         == sample.decision_ticks - sample.capture_ticks
-                    && sample.maximum_input_age_ticks <= self.contract.sensor_latency_ticks,
+                    && sample.maximum_input_age_ticks <= self.contract.maximum_latency_ticks(),
                 "sample {} violates sensor availability timing",
                 sample.step
             );
@@ -412,9 +488,91 @@ pub fn run_sensor_observed_trace<B: PhysicsBackend>(
 }
 
 fn run_sensor_observed_trace_with_fault<B: PhysicsBackend>(
-    mut backend: B,
+    backend: B,
     manifest: PhysicsBackendManifest,
     left_encoder_drop_sequence: Option<u64>,
+) -> Result<SensorObservedTrace> {
+    let mut contract = SensorObservedContract::nominal();
+    contract.left_encoder_drop_sequence = left_encoder_drop_sequence;
+    run_sensor_observed_configured(backend, manifest, contract)
+}
+
+/// Runs reset-randomized calibration, latency, jitter and one encoder dropout
+/// through the real sensor frontends and the unchanged sensor-only controller.
+pub fn run_randomized_sensor_observed_trace<B: PhysicsBackend>(
+    backend: B,
+    manifest: PhysicsBackendManifest,
+    episode_seed: u64,
+) -> Result<SensorObservedTrace> {
+    run_sensor_observed_configured(
+        backend,
+        manifest,
+        SensorObservedContract::randomized(episode_seed),
+    )
+}
+
+/// Runs a joint physical/sensor reset with fixed nominal estimator calibration.
+/// The sampled profile is experiment evidence, not an actor observation.
+pub fn run_randomized_mobility_sensor_trace<B: PhysicsBackend>(
+    backend: B,
+    manifest: PhysicsBackendManifest,
+    episode_seed: u64,
+) -> Result<SensorObservedTrace> {
+    let mut contract = SensorObservedContract::randomized(episode_seed);
+    contract.physical_profile = Some(sample_physical_profile(episode_seed));
+    run_sensor_observed_configured(backend, manifest, contract)
+}
+
+fn sample_physical_profile(
+    episode_seed: u64,
+) -> crate::mobility_randomization::RandomizedMobilityProfile {
+    crate::mobility_randomization::MobilityRandomizationSpec::training_v1().sample_from(
+        episode_seed,
+        plant_spec(),
+        crate::ackermann_suspension::suspension_spec(),
+    )
+}
+
+fn run_sensor_observed_configured<B: PhysicsBackend>(
+    backend: B,
+    manifest: PhysicsBackendManifest,
+    contract: SensorObservedContract,
+) -> Result<SensorObservedTrace> {
+    run_sensor_observed_execution(backend, manifest, contract, None)
+}
+
+/// Replays recorded terminal-voltage decisions on a fresh instance of the same backend.
+///
+/// The initial voltage is zero. Each recorded decision feeds the next drive-path
+/// evaluation and is held until the next decision; existing one-step wrench
+/// staging is preserved. The PI controller is not
+/// evaluated. Sensors and physics execute normally. Exact full-trace equality,
+/// including privileged scoring evidence and the stable digest, is required.
+/// A failed task can replay successfully without becoming a successful task.
+pub fn replay_sensor_observed_trace<B: PhysicsBackend>(
+    backend: B,
+    manifest: PhysicsBackendManifest,
+    source: &SensorObservedTrace,
+) -> Result<SensorObservedTrace> {
+    source.validate().context("replay source")?;
+    ensure!(
+        manifest == source.backend,
+        "replay backend identity mismatch"
+    );
+    let replay =
+        run_sensor_observed_execution(backend, manifest, source.contract.clone(), Some(source))?;
+    ensure!(
+        replay == *source,
+        "voltage replay differs from recorded evidence"
+    );
+    Ok(replay)
+}
+
+fn run_sensor_observed_execution<B: PhysicsBackend>(
+    mut backend: B,
+    manifest: PhysicsBackendManifest,
+    contract: SensorObservedContract,
+    replay: Option<&SensorObservedTrace>,
 ) -> Result<SensorObservedTrace> {
     manifest.validate().context("backend manifest")?;
     require_capabilities(
@@ -432,17 +590,30 @@ fn run_sensor_observed_trace_with_fault<B: PhysicsBackend>(
     );
     let task_spec = sensor_observed_task_spec();
     task_spec.validate().context("TaskSpec")?;
-    let mut contract = SensorObservedContract::nominal();
-    contract.left_encoder_drop_sequence = left_encoder_drop_sequence;
     contract.validate()?;
 
+    let plant = contract
+        .physical_profile
+        .as_ref()
+        .map_or_else(plant_spec, |profile| profile.plant);
+    let mass_scale = plant.vehicle_mass_kg / plant_spec().vehicle_mass_kg;
     let fixed_delta = SimDuration::from_ticks(SENSOR_OBSERVED_FIXED_DELTA_TICKS);
     let dt_s = fixed_delta.as_seconds().value();
+    let gravity_m_s2 = Vec3::new(
+        -9.806_65 * plant.road_grade_rad.sin(),
+        -9.806_65 * plant.road_grade_rad.cos(),
+        0.0,
+    );
     let physics_world = backend.create_world(PhysicsWorldDesc {
-        gravity_m_s2: Vec3::new(0.0, -9.806_65, 0.0),
+        gravity_m_s2,
         solver_iterations: 16,
     })?;
     let mut world = World::new();
+    if contract.physical_profile.is_some() {
+        world.insert_resource(
+            rne_sensor::SensorGravity::new(gravity_m_s2).context("finite sensor gravity")?,
+        );
+    }
     world.insert_resource(WorldRandom::new(WORLD_SEED));
     let ground = spawn_named(&mut world, "sensor_observed_ground");
     world.entity_mut(ground).insert((
@@ -456,17 +627,17 @@ fn run_sensor_observed_trace_with_fault<B: PhysicsBackend>(
     let vehicle = spawn_named(&mut world, "sensor_observed_vehicle");
     world.entity_mut(vehicle).insert((
         RigidBody {
-            mass_kg: 100.0,
+            mass_kg: plant.vehicle_mass_kg,
             ..RigidBody::default()
         },
         RigidBodyInertia {
             center_of_mass_local_m: Vec3::ZERO,
-            ixx_kg_m2: 5.083_333_333_333_333,
+            ixx_kg_m2: 5.083_333_333_333_333 * mass_scale,
             ixy_kg_m2: 0.0,
             ixz_kg_m2: 0.0,
-            iyy_kg_m2: 11.333_333_333_334,
+            iyy_kg_m2: 11.333_333_333_334 * mass_scale,
             iyz_kg_m2: 0.0,
-            izz_kg_m2: 10.416_666_666_666_666,
+            izz_kg_m2: 10.416_666_666_666_666 * mass_scale,
         },
         frictionless_collider(Vec3::new(0.5, 0.25, 0.3)),
         Transform3::from_translation_rotation(Vec3::new(0.0, 0.251, 0.0), Quat::IDENTITY),
@@ -474,9 +645,9 @@ fn run_sensor_observed_trace_with_fault<B: PhysicsBackend>(
     let rig = spawn_sensor_rig(&mut world, vehicle, &contract);
     backend.sync_from_ecs(&mut world, physics_world)?;
 
-    let plant = plant_spec();
     let mut estimator = WheelImuOdometry::new(
-        odometry_config(&contract, plant.wheel.radius_m),
+        // Calibration is fixed: a hidden radius reset must not leak into odometry.
+        odometry_config(&contract, plant_spec().wheel.radius_m),
         PoseSample::default(),
     )?;
     let mut bus = InMemoryDataBus::new();
@@ -538,6 +709,24 @@ fn run_sensor_observed_trace_with_fault<B: PhysicsBackend>(
 
         let step = zero_based_step + 1;
         let decision_time = SimTime::from_ticks(step * SENSOR_OBSERVED_FIXED_DELTA_TICKS);
+        if let Some(sample) = &contract.randomization {
+            let latency = sample.latency_ticks(decision_time.ticks());
+            for mut sensor in world
+                .query::<&mut IncrementalEncoderSensor>()
+                .iter_mut(&mut world)
+            {
+                sensor.latency_ticks = latency;
+            }
+            for mut sensor in world.query::<&mut ImuFeedbackSensor>().iter_mut(&mut world) {
+                sensor.latency_ticks = latency;
+            }
+            for mut sensor in world
+                .query::<&mut MotorElectricalFeedbackSensor>()
+                .iter_mut(&mut world)
+            {
+                sensor.latency_ticks = latency;
+            }
+        }
         sample_frontends(&mut world, decision_time, &mut bus)?;
         let Some(left_frame) =
             bus.latest_available::<IncrementalEncoderFeedback>(LEFT_ENCODER_STREAM, decision_time)
@@ -568,11 +757,23 @@ fn run_sensor_observed_trace_with_fault<B: PhysicsBackend>(
             } else {
                 0.0
             };
-        command_voltage_v = controller.update(
-            actor.estimated_linear_velocity_m_s,
-            target_velocity_m_s,
-            SENSOR_PERIOD_TICKS as f64 / 1_000_000_000.0,
-        );
+        command_voltage_v = if let Some(source) = replay {
+            let decision = source
+                .samples
+                .get(samples.len())
+                .context("replay omitted voltage decision")?;
+            ensure!(
+                decision.decision_ticks == decision_time.ticks(),
+                "replay voltage decision timing mismatch"
+            );
+            decision.command_voltage_v
+        } else {
+            controller.update(
+                actor.estimated_linear_velocity_m_s,
+                target_velocity_m_s,
+                SENSOR_PERIOD_TICKS as f64 / 1_000_000_000.0,
+            )
+        };
         let transform = *world
             .get::<Transform3>(vehicle)
             .context("vehicle transform at actor decision")?;
@@ -681,8 +882,8 @@ fn run_sensor_observed_trace_with_fault<B: PhysicsBackend>(
                 .max()
                 .unwrap_or_default() as f64
                 / 1_000_000_000.0,
-            SENSOR_LATENCY_TICKS as f64 / 1_000_000_000.0,
-            SENSOR_LATENCY_TICKS as f64 / 1_000_000_000.0,
+            contract.sensor_latency_ticks as f64 / 1_000_000_000.0,
+            contract.maximum_latency_ticks() as f64 / 1_000_000_000.0,
         ),
         metric(
             "maximum_measured_current_a",
@@ -798,7 +999,13 @@ fn spawn_sensor_rig(
             ),
         },
         ImuFeedbackSensor {
-            spec: realistic_imu_spec(contract.calibrated_gyro_z_bias_rad_s),
+            spec: realistic_imu_spec(
+                contract.calibrated_gyro_z_bias_rad_s
+                    + contract
+                        .randomization
+                        .as_ref()
+                        .map_or(0.0, |s| s.residual_gyro_bias_rad_s),
+            ),
             update_rate_hz: 100.0,
             sample_period_ticks: Some(contract.sensor_period_ticks),
             phase_offset_ticks: 0,
@@ -819,7 +1026,10 @@ fn spawn_sensor_rig(
                 voltage_range_v: 30.0,
                 minimum_temperature_c: -40.0,
                 maximum_temperature_c: 180.0,
-                current_offset_a: 0.02,
+                current_offset_a: contract
+                    .randomization
+                    .as_ref()
+                    .map_or(0.02, |s| s.current_offset_a),
                 voltage_offset_v: -0.01,
                 temperature_offset_c: 0.0,
                 current_noise_std_a: 0.02,
@@ -966,7 +1176,7 @@ fn odometry_config(
         disagreement_gyro_yaw_weight: 0.8,
         disagreement_threshold_rad: 0.02,
         max_input_skew_ticks: 0,
-        max_frame_age_ticks: contract.sensor_latency_ticks,
+        max_frame_age_ticks: contract.maximum_latency_ticks(),
     }
 }
 
@@ -1137,6 +1347,195 @@ fn fnv1a64(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use rne_physics_rapier::RapierBackend;
+
+    #[test]
+    fn voltage_replay_reproduces_failure_and_rejects_changed_commands() {
+        let source = run_randomized_mobility_sensor_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            42,
+        )
+        .unwrap();
+        let replay =
+            replay_sensor_observed_trace(RapierBackend::new(), RapierBackend::manifest(), &source)
+                .unwrap();
+        assert_eq!(replay.content_digest, source.content_digest);
+        assert!(!replay.passed);
+        let mut changed = source.clone();
+        for sample in &mut changed.samples {
+            sample.command_voltage_v = 0.0;
+        }
+        changed.content_digest = trace_digest(&changed).unwrap();
+        changed.validate().unwrap();
+        // Validly hashed but physically inconsistent commands must not be accepted.
+        assert!(replay_sensor_observed_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            &changed
+        )
+        .is_err());
+        let mut mistimed = source;
+        mistimed.samples[0].decision_ticks += 1;
+        assert!(replay_sensor_observed_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            &mistimed
+        )
+        .is_err());
+    }
+
+    #[cfg(feature = "mujoco")]
+    #[test]
+    fn voltage_replay_is_exact_on_mujoco() {
+        use rne_physics_mujoco::MuJoCoBackend;
+        let backend = || {
+            MuJoCoBackend::new(SimDuration::from_ticks(SENSOR_OBSERVED_FIXED_DELTA_TICKS)).unwrap()
+        };
+        let source =
+            run_randomized_mobility_sensor_trace(backend(), MuJoCoBackend::manifest(), 42).unwrap();
+        assert_eq!(
+            source,
+            replay_sensor_observed_trace(backend(), MuJoCoBackend::manifest(), &source).unwrap()
+        );
+    }
+
+    #[test]
+    fn joint_reset_replays_without_exposing_physical_calibration() {
+        let run = || {
+            run_randomized_mobility_sensor_trace(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                42,
+            )
+            .unwrap()
+        };
+        let first = run();
+        assert_eq!(first, run());
+        first.validate().unwrap();
+        assert!(
+            first
+                .metrics
+                .iter()
+                .find(|m| m.id == "maximum_input_age_s")
+                .unwrap()
+                .passed
+        );
+        // A shared physical failure is not erased by cross-backend agreement.
+        assert!(!first.passed);
+        assert!(
+            !first
+                .metrics
+                .iter()
+                .find(|m| m.id == "final_truth_velocity_tracking_error_m_s")
+                .unwrap()
+                .passed
+        );
+        let sensor_only = run_randomized_sensor_observed_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            42,
+        )
+        .unwrap();
+        assert_eq!(first.task_spec, sensor_only.task_spec);
+        assert_eq!(
+            first.contract.randomization,
+            sensor_only.contract.randomization
+        );
+        assert_ne!(first.samples, sensor_only.samples);
+        assert_ne!(
+            first
+                .contract
+                .physical_profile
+                .as_ref()
+                .unwrap()
+                .plant
+                .wheel
+                .radius_m,
+            plant_spec().wheel.radius_m
+        );
+        let mut forged = first;
+        forged
+            .contract
+            .physical_profile
+            .as_mut()
+            .unwrap()
+            .plant
+            .vehicle_mass_kg += 1.0;
+        assert!(forged.contract.validate().is_err());
+    }
+
+    #[cfg(feature = "mujoco")]
+    #[test]
+    fn joint_reset_cross_backend_comparison_passes() {
+        use rne_physics_mujoco::MuJoCoBackend;
+        let first = run_randomized_mobility_sensor_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            42,
+        )
+        .unwrap();
+        let second = run_randomized_mobility_sensor_trace(
+            MuJoCoBackend::new(SimDuration::from_ticks(SENSOR_OBSERVED_FIXED_DELTA_TICKS)).unwrap(),
+            MuJoCoBackend::manifest(),
+            42,
+        )
+        .unwrap();
+        let comparison = compare_sensor_observed_traces(first, second).unwrap();
+        assert!(comparison.passed, "{:#?}", comparison.metrics);
+    }
+
+    #[test]
+    fn randomized_frontends_replay_and_publish_jittered_observations() {
+        let run = |seed| {
+            run_randomized_sensor_observed_trace(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                seed,
+            )
+            .unwrap()
+        };
+        let first = run(42);
+        assert!(first.passed, "{:#?}", first.metrics);
+        assert_eq!(first, run(42));
+        assert_ne!(first.samples, run(43).samples);
+        assert!(first
+            .samples
+            .windows(2)
+            .any(|p| p[0].maximum_input_age_ticks != p[1].maximum_input_age_ticks));
+        assert!(first
+            .samples
+            .windows(2)
+            .any(|p| p[1].left_encoder_sequence > p[0].left_encoder_sequence + 1));
+        first.validate().unwrap();
+        let mut forged = first;
+        forged
+            .contract
+            .randomization
+            .as_mut()
+            .unwrap()
+            .current_offset_a += 0.01;
+        assert!(forged.validate().is_err());
+    }
+
+    #[cfg(feature = "mujoco")]
+    #[test]
+    fn randomized_frontends_share_the_cross_backend_contract() {
+        use rne_physics_mujoco::MuJoCoBackend;
+        let first = run_randomized_sensor_observed_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            42,
+        )
+        .unwrap();
+        let second = run_randomized_sensor_observed_trace(
+            MuJoCoBackend::new(SimDuration::from_ticks(SENSOR_OBSERVED_FIXED_DELTA_TICKS)).unwrap(),
+            MuJoCoBackend::manifest(),
+            42,
+        )
+        .unwrap();
+        let comparison = compare_sensor_observed_traces(first, second).unwrap();
+        assert!(comparison.passed, "{:#?}", comparison.metrics);
+    }
 
     #[test]
     fn rapier_sensor_observed_trace_is_exactly_repeatable() {

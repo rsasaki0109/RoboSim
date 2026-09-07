@@ -95,6 +95,141 @@ cargo run -p rne_mobility_benchmark --features mujoco -- \
 Individual evidence is available with `sensor-rapier` and `sensor-mujoco`.
 Rendering is neither required nor accepted as evidence.
 
+## Seeded sensor reset experiment
+
+`sensor-randomized-compare --seed 42` runs the same controller and nominal plant
+with a reset sample retained in `contract.randomization`. Here `--seed` is the
+lane-local episode seed; a batch caller derives it with `derive_episode_seed`.
+The physics/noise seed remains zero to isolate the effect of sensor parameters.
+Validation regenerates the reset sample and rejects parameter drift.
+
+The bounded experiment samples a common baseline delay of 1, 2, or 3 ms,
+then adds 0, 1, or 2 ms of keyed jitter for each capture. The jitter is common
+to encoder, IMU, and current streams, modeling shared transport. Capture times
+remain exactly 100 Hz; only DataBus availability changes. Frames already
+published retain their original delay. The estimator accepts at most baseline
+plus 2 ms of age. Independent stream jitter and capture-clock jitter remain open.
+
+The physical gyro has a residual bias sampled uniformly in `[-0.002, 0.002)`
+rad/s after the estimator's nominal calibration. Current offset is sampled in
+`[-0.1, 0.1)` A. A single left-encoder attempted sequence in `50..=149` is
+dropped after measurement, preserving internal encoder state and exposing a
+sequence gap to the estimator. These are explicit engineering test ranges,
+not distributions fitted to a named physical device.
+
+The actor TaskSpec remains unchanged: reset parameters are retained in the
+experiment contract, not supplied as actor observations. Repeatability tests
+compare complete traces, require changing input ages and an observed sequence
+gap, and run the same sampled contract on Rapier and MuJoCo with the existing
+unit-bearing tolerances. Stuck/saturation randomization and camera/LiDAR reset
+parameters remain subsequent work; the joint chassis reset is described below.
+
+```powershell
+$env:CARGO_TARGET_DIR = 'E:\RNE-build\m3c-sensor'
+$env:TEMP = 'E:\RNE-build\tmp'
+$env:TMP = $env:TEMP
+$env:MUJOCO_DYNAMIC_LINK_DIR = 'E:\RoboSim-mujoco\lib'
+$env:PATH = 'E:\RoboSim-mujoco\bin;' + $env:PATH
+cargo run -p rne_mobility_benchmark --features mujoco -- `
+  --backend sensor-randomized-compare --seed 42 `
+  --output E:\RNE-build\m3c-sensor\sensor-randomized-compare.json
+```
+
+Two independent seed-42 CLI runs, after correcting latency acceptance to use the
+declared contract bounds, produced byte-identical 695,590-byte comparison files
+(SHA-256 `B203D06E6BF3775271BF88C29BF6E1254ED9E3F86C9EE3CFDC0C7917DFF0151A`).
+The sample used 3 ms base latency, up to 2 ms added jitter, a 0.000960431 rad/s
+residual gyro bias, a 0.018579700 A current offset, and left-encoder dropout at
+sequence 104. All cross-backend tolerances passed; the privileged final-distance
+gap was 0.002387 m against 0.1 m. Both backend tasks also passed. These results demonstrate reproducibility for
+this synthetic reset profile, not real-device calibration accuracy.
+
+### Joint physical/sensor reset
+
+`run_randomized_mobility_sensor_trace` uses the same explicit episode seed to sample
+the existing physical profile and the sensor reset in separate keyed random domains.
+The sampled mass/inertia, motor, transmission, wheel, tire, friction, and road grade
+are applied before stepping. The controller gains and nominal wheel-radius calibration
+remain fixed: the estimator does not receive the sampled physical radius. The actor
+TaskSpec is unchanged; the frozen profile is retained only in the experiment contract.
+Suspension stiffness/damping are retained but inactive in this rigid-support fixture.
+
+Road-aligned gravity is applied to both the backend and the IMU through the new
+`SensorGravity` resource. IMUs subtract that vector when computing specific force;
+without the resource they preserve the legacy gravity default. This prevents a graded
+physics world from silently producing flat-world accelerometer readings. The resource
+is an environment input, not controller-visible data. Other fixtures must explicitly
+set it when using non-default gravity.
+
+This follows the episode-fixed hidden dynamics distinction in
+[Peng et al., Sim-to-Real Transfer of Robotic Control with Dynamics Randomization](https://xbpeng.github.io/projects/SimToReal/SimToReal_2018.pdf).
+It does not reproduce that paper's learned controller or establish real-world transfer.
+The joint-reset tests exercise exact replay, profile integrity, unchanged actor tensors,
+and Rapier/MuJoCo comparison without widening the existing acceptance tolerances.
+
+Validation: both `joint_reset` tests passed with MuJoCo enabled; all 79 sensor
+library tests passed, including a stationary IMU and zero-specific-force free fall
+under a nonvertical gravity vector. Targeted sensor/Mobility Clippy also passed.
+After setting the external-SSD environment above, generate the joint comparison with:
+
+```powershell
+cargo run -p rne_mobility_benchmark --features mujoco -- `
+  --backend mobility-sensor-randomized-compare --seed 42 `
+  --output E:\RNE-build\m3c-sensor\joint-reset-a.json
+```
+
+`--seed` is the episode seed directly; `--lane-id`, `--episode-index`, and
+`--num-envs` are rejected for this single-episode CLI. A batch caller must derive
+lane-local seeds before invoking the runner. The CLI does not claim vectorized execution.
+
+Two independent seed-42 joint CLI runs, after the latency-scoring correction,
+produced byte-identical 705,897-byte outputs:
+digest `fnv1a64:b5cc9293e13e63d9`, SHA-256
+`B11CD5A148E4D20AF1BC1A36929E1BC61E8CBD6963365D55C268B6C859D4FA52`.
+The physical sample used 98.608971 kg and -0.021837 rad grade. All seven existing
+comparison tolerances passed, including a 0.002592 m privileged final-distance gap
+and a 0.001227 m estimated-distance gap (each limited to 0.1 m).
+
+**Backend agreement is not task success.** In this joint seed, both tasks fail the
+unchanged velocity acceptance: final true speeds are 0.888280 and 0.888500 m/s,
+below the 0.9 m/s lower bound. Their tracking errors exceed the 0.1 m/s limit.
+The comparison's `passed` field describes only backend gaps; inspect each nested
+trace's `passed` field for task acceptance. The CLI prints both verdicts separately
+and preserves this reproducible failure instead of widening tolerances. The sensor-only
+reset succeeds; the joint reset exposes a robustness gap for follow-on identification
+and estimation work. Neither result establishes real-world fidelity.
+
+### Voltage replay and remaining capsule gate
+
+The failed joint trace is evidence, not yet a common `rne_failure_capsule` bundle.
+That envelope requires an actual replay artifact. The existing generic actuator-log
+replayer currently restores wheel velocity commands; this fixture commands motor
+terminal voltage. Relabeling volts as wheel velocity or joint effort would change
+the plant semantics and is not an acceptable bridge.
+
+`replay_sensor_observed_trace` now reruns a validated trace on a fresh instance of
+the same backend. It restores both reset profiles, starts with zero voltage, and
+uses each timestamped recorded voltage for the next drive-path evaluation with
+zero-order hold between decisions. The existing one-step wrench staging is unchanged.
+The PI update is bypassed; sensors, estimation, drive dynamics, and backend physics
+still execute. Decision times and the complete resulting trace, including privileged
+scoring and its digest, must match. Recomputed hashes alone do not establish replay:
+changing recorded voltages and rehashing the source is rejected when the physical
+result differs. A reproducibly failed task remains failed after successful replay.
+
+The remaining gate adds a bounded file reader/CLI and build provenance, then packages
+the verified voltage replay and failed metric report as references in the common
+capsule. The generic wheel-velocity replayer is not modified or used for this voltage
+fixture. Cross-backend agreement and single-backend exact replay remain distinct checks.
+
+Validation on Windows (2026-09-07): the frozen voltage-replay worktree completed
+`cargo run -p xtask -- ci` with exit code 0, including workspace Clippy/tests,
+example and RL smokes, headless checks, parity, fuzz, and 10/10 behavior seeds.
+The separate MuJoCo-enabled voltage-replay tests passed for both backends.
+Build output, CI log, and configured evidence root were on the external SSD;
+some legacy tests still use short-lived checkout-local paths. This CI result
+does not close the real-log identification, vectorized execution, or capsule gates.
+
 ## Research and OSS correspondence
 
 - [Kalibr's official IMU noise model](https://github.com/ethz-asl/kalibr/wiki/IMU-Noise-Model)
@@ -150,16 +285,16 @@ Rendering is neither required nor accepted as evidence.
 
 ## Remaining M3-C boundary
 
-The four-wheel side-fusion primitive is implemented and unit-tested through the existing
-wheel/IMU estimator, but it is not yet wired into the rigid-body benchmark controller. The
-next gate completes that connection and adds differential and Ackermann fixtures. Acceptance
-must cover steering and yaw
-response, lateral acceleration and scrub, per-wheel load transfer, split friction,
-grade, roughness/curb interaction, lift/recontact, synchronized steering feedback,
-and sensor-only closed-loop metrics. M5 then fits motor, tire, geometry, sensor,
-and estimator parameters against training logs and scores held-out real logs.
+The four-wheel plant and side-fusion primitive are now connected to the sensor-only
+estimator/controller in
+[`MOBILITY_PER_WHEEL_SENSOR_CLOSED_LOOP_V1.md`](MOBILITY_PER_WHEEL_SENSOR_CLOSED_LOOP_V1.md).
+The steering-feedback counterpart is documented in
+[`MOBILITY_ACKERMANN_SENSOR_CLOSED_LOOP_V1.md`](MOBILITY_ACKERMANN_SENSOR_CLOSED_LOOP_V1.md).
+Those fixtures have their own cross-backend and fault evidence; the seeded reset experiment
+above currently applies only to this simpler longitudinal fixture, not automatically to
+either successor.
 
-The first half of that replacement is now implemented in
-[`MOBILITY_PER_WHEEL_SKID_V1.md`](MOBILITY_PER_WHEEL_SKID_V1.md): four independent skid
-wheel paths execute against both rigid-body backends. Its plant has not yet been connected
-to this sensor-only estimator/controller, so the combined M3-C gate remains open.
+The combined gate still requires evidence that identifies real physical and sensor
+parameters and exercises them together under road and fault variation. M5 fits motor,
+tire, geometry, sensor, and estimator parameters against training logs and scores
+held-out real logs. Passing synthetic fixtures alone does not close that gate.

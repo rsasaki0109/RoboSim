@@ -1,10 +1,19 @@
 //! Deterministic, batch-width-independent Mobility plant domain randomization.
 
 use crate::ackermann_suspension::suspension_spec;
+use crate::backend::{
+    backend_mobility_task_spec, backend_plant_spec, comparison_metrics,
+    run_backend_mobility_trace_configured, BackendMobilityTrace,
+};
 use crate::plant_spec;
+use crate::MobilityBenchmarkMetric;
 use anyhow::{ensure, Result};
-use rne_ai::derive_episode_seed;
+use rne_ai::{
+    derive_episode_seed, RandomDistributionSpec, RandomizationParameterSpec, RandomizationSpec,
+    TaskSpec,
+};
 use rne_core::KeyedRandom;
+use rne_physics::{PhysicsBackend, PhysicsBackendManifest};
 use rne_robot::{
     evaluate_longitudinal_mobility_plant, DcMotorFailureMode, LongitudinalMobilityPlantSpec,
     LongitudinalMobilityPlantState, SuspensionStrutSpec,
@@ -15,6 +24,15 @@ use serde::{Deserialize, Serialize};
 pub const MOBILITY_RANDOMIZED_BATCH_KIND: &str = "rne_mobility_randomized_batch";
 /// Randomized-batch schema.
 pub const MOBILITY_RANDOMIZED_BATCH_SCHEMA_VERSION: u32 = 1;
+/// Stable randomized physics-backend artifact kind.
+pub const MOBILITY_RANDOMIZED_BACKEND_TRACE_KIND: &str = "rne_mobility_randomized_backend_trace";
+/// Randomized physics-backend trace schema.
+pub const MOBILITY_RANDOMIZED_BACKEND_TRACE_SCHEMA_VERSION: u32 = 1;
+/// Stable randomized cross-backend comparison kind.
+pub const MOBILITY_RANDOMIZED_BACKEND_COMPARISON_KIND: &str =
+    "rne_mobility_randomized_backend_comparison";
+/// Randomized cross-backend comparison schema.
+pub const MOBILITY_RANDOMIZED_BACKEND_COMPARISON_SCHEMA_VERSION: u32 = 1;
 /// Fixed analytic integration step in seconds.
 pub const MOBILITY_RANDOMIZED_FIXED_DELTA_S: f64 = 0.001;
 /// Fixed rollout length per lane.
@@ -161,6 +179,20 @@ impl MobilityRandomizationSpec {
 
     /// Samples one profile solely from its episode seed.
     pub fn sample(self, episode_seed: u64) -> RandomizedMobilityProfile {
+        self.sample_from(
+            episode_seed,
+            plant_spec(1.0, DcMotorFailureMode::Nominal),
+            suspension_spec(),
+        )
+    }
+
+    /// Samples and applies one profile to explicit backend-neutral baselines.
+    pub fn sample_from(
+        self,
+        episode_seed: u64,
+        base_plant: LongitudinalMobilityPlantSpec,
+        base_suspension: SuspensionStrutSpec,
+    ) -> RandomizedMobilityProfile {
         let random = KeyedRandom::new(episode_seed, RANDOM_DOMAIN);
         let values = MobilityRandomizationSample {
             vehicle_mass_scale: self.vehicle_mass_scale.sample(&random, 0),
@@ -179,7 +211,52 @@ impl MobilityRandomizationSpec {
             suspension_stiffness_scale: self.suspension_stiffness_scale.sample(&random, 13),
             suspension_damping_scale: self.suspension_damping_scale.sample(&random, 14),
         };
-        apply(values)
+        apply_to(values, base_plant, base_suspension)
+    }
+
+    /// Converts the exact ordered v1 ranges into the portable TaskSpec contract.
+    pub fn task_randomization(self) -> RandomizationSpec {
+        RandomizationSpec::new(vec![
+            parameter("vehicle_mass_scale", "1", self.vehicle_mass_scale),
+            parameter("motor_resistance_scale", "1", self.motor_resistance_scale),
+            parameter("motor_constant_scale", "1", self.motor_constant_scale),
+            parameter("rotor_inertia_scale", "1", self.rotor_inertia_scale),
+            parameter(
+                "transmission_ratio_scale",
+                "1",
+                self.transmission_ratio_scale,
+            ),
+            parameter(
+                "transmission_efficiency_scale",
+                "1",
+                self.transmission_efficiency_scale,
+            ),
+            parameter("wheel_radius_scale", "1", self.wheel_radius_scale),
+            parameter("wheel_inertia_scale", "1", self.wheel_inertia_scale),
+            parameter(
+                "rolling_resistance_scale",
+                "1",
+                self.rolling_resistance_scale,
+            ),
+            parameter("tire_stiffness_scale", "1", self.tire_stiffness_scale),
+            parameter(
+                "tire_peak_friction_scale",
+                "1",
+                self.tire_peak_friction_scale,
+            ),
+            parameter("road_friction_scale", "1", self.road_friction_scale),
+            parameter("road_grade_rad", "rad", self.road_grade_rad),
+            parameter(
+                "suspension_stiffness_scale",
+                "1",
+                self.suspension_stiffness_scale,
+            ),
+            parameter(
+                "suspension_damping_scale",
+                "1",
+                self.suspension_damping_scale,
+            ),
+        ])
     }
 }
 
@@ -285,6 +362,117 @@ pub struct MobilityRandomizedBatchReport {
     pub content_digest: String,
 }
 
+/// One replayable randomized profile executed by a real physics backend.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MobilityRandomizedBackendTrace {
+    /// Artifact discriminator.
+    pub kind: String,
+    /// Artifact schema.
+    pub schema_version: u32,
+    /// Root seed before lane/episode derivation.
+    pub root_seed: u64,
+    /// Stable lane identity.
+    pub lane_id: u64,
+    /// Lane-local episode index.
+    pub episode_index: u64,
+    /// Derived width-independent episode seed.
+    pub episode_seed: u64,
+    /// Exact sampled and applied physical profile.
+    pub profile: RandomizedMobilityProfile,
+    /// Complete backend execution trace.
+    pub trace: BackendMobilityTrace,
+    /// FNV-1a integrity digest with this field empty.
+    pub content_digest: String,
+}
+
+impl MobilityRandomizedBackendTrace {
+    /// Re-samples the profile and verifies the complete backend execution.
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.kind == MOBILITY_RANDOMIZED_BACKEND_TRACE_KIND
+                && self.schema_version == MOBILITY_RANDOMIZED_BACKEND_TRACE_SCHEMA_VERSION,
+            "randomized backend trace kind/schema drift"
+        );
+        let spec = MobilityRandomizationSpec::training_v1();
+        spec.validate()?;
+        let expected_seed = derive_episode_seed(self.root_seed, self.lane_id, self.episode_index);
+        ensure!(self.episode_seed == expected_seed, "episode seed drift");
+        let expected_profile =
+            spec.sample_from(self.episode_seed, backend_plant_spec(), suspension_spec());
+        ensure!(self.profile == expected_profile, "randomized profile drift");
+        ensure!(
+            self.trace.seed == self.episode_seed
+                && self.trace.task_spec == backend_mobility_randomized_task_spec(),
+            "randomized backend execution contract drift"
+        );
+        self.trace.validate_execution()?;
+        ensure!(self.trace.passed, "randomized backend verdict failed");
+        ensure!(
+            self.content_digest == randomized_backend_trace_digest(self)?,
+            "randomized backend trace digest drift"
+        );
+        Ok(())
+    }
+}
+
+/// Two equivalent randomized profiles with explicit cross-backend tolerances.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MobilityRandomizedBackendComparison {
+    /// Artifact discriminator.
+    pub kind: String,
+    /// Artifact schema.
+    pub schema_version: u32,
+    /// First complete randomized backend trace.
+    pub first: MobilityRandomizedBackendTrace,
+    /// Second complete randomized backend trace.
+    pub second: MobilityRandomizedBackendTrace,
+    /// Ordered absolute gaps with SI-unit tolerances.
+    pub metrics: Vec<MobilityBenchmarkMetric>,
+    /// Whether every backend gap passed.
+    pub passed: bool,
+    /// FNV-1a integrity digest with this field empty.
+    pub content_digest: String,
+}
+
+impl MobilityRandomizedBackendComparison {
+    /// Verifies both traces, shared randomized physics, tolerances, and digest.
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.kind == MOBILITY_RANDOMIZED_BACKEND_COMPARISON_KIND
+                && self.schema_version == MOBILITY_RANDOMIZED_BACKEND_COMPARISON_SCHEMA_VERSION,
+            "randomized backend comparison kind/schema drift"
+        );
+        self.first.validate()?;
+        self.second.validate()?;
+        ensure!(
+            self.first.trace.backend.backend_id != self.second.trace.backend.backend_id,
+            "comparison requires distinct backend identities"
+        );
+        ensure!(
+            self.first.root_seed == self.second.root_seed
+                && self.first.lane_id == self.second.lane_id
+                && self.first.episode_index == self.second.episode_index
+                && self.first.episode_seed == self.second.episode_seed
+                && self.first.profile == self.second.profile
+                && self.first.trace.task_spec == self.second.trace.task_spec,
+            "randomized cross-backend contract drift"
+        );
+        let expected = comparison_metrics(&self.first.trace, &self.second.trace)?;
+        ensure!(self.metrics == expected, "comparison metric drift");
+        ensure!(
+            self.passed == self.metrics.iter().all(|metric| metric.passed),
+            "comparison verdict drift"
+        );
+        ensure!(
+            self.content_digest == randomized_backend_comparison_digest(self)?,
+            "randomized backend comparison digest drift"
+        );
+        Ok(())
+    }
+}
+
 impl MobilityRandomizedBatchReport {
     /// Re-samples and re-runs every lane, then verifies ordering and digests.
     pub fn validate(&self) -> Result<()> {
@@ -361,8 +549,98 @@ pub fn run_mobility_randomized_batch(
     Ok(report)
 }
 
+/// Returns the backend mobility task with the exact v1 physical randomization contract.
+pub fn backend_mobility_randomized_task_spec() -> TaskSpec {
+    backend_mobility_task_spec()
+        .with_randomization(MobilityRandomizationSpec::training_v1().task_randomization())
+}
+
+/// Executes one width-independent randomized profile on a physics backend.
+pub fn run_mobility_randomized_backend_trace<B: PhysicsBackend>(
+    backend: B,
+    manifest: PhysicsBackendManifest,
+    root_seed: u64,
+    lane_id: u64,
+    episode_index: u64,
+) -> Result<MobilityRandomizedBackendTrace> {
+    let spec = MobilityRandomizationSpec::training_v1();
+    spec.validate()?;
+    let episode_seed = derive_episode_seed(root_seed, lane_id, episode_index);
+    let profile = spec.sample_from(episode_seed, backend_plant_spec(), suspension_spec());
+    ensure!(
+        profile.plant.is_valid() && profile.suspension.is_valid(),
+        "invalid applied randomized backend profile"
+    );
+    let trace = run_backend_mobility_trace_configured(
+        backend,
+        manifest,
+        backend_mobility_randomized_task_spec(),
+        profile.plant,
+        episode_seed,
+    )?;
+    let mut evidence = MobilityRandomizedBackendTrace {
+        kind: MOBILITY_RANDOMIZED_BACKEND_TRACE_KIND.into(),
+        schema_version: MOBILITY_RANDOMIZED_BACKEND_TRACE_SCHEMA_VERSION,
+        root_seed,
+        lane_id,
+        episode_index,
+        episode_seed,
+        profile,
+        trace,
+        content_digest: String::new(),
+    };
+    evidence.content_digest = randomized_backend_trace_digest(&evidence)?;
+    evidence.validate()?;
+    Ok(evidence)
+}
+
+/// Compares two backends that executed the same sampled physical profile.
+pub fn compare_mobility_randomized_backend_traces(
+    first: MobilityRandomizedBackendTrace,
+    second: MobilityRandomizedBackendTrace,
+) -> Result<MobilityRandomizedBackendComparison> {
+    first.validate()?;
+    second.validate()?;
+    ensure!(
+        first.trace.backend.backend_id != second.trace.backend.backend_id,
+        "comparison requires distinct backend identities"
+    );
+    ensure!(
+        first.root_seed == second.root_seed
+            && first.lane_id == second.lane_id
+            && first.episode_index == second.episode_index
+            && first.profile == second.profile
+            && first.trace.task_spec == second.trace.task_spec,
+        "randomized cross-backend contract drift"
+    );
+    let metrics = comparison_metrics(&first.trace, &second.trace)?;
+    let mut comparison = MobilityRandomizedBackendComparison {
+        kind: MOBILITY_RANDOMIZED_BACKEND_COMPARISON_KIND.into(),
+        schema_version: MOBILITY_RANDOMIZED_BACKEND_COMPARISON_SCHEMA_VERSION,
+        first,
+        second,
+        passed: metrics.iter().all(|metric| metric.passed),
+        metrics,
+        content_digest: String::new(),
+    };
+    comparison.content_digest = randomized_backend_comparison_digest(&comparison)?;
+    comparison.validate()?;
+    Ok(comparison)
+}
+
 fn apply(sample: MobilityRandomizationSample) -> RandomizedMobilityProfile {
-    let mut plant = plant_spec(1.0, DcMotorFailureMode::Nominal);
+    apply_to(
+        sample,
+        plant_spec(1.0, DcMotorFailureMode::Nominal),
+        suspension_spec(),
+    )
+}
+
+fn apply_to(
+    sample: MobilityRandomizationSample,
+    mut plant: LongitudinalMobilityPlantSpec,
+    mut suspension: SuspensionStrutSpec,
+) -> RandomizedMobilityProfile {
     plant.vehicle_mass_kg *= sample.vehicle_mass_scale;
     plant.normal_load_per_driven_wheel_n *= sample.vehicle_mass_scale;
     plant.motor.resistance_ohm *= sample.motor_resistance_scale;
@@ -382,7 +660,6 @@ fn apply(sample: MobilityRandomizationSample) -> RandomizedMobilityProfile {
     plant.tire.lateral_peak_friction *= sample.tire_peak_friction_scale;
     plant.road_friction_scale *= sample.road_friction_scale;
     plant.road_grade_rad = sample.road_grade_rad;
-    let mut suspension = suspension_spec();
     suspension.stiffness_n_per_m *= sample.suspension_stiffness_scale;
     suspension.damping_n_s_per_m *= sample.suspension_damping_scale;
     RandomizedMobilityProfile {
@@ -446,6 +723,17 @@ fn range(minimum: f64, maximum: f64) -> UniformRange {
     UniformRange { minimum, maximum }
 }
 
+fn parameter(name: &str, unit: &str, range: UniformRange) -> RandomizationParameterSpec {
+    RandomizationParameterSpec::new(
+        name,
+        unit,
+        RandomDistributionSpec::Uniform {
+            minimum: range.minimum,
+            maximum: range.maximum,
+        },
+    )
+}
+
 fn lane_digest(lane: &MobilityRandomizedLane) -> Result<String> {
     let mut canonical = lane.clone();
     canonical.content_digest.clear();
@@ -453,6 +741,18 @@ fn lane_digest(lane: &MobilityRandomizedLane) -> Result<String> {
 }
 fn batch_digest(report: &MobilityRandomizedBatchReport) -> Result<String> {
     let mut canonical = report.clone();
+    canonical.content_digest.clear();
+    digest(&canonical)
+}
+fn randomized_backend_trace_digest(trace: &MobilityRandomizedBackendTrace) -> Result<String> {
+    let mut canonical = trace.clone();
+    canonical.content_digest.clear();
+    digest(&canonical)
+}
+fn randomized_backend_comparison_digest(
+    comparison: &MobilityRandomizedBackendComparison,
+) -> Result<String> {
+    let mut canonical = comparison.clone();
     canonical.content_digest.clear();
     digest(&canonical)
 }
@@ -468,6 +768,7 @@ fn digest<T: Serialize>(value: &T) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rne_physics_rapier::RapierBackend;
 
     #[test]
     fn randomized_batch_is_repeatable_diverse_and_width_independent() {
@@ -495,5 +796,97 @@ mod tests {
         let mut spec = MobilityRandomizationSpec::training_v1();
         spec.transmission_efficiency_scale = range(0.9, 2.0);
         assert!(spec.validate().is_err());
+    }
+
+    #[test]
+    fn randomized_rapier_trace_is_replayable_and_lane_specific() {
+        let first = run_mobility_randomized_backend_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            42,
+            3,
+            7,
+        )
+        .unwrap();
+        let repeated = run_mobility_randomized_backend_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            42,
+            3,
+            7,
+        )
+        .unwrap();
+        let other_lane = run_mobility_randomized_backend_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            42,
+            4,
+            7,
+        )
+        .unwrap();
+
+        assert_eq!(first, repeated);
+        assert_ne!(first.profile, other_lane.profile);
+        assert_ne!(first.trace.samples, other_lane.trace.samples);
+        first.validate().unwrap();
+        assert_eq!(
+            first.trace.task_spec.randomization,
+            Some(MobilityRandomizationSpec::training_v1().task_randomization())
+        );
+    }
+
+    #[test]
+    fn randomized_backend_trace_rejects_profile_and_result_tampering() {
+        let evidence = run_mobility_randomized_backend_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            9,
+            0,
+            1,
+        )
+        .unwrap();
+        let mut profile_tamper = evidence.clone();
+        profile_tamper.profile.plant.vehicle_mass_kg += 0.01;
+        assert!(profile_tamper.validate().is_err());
+        let mut result_tamper = evidence;
+        result_tamper
+            .trace
+            .samples
+            .last_mut()
+            .unwrap()
+            .wheel_velocity_rad_s += 0.01;
+        assert!(result_tamper.validate().is_err());
+    }
+
+    #[cfg(feature = "mujoco")]
+    #[test]
+    fn identical_randomized_profile_passes_cross_backend_tolerances() {
+        use rne_core::SimDuration;
+        use rne_physics_mujoco::MuJoCoBackend;
+
+        let rapier = run_mobility_randomized_backend_trace(
+            RapierBackend::new(),
+            RapierBackend::manifest(),
+            20_260_903,
+            0,
+            0,
+        )
+        .unwrap();
+        let mujoco = run_mobility_randomized_backend_trace(
+            MuJoCoBackend::new(SimDuration::from_ticks(
+                crate::backend::BACKEND_MOBILITY_FIXED_DELTA_TICKS,
+            ))
+            .unwrap(),
+            MuJoCoBackend::manifest(),
+            20_260_903,
+            0,
+            0,
+        )
+        .unwrap();
+        let comparison = compare_mobility_randomized_backend_traces(rapier, mujoco).unwrap();
+
+        assert!(comparison.passed, "{:#?}", comparison.metrics);
+        assert_eq!(comparison.first.profile, comparison.second.profile);
+        comparison.validate().unwrap();
     }
 }

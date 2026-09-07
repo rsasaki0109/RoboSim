@@ -454,7 +454,7 @@ fn sample_imu_stateful_impl(
     let inverse = world_from_sensor.rotation.inverse();
     let true_angular = inverse * angular_world;
     // Specific force: what an accelerometer feels is acceleration minus gravity.
-    let true_specific_force = inverse * (sensor_acceleration_world - GRAVITY_M_S2);
+    let true_specific_force = inverse * (sensor_acceleration_world - sensor_gravity(world));
 
     let random = imu_random(noise_key);
     let effective_dt_s = if dt_s > 0.0 { dt_s } else { 0.0 };
@@ -615,7 +615,54 @@ fn static_measurement(world: &World, entity: Entity) -> (Vec3, Vec3) {
         .map(|body| body.angular_velocity_rad_s)
         .unwrap_or(Vec3::ZERO);
     let inverse = rotation.inverse();
-    (inverse * angular_world, inverse * -GRAVITY_M_S2)
+    (inverse * angular_world, inverse * -sensor_gravity(world))
+}
+
+fn sensor_gravity(world: &World) -> Vec3 {
+    world
+        .get_resource::<crate::SensorGravity>()
+        .map_or(GRAVITY_M_S2, |gravity| gravity.gravity_m_s2())
+}
+
+#[cfg(test)]
+mod gravity_tests {
+    use super::*;
+
+    #[test]
+    fn stateless_and_stateful_imu_use_world_gravity() {
+        let mut world = World::new();
+        let entity = world
+            .spawn((Transform3::default(), RigidBody::default()))
+            .id();
+        let gravity = Vec3::new(-3.0, -9.0, 0.0);
+        world.insert_resource(crate::SensorGravity::new(gravity).unwrap());
+        assert_eq!(static_measurement(&world, entity).1, -gravity);
+        let mut state = ImuState::default();
+        let sample = sample_imu_stateful_diagnostic(
+            &world,
+            entity,
+            &ImuSpec::default(),
+            SensorNoiseKey::new(1, 2, 3, 1),
+            SimTime::ZERO,
+            &mut state,
+        )
+        .unwrap();
+        assert_eq!(sample.truth.specific_force_m_s2, -gravity);
+        world.entity_mut(entity).insert(RigidBody {
+            linear_velocity_m_s: gravity,
+            ..RigidBody::default()
+        });
+        let falling = sample_imu_stateful_diagnostic(
+            &world,
+            entity,
+            &ImuSpec::default(),
+            SensorNoiseKey::new(1, 2, 3, 2),
+            SimTime::from_ticks(1_000_000_000),
+            &mut state,
+        )
+        .unwrap();
+        assert_eq!(falling.truth.specific_force_m_s2, Vec3::ZERO);
+    }
 }
 
 fn saturate(value: Vec3, range: f64) -> Vec3 {

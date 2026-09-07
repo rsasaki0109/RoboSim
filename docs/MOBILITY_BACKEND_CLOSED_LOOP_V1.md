@@ -11,12 +11,18 @@ motor voltage -> DC motor -> transmission -> wheel inertia
 ```
 
 The actor-visible observation is only the task-owned `command_phase`; the action is a
-bounded motor terminal voltage. Chassis pose, velocity, contact load, tire force, motor
-current, and wheel speed are explicitly privileged evidence fields. They are not actor
-tensors. Both runs use seed `0`, a 1 ms fixed step, 300 settle steps, and 2,000 driven
-steps.
+bounded motor terminal voltage. Chassis pose, velocity, rotation, angular velocity, and
+wheel speed are declared as privileged critic tensors. Motor current, contact load, tire
+force, and friction utilization are diagnostic-only tensors. None are actor inputs. Both
+nominal runs use seed `0`, a 1 ms fixed step, 300 settle steps, and 2,000 driven steps.
 
 ## Contact and force convention
+
+For randomized grades, the fixture's world coordinates are road-aligned: X follows
+the road and Y is its normal. Gravity is `(-g sin(grade), -g cos(grade), 0)`.
+Thus positive grade produces downhill acceleration toward negative X, and the solver
+resolves the corresponding normal load. Reported world positions and tilt use this
+road-aligned frame. The nominal zero-grade fixture is unchanged.
 
 The backend reports a completed-step contact point, its carrier-point velocity, and normal
 load. `evaluate_longitudinal_drive_path` subtracts the wheel circumferential velocity once,

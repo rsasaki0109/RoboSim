@@ -87,14 +87,71 @@ The 32-lane external-SSD run passed all lanes and produced:
 Two independent executions must be compared byte-for-byte before accepting this
 evidence record.
 
+## Applied Rapier/MuJoCo profile gate
+
+The follow-on gate binds the same 15 ordered ranges into the portable `TaskSpec`, derives
+one width-independent episode seed, and applies the resulting physical profile to the
+shared Rapier/MuJoCo contact-to-tire-to-wrench fixture. This is an actual backend run: the
+sample changes rigid-body mass plus the backend-neutral motor, transmission, wheel, tire,
+and road structs before either solver advances. Both traces retain the exact same sampled
+profile and task contract. Each backend result is self-verifying, and the comparison uses
+the existing SI-unit tolerances instead of requiring bit equality between solvers.
+
+Road grade rotates gravity into the road-aligned fixture frame, affecting both downhill
+acceleration and support load. A regression test independently varies only grade and
+checks that uphill speed is below level-road speed and downhill speed is above it.
+Suspension stiffness and damping are retained parameters, not active dynamics here.
+
+The backend fixture has one driven support path, so its nominal normal load and tire
+reference load differ from the two-driven-wheel analytic reference batch. Sampling is
+therefore split into deterministic scale generation and application to an explicit base
+plant. This prevents a profile generated for one fixture from silently importing the
+other fixture's load assumptions. Suspension scales remain retained but are not applied
+to the rigid-support backend fixture yet.
+
+Run the cross-backend evidence entirely on an external SSD:
+
+```powershell
+$env:CARGO_TARGET_DIR = 'E:\RNE-build\m3c-sensor'
+$env:TEMP = 'E:\RNE-build\tmp'
+$env:TMP = 'E:\RNE-build\tmp'
+$env:MUJOCO_DYNAMIC_LINK_DIR = 'E:\RoboSim-mujoco\lib'
+$env:PATH = 'E:\RoboSim-mujoco\bin;' + $env:PATH
+cargo run -p rne_mobility_benchmark --features mujoco -- `
+  --backend mobility-randomized-backend-compare `
+  --seed 20260903 --lane-id 0 --episode-index 0 `
+  --output E:\RNE-build\m3c-sensor\mobility-randomized-backend-compare-v1.json
+```
+
+The reproduced lane-0 evidence used episode seed `15606677303828933863`, sampled a
+115.531173 kg carrier, road-friction scale 0.617472, and road grade 0.050031 rad. Two
+independent 81,725-byte outputs were byte-identical after the gravity/grade correction:
+
+| field | value |
+| --- | ---: |
+| comparison digest | `fnv1a64:7c797c03999f633b` |
+| SHA-256 | `A2E3DE8FAA2B8EA62710689CF53095510DAC72C3BA86113F326DE9EA24631F90` |
+| forward-position gap | 0.002715 m / 0.05 m |
+| forward-velocity gap | 0.001416 m/s / 0.05 m/s |
+| maximum tire-utilization gap | 0.033945 / 0.1 |
+| maximum tilt gap | 0.000025 rad / 0.005 rad |
+
+The artifact also contains contact participation, lateral drift, motor-current, and
+vertical-displacement gaps; all declared tolerances passed.
+
 ## Deliberate limits and next gate
 
-The suspension parameters are sampled and retained but are not excited by the v1
-analytic longitudinal rollout. The batch also does not yet execute the shared Rapier and
-MuJoCo rigid-road TaskSpec, randomize sensor calibration/timing/faults, expose separate
-actor and privileged tensors, run lanes concurrently, or report hardware throughput.
+The suspension parameters are sampled and retained but are not excited by either the v1
+analytic longitudinal rollout or the rigid-support backend fixture. Physical profiles now
+execute under the shared Rapier/MuJoCo TaskSpec, and that task separates actor,
+privileged-truth, and diagnostic tensors. A separate
+[sensor reset experiment](MOBILITY_SENSOR_OBSERVED_CLOSED_LOOP_V1.md#seeded-sensor-reset-experiment)
+now applies seeded gyro/current offsets, common transport latency/jitter, and an encoder
+dropout through the sensor-only controller. Its joint-reset API now combines those sensor
+resets with a randomized longitudinal chassis while retaining nominal estimator calibration.
+Neither runner executes lanes concurrently or reports hardware throughput.
 
-The next gate applies each profile unchanged to the Rapier/MuJoCo mobility fixtures and
-adds deterministic encoder, current, IMU, LiDAR, and camera randomization at reset. Only
-after single-lane versus batch replay equivalence is proven should an MJX, GPU, or other
-accelerator adapter advertise vectorized throughput.
+The next gate extends joint resets to the per-wheel skid and Ackermann fixtures,
+independent transport jitter, LiDAR, and camera faults, then proves single-lane versus ordered-batch
+replay equivalence. Only after that should an MJX, GPU, or other accelerator adapter
+advertise vectorized throughput.
