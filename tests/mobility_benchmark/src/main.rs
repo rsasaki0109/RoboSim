@@ -406,7 +406,9 @@ fn main() -> Result<()> {
         "suspension-uncertainty"
         | "suspension-uncertainty-verify"
         | "suspension-derived-errors"
-        | "suspension-derived-errors-verify" => {
+        | "suspension-derived-errors-verify"
+        | "suspension-affine-errors"
+        | "suspension-affine-errors-verify" => {
             ensure!(interval_tolerance_s.is_none() && root_seed.is_none()
                 && noise_root_seed.is_none() && episode_index.is_none() && lane_id.is_none()
                 && num_envs.is_none() && num_workers.is_none() && acquisition_manifest.is_none()
@@ -437,6 +439,24 @@ fn main() -> Result<()> {
                 "uncertainty input too large"
             );
             if matches!(
+                backend.as_str(),
+                "suspension-affine-errors" | "suspension-affine-errors-verify"
+            ) {
+                use rne_mobility_benchmark::suspension_affine_acquisition::{
+                    decode_suspension_affine, encode_suspension_affine,
+                    SuspensionAcquiredAffineRequest,
+                };
+                let evidence = if backend == "suspension-affine-errors-verify" {
+                    decode_suspension_affine(&bytes, root)?
+                } else {
+                    let request: SuspensionAcquiredAffineRequest = serde_json::from_slice(&bytes)?;
+                    request.evaluate(root)?
+                };
+                (
+                    String::from_utf8(encode_suspension_affine(&evidence, root)?)?,
+                    "suspension-affine-evidence",
+                )
+            } else if matches!(
                 backend.as_str(),
                 "suspension-derived-errors" | "suspension-derived-errors-verify"
             ) {
@@ -741,6 +761,8 @@ fn main() -> Result<()> {
                 | "suspension-uncertainty-verify"
                 | "suspension-derived-errors"
                 | "suspension-derived-errors-verify"
+                | "suspension-affine-errors"
+                | "suspension-affine-errors-verify"
                 | "suspension-acquired-verify"
                 | "suspension-timing"
                 | "suspension-timing-verify"
@@ -769,6 +791,8 @@ fn main() -> Result<()> {
                 | "suspension-uncertainty-verify"
                 | "suspension-derived-errors"
                 | "suspension-derived-errors-verify"
+                | "suspension-affine-errors"
+                | "suspension-affine-errors-verify"
         ) || evidence_root.is_none(),
         "--evidence-root requires an acquisition verification or acquired suspension backend"
     );

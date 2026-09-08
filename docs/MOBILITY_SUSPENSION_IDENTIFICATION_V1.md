@@ -286,6 +286,21 @@ process run predates those final negative cases; the MuJoCo run includes them.
 The full-CI checkpoint immediately below is for the earlier operator commit,
 not this later CLI/envelope extension.
 
+Full CLI/envelope checkpoint (2026-09-09):
+`4e62b31c8fcc15c752bd0aa6812759682c6999a1` completed
+`cargo run -p xtask -- ci` with exit code 0, tracked files fixed throughout.
+Workspace formatting, dependency boundaries, Clippy/tests, smoke/RL, headless,
+OSS parity, 361 fuzz cases across nine boundaries and Behavior CI 10/10 seeds
+passed. Default Mobility Benchmark library: 151 passed, zero failed, one long
+training job ignored (167.01 s); the extended derivative CLI process test passed.
+External log: `E:\RNE-build\m3c-sensor\suspension-derived-cli-v1-ci.log`, SHA-256
+`8683b07290410d76449516fcb1ad6f235941182ddc636b47e00c09b500438c1d`.
+Negative evidence is retained: clutter PPO trained -1.37 versus random -1.19
+(worse); mobile clutter CEM grasped but did not place; heading CEM -10 equals
+baseline -10. Mobile clutter PPO was -1.61 versus random -2.27. Flagship capsule
+validation reported `cross_backend=false`. This is software regression evidence,
+not physical calibration, uncertainty coverage validation or actual HIL.
+
 Derivative slice verification (2026-09-09): default-feature suspension-related
 tests passed 29/29 (40.28 s), including the file-bound propagation API. The
 MuJoCo-enabled benchmark library passed 179 tests with zero failures and two
@@ -311,6 +326,130 @@ tests are not actual physical HIL. This checkpoint does not qualify real
 measurements or complete the remaining derivative CLI/clock/gain work.
 
 ### Uncertainty implementation boundary (2026-09-09)
+
+Clock/gain next-slice design: [NIST's calibration definition](https://www.nist.gov/pml/time-and-frequency-division/popular-links/time-frequency-z/time-and-frequency-z-c-ce)
+distinguishes time offset, frequency offset and measurement uncertainty. RNE
+must not reinterpret the existing inter-channel synchronization bound as either
+a timebase-scale distribution or independent per-sample jitter. These require
+separate calibration declarations and correlation assumptions.
+
+The planned deterministic realization uses explicit positive scale multipliers:
+`t' = t_ref + a_t*(t - t_ref) + b_t`, `x' = a_x*x + b_x`,
+`F' = a_F*F + b_F`. These are applied corrections, not automatically inverted
+instrument-error declarations; `a_t` is an elapsed-time multiplier, not an
+oscillator frequency-offset value. Recompute velocity from `(t', x')` with the
+bound operator before fitting. Common time translation must leave the derivative
+unchanged where representable; positive time scaling divides velocity by `a_t`.
+Position scaling multiplies it by `a_x`. In a linear force-law regression, the
+analytic transformed coefficients are `k' = a_F*k/a_x`,
+`c' = a_F*a_t*c/a_x`, `e' = a_x*e + b_x + b_F/k'`.
+These equations are RNE algebraic test oracles, not physical calibration results.
+Reject nonpositive scales, non-finite arithmetic and loss of strict timestamp
+ordering; do not clip or redraw invalid realizations. Distribution sampling,
+shared/cross-channel factors, retained clock calibration, jitter and filter
+propagation remain separate required work. The current v1 CLI must remain
+unchanged until a separately versioned extended request is implemented.
+
+`SuspensionAffineCorrection::apply` now executes one declared realization on a
+single acquisition, preserving the source and row count. It validates finite
+inputs and positive scales, transforms time/position/force, then reconstructs
+velocity with the explicit operator. Tests cover unequal sample spacing,
+time/position scale interaction, force scale/offset, ignored nominal velocity
+values, repeatability, invalid scales, overflow and finite timestamp collapse.
+An analytic regression also runs the actual training-only fitter on corrected
+nonuniform samples: identity, common time offset, time scale, and joint
+time/position/force scale and offset reproduce the coefficient transformations
+above. The six derivative-module tests and default all-target Clippy pass.
+The helper is connected to the numerical affine factor model below, but not yet
+to calibration-bound CLI requests. No default distribution or timebase
+calibration is inferred. These checks are synthetic algebraic evidence,
+not validation of a physical suspension or a calibrated clock.
+
+`SuspensionAffineCorrection::fit_training` connects per-acquisition corrections
+and derivative operators to the actual pooled training-only estimator. It caps
+the aggregate at 64 runs and 100,000 rows, retains acquisition identities, and
+does not consume holdout samples. Invalid corrections return `InvalidSample`;
+duplicate identities and nonphysical fit results retain their estimator errors.
+Callers must retain each result in realization order; this primitive does not
+sample, retry failed realizations, or certify calibration provenance.
+
+The separate `rne_suspension_affine_error_model` schema 1 now samples declared
+normal or rectangular unit-variance factors with an explicit WorldRandom seed.
+Signed loadings jointly perturb nominal elapsed-time, position and force scales
+and offsets. Factors are independent of each other; channels sharing a factor
+share its latent draw. Sharing is either all training runs or one acquisition
+(in request order), never per sample. Scale loadings are dimensionless, offset
+loadings use seconds/metres/newtons, and the reference time is fixed. These are
+additions to nominal correction parameters, not sequential correction products.
+The baseline uses the nominal corrections. Every draw reconstructs velocity and
+runs the actual estimator; invalid scales and nonphysical fits remain errors in
+their original slots. Draw prefixes are stable when only draw count increases.
+Limits are 4,096 draws, 16 ordered unique factors and 10 million row-factor-draw
+evaluations. This numerical API does not read calibration files and is not yet
+exposed as a calibration-bound CLI request. It does not cover sample jitter,
+filter uncertainty, model discrepancy or physical qualification; the existing
+additive/derived v1 evidence format remains unchanged.
+
+Focused verification (2026-09-09, working tree): all 34 default suspension
+library tests pass (47.92 s), including the Rapier deterministic Ackermann trace,
+and default all-target Clippy passes with `-D warnings`. Affine tests cover
+analytic damping scaling, seed replay, stable draw prefixes, holdout isolation,
+zero-loading equivalence, shared versus acquisition-specific realizations across
+two runs, serialization and retained invalid/nonphysical draws. This is not a
+workspace-wide or MuJoCo verification result for the affine changes.
+
+Additional focused verification: the three affine tests pass with the MuJoCo
+feature enabled, and MuJoCo all-target Clippy passes. Seeded joint signed scale
+and offset factors reproduce analytic stiffness, damping and equilibrium changes
+for both supported distributions. Nonfinite loadings, unknown model versions,
+excess draw counts and missing nominal corrections are rejected. This exercises
+the numerical identification path, not a MuJoCo physical suspension rollout.
+
+Standalone calibration references can use `SuspensionEvidenceFileRef::verify`
+for the existing root-confined, bounded streaming byte checks. This enables a
+separate retained timebase certificate without misusing the manifest's channel
+synchronization bound. A file reference alone still does not bind a certificate
+to an installed clock, justify a factor loading, or establish traceability;
+those declarations remain required in the forthcoming acquired affine request.
+
+`SuspensionAcquiredAffineRequest` now supplies that file-bound numerical entry
+point (kind `rne_suspension_acquired_affine_request`, schema 1). It requires
+nominal bindings for timebase, position and force, including identity corrections,
+followed by each factor's affected domains and training acquisitions in explicit
+order. Each binding retains acquisition/capture identity, instrument identity,
+exact calibration reference and a nonempty interpretation of scale/offset and
+sharing. Position/force identities and files must match the source manifest;
+clock factor references must match that acquisition's nominal clock declaration.
+The derivative binding must reproduce nominal velocities and match the model's
+operator. All acquisition files, including holdout sources, and standalone clock
+files are verified before propagation. Missing/extra/reordered bindings and
+instrument/capture mismatches are rejected. The installed clock identity and
+certificate interpretation are still caller assertions, not authenticated facts.
+The replayable `rne_suspension_affine_evidence` schema 1 retains the complete
+request and every baseline/draw outcome. Its strict 8 MiB decoder reopens the
+source and calibration files, reruns propagation and compares every field;
+encoding also verifies before writing. Neither this format nor its CLI grants
+physical qualification or uncertainty coverage.
+
+```powershell
+cargo run -p rne_mobility_benchmark -- --backend suspension-affine-errors --input E:/RNE-data/affine-request.json --evidence-root E:/RNE-data/retained --output E:/RNE-data/affine-evidence.json
+cargo run -p rne_mobility_benchmark -- --backend suspension-affine-errors-verify --input E:/RNE-data/affine-evidence.json --evidence-root E:/RNE-data/retained --output E:/RNE-data/affine-replayed.json
+```
+
+These example paths require a caller-supplied request and retained files. Both
+modes permit only backend, input, evidence root and output; seed and tolerance
+overrides are rejected because assumptions must remain embedded in the request.
+Input must be a regular file and is read with an 8 MiB bound. Failed verification
+does not write an output artifact. This affine model still excludes sample jitter,
+filters and model discrepancy, and is separate from additive-error evidence.
+
+Focused CLI verification (2026-09-09, working tree): the acquired binding library
+test passes (0.44 s), the complete diagnostic CLI integration test passes
+(1.94 s), and default all-target Clippy passes with `-D warnings`. Affine process
+checks include generate/reverify byte equality, retained failed fits, rejected
+draw deletion, rejected seed/tolerance overrides, and changed clock-file rejection
+without an output artifact. These results do not replace workspace CI or physical
+data validation.
 
 Source review: [JCGM 101:2008, BIPM](https://www.bipm.org/en/doi/10.59161/jcgm101-2008)
 describes propagation of input probability distributions through a measurement

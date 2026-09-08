@@ -319,6 +319,147 @@ fn whole_run_cli_generates_and_reverifies_all_diagnostic_envelopes() {
             absolute_tolerance_m_s: 0.0,
         }];
         let derived = SuspensionDerivedErrorRequest { errors, bindings };
+        {
+            use rne_mobility_benchmark::suspension_affine_acquisition::*;
+            use rne_mobility_benchmark::suspension_derivative::{
+                SuspensionAffineCorrection, SuspensionAffineErrorModel, SuspensionAffineFactor,
+            };
+            use rne_mobility_benchmark::suspension_uncertainty::{
+                SuspensionErrorDistribution, SuspensionErrorScope,
+            };
+            use SuspensionAffineDomain::{Force, Position, Timebase};
+            let mut affine = SuspensionAcquiredAffineRequest {
+                kind: "rne_suspension_acquired_affine_request".into(),
+                schema_version: 1,
+                acquisitions: derived.errors.acquisitions.clone(),
+                derivatives: derived.bindings.clone(),
+                model: SuspensionAffineErrorModel {
+                    kind: "rne_suspension_affine_error_model".into(),
+                    schema_version: 1,
+                    seed: 42,
+                    draws: 8,
+                    nominal: vec![(
+                        SuspensionAffineCorrection {
+                            time_reference_s: 0.0,
+                            time_scale: 1.0,
+                            time_offset_s: 0.0,
+                            position_scale: 1.0,
+                            position_offset_m: 0.0,
+                            force_scale: 1.0,
+                            force_offset_n: 0.0,
+                        },
+                        operator,
+                    )],
+                    factors: vec![SuspensionAffineFactor {
+                        factor_id: 7,
+                        distribution: SuspensionErrorDistribution::Normal,
+                        scope: SuspensionErrorScope::SharedTraining,
+                        time_scale_loading: 100.0,
+                        time_offset_loading_s: 0.0,
+                        position_scale_loading: 0.0,
+                        position_offset_loading_m: 0.0,
+                        force_scale_loading: 0.0,
+                        force_offset_loading_n: 0.0,
+                    }],
+                },
+                calibration: vec![],
+            };
+            let manifest = &affine.acquisitions.training[0];
+            let clock_bytes =
+                fs::read(root.join(&manifest.signals[0].calibration_artifact.path)).unwrap();
+            fs::write(root.join("affine-clock.txt"), &clock_bytes).unwrap();
+            for (factor_id, domain) in [
+                (None, Timebase),
+                (None, Position),
+                (None, Force),
+                (Some(7), Timebase),
+            ] {
+                let signal = &manifest.signals[if domain == Force { 2 } else { 0 }];
+                let mut artifact = signal.calibration_artifact.clone();
+                if domain == Timebase {
+                    artifact.path = "affine-clock.txt".into();
+                }
+                affine.calibration.push(SuspensionAffineCalibrationBinding {
+                    factor_id,
+                    domain,
+                    acquisition_id: affine.acquisitions.runs.training[0].acquisition_id,
+                    capture_id: manifest.capture_id.clone(),
+                    instrument_id: if domain == Timebase {
+                        "test-clock".into()
+                    } else {
+                        signal.sensor_id.clone()
+                    },
+                    calibration_artifact: artifact,
+                    interpretation: "Synthetic test declaration, not calibration evidence.".into(),
+                });
+            }
+            let input = root.join("affine-input.json");
+            let output = root.join("affine-output.json");
+            let replay = root.join("affine-replay.json");
+            fs::write(&input, serde_json::to_vec(&affine).unwrap()).unwrap();
+            let invoke = |mode: &str,
+                          source: &std::path::Path,
+                          destination: &std::path::Path,
+                          extra: &[&str]| {
+                Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
+                    .args(["--backend", mode, "--input"])
+                    .arg(source)
+                    .arg("--evidence-root")
+                    .arg(&root)
+                    .arg("--output")
+                    .arg(destination)
+                    .args(extra)
+                    .output()
+                    .unwrap()
+            };
+            for (mode, source, destination) in [
+                ("suspension-affine-errors", &input, &output),
+                ("suspension-affine-errors-verify", &output, &replay),
+            ] {
+                let result = invoke(mode, source, destination, &[]);
+                assert!(
+                    result.status.success(),
+                    "{mode}: {}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+            }
+            assert_eq!(fs::read(&output).unwrap(), fs::read(&replay).unwrap());
+            let evidence: SuspensionAffineEvidence =
+                serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+            assert_eq!(evidence.propagation.draws.len(), 8);
+            assert!(evidence.propagation.draws.iter().any(Result::is_err));
+            let rejected = root.join("affine-rejected.json");
+            for (mode, source) in [
+                ("suspension-affine-errors", &input),
+                ("suspension-affine-errors-verify", &output),
+            ] {
+                for extra in [["--seed", "123"], ["--interval-tolerance-s", "0.001"]] {
+                    let result = invoke(mode, source, &rejected, &extra);
+                    assert!(!result.status.success());
+                    assert!(String::from_utf8_lossy(&result.stderr)
+                        .contains("assumptions must be embedded"));
+                    assert!(!rejected.exists());
+                }
+            }
+            let mut forged = evidence;
+            forged.propagation.draws.clear();
+            let forged_path = root.join("affine-forged.json");
+            fs::write(&forged_path, serde_json::to_vec(&forged).unwrap()).unwrap();
+            let result = invoke(
+                "suspension-affine-errors-verify",
+                &forged_path,
+                &rejected,
+                &[],
+            );
+            assert!(!result.status.success());
+            assert!(String::from_utf8_lossy(&result.stderr).contains("replay mismatch"));
+            assert!(!rejected.exists());
+            fs::write(root.join("affine-clock.txt"), b"tampered").unwrap();
+            let result = invoke("suspension-affine-errors-verify", &output, &rejected, &[]);
+            assert!(!result.status.success());
+            assert!(!rejected.exists());
+            fs::write(root.join("affine-clock.txt"), clock_bytes).unwrap();
+        }
         let input = root.join("derived-input.json");
         let output = root.join("derived-output.json");
         let replay = root.join("derived-replay.json");

@@ -105,6 +105,18 @@ pub struct SuspensionEvidenceFileRef {
 }
 
 impl SuspensionEvidenceFileRef {
+    /// Verifies a standalone retained calibration file under an explicit root.
+    /// Enforces the same path confinement, regular-file, exact-size and streaming
+    /// SHA-256 checks as acquisition manifests. Byte identity is not authenticity.
+    pub fn verify(&self, evidence_root: &Path) -> Result<()> {
+        self.validate()?;
+        let root = evidence_root
+            .canonicalize()
+            .with_context(|| format!("canonicalize {}", evidence_root.display()))?;
+        ensure!(root.is_dir(), "suspension evidence root is not a directory");
+        verify_file(&root, self)
+    }
+
     /// Validates portable path, bounded size, and digest syntax without reading the file.
     pub fn validate(&self) -> Result<()> {
         ensure!(valid_relative_path(&self.path), "invalid evidence path");
@@ -678,6 +690,19 @@ mod tests {
         fs::write(root.join("procedure.txt"), b"test-only procedure bytes").unwrap();
         fs::write(root.join("calibration.txt"), b"test-only calibration bytes").unwrap();
         let evidence = request.identify(&root, 1e-9).unwrap();
+        let standalone = request.training[0].signals[2].calibration_artifact.clone();
+        standalone.verify(&root).unwrap();
+        assert!(standalone.verify(&root.join("raw.csv")).is_err());
+        let mut invalid = standalone.clone();
+        invalid.path = "../calibration.txt".into();
+        assert!(invalid.verify(&root).is_err());
+        invalid = standalone.clone();
+        invalid.size_bytes += 1;
+        assert!(invalid.verify(&root).is_err());
+        fs::write(root.join("calibration.txt"), b"TEST-ONLY calibration bytes").unwrap();
+        assert!(standalone.verify(&root).is_err());
+        fs::write(root.join("calibration.txt"), b"test-only calibration bytes").unwrap();
+        standalone.verify(&root).unwrap();
         use crate::suspension_uncertainty::*;
         let error_request = SuspensionAcquiredErrorRequest {
             kind: "rne_suspension_acquired_error_request".into(),
@@ -734,6 +759,110 @@ mod tests {
                 absolute_tolerance_m_s: 0.0,
             }];
             let mut model = error_request.model.clone();
+            {
+                use crate::suspension_affine_acquisition::*;
+                use crate::suspension_derivative::{
+                    SuspensionAffineCorrection, SuspensionAffineErrorModel, SuspensionAffineFactor,
+                };
+                use SuspensionAffineDomain::{Force, Position, Timebase};
+                let mut affine = SuspensionAcquiredAffineRequest {
+                    kind: "rne_suspension_acquired_affine_request".into(),
+                    schema_version: 1,
+                    acquisitions: derived.clone(),
+                    derivatives: bindings.clone(),
+                    model: SuspensionAffineErrorModel {
+                        kind: "rne_suspension_affine_error_model".into(),
+                        schema_version: 1,
+                        seed: 42,
+                        draws: 8,
+                        nominal: vec![(
+                            SuspensionAffineCorrection {
+                                time_reference_s: 0.0,
+                                time_scale: 1.0,
+                                time_offset_s: 0.0,
+                                position_scale: 1.0,
+                                position_offset_m: 0.0,
+                                force_scale: 1.0,
+                                force_offset_n: 0.0,
+                            },
+                            operator,
+                        )],
+                        factors: vec![SuspensionAffineFactor {
+                            factor_id: 7,
+                            distribution: SuspensionErrorDistribution::Normal,
+                            scope: SuspensionErrorScope::SharedTraining,
+                            time_scale_loading: 0.01,
+                            time_offset_loading_s: 0.0,
+                            position_scale_loading: 0.01,
+                            position_offset_loading_m: 0.0,
+                            force_scale_loading: 0.01,
+                            force_offset_loading_n: 0.0,
+                        }],
+                    },
+                    calibration: vec![],
+                };
+                // Dedicated synthetic clock bytes, not a synchronization declaration.
+                fs::write(root.join("clock.txt"), b"test-only calibration bytes").unwrap();
+                for factor_id in [None, Some(7)] {
+                    for domain in [Timebase, Position, Force] {
+                        let signal =
+                            &derived.training[0].signals[if domain == Force { 2 } else { 0 }];
+                        let mut artifact = signal.calibration_artifact.clone();
+                        if domain == Timebase {
+                            artifact.path = "clock.txt".into();
+                        }
+                        affine.calibration.push(SuspensionAffineCalibrationBinding {
+                            factor_id,
+                            domain,
+                            acquisition_id: derived.runs.training[0].acquisition_id,
+                            capture_id: derived.training[0].capture_id.clone(),
+                            instrument_id: if domain == Timebase {
+                                "test-clock".into()
+                            } else {
+                                signal.sensor_id.clone()
+                            },
+                            calibration_artifact: artifact,
+                            interpretation: "Synthetic test assumption, not physical calibration."
+                                .into(),
+                        });
+                    }
+                }
+                let propagated = affine.propagate(&root).unwrap();
+                let envelope = affine.evaluate(&root).unwrap();
+                let bytes = encode_suspension_affine(&envelope, &root).unwrap();
+                assert_eq!(envelope, decode_suspension_affine(&bytes, &root).unwrap());
+                let mut forged = envelope.clone();
+                forged.propagation.draws.clear();
+                assert!(forged.verify(&root).is_err());
+                forged = envelope.clone();
+                forged.schema_version = 2;
+                assert!(forged.verify(&root).is_err());
+                let mut unknown = serde_json::to_value(&envelope).unwrap();
+                unknown["qualified"] = serde_json::json!(true);
+                assert!(
+                    decode_suspension_affine(&serde_json::to_vec(&unknown).unwrap(), &root)
+                        .is_err()
+                );
+                assert_eq!(propagated, affine.model.propagate(&derived.runs).unwrap());
+                assert_eq!(propagated, affine.propagate(&root).unwrap());
+                let mut bad = affine.clone();
+                bad.calibration.pop();
+                assert!(bad.propagate(&root).is_err());
+                bad = affine.clone();
+                bad.calibration[3].instrument_id = "other-clock".into();
+                assert!(bad.propagate(&root).is_err());
+                bad = affine.clone();
+                bad.calibration[4].capture_id = "other-capture".into();
+                assert!(bad.propagate(&root).is_err());
+                bad = affine.clone();
+                bad.calibration[1].instrument_id = "other-position".into();
+                assert!(bad.propagate(&root).is_err());
+                fs::write(root.join("clock.txt"), b"TEST-ONLY calibration bytes").unwrap();
+                assert!(affine.propagate(&root).is_err());
+                assert!(decode_suspension_affine(&bytes, &root).is_err());
+                fs::write(root.join("clock.txt"), b"test-only calibration bytes").unwrap();
+                assert_eq!(propagated, affine.propagate(&root).unwrap());
+            }
             model.factors[0].position_loading_m = 0.001;
             model.factors[0].scope = SuspensionErrorScope::Sample;
             let result =

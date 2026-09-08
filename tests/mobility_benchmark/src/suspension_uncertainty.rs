@@ -372,7 +372,7 @@ pub struct SuspensionErrorPropagation {
     pub draws: Vec<Result<SuspensionTrainingCoefficients, SuspensionIdentificationError>>,
 }
 
-fn latent(rng: &mut DeterministicRng, distribution: SuspensionErrorDistribution) -> f64 {
+pub(crate) fn latent(rng: &mut DeterministicRng, distribution: SuspensionErrorDistribution) -> f64 {
     match distribution {
         SuspensionErrorDistribution::Normal => {
             // 1-u is strictly positive since uniform_f64 excludes its upper bound.
@@ -383,7 +383,7 @@ fn latent(rng: &mut DeterministicRng, distribution: SuspensionErrorDistribution)
     }
 }
 
-fn draw_rng(random: &WorldRandom, factor_id: u64, draw: usize) -> DeterministicRng {
+pub(crate) fn draw_rng(random: &WorldRandom, factor_id: u64, draw: usize) -> DeterministicRng {
     // Hierarchical derivation avoids symmetric XOR collisions between factor and draw IDs.
     let factor_random = WorldRandom::new(random.stream_seed(RandomStreamId::new(factor_id)));
     factor_random.stream(RandomStreamId::new(draw as u64 ^ 0x5355_5350_4552_5231))
@@ -628,6 +628,151 @@ mod tests {
                 }],
             },
         )
+    }
+
+    #[test]
+    fn affine_draws_replay_scale_damping_and_preserve_failed_slots() {
+        use crate::suspension_derivative::{
+            SuspensionAffineCorrection, SuspensionAffineErrorModel, SuspensionAffineFactor,
+            SuspensionDerivativeOperator,
+        };
+        let (mut request, _) = fixture();
+        let op = SuspensionDerivativeOperator::NonuniformThreePointSecantEndsV1;
+        let nominal = SuspensionAffineCorrection {
+            time_reference_s: 0.0,
+            time_scale: 1.0,
+            time_offset_s: 0.0,
+            position_scale: 1.0,
+            position_offset_m: 0.0,
+            force_scale: 1.0,
+            force_offset_n: 0.0,
+        };
+        let mut model = SuspensionAffineErrorModel {
+            kind: "rne_suspension_affine_error_model".into(),
+            schema_version: 1,
+            seed: 42,
+            draws: 16,
+            nominal: vec![(nominal, op)],
+            factors: vec![SuspensionAffineFactor {
+                factor_id: 7,
+                distribution: SuspensionErrorDistribution::Rectangular,
+                scope: SuspensionErrorScope::SharedTraining,
+                time_scale_loading: 0.01,
+                time_offset_loading_s: 0.0,
+                position_scale_loading: 0.0,
+                position_offset_loading_m: 0.0,
+                force_scale_loading: 0.0,
+                force_offset_loading_n: 0.0,
+            }],
+        };
+        let result = model.propagate(&request).unwrap();
+        assert_eq!(result, model.propagate(&request).unwrap());
+        let base = result.baseline.unwrap();
+        // All six signed loadings share one latent value. An independent-channel
+        // implementation would violate these per-draw coefficient identities.
+        let mut joint = model.clone();
+        joint.factors[0].time_offset_loading_s = 0.02;
+        joint.factors[0].position_scale_loading = -0.015;
+        joint.factors[0].position_offset_loading_m = 0.001;
+        joint.factors[0].force_scale_loading = 0.025;
+        joint.factors[0].force_offset_loading_n = -20.0;
+        for distribution in [
+            SuspensionErrorDistribution::Normal,
+            SuspensionErrorDistribution::Rectangular,
+        ] {
+            joint.factors[0].distribution = distribution;
+            let propagated = joint.propagate(&request).unwrap();
+            assert_eq!(propagated, joint.propagate(&request).unwrap());
+            for (i, fitted) in propagated.draws.iter().enumerate() {
+                let mut rng = draw_rng(&WorldRandom::new(42), 7, i);
+                let z = latent(&mut rng, distribution);
+                let at = 1.0 + 0.01 * z;
+                let ax = 1.0 - 0.015 * z;
+                let af = 1.0 + 0.025 * z;
+                let expected_k = af / ax * base.stiffness_n_per_m;
+                let expected_c = af * at / ax * base.damping_n_s_per_m;
+                let expected_e =
+                    ax * base.equilibrium_position_m + 0.001 * z - 20.0 * z / expected_k;
+                let fitted = fitted.as_ref().unwrap();
+                assert!((fitted.stiffness_n_per_m - expected_k).abs() < 1e-5);
+                assert!((fitted.damping_n_s_per_m - expected_c).abs() < 1e-6);
+                assert!((fitted.equilibrium_position_m - expected_e).abs() < 1e-12);
+            }
+        }
+        for invalid in [f64::NAN, f64::INFINITY] {
+            joint.factors[0].force_scale_loading = invalid;
+            assert!(joint.propagate(&request).is_err());
+        }
+        joint = model.clone();
+        joint.schema_version = 2;
+        assert!(joint.propagate(&request).is_err());
+        joint = model.clone();
+        joint.draws = 4097;
+        assert!(joint.propagate(&request).is_err());
+        joint = model.clone();
+        joint.nominal.clear();
+        assert!(joint.propagate(&request).is_err());
+        for (i, fitted) in result.draws.iter().enumerate() {
+            let mut rng = draw_rng(&WorldRandom::new(42), 7, i);
+            let scale = 1.0 + 0.01 * latent(&mut rng, SuspensionErrorDistribution::Rectangular);
+            let fitted = fitted.as_ref().unwrap();
+            assert!((fitted.stiffness_n_per_m - base.stiffness_n_per_m).abs() < 1e-5);
+            assert!((fitted.damping_n_s_per_m - scale * base.damping_n_s_per_m).abs() < 1e-6);
+        }
+        model.draws = 32;
+        assert_eq!(
+            &model.propagate(&request).unwrap().draws[..16],
+            &result.draws
+        );
+        request.holdout[0].dataset.samples[0].force_n += 100.0;
+        request.holdout[0].dataset.seal().unwrap();
+        model.draws = 16;
+        assert_eq!(result, model.propagate(&request).unwrap());
+        model.factors[0].time_scale_loading = 100.0;
+        let failed = model.propagate(&request).unwrap();
+        assert_eq!(failed.draws.len(), 16);
+        assert!(failed
+            .draws
+            .contains(&Err(SuspensionIdentificationError::InvalidSample)));
+        assert!(failed
+            .draws
+            .contains(&Err(SuspensionIdentificationError::NonPhysicalResult)));
+        assert_eq!(failed, model.propagate(&request).unwrap());
+        model.factors[0].scope = SuspensionErrorScope::Sample;
+        assert!(model.propagate(&request).is_err());
+        model.factors[0].scope = SuspensionErrorScope::Acquisition;
+        model.factors[0].time_scale_loading = 0.01;
+        assert_ne!(result.draws, model.propagate(&request).unwrap().draws);
+        model.factors.push(model.factors[0].clone());
+        assert!(model.propagate(&request).is_err());
+        model.factors.pop();
+        let mut second = request.training[0].clone();
+        second.acquisition_id = 3;
+        second.dataset.dataset_id = "synthetic.affine.second".into();
+        for sample in &mut second.dataset.samples {
+            sample.capture_time_s += 1.0;
+        }
+        second.dataset.seal().unwrap();
+        request.training.push(second);
+        model.nominal.push((nominal, op));
+        let acquisition = model.propagate(&request).unwrap();
+        assert!(acquisition.draws.iter().all(Result::is_ok));
+        model.factors[0].scope = SuspensionErrorScope::SharedTraining;
+        let shared = model.propagate(&request).unwrap();
+        assert_ne!(acquisition.draws, shared.draws);
+        assert_eq!(shared, model.propagate(&request).unwrap());
+        model.seed += 1;
+        assert_ne!(shared.draws, model.propagate(&request).unwrap().draws);
+        model.factors[0].time_scale_loading = 0.0;
+        let zero = model.propagate(&request).unwrap();
+        assert!(zero.draws.iter().all(|draw| *draw == zero.baseline));
+        let encoded = serde_json::to_vec(&model).unwrap();
+        assert_eq!(
+            model,
+            serde_json::from_slice::<SuspensionAffineErrorModel>(&encoded).unwrap()
+        );
+        model.nominal[0].0.time_scale = 0.0;
+        assert!(model.propagate(&request).is_err());
     }
 
     #[test]
