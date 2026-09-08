@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$Archive,
     [Parameter(Mandatory=$true)][string]$Executable,
-    [Parameter(Mandatory=$true)][string]$OutputPath
+    [Parameter(Mandatory=$true)][string]$OutputPath,
+    [ValidateSet('FullInterior','TimeSegments')][string]$Protocol = 'FullInterior'
 )
 $ErrorActionPreference = 'Stop'
 if (Test-Path -LiteralPath $OutputPath) { throw 'Refusing to overwrite evidence' }
@@ -12,6 +13,10 @@ $expected = @{
 }
 $reports = [System.Collections.Generic.List[object]]::new()
 $firstOutputs = @{}
+$firstEndpoints = if ($Protocol -eq 'TimeSegments') {
+    @('259556000000', '280356000000', '301156000000')
+} else { @('259556000000') }
+$endpoints = if ($Protocol -eq 'TimeSegments') { 10800 } else { 52963 }
 $sourceHashes = @{}
 foreach ($source in @('crates/rne_sensor/src/allan/timed.rs',
     'tests/mobility_benchmark/src/recorded_ipin.rs',
@@ -24,6 +29,7 @@ $zip = [System.IO.Compression.ZipFile]::OpenRead($Archive)
 try {
     for ($repeat=0; $repeat -lt 2; $repeat++) {
         foreach ($name in @('acceleration_Allan.csv','rotation_Allan.csv')) {
+          foreach ($firstEndpoint in $firstEndpoints) {
             for ($axis=0; $axis -lt 3; $axis++) {
                 $info = [System.Diagnostics.ProcessStartInfo]::new($Executable)
                 $info.UseShellExecute=$false
@@ -31,7 +37,7 @@ try {
                 $info.RedirectStandardInput=$true
                 $info.RedirectStandardOutput=$true
                 $info.RedirectStandardError=$true
-                foreach ($argument in @('-', "$axis", '1000000', '259556000000', '1000000', '52963')) {
+                foreach ($argument in @('-', "$axis", '1000000', $firstEndpoint, '1000000', "$endpoints")) {
                     $info.ArgumentList.Add($argument)
                 }
                 $process = [System.Diagnostics.Process]::Start($info)
@@ -49,22 +55,23 @@ try {
                     if ($process.ExitCode -ne 0) { throw "Diagnostic failed: $errorText" }
                     $report = $text | ConvertFrom-Json
                     if ($report.source.source_sha256 -cne $expected[$name]) { throw 'Source hash mismatch' }
-                    if ($report.axis -ne $axis -or $report.statistic.valid_pairs + $report.statistic.empty_pairs -ne 52963) {
+                    if ($report.axis -ne $axis -or $report.statistic.valid_pairs + $report.statistic.empty_pairs -ne $endpoints) {
                         throw 'Incomplete diagnostic result'
                     }
-                    $key = "$name/$axis"
+                    $key = "$name/$firstEndpoint/$axis"
                     if ($repeat -eq 0) {
                         $firstOutputs[$key] = $text
-                        $reports.Add([pscustomobject]@{entry=$name; result=$report})
+                        $reports.Add([pscustomobject]@{entry=$name; first_endpoint_us=$firstEndpoint; result=$report})
                     } elseif (-not [String]::Equals($firstOutputs[$key],$text,[StringComparison]::Ordinal)) {
                         throw "Non-reproducible output $key"
                     }
-                    Write-Output "repeat=$repeat entry=$name axis=$axis variance=$($report.statistic.variance_source_units_squared)"
+                    Write-Output "repeat=$repeat entry=$name start_us=$firstEndpoint axis=$axis variance=$($report.statistic.variance_source_units_squared)"
                 } finally {
                     if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
                     $process.Dispose()
                 }
             }
+          }
         }
     }
 } finally { $zip.Dispose() }
@@ -77,7 +84,8 @@ foreach ($source in $sourceHashes.Keys) {
     }
 }
 $result = [ordered]@{
-    schema_version=1; protocol='ipin_time_window_diagnostic_v1'; repeats=2
+    schema_version=1; protocol=$(if ($Protocol -eq 'TimeSegments') { 'ipin_equal_duration_time_segments_v1' } else { 'ipin_time_window_diagnostic_v1' }); repeats=2
+    window_us=1000000; endpoint_period_us=1000000; endpoints=$endpoints; first_endpoints_us=$firstEndpoints
     byte_identical_repeats=$true; executable_sha256=$exeHash; source_code_sha256=$sourceHashes
     physical_calibration=$false; reports=$reports.ToArray()
 }

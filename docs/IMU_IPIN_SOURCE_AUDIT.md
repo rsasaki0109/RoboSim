@@ -102,8 +102,11 @@ an independent direct-window oracle across four durations, irregular sample coun
 a long empty interval followed by recovery, and offsets 0, 9.81 and 1e9. Validation
 also covers zero/overflowing grids, incomplete source coverage, zero total weight,
 trailing NaN, arithmetic overflow, and the retained/total sample limits. The
-20-million-record limit is checked even after evaluation is complete. Full
-regression and connection to the physical source remain pending.
+20-million-record limit is checked even after evaluation is complete. The physical
+connection is described below. Full `xtask ci` passed for commit `98c7c40`, including
+workspace Clippy/tests, example and RL smokes, headless checks, OSS parity, 361 fuzz
+cases and Behavior CI 10/10. Frozen-run log:
+`E:\RNE-build\m3c-sensor\imu-irregular-v1-ci.log` (exit 0).
 
 The evaluation contract must declare the endpoint grid, window durations,
 coverage and empty-window accounting. A zero total weight must fail; missing data
@@ -132,8 +135,8 @@ Acceleration source-axis extrema were [-0.287936,-0.150897,9.66878] through
 [-0.0307083,0.159058,9.99879]; rotation extrema were
 [-0.0111828,-0.0190631,-0.00939941] through [0.01465,0.0147979,0.0168089].
 These are measurements in source coordinates, not inferred turn-on bias or
-calibrated limits. Full regression for this reader remains pending: the successful
-`6d7e7d1` IMU CI predates this addition.
+calibrated limits. The successful `98c7c40` full CI includes this reader; the earlier
+`6d7e7d1` IMU CI did not.
 
 Remaining gates: validated source reader and replayable source audit;
 strict source identity and unknown-status handling; irregular and long-series
@@ -175,7 +178,8 @@ It binds executable and source-code hashes, explicit grids, source audits and
 repeatability. This was an uncommitted development build, not evidence for the
 earlier frozen CI commit. No thermal correction, profile fitting, confidence
 interval, or physical noise-density interpretation follows from this one-duration
-result. Complete regression for the source reader and timed statistic remains pending.
+result. Complete regression for the source reader and timed statistic passed in
+the frozen `98c7c40` run described above.
 
 To reproduce without extracting the CSVs, build `ipin_time_deviation` in the
 external Cargo target, then run from the repository root (PowerShell 7):
@@ -188,3 +192,50 @@ Choose a new output filename; the script refuses overwriting evidence. The scrip
 contains the fixed grid and expected input hashes, validates both complete passes,
 and binds the executable and source files used. A changed build may produce a
 different evidence-file hash even when its numerical outputs agree.
+
+## Equal-duration temporal diagnostic
+
+Before executing the comparison, the protocol fixed three first endpoints at
+259556, 280356 and 301156 source seconds, 10800 endpoints per segment, 1-second
+spacing and 1-second adjacent windows. Each segment uses the union of half-open
+windows `[first_endpoint - 2 s, first_endpoint + 10799 s)`. These are separated
+early/middle/late diagnostic domains, not independent training/validation/test sets.
+All source rows are still parsed and hashed on every invocation. No source-clock
+qualification, resampling, thermal correction or fitted profile is implied.
+
+All 36 invocations succeeded. Each of the 18 conditions reproduced byte-identical
+JSON on its second run, with 10800 valid pairs and no empty pairs. Executable and
+source-code hashes were checked before and after execution.
+
+| Source axis | Early deviation | Middle deviation | Late deviation |
+| --- | ---: | ---: | ---: |
+| acceleration X | 0.00189459486620244 | 0.0018777952210854 | 0.00185422653673403 |
+| acceleration Y | 0.00176128189922762 | 0.00170354028849906 | 0.00172159173631909 |
+| acceleration Z | 0.00187504684087406 | 0.00180519284582738 | 0.00178502515618632 |
+| rotation X | 0.000152196249503715 | 0.000148562093289727 | 0.000147223344753409 |
+| rotation Y | 0.000209696606589473 | 0.000210738903903423 | 0.000207973941802802 |
+| rotation Z | 0.000152311768804003 | 0.000146063791760897 | 0.000146148196886767 |
+
+Values remain in source units. Late deviations are 0.82–4.80% below early values;
+no confidence intervals or statistical significance are established. This is still
+one window duration, not a calibrated Allan curve. The initial execution used an
+inline orchestration command; the checked-in script now exposes the same fixed grid
+via `-Protocol TimeSegments`. That script's full 36-invocation rerun also passed:
+all 18 source/statistic results matched the original diagnostic, and both repeats
+were byte-identical. Script-bound evidence:
+`E:\RoboSim-external-data\mobility-ipin-14501047\time-segment-diagnostic-script-v1.json`,
+SHA-256 `c5b3e1f3ff1d485b96689f969a10557b7502adfa89bd783d8b2d3630b7bd023b`.
+
+Evidence: `E:\RoboSim-external-data\mobility-ipin-14501047\time-segment-diagnostic-v1.json`,
+SHA-256 `b4ada7e1040f18e9f49e73374ee87200b36a8e6de4379d2c001a77f2f354d9a8`.
+
+The temperature source was independently parsed in full (52965 finite, strictly
+time-ordered rows; exact source hash above). Each matching window-union domain
+contains 10801 temperature records. Early/middle/late minima are 41.0273, 36.0898,
+36.3398 and maxima are 52.5625, 36.5586, 36.6328 degrees Celsius under the annex
+convention. Sensor identity/location remains unqualified: neither temperature
+causality nor constant IMU-die temperature follows from these ranges.
+
+Temperature evidence:
+`E:\RoboSim-external-data\mobility-ipin-14501047\temperature-time-segments-v1.json`,
+SHA-256 `17c7d805e7de742b3dbb786ab738303992812df6daa582e26964d9d3455791c1`.
