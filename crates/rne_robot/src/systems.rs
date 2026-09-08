@@ -73,6 +73,92 @@ pub struct SuspensionIdentificationRun<'a> {
     pub samples: &'a [SuspensionForceSample],
 }
 
+/// Training-only excitation diagnostics for the centered two-column design.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionExcitationDiagnostics {
+    /// Number of training samples, pooled in caller order.
+    pub sample_count: usize,
+    /// Centered position RMS in meters (population normalization).
+    pub position_rms_m: f64,
+    /// Centered velocity RMS in meters per second (population normalization).
+    pub velocity_rms_m_s: f64,
+    /// Position/velocity correlation; absent when either column has zero energy.
+    pub position_velocity_correlation: Option<f64>,
+    /// L2 condition number of the centered, unit-column-norm design, not its Gram
+    /// matrix. Absent for zero energy or numerically singular correlation.
+    pub normalized_design_condition: Option<f64>,
+}
+
+/// Measures training excitation without accepting holdout data or using forces.
+///
+/// With normalized centered columns the Gram eigenvalues are `1 +/- |rho|`,
+/// so the design condition is `sqrt((1 + |rho|)/(1 - |rho|))`. This diagnoses
+/// collinearity only: retain the SI RMS values to inspect excitation magnitude.
+/// It is not a covariance estimate or a parameter-acceptance gate. Input samples
+/// still require valid finite force fields and ordered per-acquisition clocks.
+/// Scaling before centering avoids squaring large SI coordinates directly.
+pub fn suspension_training_excitation(
+    runs: &[SuspensionIdentificationRun<'_>],
+) -> Result<SuspensionExcitationDiagnostics, SuspensionIdentificationError> {
+    let mut ids = std::collections::BTreeSet::new();
+    for run in runs {
+        if !ids.insert(run.acquisition_id) {
+            return Err(SuspensionIdentificationError::DuplicateAcquisition);
+        }
+        if run.samples.is_empty() {
+            return Err(SuspensionIdentificationError::InsufficientSamples);
+        }
+        validate_suspension_samples(run.samples)?;
+    }
+    let samples = || runs.iter().flat_map(|run| run.samples.iter());
+    let sample_count = samples().count();
+    if sample_count < 3 {
+        return Err(SuspensionIdentificationError::InsufficientSamples);
+    }
+    let (x_scale, v_scale) = samples().fold((0.0_f64, 0.0_f64), |(x, v), s| {
+        (x.max(s.position_m.abs()), v.max(s.velocity_m_s.abs()))
+    });
+    let x_scale = if x_scale == 0.0 { 1.0 } else { x_scale };
+    let v_scale = if v_scale == 0.0 { 1.0 } else { v_scale };
+    let n = sample_count as f64;
+    let first = runs[0].samples[0];
+    let x_origin = first.position_m / x_scale;
+    let v_origin = first.velocity_m_s / v_scale;
+    let (x_offset, v_offset) = samples().fold((0.0, 0.0), |(x, v), s| {
+        (
+            x + (s.position_m / x_scale - x_origin) / n,
+            v + (s.velocity_m_s / v_scale - v_origin) / n,
+        )
+    });
+    let (xx, vv, xv) = samples().fold((0.0, 0.0, 0.0), |(xx, vv, xv), s| {
+        let x = (s.position_m / x_scale - x_origin) - x_offset;
+        let v = (s.velocity_m_s / v_scale - v_origin) - v_offset;
+        (xx + x * x, vv + v * v, xv + x * v)
+    });
+    let position_rms_m = (xx / n).sqrt() * x_scale;
+    let velocity_rms_m_s = (vv / n).sqrt() * v_scale;
+    if !position_rms_m.is_finite() || !velocity_rms_m_s.is_finite() {
+        return Err(SuspensionIdentificationError::InvalidSample);
+    }
+    let correlation = if xx > 0.0 && vv > 0.0 {
+        Some((xv / xx.sqrt() / vv.sqrt()).clamp(-1.0, 1.0))
+    } else {
+        None
+    };
+    let condition = correlation.and_then(|rho| {
+        let gap = 1.0 - rho.abs();
+        (gap > f64::EPSILON * 8.0).then(|| ((1.0 + rho.abs()) / gap).sqrt())
+    });
+    Ok(SuspensionExcitationDiagnostics {
+        sample_count,
+        position_rms_m,
+        velocity_rms_m_s,
+        position_velocity_correlation: correlation,
+        normalized_design_condition: condition,
+    })
+}
+
 /// Residual evidence for one acquisition, evaluated with frozen fitted parameters.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -2289,6 +2375,139 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn suspension_excitation_extreme_scales_and_invalid_inputs_are_explicit() {
+        for scale in [f64::MIN_POSITIVE, 1.0, f64::MAX] {
+            let mut samples: Vec<_> = [(-1.0, -1.0), (-1.0, 1.0), (1.0, -1.0), (1.0, 1.0)]
+                .into_iter()
+                .enumerate()
+                .map(|(i, (x, v))| SuspensionForceSample {
+                    capture_time_s: i as f64,
+                    position_m: x * scale,
+                    velocity_m_s: v * scale,
+                    force_n: 0.0,
+                })
+                .collect();
+            let result = suspension_training_excitation(&[SuspensionIdentificationRun {
+                acquisition_id: 1,
+                samples: &samples,
+            }])
+            .unwrap();
+            assert_eq!(result.position_rms_m, scale);
+            assert_eq!(result.velocity_rms_m_s, scale);
+            assert_eq!(result.normalized_design_condition, Some(1.0));
+            for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                samples[0].force_n = invalid;
+                assert_eq!(
+                    suspension_training_excitation(&[SuspensionIdentificationRun {
+                        acquisition_id: 1,
+                        samples: &samples
+                    }]),
+                    Err(SuspensionIdentificationError::InvalidSample)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn suspension_excitation_near_collinearity_and_force_independence() {
+        // Orthogonal x/z columns with equal norm; v = x + epsilon*z.
+        // The normalized design condition is (sqrt(1+epsilon^2)+1)/epsilon.
+        let epsilon = 0.01;
+        let mut samples: Vec<_> = [(-1.0, -1.0), (-1.0, 1.0), (1.0, -1.0), (1.0, 1.0)]
+            .into_iter()
+            .enumerate()
+            .map(|(i, (x, z))| SuspensionForceSample {
+                capture_time_s: i as f64,
+                position_m: x,
+                velocity_m_s: x + epsilon * z,
+                force_n: 0.0,
+            })
+            .collect();
+        let diagnose = |samples: &[SuspensionForceSample]| {
+            suspension_training_excitation(&[SuspensionIdentificationRun {
+                acquisition_id: 1,
+                samples,
+            }])
+            .unwrap()
+        };
+        let baseline = diagnose(&samples);
+        let expected = ((1.0 + epsilon * epsilon).sqrt() + 1.0) / epsilon;
+        let actual = baseline.normalized_design_condition.unwrap();
+        assert!((actual - expected).abs() < expected * 1.0e-10);
+        assert!(actual > 200.0);
+        for (i, sample) in samples.iter_mut().enumerate() {
+            sample.force_n = 1.0e100 * (i as f64 - 2.0);
+        }
+        assert_eq!(diagnose(&samples), baseline);
+        let run = SuspensionIdentificationRun {
+            acquisition_id: 1,
+            samples: &samples,
+        };
+        assert_eq!(
+            suspension_training_excitation(&[run, run]),
+            Err(SuspensionIdentificationError::DuplicateAcquisition)
+        );
+        assert_eq!(
+            suspension_training_excitation(&[]),
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+        samples[1].capture_time_s = samples[0].capture_time_s;
+        assert_eq!(
+            suspension_training_excitation(&[SuspensionIdentificationRun {
+                acquisition_id: 1,
+                samples: &samples
+            }]),
+            Err(SuspensionIdentificationError::InvalidSample)
+        );
+    }
+
+    #[test]
+    fn suspension_excitation_orthogonal_collinear_and_constant_designs() {
+        let mut samples: Vec<_> = [(-1.0, -1.0), (-1.0, 1.0), (1.0, -1.0), (1.0, 1.0)]
+            .into_iter()
+            .enumerate()
+            .map(|(i, (x, v))| SuspensionForceSample {
+                capture_time_s: i as f64,
+                position_m: x,
+                velocity_m_s: v,
+                force_n: 0.0,
+            })
+            .collect();
+        let diagnose = |samples: &[SuspensionForceSample]| {
+            suspension_training_excitation(&[SuspensionIdentificationRun {
+                acquisition_id: 1,
+                samples,
+            }])
+            .unwrap()
+        };
+        let result = diagnose(&samples);
+        assert_eq!(result.normalized_design_condition, Some(1.0));
+        assert_eq!(result.position_rms_m, 1.0);
+        for sample in &mut samples {
+            sample.position_m *= 1.0e150;
+            sample.velocity_m_s *= 1.0e-150;
+            sample.force_n = 999.0;
+        }
+        let scaled = diagnose(&samples);
+        assert_eq!(scaled.normalized_design_condition, Some(1.0));
+        assert_eq!(scaled.position_rms_m, 1.0e150);
+        assert_eq!(scaled.velocity_rms_m_s, 1.0e-150);
+        for sample in &mut samples {
+            sample.velocity_m_s = -sample.position_m;
+        }
+        let singular = diagnose(&samples);
+        assert_eq!(singular.position_velocity_correlation, Some(-1.0));
+        assert_eq!(singular.normalized_design_condition, None);
+        for sample in &mut samples {
+            sample.position_m = 0.123;
+        }
+        let constant = diagnose(&samples);
+        assert_eq!(constant.position_rms_m, 0.0);
+        assert_eq!(constant.position_velocity_correlation, None);
+        assert_eq!(constant.normalized_design_condition, None);
     }
 
     #[test]

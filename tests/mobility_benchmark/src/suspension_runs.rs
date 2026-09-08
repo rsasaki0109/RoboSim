@@ -10,6 +10,75 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
+/// Whole-run evidence with training-only excitation diagnostics; not uncertainty.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionExcitationEvidence {
+    /// Must be `rne_suspension_excitation_evidence`.
+    pub kind: String,
+    /// Independent envelope schema, currently 1.
+    pub schema_version: u32,
+    /// Unchanged v1 fit, run split and residual verdicts.
+    pub run_evidence: SuspensionRunEvidence,
+    /// Recomputed solely from embedded training acquisitions.
+    pub training_excitation: rne_robot::systems::SuspensionExcitationDiagnostics,
+}
+
+/// Fits a checked request and retains excitation without changing residual gates.
+pub fn identify_suspension_excitation(
+    request: &SuspensionRunRequest,
+) -> Result<SuspensionExcitationEvidence> {
+    let run_evidence = identify_suspension_runs(request)?;
+    let training: Vec<_> = request
+        .training
+        .iter()
+        .map(|run| SuspensionIdentificationRun {
+            acquisition_id: run.acquisition_id,
+            samples: &run.dataset.samples,
+        })
+        .collect();
+    let training_excitation = rne_robot::systems::suspension_training_excitation(&training)?;
+    let evidence = SuspensionExcitationEvidence {
+        kind: "rne_suspension_excitation_evidence".into(),
+        schema_version: 1,
+        run_evidence,
+        training_excitation,
+    };
+    ensure!(
+        serde_json::to_vec(&evidence)?.len() <= MAX_SUSPENSION_RUN_BYTES,
+        "excitation evidence too large"
+    );
+    Ok(evidence)
+}
+
+/// Reexecutes both fit and excitation, then emits bounded compact JSON.
+pub fn encode_suspension_excitation(evidence: &SuspensionExcitationEvidence) -> Result<Vec<u8>> {
+    ensure!(
+        *evidence == identify_suspension_excitation(&evidence.run_evidence.request)?,
+        "excitation evidence replay mismatch"
+    );
+    let bytes = serde_json::to_vec(evidence)?;
+    ensure!(
+        bytes.len() <= MAX_SUSPENSION_RUN_BYTES,
+        "excitation evidence too large"
+    );
+    Ok(bytes)
+}
+
+/// Bounded decoder that recomputes diagnostics, input binding and run verdicts.
+pub fn decode_suspension_excitation(bytes: &[u8]) -> Result<SuspensionExcitationEvidence> {
+    ensure!(
+        bytes.len() <= MAX_SUSPENSION_RUN_BYTES,
+        "excitation evidence too large"
+    );
+    let evidence: SuspensionExcitationEvidence = serde_json::from_slice(bytes)?;
+    ensure!(
+        evidence == identify_suspension_excitation(&evidence.run_evidence.request)?,
+        "excitation evidence replay mismatch"
+    );
+    Ok(evidence)
+}
+
 /// Maximum serialized request or evidence size (including embedded samples).
 pub const MAX_SUSPENSION_RUN_BYTES: usize = 8 * 1024 * 1024;
 
@@ -206,6 +275,32 @@ mod tests {
                 dataset: second,
             }],
         }
+    }
+
+    #[test]
+    fn excitation_evidence_recomputes_training_only_and_keeps_v1_unchanged() {
+        let mut request = request();
+        let evidence = identify_suspension_excitation(&request).unwrap();
+        assert_eq!(
+            evidence.run_evidence,
+            identify_suspension_runs(&request).unwrap()
+        );
+        let bytes = encode_suspension_excitation(&evidence).unwrap();
+        assert_eq!(decode_suspension_excitation(&bytes).unwrap(), evidence);
+        for sample in &mut request.holdout[0].dataset.samples {
+            sample.force_n += 1.0;
+        }
+        request.holdout[0].dataset.seal().unwrap();
+        let changed = identify_suspension_excitation(&request).unwrap();
+        assert_eq!(changed.training_excitation, evidence.training_excitation);
+        assert_ne!(
+            changed.run_evidence.request_sha256,
+            evidence.run_evidence.request_sha256
+        );
+        let mut forged = evidence;
+        forged.training_excitation.position_rms_m *= 2.0;
+        assert!(encode_suspension_excitation(&forged).is_err());
+        assert!(decode_suspension_excitation(&serde_json::to_vec(&forged).unwrap()).is_err());
     }
 
     #[test]

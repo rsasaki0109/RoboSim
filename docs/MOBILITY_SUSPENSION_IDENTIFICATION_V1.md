@@ -204,6 +204,39 @@ raw-source hashes and distinguish derived velocity from measured velocity.
 
 ### Identification validation upgrade
 
+The additive `rne_robot::systems::suspension_training_excitation` diagnostic
+accepts training acquisitions only. It returns centered position/velocity RMS
+in SI units, correlation, and the L2 condition number of the centered design
+after normalizing each column to unit norm. For correlation `rho`, its Gram
+matrix has eigenvalues `1 +/- |rho|`, so the design condition is
+`sqrt((1+|rho|)/(1-|rho|))`, not the squared Gram condition. The norm convention
+follows [NumPy's official condition-number documentation](https://numpy.org/doc/stable/reference/generated/numpy.linalg.cond.html).
+Zero-energy columns or `1-|rho| <= 8*EPSILON` return no finite condition, rather
+than serializing infinity. Scaling before centering avoids direct SI squaring
+overflow. RMS magnitudes remain separate because unit normalization can hide
+insufficient excitation amplitude. Forces are validated but do not enter the
+calculation. It does not change residual acceptance gates and is not parameter
+uncertainty evidence.
+
+The separate `rne_suspension_excitation_evidence` v1 envelope embeds unchanged
+whole-run evidence plus these training-only diagnostics. CLI modes
+`suspension-excitation` (whole-run request input) and `suspension-excitation-verify`
+(envelope input) use the same bounded 8 MiB intake and compact output. Verification
+reexecutes both the fit and diagnostics and compares the complete envelope.
+Changing holdout forces cannot change the diagnostic; editing a stored diagnostic
+is rejected. Neither an acceptable condition number nor a residual verdict
+qualifies instrument calibration or independent physical trials.
+
+Excitation-slice checks (2026-09-08): all 59 `rne_robot` library tests and
+all-target Clippy passed. Tests include orthogonal/collinear/constant designs,
+an analytic near-collinear condition, force independence, extreme finite scales,
+and invalid inputs. The MuJoCo-enabled benchmark library passed 163 tests with
+zero failures and two ignored long training jobs (250.30 s); all-target Clippy
+passed after the envelope/CLI addition. The four run-artifact tests include
+diagnostic recomputation and tamper rejection. These are focused and benchmark
+regression checks, not full workspace CI for the excitation changes; the
+`fdecb2e` full-CI checkpoint below predates them.
+
 Inspection of `identify_suspension_strut` confirms that v1 holds out every
 `holdout_stride`th point from a single ordered sequence. This prevents direct
 use of held-out samples in fitting, but does not establish independent trials:
@@ -266,8 +299,16 @@ benchmark library passed 162 tests with zero failures and two explicitly ignored
 long training jobs (220.66 s); its all-target Clippy also passed. This includes
 v1 suspension regressions, whole-run split isolation, failed-run retention,
 rehashed split/report tampering rejection and compact evidence roundtrips.
-The two long training jobs were not rerun. Full workspace CI for this whole-run
-slice remains pending; the earlier `8419edb` checkpoint predates these changes.
+The two long training jobs were not rerun.
+
+Full workspace checkpoint: `fdecb2edb6d94cc9ce78d5133bb7239c52b968e9`
+completed `cargo run -p xtask -- ci` with exit code 0, with tracked files fixed
+through execution. This included workspace lint/tests, smoke/RL checks,
+headless, OSS parity, 361 fuzz cases across nine boundaries and Behavior CI
+10/10 seeds. External log:
+`E:\RNE-build\m3c-sensor\suspension-runs-v1-ci.log`, SHA-256
+`a891981ca2266ccdfc5391b04f698ecae18eda006727cf914821453ab4366155`.
+This is regression evidence, not physical dataset qualification or actual HIL.
 
 This fixture proves the schema, split, solver, residual calculation, provenance
 propagation, determinism, and tamper rejection. It does not pass the physical acquisition
