@@ -390,6 +390,33 @@ fn main() -> Result<()> {
                 "suspension-identification-fixture",
             )
         }
+        "suspension-run-identification" | "suspension-run-verify" => {
+            use rne_mobility_benchmark::suspension_runs::{
+                decode_suspension_run_evidence, decode_suspension_run_request,
+                encode_suspension_run_evidence, identify_suspension_runs, MAX_SUSPENSION_RUN_BYTES,
+            };
+            use std::io::Read;
+            let input = input
+                .as_deref()
+                .context("suspension run operation requires --input")?;
+            let file = std::fs::File::open(input)?;
+            ensure!(
+                file.metadata()?.is_file(),
+                "run input must be a regular file"
+            );
+            let mut bytes = Vec::new();
+            file.take(MAX_SUSPENSION_RUN_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)?;
+            let evidence = if backend == "suspension-run-verify" {
+                decode_suspension_run_evidence(&bytes)?
+            } else {
+                identify_suspension_runs(&decode_suspension_run_request(&bytes)?)?
+            };
+            (
+                String::from_utf8(encode_suspension_run_evidence(&evidence)?)?,
+                "suspension-run-evidence",
+            )
+        }
         "suspension-identification" => {
             let input = input
                 .as_deref()

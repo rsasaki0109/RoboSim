@@ -57,6 +57,142 @@ pub enum SuspensionIdentificationError {
     /// Training or holdout residuals are non-finite or exceed acceptance bounds.
     #[error("suspension identification residual exceeds its declared bound")]
     ResidualExceeded,
+    /// An acquisition ID appears more than once, including across split roles.
+    #[error("suspension acquisition IDs must be unique across training and holdout")]
+    DuplicateAcquisition,
+}
+
+/// One complete acquisition with its own strictly increasing capture clock.
+///
+/// Identity is caller-supplied, not an attestation of independent acquisition.
+#[derive(Clone, Copy, Debug)]
+pub struct SuspensionIdentificationRun<'a> {
+    /// Stable acquisition identity, unique across both split roles.
+    pub acquisition_id: u64,
+    /// SI samples in capture order; clocks may restart between acquisitions.
+    pub samples: &'a [SuspensionForceSample],
+}
+
+/// Residual evidence for one acquisition, evaluated with frozen fitted parameters.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionRunResidual {
+    /// Caller-supplied acquisition identity.
+    pub acquisition_id: u64,
+    /// Number of samples in this run.
+    pub sample_count: usize,
+    /// Force root-mean-square error in newtons.
+    pub rmse_n: f64,
+    /// Largest absolute force error in newtons (diagnostic, not separately gated).
+    pub maximum_absolute_residual_n: f64,
+    /// Whether this run meets the RMSE bound for its training or holdout role.
+    pub passed: bool,
+}
+
+/// Pooled fit and individual acquisition checks; not physical qualification.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionRunIdentificationReport {
+    /// Fit accepted by the pooled v1 parameter and residual gates.
+    pub fit: SuspensionIdentificationResult,
+    /// Training-run metrics in caller-specified order.
+    pub training_runs: Vec<SuspensionRunResidual>,
+    /// Holdout-run metrics in caller-specified order.
+    pub holdout_runs: Vec<SuspensionRunResidual>,
+    /// True only when every individual run also meets its role's RMSE bound.
+    pub passed: bool,
+}
+
+/// Identifies a run split and checks that no individual run is hidden by pooling.
+///
+/// Pooled fit failures return an error. Individual RMSE failures remain in the
+/// returned report with `passed = false`, preserving diagnostics. The minimum
+/// sample counts apply to the pooled roles, not individual runs. No confidence
+/// interval, calibration attestation or independent-acquisition proof is implied.
+pub fn identify_suspension_strut_runs_report(
+    spec: SuspensionIdentificationSpec,
+    training_runs: &[SuspensionIdentificationRun<'_>],
+    holdout_runs: &[SuspensionIdentificationRun<'_>],
+) -> Result<SuspensionRunIdentificationReport, SuspensionIdentificationError> {
+    let fit = identify_suspension_strut_runs(spec, training_runs, holdout_runs)?;
+    let evaluate = |runs: &[SuspensionIdentificationRun<'_>], bound_n: f64| {
+        runs.iter()
+            .map(|run| {
+                let mut squared_error = 0.0;
+                let mut maximum_absolute_residual_n = 0.0_f64;
+                for sample in run.samples {
+                    let residual_n = fit.stiffness_n_per_m
+                        * (fit.equilibrium_position_m - sample.position_m)
+                        - fit.damping_n_s_per_m * sample.velocity_m_s
+                        - sample.force_n;
+                    squared_error += residual_n * residual_n;
+                    maximum_absolute_residual_n = maximum_absolute_residual_n.max(residual_n.abs());
+                }
+                let rmse_n = (squared_error / run.samples.len() as f64).sqrt();
+                if !rmse_n.is_finite() || !maximum_absolute_residual_n.is_finite() {
+                    return Err(SuspensionIdentificationError::ResidualExceeded);
+                }
+                Ok(SuspensionRunResidual {
+                    acquisition_id: run.acquisition_id,
+                    sample_count: run.samples.len(),
+                    rmse_n,
+                    maximum_absolute_residual_n,
+                    passed: rmse_n <= bound_n,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let training_runs = evaluate(training_runs, spec.maximum_training_rmse_n)?;
+    let holdout_runs = evaluate(holdout_runs, spec.maximum_holdout_rmse_n)?;
+    let passed = training_runs
+        .iter()
+        .chain(&holdout_runs)
+        .all(|run| run.passed);
+    Ok(SuspensionRunIdentificationReport {
+        fit,
+        training_runs,
+        holdout_runs,
+        passed,
+    })
+}
+
+/// Fits complete training acquisitions and evaluates complete held-out acquisitions.
+///
+/// No held-out force enters coefficient fitting. Run order and sample order are
+/// preserved for deterministic accumulation. Each run must be nonempty and have
+/// finite samples and a strictly increasing local clock. IDs must be unique even
+/// within one split role. Caller identities do not prove physical independence.
+///
+/// This additive API reuses v1 parameter, sample-count and pooled residual gates;
+/// `holdout_stride` must remain valid but does not select samples here. It returns
+/// pooled, sample-weighted residuals, not per-run uncertainty or qualification.
+pub fn identify_suspension_strut_runs(
+    spec: SuspensionIdentificationSpec,
+    training_runs: &[SuspensionIdentificationRun<'_>],
+    holdout_runs: &[SuspensionIdentificationRun<'_>],
+) -> Result<SuspensionIdentificationResult, SuspensionIdentificationError> {
+    if !spec.is_valid() {
+        return Err(SuspensionIdentificationError::InvalidSpec);
+    }
+    let mut identities = std::collections::BTreeSet::new();
+    for run in training_runs.iter().chain(holdout_runs) {
+        if !identities.insert(run.acquisition_id) {
+            return Err(SuspensionIdentificationError::DuplicateAcquisition);
+        }
+        if run.samples.is_empty() {
+            return Err(SuspensionIdentificationError::InsufficientSamples);
+        }
+        validate_suspension_samples(run.samples)?;
+    }
+    identify_suspension_split(
+        spec,
+        training_runs
+            .iter()
+            .flat_map(|run| run.samples.iter().copied()),
+        holdout_runs
+            .iter()
+            .flat_map(|run| run.samples.iter().copied()),
+    )
 }
 
 /// One timestamped force/position/velocity sample from a suspension log.
@@ -147,6 +283,28 @@ pub fn identify_suspension_strut(
     if !spec.is_valid() {
         return Err(SuspensionIdentificationError::InvalidSpec);
     }
+    validate_suspension_samples(samples)?;
+    let is_holdout = |index: usize| (index + 1).is_multiple_of(spec.holdout_stride);
+    identify_suspension_split(
+        spec,
+        samples
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(index, _)| !is_holdout(*index))
+            .map(|(_, sample)| sample),
+        samples
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(index, _)| is_holdout(*index))
+            .map(|(_, sample)| sample),
+    )
+}
+
+fn validate_suspension_samples(
+    samples: &[SuspensionForceSample],
+) -> Result<(), SuspensionIdentificationError> {
     if samples.iter().any(|sample| {
         !sample.capture_time_s.is_finite()
             || !sample.position_m.is_finite()
@@ -158,27 +316,23 @@ pub fn identify_suspension_strut(
     {
         return Err(SuspensionIdentificationError::InvalidSample);
     }
+    Ok(())
+}
 
-    let is_holdout = |index: usize| (index + 1).is_multiple_of(spec.holdout_stride);
-    let training_sample_count = samples
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| !is_holdout(*index))
-        .count();
-    let holdout_sample_count = samples.len() - training_sample_count;
+fn identify_suspension_split(
+    spec: SuspensionIdentificationSpec,
+    training_samples: impl Iterator<Item = SuspensionForceSample> + Clone,
+    holdout_samples: impl Iterator<Item = SuspensionForceSample> + Clone,
+) -> Result<SuspensionIdentificationResult, SuspensionIdentificationError> {
+    let training_sample_count = training_samples.clone().count();
+    let holdout_sample_count = holdout_samples.clone().count();
     if training_sample_count < spec.minimum_training_samples
         || holdout_sample_count < spec.minimum_holdout_samples
     {
         return Err(SuspensionIdentificationError::InsufficientSamples);
     }
 
-    let training = || {
-        samples
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| !is_holdout(*index))
-            .map(|(_, sample)| *sample)
-    };
+    let training = || training_samples.clone();
     let count = training_sample_count as f64;
     let (position_sum, velocity_sum, force_sum) = training().fold(
         (0.0, 0.0, 0.0),
@@ -244,13 +398,11 @@ pub fn identify_suspension_strut(
         .sum::<f64>();
     let mut holdout_squared_error = 0.0;
     let mut maximum_absolute_holdout_residual_n = 0.0_f64;
-    for (index, sample) in samples.iter().copied().enumerate() {
-        if is_holdout(index) {
-            let residual_n = predict(sample) - sample.force_n;
-            holdout_squared_error += residual_n.powi(2);
-            maximum_absolute_holdout_residual_n =
-                maximum_absolute_holdout_residual_n.max(residual_n.abs());
-        }
+    for sample in holdout_samples {
+        let residual_n = predict(sample) - sample.force_n;
+        holdout_squared_error += residual_n.powi(2);
+        maximum_absolute_holdout_residual_n =
+            maximum_absolute_holdout_residual_n.max(residual_n.abs());
     }
     let training_rmse_n = (training_squared_error / training_sample_count as f64).sqrt();
     let holdout_rmse_n = (holdout_squared_error / holdout_sample_count as f64).sqrt();
@@ -2137,6 +2289,182 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn suspension_run_report_exposes_small_failed_run_hidden_by_pooled_rmse() {
+        let samples = suspension_identification_samples();
+        let spec = suspension_identification_spec();
+        let training = [SuspensionIdentificationRun {
+            acquisition_id: 1,
+            samples: &samples,
+        }];
+        let mut bad = samples[..10].to_vec();
+        for sample in &mut bad {
+            sample.force_n += 10.0;
+        }
+        let holdout = [
+            SuspensionIdentificationRun {
+                acquisition_id: 2,
+                samples: &samples,
+            },
+            SuspensionIdentificationRun {
+                acquisition_id: 3,
+                samples: &bad,
+            },
+        ];
+        let report = identify_suspension_strut_runs_report(spec, &training, &holdout).unwrap();
+        assert!(report.fit.holdout_rmse_n < spec.maximum_holdout_rmse_n);
+        assert!(!report.passed);
+        assert!(report.training_runs[0].passed);
+        assert!(report.holdout_runs[0].passed);
+        assert!(!report.holdout_runs[1].passed);
+        assert_eq!(report.holdout_runs[1].acquisition_id, 3);
+        assert_eq!(report.holdout_runs[1].sample_count, 10);
+        assert!(report.holdout_runs[1].rmse_n > 9.0);
+        assert_eq!(
+            report,
+            identify_suspension_strut_runs_report(spec, &training, &holdout).unwrap()
+        );
+        let healthy =
+            identify_suspension_strut_runs_report(spec, &training, &holdout[..1]).unwrap();
+        assert!(healthy.passed);
+        assert_eq!(
+            healthy.fit.stiffness_n_per_m.to_bits(),
+            report.fit.stiffness_n_per_m.to_bits()
+        );
+        assert_eq!(
+            healthy.fit.damping_n_s_per_m.to_bits(),
+            report.fit.damping_n_s_per_m.to_bits()
+        );
+    }
+
+    #[test]
+    fn suspension_run_split_excludes_holdout_from_fit_and_preserves_v1_arithmetic() {
+        let samples = suspension_identification_samples();
+        let spec = suspension_identification_spec();
+        let train: Vec<_> = samples
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(i, _)| !(i + 1).is_multiple_of(spec.holdout_stride))
+            .map(|(_, sample)| sample)
+            .collect();
+        let mut holdout: Vec<_> = samples
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(i, _)| (i + 1).is_multiple_of(spec.holdout_stride))
+            .map(|(_, sample)| sample)
+            .collect();
+        let training_runs = [SuspensionIdentificationRun {
+            acquisition_id: 1,
+            samples: &train,
+        }];
+        let fit = |validation: &[SuspensionForceSample]| {
+            identify_suspension_strut_runs(
+                spec,
+                &training_runs,
+                &[SuspensionIdentificationRun {
+                    acquisition_id: 2,
+                    samples: validation,
+                }],
+            )
+            .unwrap()
+        };
+        let baseline = fit(&holdout);
+        // Exactly the same ordered inputs reach the shared solver, preserving v1 bytes.
+        assert_eq!(baseline, identify_suspension_strut(spec, &samples).unwrap());
+        for sample in &mut holdout {
+            sample.force_n += 2.0;
+            // Independent acquisitions may restart their capture clocks.
+            sample.capture_time_s -= 0.04;
+        }
+        let changed = fit(&holdout);
+        assert_eq!(
+            baseline.stiffness_n_per_m.to_bits(),
+            changed.stiffness_n_per_m.to_bits()
+        );
+        assert_eq!(
+            baseline.damping_n_s_per_m.to_bits(),
+            changed.damping_n_s_per_m.to_bits()
+        );
+        assert_eq!(
+            baseline.equilibrium_position_m.to_bits(),
+            changed.equilibrium_position_m.to_bits()
+        );
+        assert_eq!(
+            baseline.training_rmse_n.to_bits(),
+            changed.training_rmse_n.to_bits()
+        );
+        assert!(changed.holdout_rmse_n > baseline.holdout_rmse_n);
+        assert_eq!(changed, fit(&holdout));
+    }
+
+    #[test]
+    fn suspension_run_split_rejects_identity_overlap_empty_runs_and_local_time_drift() {
+        let samples = suspension_identification_samples();
+        let spec = suspension_identification_spec();
+        let run = SuspensionIdentificationRun {
+            acquisition_id: 10,
+            samples: &samples,
+        };
+        let other = SuspensionIdentificationRun {
+            acquisition_id: 11,
+            samples: &samples,
+        };
+        assert_eq!(
+            identify_suspension_strut_runs(spec, &[run], &[run]),
+            Err(SuspensionIdentificationError::DuplicateAcquisition)
+        );
+        assert_eq!(
+            identify_suspension_strut_runs(spec, &[run, run], &[other]),
+            Err(SuspensionIdentificationError::DuplicateAcquisition)
+        );
+        assert_eq!(
+            identify_suspension_strut_runs(spec, &[run], &[other, other]),
+            Err(SuspensionIdentificationError::DuplicateAcquisition)
+        );
+        assert_eq!(
+            identify_suspension_strut_runs(spec, &[], &[other]),
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+        assert_eq!(
+            identify_suspension_strut_runs(spec, &[run], &[]),
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+        let empty = SuspensionIdentificationRun {
+            acquisition_id: 12,
+            samples: &[],
+        };
+        assert_eq!(
+            identify_suspension_strut_runs(spec, &[run], &[empty]),
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+        let mut invalid = samples.clone();
+        invalid[10].capture_time_s = invalid[9].capture_time_s;
+        let invalid_run = SuspensionIdentificationRun {
+            acquisition_id: 12,
+            samples: &invalid,
+        };
+        for (training, holdout) in [([run], [invalid_run]), ([invalid_run], [run])] {
+            assert_eq!(
+                identify_suspension_strut_runs(spec, &training, &holdout),
+                Err(SuspensionIdentificationError::InvalidSample)
+            );
+        }
+        // Distinct run IDs and restarted clocks are legal; not proof of real independence.
+        let result = identify_suspension_strut_runs(
+            spec,
+            &[run, other],
+            &[SuspensionIdentificationRun {
+                acquisition_id: 12,
+                samples: &samples,
+            }],
+        )
+        .unwrap();
+        assert_eq!(result.training_sample_count, 400);
+        assert_eq!(result.holdout_sample_count, 200);
     }
 
     #[test]

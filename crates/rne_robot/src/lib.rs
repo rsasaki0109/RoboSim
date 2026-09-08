@@ -29,7 +29,8 @@ pub use systems::{
     combined_slip_tire_wrench, command_ackermann_drive, command_multirotor,
     differential_drive_kinematics, evaluate_combined_slip_tire, evaluate_dc_motor,
     evaluate_longitudinal_drive_path, evaluate_longitudinal_mobility_plant,
-    evaluate_suspension_strut, evaluate_transmission, identify_suspension_strut, multirotor_flight,
+    evaluate_suspension_strut, evaluate_transmission, identify_suspension_strut,
+    identify_suspension_strut_runs, identify_suspension_strut_runs_report, multirotor_flight,
     pure_pursuit_steering, resolve_wheel_station_frame, rigid_road_patch_geometry,
     sample_rigid_road_profile, sync_all_joint_motors_from_actuators,
     sync_joint_motors_from_actuators, vehicle_dynamics, wheel_rolling_resistance_torque_nm,
@@ -37,6 +38,7 @@ pub use systems::{
     DcMotorEvaluation, LongitudinalDrivePathEvaluation, LongitudinalDrivePathInput,
     LongitudinalMobilityPlantEvaluation, MobilityPlantEvaluationError, MultirotorCommandResult,
     RigidRoadPatchGeometry, RigidRoadSurfaceSample, SuspensionForceSample,
-    SuspensionIdentificationError, SuspensionIdentificationResult, SuspensionIdentificationSpec,
+    SuspensionIdentificationError, SuspensionIdentificationResult, SuspensionIdentificationRun,
+    SuspensionIdentificationSpec, SuspensionRunIdentificationReport, SuspensionRunResidual,
     TransmissionEvaluation, WheelContactPatch, WheelStationFrame,
 };

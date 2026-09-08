@@ -152,7 +152,7 @@ error/panic after replacement. Fresh-world replay reproduces injected constructi
 faults; healthy factories and altered update/drive-tick diagnostics do not reproduce
 them. The focused reset tests and MuJoCo-enabled all-target Clippy pass. Earlier
 batch regression coverage passed 30 tests with two long training jobs ignored;
-this is not a full CI result for the reset changes.
+the full CI checkpoint for the reset changes is recorded below.
 
 The reset file format preserves reset-observation missingness and integer
 timestamps, not just zero-filled actor tensors. It binds prior history, requested
@@ -167,9 +167,19 @@ outside this evidence; no unavailable post-reset solver state is certified.
 The complete MuJoCo-enabled mobility benchmark library run after these changes
 passed 159 tests with zero failures; two explicitly ignored long training jobs
 were not rerun (257.07 s). All-target Clippy with warnings denied passed after
-the final reset-observation check. Full workspace CI for this reset slice is
-still pending; the earlier `c48c85e` CI checkpoint covers suspension hardening,
-not these subsequent reset changes.
+the final reset-observation check.
+
+Validation checkpoint (2026-09-08): commit
+`8419edb740900ea7c23a49b9c9aa7891bf14a952` completed the full
+`cargo run -p xtask -- ci` with exit code 0. Tracked files remained unchanged
+through execution. This includes workspace lint/tests, smoke and RL checks,
+headless, OSS parity, 361 fuzz cases across nine boundaries, and Behavior CI
+10/10 seeds. The external log is
+`E:\RNE-build\m3c-sensor\reset-capsule-v1-ci.log`, SHA-256
+`66537c3ea0c5d611cd98d29b8a0fa4b6a79f3a925795fe07294def2bab280e44`.
+This checkpoint covers reset failure capture and replay software regressions;
+it does not qualify physical calibration, hardware resets, or HIL. The two
+ignored long training jobs above are not claimed as rerun by this checkpoint.
 
 Validation checkpoint: commit `99d9196` completed the full `cargo run -p xtask -- ci`
 with exit code 0, including workspace lint/tests, smoke and RL checks, headless,

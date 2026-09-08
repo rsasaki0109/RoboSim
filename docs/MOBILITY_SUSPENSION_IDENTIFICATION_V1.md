@@ -183,6 +183,92 @@ vehicle calibration or physical fidelity.
 
 ## Remaining physical gate
 
+### Real-data candidate disposition (2026-09-08)
+
+The TU Dresden primary record for [3-component servo-hydraulic test bench
+measurements](https://opara.zih.tu-dresden.de/items/eec1959c-6ec6-4ee3-af05-5419f1d2adb6)
+(DOI `10.25532/OPARA-151`, 2021-12-17, CC BY 4.0) lists
+`Heindel2021_dataset.zip` (529.24 MB). It describes three inertia-compensated
+force channels and three displacement channels from an oil-filled hydro-mount
+rig, with nonlinear damping, stiffness, and cross-direction pendulum coupling.
+The archive has not been downloaded or its sample layout inspected here.
+
+Disposition: candidate for model-discrepancy/virtual-sensing research, **not**
+qualified linear-strut or RNE vehicle calibration. The landing-page description
+does not establish the synchronized SI velocity, sample clock, instrument
+uncertainty, or calibration artifacts required by the acquisition gate. Do not
+invent velocity timestamps or relabel this rig as the benchmark vehicle.
+Before retaining any archive on the external SSD, inspect available metadata
+for those requirements and budget both archive and extraction sizes; preserve
+raw-source hashes and distinguish derived velocity from measured velocity.
+
+### Identification validation upgrade
+
+Inspection of `identify_suspension_strut` confirms that v1 holds out every
+`holdout_stride`th point from a single ordered sequence. This prevents direct
+use of held-out samples in fitting, but does not establish independent trials:
+adjacent training points can share autocorrelated noise and operating conditions.
+The existing synthetic fixture and its deterministic hashes remain useful
+software regression evidence, not a generalization result for physical logs.
+
+Before claiming physical identification, add a separately versioned validation
+path with whole acquisition runs held out (or explicitly bounded contiguous
+time blocks when independent runs are unavailable). Freeze the split before
+fitting, report excitation/conditioning from training data only, and evaluate
+force residuals by held-out run and operating range. Any uncertainty estimate
+must state its assumptions about correlated samples and measured-input error;
+an IID least-squares interval alone must not certify this gate. Tests must prove
+that changing holdout forces cannot alter fitted parameters and that run IDs
+cannot occur in both training and validation.
+
+The additive `identify_suspension_strut_runs` API now accepts explicit complete
+training and holdout acquisitions. IDs must be unique across and within roles;
+empty runs, non-finite samples and non-increasing per-run clocks are rejected.
+Clocks may restart between runs. All supplied training samples enter the fit;
+all holdout samples are excluded. The shared arithmetic preserves v1 sample
+ordering and results when given equivalent partitions. `holdout_stride` remains
+a validated compatibility field in the reused spec, but does not choose points
+in the run API. Counts and RMSE are pooled/sample-weighted, not per-run gates.
+
+`identify_suspension_strut_runs_report` additionally retains each run's ID, sample
+count, force RMSE, maximum absolute residual and RMSE verdict in caller order.
+It uses the role's existing training/holdout RMSE bound for each run; any failing
+run sets the report verdict to false even when pooled residuals pass. Minimum
+sample counts still apply to pooled roles, and maximum absolute residual is a
+diagnostic, not a separate gate. Pooled fit failures still return an error.
+
+The benchmark now supplies separate v1 `rne_suspension_run_request` and
+`rne_suspension_run_evidence` kinds through `--backend suspension-run-identification`
+and `--backend suspension-run-verify`, respectively, with `--input` and `--output`.
+Requests embed `spec`, `training` and `holdout`; each run contains an
+`acquisition_id` and an existing v1 `dataset`. The bound is 8 MiB, 64 total runs
+and 100,000 combined samples. Numeric IDs, dataset IDs and exact serialized
+sample captures must be unique across the whole request. Changing a source label
+does not evade exact sample duplication checks; altered or overlapping captures
+are not detected by this check.
+
+Evidence embeds the request, its typed compact-JSON SHA-256, and the full report.
+The CLI emits revalidated compact JSON without a trailing newline, bounded by
+the same 8 MiB limit as the decoder; pretty-print expansion is not used here.
+The verifier actually reruns identification and compares the entire result;
+it does not trust a stored hash or verdict. A valid report may have `passed=false`:
+successful CLI execution establishes processing/integrity, not model acceptance.
+SHA-256 is integrity binding, not authentication. No acquisition-manifest checks
+are implied by this path, and recorded source labels remain unverified declarations.
+
+This is not physical qualification. Training-only conditioning, uncertainty
+and acquisition-manifest integration remain to implement. Distinct caller IDs
+do not detect duplicated raw captures or establish independent measurements.
+
+Whole-run slice validation (2026-09-08): `rne_robot --lib` passed 56 tests;
+its all-target Clippy passed with warnings denied. The MuJoCo-enabled mobility
+benchmark library passed 162 tests with zero failures and two explicitly ignored
+long training jobs (220.66 s); its all-target Clippy also passed. This includes
+v1 suspension regressions, whole-run split isolation, failed-run retention,
+rehashed split/report tampering rejection and compact evidence roundtrips.
+The two long training jobs were not rerun. Full workspace CI for this whole-run
+slice remains pending; the earlier `8419edb` checkpoint predates these changes.
+
 This fixture proves the schema, split, solver, residual calculation, provenance
 propagation, determinism, and tamper rejection. It does not pass the physical acquisition
 manifest because its source is synthetic, and it does not identify the RNE vehicle.
