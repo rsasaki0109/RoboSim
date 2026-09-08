@@ -34,6 +34,7 @@ fn whole_run_cli_generates_and_reverifies_all_diagnostic_envelopes() {
     for (generate, verify) in [
         ("suspension-run-identification", "suspension-run-verify"),
         ("suspension-excitation", "suspension-excitation-verify"),
+        ("suspension-influence", "suspension-influence-verify"),
         ("suspension-timing", "suspension-timing-verify"),
     ] {
         let output = root.join(format!("{generate}.json"));

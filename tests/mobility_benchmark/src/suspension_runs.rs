@@ -171,6 +171,76 @@ pub fn encode_suspension_acquired_evidence(
     Ok(serde_json::to_vec(evidence)?)
 }
 
+/// Recomputable training influence, retaining unsuccessful fits without qualification.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionInfluenceEvidence {
+    /// Must be `rne_suspension_influence_evidence`.
+    pub kind: String,
+    /// Independent envelope version, currently 1.
+    pub schema_version: u32,
+    /// Exact split declaration; holdout samples are retained but never fitted here.
+    pub request: SuspensionRunRequest,
+    /// SHA-256 of typed compact request JSON, not authentication.
+    pub request_sha256: String,
+    /// Baseline and every whole-training-run deletion, including fitting errors.
+    pub training: rne_robot::SuspensionTrainingInfluence,
+}
+
+/// Bounds input work before refitting training only, without residual selection.
+pub fn identify_suspension_influence(
+    request: &SuspensionRunRequest,
+) -> Result<SuspensionInfluenceEvidence> {
+    request.validate()?;
+    let training: Vec<_> = request
+        .training
+        .iter()
+        .map(|run| SuspensionIdentificationRun {
+            acquisition_id: run.acquisition_id,
+            samples: &run.dataset.samples,
+        })
+        .collect();
+    let evidence = SuspensionInfluenceEvidence {
+        kind: "rne_suspension_influence_evidence".into(),
+        schema_version: 1,
+        request: request.clone(),
+        request_sha256: hash(request)?,
+        training: rne_robot::suspension_training_influence(request.spec, &training)?,
+    };
+    ensure!(
+        serde_json::to_vec(&evidence)?.len() <= MAX_SUSPENSION_RUN_BYTES,
+        "influence evidence too large"
+    );
+    Ok(evidence)
+}
+
+/// Recomputes every successful or failed refit before emitting bounded JSON.
+pub fn encode_suspension_influence(evidence: &SuspensionInfluenceEvidence) -> Result<Vec<u8>> {
+    ensure!(
+        serde_json::to_vec(evidence)?.len() <= MAX_SUSPENSION_RUN_BYTES,
+        "influence evidence too large"
+    );
+    ensure!(
+        *evidence == identify_suspension_influence(&evidence.request)?,
+        "influence evidence replay mismatch"
+    );
+    Ok(serde_json::to_vec(evidence)?)
+}
+
+/// Strict bounded decoding and actual refitting, never trusting stored outcomes.
+pub fn decode_suspension_influence(bytes: &[u8]) -> Result<SuspensionInfluenceEvidence> {
+    ensure!(
+        bytes.len() <= MAX_SUSPENSION_RUN_BYTES,
+        "influence evidence too large"
+    );
+    let evidence: SuspensionInfluenceEvidence = serde_json::from_slice(bytes)?;
+    ensure!(
+        evidence == identify_suspension_influence(&evidence.request)?,
+        "influence evidence replay mismatch"
+    );
+    Ok(evidence)
+}
+
 /// Replayable per-acquisition residual timing, without an independence verdict.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -527,6 +597,37 @@ mod tests {
                 dataset: second,
             }],
         }
+    }
+
+    #[test]
+    fn influence_evidence_retains_failures_and_rejects_tampering() {
+        let mut request = request();
+        let evidence = identify_suspension_influence(&request).unwrap();
+        assert_eq!(
+            evidence.training.deletions[0].coefficients,
+            Err(rne_robot::SuspensionIdentificationError::InsufficientSamples)
+        );
+        let bytes = encode_suspension_influence(&evidence).unwrap();
+        assert_eq!(decode_suspension_influence(&bytes).unwrap(), evidence);
+        request.holdout[0].dataset.samples[0].force_n += 500.0;
+        request.holdout[0].dataset.seal().unwrap();
+        let changed = identify_suspension_influence(&request).unwrap();
+        assert_eq!(changed.training, evidence.training);
+        assert_ne!(changed.request_sha256, evidence.request_sha256);
+        let mut forged = evidence.clone();
+        forged.training.deletions.clear();
+        assert!(encode_suspension_influence(&forged).is_err());
+        assert!(decode_suspension_influence(&serde_json::to_vec(&forged).unwrap()).is_err());
+        let mut forged = evidence.clone();
+        forged.training.deletions[0].coefficients = evidence.training.baseline;
+        assert!(encode_suspension_influence(&forged).is_err());
+        let mut forged = evidence.clone();
+        forged.schema_version = 2;
+        assert!(encode_suspension_influence(&forged).is_err());
+        let mut value = serde_json::to_value(&evidence).unwrap();
+        value["training"]["confidence"] = serde_json::json!(0.95);
+        assert!(decode_suspension_influence(&serde_json::to_vec(&value).unwrap()).is_err());
+        assert!(decode_suspension_influence(&vec![b' '; MAX_SUSPENSION_RUN_BYTES + 1]).is_err());
     }
 
     #[test]

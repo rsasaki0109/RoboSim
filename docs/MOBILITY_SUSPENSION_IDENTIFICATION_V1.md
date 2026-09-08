@@ -202,6 +202,78 @@ Before retaining any archive on the external SSD, inspect available metadata
 for those requirements and budget both archive and extraction sizes; preserve
 raw-source hashes and distinguish derived velocity from measured velocity.
 
+### Uncertainty implementation boundary (2026-09-09)
+
+Source review: [JCGM 101:2008, BIPM](https://www.bipm.org/en/doi/10.59161/jcgm101-2008)
+describes propagation of input probability distributions through a measurement
+model. [Cameron, Gelbach and Miller, NBER t0344](https://www.nber.org/papers/t0344)
+warn that conventional cluster-robust inference relies on many clusters and can
+over-reject with few clusters. The latter abstract was available in search;
+direct retrieval returned HTTP 403, so no full-paper implementation review is
+claimed here.
+
+Repository inspection: `SuspensionSignalEvidence` retains expanded uncertainty,
+but has no coverage factor, probability model or cross-channel covariance.
+Consequently it cannot by itself define standard deviations or Monte Carlo
+draws. Do not silently divide every expanded uncertainty by two, assume Gaussian
+errors or perturb each sample independently. Derived velocity can share position
+error, and a calibration offset can persist across an entire capture.
+
+The implementation separates two outputs:
+
+- Acquisition influence: omit each complete training acquisition, preserve all
+  other samples in their original order, refit, and report SI parameter changes
+  and every unsuccessful refit. Keep holdout data out of selection. This is a
+  sensitivity diagnostic, **not** a confidence interval or independence proof.
+- Measurement uncertainty: add a versioned declaration of distribution,
+  coverage-factor interpretation, shared versus sample-varying error and
+  cross-channel dependence, bound to retained calibration evidence. Propagate
+  through the actual estimator using explicit deterministic seeds and bounded
+  work; retain invalid/nonphysical draws rather than silently conditioning on
+  successes. Interval coverage remains unqualified until assumptions and
+  independent physical validation support it.
+
+Tests must include whole-run clock resets, insufficient remaining excitation,
+holdout changes leaving training diagnostics unchanged, common-mode calibration
+error not shrinking with repeated samples, and corrupted declaration rejection.
+Do not substitute the existing synthetic fixture for physical coverage evidence.
+
+The core `suspension_training_influence` API now implements whole-acquisition
+deletion diagnostics for 1–64 training runs. It returns baseline SI coefficients
+and one coefficient result per omitted acquisition, in input order, so callers
+can compare parameter changes directly. Failed baseline and deletion fits remain
+typed errors in the report; invalid capture data reject the entire request before
+any refit. Local clocks can restart between runs. The same centered least-squares
+solver as the ordinary identification path is used, with physical coefficient
+bounds but without residual acceptance gates. No holdout input is accepted.
+
+Unit coverage includes deterministic replay, local clock resets, single-run
+insufficiency, rank loss, nonphysical deleted-run fits, capture-wide force offsets,
+residual-gate independence, duplicate IDs, excessive run counts and malformed
+samples. These are synthetic regression tests, not calibration validation.
+The `suspension-influence` CLI accepts the existing whole-run request and emits
+`rne_suspension_influence_evidence` schema 1. It embeds the exact request, its
+typed JSON SHA-256 and the complete training diagnostic. The
+`suspension-influence-verify` CLI recomputes every fit and compares all fields;
+missing or rewritten failures, changed versions and unknown fields are rejected.
+Both use `--input` and `--output`; unlike timing diagnostics, no interval tolerance
+is needed. A successful command means processing succeeded, not that every fit
+was physical or the model qualified. Example (use an external SSD for both paths):
+
+```powershell
+cargo run -p rne_mobility_benchmark -- --backend suspension-influence --input E:\data\runs.json --output E:\data\influence.json
+cargo run -p rne_mobility_benchmark -- --backend suspension-influence-verify --input E:\data\influence.json --output E:\data\influence-replayed.json
+```
+
+The envelope bounds input to 64 combined training/holdout runs, 100,000 combined
+samples and 8 MiB JSON, and performs one baseline plus one refit per training run.
+Holdout data are validated and bound to the request hash, but never enter this
+diagnostic's fits or residual selection. The core borrowed-sample API itself only
+bounds run count; other callers must also bound sample counts.
+This envelope verifies embedded data and computation, not retained acquisition
+files or calibration authenticity. Integration with the acquired-run file-checking
+envelope and propagated measurement uncertainty remain future work.
+
 ### Identification validation upgrade
 
 `SuspensionAcquiredRunRequest` adds an acquisition intake around the
@@ -237,6 +309,17 @@ specific size-mismatch diagnostic and absence of output after tampering;
 default-feature all-target Clippy passed with warnings denied. These tests use
 synthetic/test-only fixtures, not real calibration
 or physical model-accuracy evidence.
+
+Stack-fix commit `d8e8b48f1b34f73089aa199d6e3a201dc4b1ac2c` completed
+`cargo run -p xtask -- ci` with exit 0 on 2026-09-09, with tracked files
+unchanged throughout. Log:
+`E:\RNE-build\m3c-sensor\suspension-acquired-cli-stack-v1-ci.log`, SHA-256
+`5796b9a18dbaf90e118df3e856a982bc0124c8819aac9b2ab175746c1e350a81`.
+This includes the acquired CLI regression in workspace tests, workspace lint,
+smoke/RL, headless, OSS parity, 361 fuzz cases and Behavior CI 10/10 seeds.
+The clutter PPO score remained worse than random (-1.37 versus -1.31), and
+mobile clutter CEM still did not place; passing execution checks do not erase
+those outcomes or establish physical calibration/HIL.
 
 Commit `6688d7fad18cd7ab80791ff283440bf47efb3e3d` completed
 `cargo run -p xtask -- ci` with exit 0 on 2026-09-09, with tracked files

@@ -37,7 +37,7 @@ pub enum MobilityPlantEvaluationError {
 }
 
 /// Failure returned by deterministic suspension-force identification.
-#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SuspensionIdentificationError {
     /// The split, parameter bounds, or residual bounds are invalid.
     #[error("invalid suspension identification specification")]
@@ -71,6 +71,95 @@ pub struct SuspensionIdentificationRun<'a> {
     pub acquisition_id: u64,
     /// SI samples in capture order; clocks may restart between acquisitions.
     pub samples: &'a [SuspensionForceSample],
+}
+
+/// Physical coefficients from a training-only fit, without a residual verdict.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionTrainingCoefficients {
+    /// Spring stiffness in newtons per meter.
+    pub stiffness_n_per_m: f64,
+    /// Damping in newton-seconds per meter.
+    pub damping_n_s_per_m: f64,
+    /// Unloaded equilibrium coordinate in meters.
+    pub equilibrium_position_m: f64,
+}
+
+/// One whole-acquisition deletion, retaining unsuccessful coefficient fits.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionAcquisitionInfluence {
+    /// Training acquisition omitted from this refit.
+    pub omitted_acquisition_id: u64,
+    /// Remaining coefficients, or the exact fitting failure.
+    pub coefficients: Result<SuspensionTrainingCoefficients, SuspensionIdentificationError>,
+}
+
+/// Training-only deletion diagnostics; not a confidence interval or acceptance gate.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionTrainingInfluence {
+    /// Fit using every training acquisition; failures are retained.
+    pub baseline: Result<SuspensionTrainingCoefficients, SuspensionIdentificationError>,
+    /// Exactly one refit per input acquisition, in caller order.
+    pub deletions: Vec<SuspensionAcquisitionInfluence>,
+}
+
+/// Refits after deleting each complete training run, preserving sample/local-clock order.
+///
+/// Accepts 1 through 64 runs; a single run retains an insufficient-samples deletion.
+/// Validates all inputs before fitting. Uses coefficient and training-count bounds,
+/// but does not evaluate training/holdout residual gates. No holdout data are accepted.
+/// This diagnostic neither selects a model nor establishes uncertainty coverage.
+pub fn suspension_training_influence(
+    spec: SuspensionIdentificationSpec,
+    runs: &[SuspensionIdentificationRun<'_>],
+) -> Result<SuspensionTrainingInfluence, SuspensionIdentificationError> {
+    if !spec.is_valid() || runs.len() > 64 {
+        return Err(SuspensionIdentificationError::InvalidSpec);
+    }
+    if runs.is_empty() {
+        return Err(SuspensionIdentificationError::InsufficientSamples);
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    for run in runs {
+        if !ids.insert(run.acquisition_id) {
+            return Err(SuspensionIdentificationError::DuplicateAcquisition);
+        }
+        if run.samples.is_empty() {
+            return Err(SuspensionIdentificationError::InsufficientSamples);
+        }
+        validate_suspension_samples(run.samples)?;
+    }
+    let fit = |omit: Option<usize>| {
+        fit_suspension_training_coefficients(
+            spec,
+            runs.iter()
+                .enumerate()
+                .filter(move |(index, _)| Some(*index) != omit)
+                .flat_map(|(_, run)| run.samples.iter().copied()),
+        )
+        .map(
+            |(stiffness_n_per_m, damping_n_s_per_m, equilibrium_position_m)| {
+                SuspensionTrainingCoefficients {
+                    stiffness_n_per_m,
+                    damping_n_s_per_m,
+                    equilibrium_position_m,
+                }
+            },
+        )
+    };
+    Ok(SuspensionTrainingInfluence {
+        baseline: fit(None),
+        deletions: runs
+            .iter()
+            .enumerate()
+            .map(|(index, run)| SuspensionAcquisitionInfluence {
+                omitted_acquisition_id: run.acquisition_id,
+                coefficients: fit(Some(index)),
+            })
+            .collect(),
+    })
 }
 
 /// Within-acquisition residual timing and lag-one diagnostics.
@@ -516,16 +605,13 @@ fn validate_suspension_samples(
     Ok(())
 }
 
-fn identify_suspension_split(
+// Shared coefficient solver: deliberately has no held-out observations or gates.
+fn fit_suspension_training_coefficients(
     spec: SuspensionIdentificationSpec,
     training_samples: impl Iterator<Item = SuspensionForceSample> + Clone,
-    holdout_samples: impl Iterator<Item = SuspensionForceSample> + Clone,
-) -> Result<SuspensionIdentificationResult, SuspensionIdentificationError> {
+) -> Result<(f64, f64, f64), SuspensionIdentificationError> {
     let training_sample_count = training_samples.clone().count();
-    let holdout_sample_count = holdout_samples.clone().count();
-    if training_sample_count < spec.minimum_training_samples
-        || holdout_sample_count < spec.minimum_holdout_samples
-    {
+    if training_sample_count < spec.minimum_training_samples {
         return Err(SuspensionIdentificationError::InsufficientSamples);
     }
 
@@ -586,6 +672,24 @@ fn identify_suspension_split(
         return Err(SuspensionIdentificationError::NonPhysicalResult);
     }
 
+    Ok((stiffness_n_per_m, damping_n_s_per_m, equilibrium_position_m))
+}
+
+fn identify_suspension_split(
+    spec: SuspensionIdentificationSpec,
+    training_samples: impl Iterator<Item = SuspensionForceSample> + Clone,
+    holdout_samples: impl Iterator<Item = SuspensionForceSample> + Clone,
+) -> Result<SuspensionIdentificationResult, SuspensionIdentificationError> {
+    let training_sample_count = training_samples.clone().count();
+    let holdout_sample_count = holdout_samples.clone().count();
+    if training_sample_count < spec.minimum_training_samples
+        || holdout_sample_count < spec.minimum_holdout_samples
+    {
+        return Err(SuspensionIdentificationError::InsufficientSamples);
+    }
+    let (stiffness_n_per_m, damping_n_s_per_m, equilibrium_position_m) =
+        fit_suspension_training_coefficients(spec, training_samples.clone())?;
+    let training = || training_samples.clone();
     let predict = |sample: SuspensionForceSample| {
         stiffness_n_per_m * (equilibrium_position_m - sample.position_m)
             - damping_n_s_per_m * sample.velocity_m_s
@@ -2448,6 +2552,142 @@ mod tests {
     use rne_core::{SimClock, SimTime};
     use rne_ecs::spawn_named;
     use rne_math::Seconds;
+
+    #[test]
+    fn suspension_influence_preserves_deleted_run_failures_and_local_clocks() {
+        let samples = suspension_identification_samples();
+        let run = SuspensionIdentificationRun {
+            acquisition_id: 7,
+            samples: &samples,
+        };
+        let spec = suspension_identification_spec();
+        let single = suspension_training_influence(spec, &[run]).unwrap();
+        assert!(single.baseline.is_ok());
+        assert_eq!(
+            single.deletions[0].coefficients,
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+        let other = SuspensionIdentificationRun {
+            acquisition_id: 9,
+            samples: &samples,
+        };
+        let report = suspension_training_influence(spec, &[run, other]).unwrap();
+        assert_eq!(report.deletions[0].omitted_acquisition_id, 7);
+        assert_eq!(report.deletions[1].omitted_acquisition_id, 9);
+        assert_eq!(report.deletions[0].coefficients, single.baseline);
+        assert_eq!(
+            report,
+            suspension_training_influence(spec, &[run, other]).unwrap()
+        );
+        assert_eq!(
+            suspension_training_influence(spec, &[run, run]),
+            Err(SuspensionIdentificationError::DuplicateAcquisition)
+        );
+        let mut constant = samples.clone();
+        for sample in &mut constant {
+            sample.position_m = 0.0;
+            sample.velocity_m_s = 0.0;
+        }
+        let rankless = SuspensionIdentificationRun {
+            acquisition_id: 11,
+            samples: &constant,
+        };
+        let report = suspension_training_influence(spec, &[run, rankless]).unwrap();
+        assert_eq!(
+            report.deletions[0].coefficients,
+            Err(SuspensionIdentificationError::RankDeficient)
+        );
+        assert_eq!(report.deletions[1].coefficients, single.baseline);
+    }
+
+    #[test]
+    fn suspension_influence_retains_nonphysical_refits_without_residual_selection() {
+        let samples = suspension_identification_samples();
+        let mut shifted = samples.clone();
+        // A capture-wide force offset changes equilibrium, not stiffness/damping.
+        for sample in &mut shifted {
+            sample.force_n += 10_000.0;
+        }
+        let runs = [
+            SuspensionIdentificationRun {
+                acquisition_id: 1,
+                samples: &samples,
+            },
+            SuspensionIdentificationRun {
+                acquisition_id: 2,
+                samples: &shifted,
+            },
+        ];
+        let mut spec = suspension_identification_spec();
+        let report = suspension_training_influence(spec, &runs).unwrap();
+        let baseline = report.baseline.unwrap();
+        let original = report.deletions[1].coefficients.unwrap();
+        assert!(
+            (baseline.equilibrium_position_m
+                - original.equilibrium_position_m
+                - 5_000.0 / original.stiffness_n_per_m)
+                .abs()
+                < 1e-10
+        );
+        assert_eq!(
+            report.deletions[0].coefficients,
+            Err(SuspensionIdentificationError::NonPhysicalResult)
+        );
+        // Residual limits cannot filter runs or change this training-only diagnostic.
+        spec.maximum_training_rmse_n = 0.0;
+        spec.maximum_holdout_rmse_n = 0.0;
+        assert_eq!(report, suspension_training_influence(spec, &runs).unwrap());
+        let failed = suspension_training_influence(spec, &runs[1..]).unwrap();
+        assert_eq!(
+            failed.baseline,
+            Err(SuspensionIdentificationError::NonPhysicalResult)
+        );
+        assert_eq!(failed.deletions.len(), 1);
+    }
+
+    #[test]
+    fn suspension_influence_validates_every_capture_before_refitting() {
+        let samples = suspension_identification_samples();
+        let spec = suspension_identification_spec();
+        let run = SuspensionIdentificationRun {
+            acquisition_id: 0,
+            samples: &samples,
+        };
+        assert_eq!(
+            suspension_training_influence(spec, &[]),
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+        let many: Vec<_> = (0..65)
+            .map(|acquisition_id| SuspensionIdentificationRun {
+                acquisition_id,
+                samples: &samples,
+            })
+            .collect();
+        assert_eq!(
+            suspension_training_influence(spec, &many),
+            Err(SuspensionIdentificationError::InvalidSpec)
+        );
+        let mut invalid = samples.clone();
+        invalid[1].capture_time_s = invalid[0].capture_time_s;
+        let bad = SuspensionIdentificationRun {
+            acquisition_id: 1,
+            samples: &invalid,
+        };
+        assert_eq!(
+            suspension_training_influence(spec, &[run, bad]),
+            Err(SuspensionIdentificationError::InvalidSample)
+        );
+        invalid[1].capture_time_s = samples[1].capture_time_s;
+        invalid[0].force_n = f64::NAN;
+        let bad = SuspensionIdentificationRun {
+            acquisition_id: 1,
+            samples: &invalid,
+        };
+        assert_eq!(
+            suspension_training_influence(spec, &[run, bad]),
+            Err(SuspensionIdentificationError::InvalidSample)
+        );
+    }
 
     fn suspension_identification_spec() -> SuspensionIdentificationSpec {
         SuspensionIdentificationSpec {
