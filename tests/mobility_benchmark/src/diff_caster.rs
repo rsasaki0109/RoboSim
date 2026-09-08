@@ -316,7 +316,7 @@ pub fn differential_caster_task_spec() -> TaskSpec {
 
 /// Runs one explicit two-drive-wheel plus passive-caster multibody fixture.
 pub fn run_differential_caster_trace<B: PhysicsBackend>(
-    mut backend: B,
+    backend: B,
     manifest: PhysicsBackendManifest,
 ) -> Result<DifferentialCasterTrace> {
     manifest.validate()?;
@@ -336,57 +336,13 @@ pub fn run_differential_caster_trace<B: PhysicsBackend>(
     );
     let task_spec = differential_caster_task_spec();
     task_spec.validate()?;
-    let plant = drive_plant_spec();
-    let caster_spec = passive_caster_spec();
-    ensure!(caster_spec.is_valid(), "invalid caster fixture");
-    let fixed_delta = SimDuration::from_ticks(DIFF_CASTER_FIXED_DELTA_TICKS);
-    let dt_s = fixed_delta.as_seconds().value();
-    let physics_world = backend.create_world(PhysicsWorldDesc {
-        gravity_m_s2: Vec3::new(0.0, -9.806_65, 0.0),
-        solver_iterations: 32,
-    })?;
-    let mut world = World::new();
-    let ground = spawn_named(&mut world, "diff_caster_ground");
-    world.entity_mut(ground).insert((
-        RigidBody {
-            body_type: RigidBodyType::Fixed,
-            ..RigidBody::default()
-        },
-        frictionless_cuboid(Vec3::new(20.0, 0.5, 20.0)),
-        Transform3::from_translation_rotation(Vec3::new(0.0, -0.5, 0.0), Quat::IDENTITY),
-    ));
-    let chassis = spawn_named(&mut world, "diff_caster_chassis");
-    world.entity_mut(chassis).insert((
-        RigidBody {
-            mass_kg: 60.0,
-            ..RigidBody::default()
-        },
-        RigidBodyInertia {
-            center_of_mass_local_m: Vec3::new(-0.03, 0.03, 0.0),
-            ixx_kg_m2: 5.0,
-            ixy_kg_m2: 0.0,
-            ixz_kg_m2: 0.0,
-            iyy_kg_m2: 7.0,
-            iyz_kg_m2: 0.0,
-            izz_kg_m2: 6.0,
-        },
-        MultibodyLink,
-        frictionless_cuboid(Vec3::new(0.48, 0.10, 0.24)),
-        CollisionGroups::without_self_collision(SELF_COLLISION_GROUP),
-        Transform3::from_translation_rotation(Vec3::new(0.0, 0.37, 0.0), Quat::IDENTITY),
-    ));
-    let drive_stations = spawn_drive_stations(&mut world, chassis);
-    let caster = spawn_passive_caster(&mut world, chassis, caster_spec);
-    backend.sync_from_ecs(&mut world, physics_world)?;
-
-    let initial_transform = *world
-        .get::<Transform3>(chassis)
+    let mut simulation = CasterPlant::new(backend)?;
+    let plant = simulation.plant;
+    let caster_spec = simulation.caster_spec;
+    let initial_transform = *simulation
+        .world
+        .get::<Transform3>(simulation.chassis)
         .context("initial chassis")?;
-    let mut drive_states = [LongitudinalDrivePathState::default(); 2];
-    let mut caster_tire_state = CombinedSlipTireState::default();
-    let mut conditioned_load_n = [0.0; 3];
-    let mut pending_wrenches: Vec<ExternalBodyWrench> = Vec::new();
-    let mut integrated_yaw_rad = 0.0;
     let mut drive_contact_steps = [0_u64; 2];
     let mut caster_contact_steps = 0_u64;
     let mut maximum_abs_caster_swivel_rad = 0.0_f64;
@@ -413,141 +369,40 @@ pub fn run_differential_caster_trace<B: PhysicsBackend>(
     )];
 
     for zero_based_step in 0..TOTAL_STEPS {
-        for wrench in pending_wrenches.drain(..) {
-            backend.apply_external_body_wrench(physics_world, wrench)?;
-        }
-        backend.step(physics_world, fixed_delta)?;
-        backend.sync_to_ecs(&mut world, physics_world)?;
-
         let step = zero_based_step + 1;
-        let transform = *world.get::<Transform3>(chassis).context("chassis pose")?;
-        let body = *world.get::<RigidBody>(chassis).context("chassis body")?;
-        integrated_yaw_rad += body.angular_velocity_rad_s.y * dt_s;
-        let contacts = backend.contact_points(physics_world)?;
-        let commands = command_for_step(step);
-        let load_alpha = dt_s / (CONTACT_LOAD_FILTER_TIME_CONSTANT_S + dt_s);
-        let mut drive_loads_n = [0.0; 2];
-
-        for (index, station) in drive_stations.iter().enumerate() {
-            let frame = resolve_wheel_station_frame(
-                station.spec,
-                0.0,
-                transform,
-                body.linear_velocity_m_s,
-                body.angular_velocity_rad_s,
-            )
-            .with_context(|| format!("drive frame {index} at step {step}"))?;
-            let raw_patch = aggregate_wheel_contact_patch(
-                station.entity,
-                contacts,
-                frame.forward_world,
-                frame.lateral_world,
-            )
-            .with_context(|| format!("drive contact {index} at step {step}"))?;
-            if step > SETTLE_STEPS && raw_patch.is_some() {
-                drive_contact_steps[index] += 1;
+        let completed = simulation.step(command_for_step(step))?;
+        let transform = completed.transform;
+        let body = completed.body;
+        let integrated_yaw_rad = completed.integrated_yaw_rad;
+        let drive_loads_n = completed.drive_loads_n;
+        let caster_in_contact = completed.caster_in_contact;
+        let caster_swivel_rad = completed.caster_swivel_rad;
+        let caster_swivel_unwrapped_rad = completed.caster_swivel_unwrapped_rad;
+        let caster_swivel_velocity_rad_s = completed.caster_swivel_velocity_rad_s;
+        let caster_roll_velocity_rad_s = completed.caster_roll_velocity_rad_s;
+        if step > SETTLE_STEPS {
+            for (count, in_contact) in drive_contact_steps
+                .iter_mut()
+                .zip(completed.drive_in_contact)
+            {
+                *count += u64::from(in_contact);
             }
-            let bounded = raw_patch
-                .map_or(0.0, |patch| patch.normal_load_n)
-                .min(plant.tire.reference_load_n * plant.tire.maximum_load_ratio);
-            conditioned_load_n[index] += load_alpha * (bounded - conditioned_load_n[index]);
-            drive_loads_n[index] = conditioned_load_n[index];
-            let patch = raw_patch.map(|mut patch| {
-                patch.normal_load_n = conditioned_load_n[index];
-                patch
-            });
-            let evaluation = evaluate_longitudinal_drive_path(
-                plant,
-                drive_states[index],
-                LongitudinalDrivePathInput {
-                    carrier_patch: patch,
-                    forward_world: frame.forward_world,
-                    lateral_world: frame.lateral_world,
-                    command_voltage_v: commands[index],
-                },
-                dt_s,
-            )
-            .with_context(|| format!("drive path {index} at step {step}"))?;
-            drive_states[index] = evaluation.state;
-            if let Some(wrench) = evaluation.tire_wrench {
-                pending_wrenches.push(wrench);
-            }
+            caster_contact_steps += u64::from(caster_in_contact);
         }
-
-        let fork_transform = *world
-            .get::<Transform3>(caster.bracket)
-            .context("caster bracket")?;
-        let caster_forward = (fork_transform.rotation * Vec3::X).normalize();
-        let caster_lateral = (fork_transform.rotation * Vec3::Z).normalize();
-        let raw_caster_patch =
-            aggregate_wheel_contact_patch(caster.wheel, contacts, caster_forward, caster_lateral)
-                .with_context(|| format!("caster contact at step {step}"))?;
-        let caster_in_contact = raw_caster_patch.is_some();
-        if step > SETTLE_STEPS && caster_in_contact {
-            caster_contact_steps += 1;
-        }
-        let bounded_caster_load = raw_caster_patch
-            .map_or(0.0, |patch| patch.normal_load_n)
-            .min(caster_spec.tire.reference_load_n * caster_spec.tire.maximum_load_ratio);
-        conditioned_load_n[2] += load_alpha * (bounded_caster_load - conditioned_load_n[2]);
-        let caster_patch = raw_caster_patch.map(|mut patch| {
-            patch.normal_load_n = conditioned_load_n[2];
-            patch
-        });
-        let caster_roll_state = *world
-            .get::<JointState>(caster.wheel)
-            .context("caster roll")?;
-        let caster_roll_velocity_rad_s = match caster_roll_state {
-            JointState::Revolute { velocity_rad_s, .. } => velocity_rad_s,
-            _ => anyhow::bail!("caster roll joint state kind"),
-        };
-        let caster_tire = evaluate_combined_slip_tire(
-            caster_spec.tire,
-            caster_tire_state,
-            CombinedSlipTireInput {
-                patch: caster_patch,
-                forward_world: caster_forward,
-                lateral_world: caster_lateral,
-                wheel_circumferential_speed_m_s: caster_roll_velocity_rad_s
-                    * caster_spec.wheel_radius_m,
-                road_friction_scale: 1.0,
-            },
-            dt_s,
-        )
-        .with_context(|| format!("caster tire at step {step}"))?;
-        caster_tire_state = caster_tire.state;
-        if let Some(patch) = caster_patch {
-            pending_wrenches.push(
-                combined_slip_tire_wrench(patch, caster_tire, caster_forward, caster_lateral)
-                    .with_context(|| format!("caster wrench at step {step}"))?,
-            );
-        }
-        let caster_swivel_state = *world
-            .get::<JointState>(caster.bracket)
-            .context("caster swivel")?;
-        let (caster_swivel_unwrapped_rad, caster_swivel_velocity_rad_s) = match caster_swivel_state
-        {
-            JointState::Revolute {
-                position_rad,
-                velocity_rad_s,
-            } => (position_rad, velocity_rad_s),
-            _ => anyhow::bail!("caster swivel joint state kind"),
-        };
-        let caster_swivel_rad = wrap_angle_rad(caster_swivel_unwrapped_rad);
         maximum_abs_caster_swivel_rad = maximum_abs_caster_swivel_rad.max(caster_swivel_rad.abs());
         maximum_abs_caster_swivel_velocity_rad_s =
             maximum_abs_caster_swivel_velocity_rad_s.max(caster_swivel_velocity_rad_s.abs());
         maximum_abs_caster_lateral_force_n =
-            maximum_abs_caster_lateral_force_n.max(caster_tire.lateral_force_n.abs());
+            maximum_abs_caster_lateral_force_n.max(completed.caster_lateral_force_n.abs());
         if (SETTLE_STEPS - 200..=SETTLE_STEPS).contains(&step) {
-            static_caster_load_sum_n += conditioned_load_n[2];
+            static_caster_load_sum_n += completed.caster_load_n;
             static_caster_load_samples += 1;
         }
         if (ARC_END_STEP + 1..=ACCEL_END_STEP).contains(&step) {
-            minimum_accel_caster_load_n = minimum_accel_caster_load_n.min(conditioned_load_n[2]);
+            minimum_accel_caster_load_n = minimum_accel_caster_load_n.min(completed.caster_load_n);
         }
         if step > ACCEL_END_STEP {
-            maximum_brake_caster_load_n = maximum_brake_caster_load_n.max(conditioned_load_n[2]);
+            maximum_brake_caster_load_n = maximum_brake_caster_load_n.max(completed.caster_load_n);
         }
 
         if step % TRACE_STRIDE_STEPS == 0 || step == TOTAL_STEPS {
@@ -557,19 +412,22 @@ pub fn run_differential_caster_trace<B: PhysicsBackend>(
                 body,
                 integrated_yaw_rad,
                 drive_loads_n,
-                conditioned_load_n[2],
+                completed.caster_load_n,
                 caster_in_contact,
                 caster_swivel_rad,
                 caster_swivel_unwrapped_rad,
                 caster_swivel_velocity_rad_s,
                 caster_roll_velocity_rad_s,
-                caster_tire.lateral_force_n,
-                caster_tire.friction_utilization,
+                completed.caster_lateral_force_n,
+                completed.caster_friction_utilization,
             ));
         }
     }
 
-    let final_transform = *world.get::<Transform3>(chassis).context("final chassis")?;
+    let final_transform = *simulation
+        .world
+        .get::<Transform3>(simulation.chassis)
+        .context("final chassis")?;
     let horizontal_displacement_m = (final_transform.translation.x
         - initial_transform.translation.x)
         .hypot(final_transform.translation.z - initial_transform.translation.z);
@@ -643,7 +501,7 @@ pub fn run_differential_caster_trace<B: PhysicsBackend>(
         backend: manifest,
         task_spec,
         drive_plant_spec: plant,
-        drive_station_specs: drive_stations.map(|station| station.spec),
+        drive_station_specs: drive_station_specs(),
         caster_spec,
         fixed_delta_ticks: DIFF_CASTER_FIXED_DELTA_TICKS,
         seed: WORLD_SEED,
@@ -656,6 +514,278 @@ pub fn run_differential_caster_trace<B: PhysicsBackend>(
     trace.content_digest = trace_digest(&trace)?;
     trace.validate()?;
     Ok(trace)
+}
+
+// Shared plant state; controller-visible sensors are mounted by the caller.
+// The original queued-wrench split is retained: apply previous forces, advance
+// rigid bodies, then advance motor/tire state and queue the next forces.
+pub(crate) struct CasterPlant<B> {
+    backend: B,
+    pub(crate) world: World,
+    pub(crate) chassis: Entity,
+    physics_world: rne_physics::PhysicsWorldId,
+    pub(crate) plant: LongitudinalMobilityPlantSpec,
+    caster_spec: PassiveCasterSpec,
+    drive_stations: [DriveStation; 2],
+    caster: PassiveCasterEntities,
+    pub(crate) drive_states: [LongitudinalDrivePathState; 2],
+    caster_tire_state: CombinedSlipTireState,
+    conditioned_load_n: [f64; 3],
+    pending_wrenches: Vec<ExternalBodyWrench>,
+    integrated_yaw_rad: f64,
+    step: u64,
+}
+
+impl<B> std::fmt::Debug for CasterPlant<B> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CasterPlant")
+            .field("step", &self.step)
+            .field("chassis", &self.chassis)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CasterPlantStep {
+    pub(crate) transform: Transform3,
+    pub(crate) body: RigidBody,
+    pub(crate) integrated_yaw_rad: f64,
+    pub(crate) drive_loads_n: [f64; 2],
+    pub(crate) drive_in_contact: [bool; 2],
+    pub(crate) caster_load_n: f64,
+    pub(crate) caster_in_contact: bool,
+    pub(crate) caster_swivel_rad: f64,
+    pub(crate) caster_swivel_unwrapped_rad: f64,
+    pub(crate) caster_swivel_velocity_rad_s: f64,
+    pub(crate) caster_roll_velocity_rad_s: f64,
+    pub(crate) caster_lateral_force_n: f64,
+    pub(crate) caster_friction_utilization: f64,
+    pub(crate) motor_telemetry: [rne_robot::DcMotorCompletedTelemetry; 2],
+}
+
+impl<B: PhysicsBackend> CasterPlant<B> {
+    pub(crate) fn new(mut backend: B) -> Result<Self> {
+        let plant = drive_plant_spec();
+        let caster_spec = passive_caster_spec();
+        ensure!(caster_spec.is_valid(), "invalid caster fixture");
+        let physics_world = backend.create_world(PhysicsWorldDesc {
+            gravity_m_s2: Vec3::new(0.0, -9.806_65, 0.0),
+            solver_iterations: 32,
+        })?;
+        let mut world = World::new();
+        let ground = spawn_named(&mut world, "diff_caster_ground");
+        world.entity_mut(ground).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            frictionless_cuboid(Vec3::new(20.0, 0.5, 20.0)),
+            Transform3::from_translation_rotation(Vec3::new(0.0, -0.5, 0.0), Quat::IDENTITY),
+        ));
+        let chassis = spawn_named(&mut world, "diff_caster_chassis");
+        world.entity_mut(chassis).insert((
+            RigidBody {
+                mass_kg: 60.0,
+                ..RigidBody::default()
+            },
+            RigidBodyInertia {
+                center_of_mass_local_m: Vec3::new(-0.03, 0.03, 0.0),
+                ixx_kg_m2: 5.0,
+                ixy_kg_m2: 0.0,
+                ixz_kg_m2: 0.0,
+                iyy_kg_m2: 7.0,
+                iyz_kg_m2: 0.0,
+                izz_kg_m2: 6.0,
+            },
+            MultibodyLink,
+            frictionless_cuboid(Vec3::new(0.48, 0.10, 0.24)),
+            CollisionGroups::without_self_collision(SELF_COLLISION_GROUP),
+            Transform3::from_translation_rotation(Vec3::new(0.0, 0.37, 0.0), Quat::IDENTITY),
+        ));
+        let drive_stations = spawn_drive_stations(&mut world, chassis);
+        let caster = spawn_passive_caster(&mut world, chassis, caster_spec);
+        backend.sync_from_ecs(&mut world, physics_world)?;
+
+        Ok(Self {
+            backend,
+            world,
+            chassis,
+            physics_world,
+            plant,
+            caster_spec,
+            drive_stations,
+            caster,
+            drive_states: [LongitudinalDrivePathState::default(); 2],
+            caster_tire_state: CombinedSlipTireState::default(),
+            conditioned_load_n: [0.0; 3],
+            pending_wrenches: Vec::new(),
+            integrated_yaw_rad: 0.0,
+            step: 0,
+        })
+    }
+
+    pub(crate) fn step(&mut self, commands: [f64; 2]) -> Result<CasterPlantStep> {
+        ensure!(
+            commands.iter().all(|v| v.is_finite()),
+            "invalid terminal voltage"
+        );
+        let step = self.step.checked_add(1).context("caster step overflow")?;
+        ensure!(
+            step.checked_mul(DIFF_CASTER_FIXED_DELTA_TICKS).is_some(),
+            "caster clock overflow"
+        );
+        let fixed_delta = SimDuration::from_ticks(DIFF_CASTER_FIXED_DELTA_TICKS);
+        let dt_s = fixed_delta.as_seconds().value();
+        let backend = &mut self.backend;
+        let world = &mut self.world;
+        let physics_world = self.physics_world;
+        let chassis = self.chassis;
+        let plant = self.plant;
+        let caster_spec = self.caster_spec;
+        let drive_stations = &self.drive_stations;
+        let caster = &self.caster;
+        let drive_states = &mut self.drive_states;
+        let caster_tire_state = &mut self.caster_tire_state;
+        let conditioned_load_n = &mut self.conditioned_load_n;
+        let pending_wrenches = &mut self.pending_wrenches;
+        let mut integrated_yaw_rad = self.integrated_yaw_rad;
+        let mut drive_in_contact = [false; 2];
+        let mut motor_telemetry = [rne_robot::DcMotorCompletedTelemetry::default(); 2];
+        for wrench in pending_wrenches.drain(..) {
+            backend.apply_external_body_wrench(physics_world, wrench)?;
+        }
+        backend.step(physics_world, fixed_delta)?;
+        backend.sync_to_ecs(world, physics_world)?;
+
+        let transform = *world.get::<Transform3>(chassis).context("chassis pose")?;
+        let body = *world.get::<RigidBody>(chassis).context("chassis body")?;
+        integrated_yaw_rad += body.angular_velocity_rad_s.y * dt_s;
+        let contacts = backend.contact_points(physics_world)?;
+        let load_alpha = dt_s / (CONTACT_LOAD_FILTER_TIME_CONSTANT_S + dt_s);
+        let mut drive_loads_n = [0.0; 2];
+
+        for (index, station) in drive_stations.iter().enumerate() {
+            let frame = resolve_wheel_station_frame(
+                station.spec,
+                0.0,
+                transform,
+                body.linear_velocity_m_s,
+                body.angular_velocity_rad_s,
+            )
+            .with_context(|| format!("drive frame {index} at step {step}"))?;
+            let raw_patch = aggregate_wheel_contact_patch(
+                station.entity,
+                contacts,
+                frame.forward_world,
+                frame.lateral_world,
+            )
+            .with_context(|| format!("drive contact {index} at step {step}"))?;
+            drive_in_contact[index] = raw_patch.is_some();
+            let bounded = raw_patch
+                .map_or(0.0, |patch| patch.normal_load_n)
+                .min(plant.tire.reference_load_n * plant.tire.maximum_load_ratio);
+            conditioned_load_n[index] += load_alpha * (bounded - conditioned_load_n[index]);
+            drive_loads_n[index] = conditioned_load_n[index];
+            let patch = raw_patch.map(|mut patch| {
+                patch.normal_load_n = conditioned_load_n[index];
+                patch
+            });
+            let evaluation = evaluate_longitudinal_drive_path(
+                plant,
+                drive_states[index],
+                LongitudinalDrivePathInput {
+                    carrier_patch: patch,
+                    forward_world: frame.forward_world,
+                    lateral_world: frame.lateral_world,
+                    command_voltage_v: commands[index],
+                },
+                dt_s,
+            )
+            .with_context(|| format!("drive path {index} at step {step}"))?;
+            drive_states[index] = evaluation.state;
+            motor_telemetry[index] = evaluation.motor_telemetry;
+            if let Some(wrench) = evaluation.tire_wrench {
+                pending_wrenches.push(wrench);
+            }
+        }
+
+        let fork_transform = *world
+            .get::<Transform3>(caster.bracket)
+            .context("caster bracket")?;
+        let caster_forward = (fork_transform.rotation * Vec3::X).normalize();
+        let caster_lateral = (fork_transform.rotation * Vec3::Z).normalize();
+        let raw_caster_patch =
+            aggregate_wheel_contact_patch(caster.wheel, contacts, caster_forward, caster_lateral)
+                .with_context(|| format!("caster contact at step {step}"))?;
+        let caster_in_contact = raw_caster_patch.is_some();
+        let bounded_caster_load = raw_caster_patch
+            .map_or(0.0, |patch| patch.normal_load_n)
+            .min(caster_spec.tire.reference_load_n * caster_spec.tire.maximum_load_ratio);
+        conditioned_load_n[2] += load_alpha * (bounded_caster_load - conditioned_load_n[2]);
+        let caster_patch = raw_caster_patch.map(|mut patch| {
+            patch.normal_load_n = conditioned_load_n[2];
+            patch
+        });
+        let caster_roll_state = *world
+            .get::<JointState>(caster.wheel)
+            .context("caster roll")?;
+        let caster_roll_velocity_rad_s = match caster_roll_state {
+            JointState::Revolute { velocity_rad_s, .. } => velocity_rad_s,
+            _ => anyhow::bail!("caster roll joint state kind"),
+        };
+        let caster_tire = evaluate_combined_slip_tire(
+            caster_spec.tire,
+            *caster_tire_state,
+            CombinedSlipTireInput {
+                patch: caster_patch,
+                forward_world: caster_forward,
+                lateral_world: caster_lateral,
+                wheel_circumferential_speed_m_s: caster_roll_velocity_rad_s
+                    * caster_spec.wheel_radius_m,
+                road_friction_scale: 1.0,
+            },
+            dt_s,
+        )
+        .with_context(|| format!("caster tire at step {step}"))?;
+        *caster_tire_state = caster_tire.state;
+        if let Some(patch) = caster_patch {
+            pending_wrenches.push(
+                combined_slip_tire_wrench(patch, caster_tire, caster_forward, caster_lateral)
+                    .with_context(|| format!("caster wrench at step {step}"))?,
+            );
+        }
+        let caster_swivel_state = *world
+            .get::<JointState>(caster.bracket)
+            .context("caster swivel")?;
+        let (caster_swivel_unwrapped_rad, caster_swivel_velocity_rad_s) = match caster_swivel_state
+        {
+            JointState::Revolute {
+                position_rad,
+                velocity_rad_s,
+            } => (position_rad, velocity_rad_s),
+            _ => anyhow::bail!("caster swivel joint state kind"),
+        };
+        let caster_swivel_rad = wrap_angle_rad(caster_swivel_unwrapped_rad);
+        self.step = step;
+        self.integrated_yaw_rad = integrated_yaw_rad;
+        Ok(CasterPlantStep {
+            transform,
+            body,
+            integrated_yaw_rad,
+            drive_loads_n,
+            drive_in_contact,
+            caster_load_n: conditioned_load_n[2],
+            caster_in_contact,
+            caster_swivel_rad,
+            caster_swivel_unwrapped_rad,
+            caster_swivel_velocity_rad_s,
+            caster_roll_velocity_rad_s,
+            caster_lateral_force_n: caster_tire.lateral_force_n,
+            caster_friction_utilization: caster_tire.friction_utilization,
+            motor_telemetry,
+        })
+    }
 }
 
 /// Builds a self-verifying SI-unit comparison from two complete backend traces.

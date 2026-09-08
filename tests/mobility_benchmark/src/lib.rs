@@ -4,6 +4,8 @@ pub mod ackermann_observed;
 pub mod ackermann_suspension;
 pub mod backend;
 pub mod diff_caster;
+pub mod diff_caster_control;
+pub mod diff_caster_observed;
 pub mod identified_suspension_road;
 pub mod mobility_randomization;
 pub mod observed;

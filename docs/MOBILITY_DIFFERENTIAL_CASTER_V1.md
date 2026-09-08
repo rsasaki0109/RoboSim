@@ -85,9 +85,127 @@ cargo run -p rne_mobility_benchmark --features mujoco -- `
 
 ## Explicit limits
 
+The additive `diff_caster_control` module prepares the sensor-only controller
+boundary: forward +x, left +y, positive counterclockwise yaw (world x/z and
+negative world-Y yaw for this fixture). It accepts only odometry estimates and
+task velocity references. The oldest source capture bounds command holding;
+duplicates do not renew it or integrate PI state. Expiry clears voltage and
+integrators, and malformed or saturated inputs fail closed. Zero terminal voltage
+is not an instantaneous physical stop. Gains are provisional, not identified.
+Controller-only tests cover signs, deadlines, duplicates, initialization,
+saturation and invalid input. `diff_caster_observed` now connects this controller
+to the shared plant through actual 2048-count encoders, seeded IMU and motor-current
+frontends (10 ms capture period, 2 ms latency). The 10-second run settles, tracks
+an arc, straightens and reverses. It records every 1 ms decision, including held
+and expired commands. An optional 50 ms IMU capture outage tests expiry/recovery.
+The estimator uses world x/z as planar x/y; sensor +Z is mounted along body -Y.
+Truth is read only for evidence/scoring, never passed into the controller.
+
+The first Rapier run reproduced exactly and passed the preliminary limits, but
+tracking remains coarse: on the predeclared 4–5 second arc window, speed RMSE is
+0.09707 m/s against a 0.25 m/s target and yaw-rate RMSE is 0.05147 rad/s against
+0.15 rad/s. Final reverse speed is only -0.03460 m/s against -0.15 m/s. Do not
+interpret these as tuned control performance. MuJoCo also completed the same
+10-second TaskSpec: arc speed RMSE 0.09680 m/s, yaw-rate RMSE 0.05129 rad/s and
+final reverse speed -0.03276 m/s. Its final planar position differs from Rapier
+by about 0.01053 m. These first runs agree closely but share the tracking deficit.
+MuJoCo repeatability/outage regression tests passed, including identical TaskSpec,
+source sequence/capture timelines, full-run speed/yaw gap envelopes of 0.02 m/s
+and 0.02 rad/s, and final planar gap below 0.05 m. These are synthetic regression
+envelopes, not physical validation tolerances. All 12 focused tests and MuJoCo-feature
+all-target Clippy passed. Stronger trace validation, Failure Capsules and controller
+improvement remain open.
+
+Initial closed-loop artifacts (uncommitted development builds):
+
+- `E:\RNE-build\m3c-sensor\caster-observed-rapier-v1.json`, SHA-256
+  `31dc8f1f448f67d88f81c1665bb95be8e9f15054102a28e218a84b43be787304`.
+- `E:\RNE-build\m3c-sensor\caster-observed-mujoco-v1.json`, SHA-256
+  `879df828e207835d76609aef0ad2ac02c1db2b523c53cd6514c4375998e4e324`.
+
+The next controller candidate is model-based velocity feedforward plus the same
+PI feedback. [WPILib's official feedforward documentation](https://docs.wpilib.org/en/latest/docs/software/advanced-controls/controllers/feedforward.html)
+describes separating predictable voltage demand from feedback correction, with
+explicit voltage/velocity units. For the nominal fixture only,
+`k_v = (K_e + R*b/K_t)*gear_ratio/wheel_radius = 14.375 V s/m` and the
+differential yaw coefficient is `k_v*track_width/2 = 4.3125 V s/rad`.
+These follow the existing motor model's no-load steady-state equations; they are
+not empirically identified coefficients. Do not read sampled/randomized privileged
+plant parameters into the actor. Static friction and transient acceleration
+compensation are not inferred from this calculation. The candidate is now
+implemented as `nominal_caster_feedforward_spec`, selected explicitly through
+`run_caster_observed_with_control_spec` or the exporter's `--nominal-feedforward`
+flag. PI-only remains the default comparison baseline. The same task, references,
+sensor seeds, delays, feedback gains and voltage limit are retained; no parameter
+search is used. Before evaluation, the comparison requires both arc RMSEs to
+halve and final reverse speed to exceed 0.10 m/s in magnitude in the correct
+direction. Both predeclared checks passed without changing feedback gains or the
+test window:
+
+| Backend | PI speed RMSE (m/s) | FF+PI speed RMSE (m/s) | PI yaw RMSE (rad/s) | FF+PI yaw RMSE (rad/s) | FF+PI final reverse (m/s) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Rapier | 0.097071 | 0.004231 | 0.051468 | 0.001762 | -0.142213 |
+| MuJoCo | 0.096799 | 0.003993 | 0.051288 | 0.000947 | -0.143420 |
+
+All 15 focused tests and feature-enabled Clippy passed for that comparison.
+Candidate-specific repeatability and outage tests also passed on both backends:
+each candidate reproduces exactly, the 50 ms IMU capture outage expires the entire
+feedforward-plus-feedback voltage, and fresh measurements restore tracking.
+The result demonstrates control improvement on this fixed synthetic model, not
+generalization to unknown tire friction, payload, motor temperature or real hardware.
+
+FF+PI artifacts (10000 decisions each, external storage):
+
+- `E:\RNE-build\m3c-sensor\caster-observed-rapier-feedforward-v1.json`, SHA-256
+  `8309ac879b75c3a4675c1e61db7374d779e987d1dea00e7f1b7677d521d904c5`.
+- `E:\RNE-build\m3c-sensor\caster-observed-mujoco-feedforward-v1.json`, SHA-256
+  `9a8efc9d1e548508f84cea160bc9bf9b01369cd048a0e3bc5377d34b831e75fd`.
+
+### Versioned controller evidence
+
+The new trace schema is version 2 (`rne_diff_caster_sensor_trace`) and the actor
+TaskSpec is `mobility_diff_caster_sensor_twist_v2`. It explicitly declares whether
+a new estimate is available and its health code. Unavailable estimate tensors must
+not be interpreted as fresh zeros; the controller receives no estimate and follows
+its hold/expiry contract. The earlier files above are unversioned preview evidence:
+retain them as baselines, but do not synthesize headers to upgrade them to v2.
+
+Each v2 decision records the voltage supplied to the current motor/tire update as
+well as the newly selected next-interval voltage. Accepted estimates retain oldest
+capture time and health; each motor measurement retains its original DataBus
+stream/entity/sequence/capture/availability header and complete electrical payload.
+
+`CasterObservedRun::validate` checks the complete fixed-step timeline, declared
+capture schedule/outage, estimator field presence, finite values, motor source
+continuity/latency, voltage bounds and prior-decision-to-applied-command linkage.
+It then replays the controller from recorded estimates/references and requires exact
+command/status agreement. A SHA-256 content digest detects accidental modifications;
+it is not a signature or an attestation that the data came from real hardware.
+Even a recomputed digest does not waive timing or controller checks. This is not
+raw-sensor estimator replay or full-physics replay; those remain separate evidence
+requirements. Validation/round-trip and rehashed-mutation tests passed, along with
+all 16 focused caster tests and MuJoCo-feature all-target Clippy. Full workspace
+CI for this complete caster slice remains pending.
+The original open-loop contract is retained. Before/after Rapier trace files are
+byte-identical after the shared-plant refactor (SHA-256
+`45c87f423f5a744f0eb12fbcbad004957bb0250589280fe6224fa23f1fba7a30`;
+`E:\RNE-build\m3c-sensor\diff-caster-refactor-before.json` and
+`diff-caster-refactor-after.json`). All ten focused caster/controller tests and
+benchmark all-target Clippy passed; the new closed-loop changes have not yet run
+through full CI. The prior `98c7c40` full CI does not cover this addition.
+
+Export preliminary evidence to a new external filename with:
+
+```powershell
+cargo run -p rne_mobility_benchmark --example diff_caster_sensor_loop -- rapier E:\RNE-build\m3c-sensor\caster-observed-v1.json
+```
+
+Add `--imu-blackout` after the output path to exercise the outage. With
+`--features mujoco`, replace `rapier` by `mujoco`. The exporter refuses overwrite.
+
 This is a dynamics fixture, not a full real-robot validation claim. The drive and caster
 contacts use sphere proxies on a flat rigid plane; suspension compliance, wheel profile,
-roughness, curb impact, split friction, lift/recontact, closed-loop sensor-only control,
+roughness, curb impact, split friction, lift/recontact, qualified closed-loop control,
 and real-log parameter identification remain later M3-C/M5 gates. Three support points
 avoid the over-constrained uneven-ground problem; four-or-more-wheel vehicles still need
 identified suspension before comparable load-transfer claims are justified.
