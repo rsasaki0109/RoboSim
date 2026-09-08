@@ -17,6 +17,17 @@ pub struct SuspensionCaptureTiming {
     pub reported_capture_time_s: f64,
 }
 
+/// One training acquisition sampled from an explicitly supplied signal model.
+#[derive(Clone, Copy, Debug)]
+pub struct SuspensionSignalRun<'a> {
+    /// Unique acquisition identity, also selecting independent timing streams.
+    pub acquisition_id: u64,
+    /// Nominal physical instants and reported timestamps, in capture order.
+    pub timing: &'a [SuspensionCaptureTiming],
+    /// Explicit offline derivative applied to sampled positions and reported times.
+    pub operator: SuspensionDerivativeOperator,
+}
+
 /// Temporal sharing within one acquisition; different acquisitions are independent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -58,6 +69,96 @@ pub struct SuspensionTimingErrorModel {
 }
 
 impl SuspensionTimingErrorModel {
+    /// Samples a declared signal for each realized physical clock, then refits.
+    /// `signal(acquisition_id, physical_time_s)` returns position/force in SI units
+    /// and must be pure and deterministic. No recorded-log interpolation is inferred.
+    /// All runs are training inputs; no holdout or live physics advancement occurs.
+    /// Signal-domain, clock and derivative failures remain `InvalidSample` in their
+    /// original slots, including the baseline. Estimator errors are kept unchanged.
+    /// Caps 64 unique runs, 100,000 combined rows and 10 million row-factor-draw
+    /// evaluations. Callback cost and authenticity are outside this numerical API.
+    pub fn propagate_signal(
+        &self,
+        spec: rne_robot::SuspensionIdentificationSpec,
+        runs: &[SuspensionSignalRun<'_>],
+        draws: usize,
+        signal: impl Fn(u64, f64) -> Result<(f64, f64)>,
+    ) -> Result<crate::suspension_uncertainty::SuspensionErrorPropagation> {
+        use rne_robot::{
+            fit_suspension_training_runs, SuspensionIdentificationError,
+            SuspensionIdentificationRun,
+        };
+        self.validate()?;
+        ensure!(spec.is_valid(), "invalid sampled identification spec");
+        ensure!(
+            (1..=64).contains(&runs.len()) && (1..=4096).contains(&draws),
+            "invalid sampled propagation shape"
+        );
+        let mut ids = std::collections::BTreeSet::new();
+        let mut rows = 0usize;
+        for run in runs {
+            ensure!(
+                ids.insert(run.acquisition_id),
+                "duplicate sampled acquisition identity"
+            );
+            rows = rows
+                .checked_add(run.timing.len())
+                .ok_or_else(|| anyhow::anyhow!("sampled row overflow"))?;
+            ensure!(rows <= 100_000, "too many sampled rows");
+            validate_times(
+                &run.timing
+                    .iter()
+                    .map(|t| t.physical_capture_time_s)
+                    .collect::<Vec<_>>(),
+            )?;
+            validate_times(
+                &run.timing
+                    .iter()
+                    .map(|t| t.reported_capture_time_s)
+                    .collect::<Vec<_>>(),
+            )?;
+        }
+        ensure!(
+            rows.saturating_mul(draws)
+                .saturating_mul(self.factors.len())
+                <= 10_000_000,
+            "sampled propagation work budget exceeded"
+        );
+        let evaluate = |draw: Option<usize>| {
+            let samples = runs
+                .iter()
+                .map(|run| {
+                    let timing = match draw {
+                        Some(draw) => self.realize(run.timing, run.acquisition_id, draw)?,
+                        None => run.timing.to_vec(),
+                    };
+                    capture_suspension_signal(
+                        &timing,
+                        |t| signal(run.acquisition_id, t),
+                        run.operator,
+                    )
+                })
+                .collect::<Result<Vec<_>>>();
+            match samples {
+                Err(_) => Err(SuspensionIdentificationError::InvalidSample),
+                Ok(samples) => {
+                    let training: Vec<_> = runs
+                        .iter()
+                        .zip(&samples)
+                        .map(|(run, samples)| SuspensionIdentificationRun {
+                            acquisition_id: run.acquisition_id,
+                            samples,
+                        })
+                        .collect();
+                    fit_suspension_training_runs(spec, &training)
+                }
+            }
+        };
+        let baseline = evaluate(None);
+        let draws = (0..draws).map(|draw| evaluate(Some(draw))).collect();
+        Ok(crate::suspension_uncertainty::SuspensionErrorPropagation { baseline, draws })
+    }
+
     fn validate(&self) -> Result<()> {
         ensure!(
             self.kind == "rne_suspension_timing_error_model" && self.schema_version == 1,
@@ -364,6 +465,149 @@ mod tests {
     use super::*;
     const OP: SuspensionDerivativeOperator =
         SuspensionDerivativeOperator::NonuniformThreePointSecantEndsV1;
+
+    #[test]
+    fn sampled_propagation_rejects_invalid_requests_before_signal_evaluation() {
+        use crate::suspension_identification::suspension_identification_spec;
+        use crate::suspension_uncertainty::SuspensionErrorDistribution;
+        let timing: Vec<_> = (0..200)
+            .map(|i| SuspensionCaptureTiming {
+                physical_capture_time_s: i as f64 * 0.01,
+                reported_capture_time_s: i as f64 * 0.01,
+            })
+            .collect();
+        let model = SuspensionTimingErrorModel {
+            kind: "rne_suspension_timing_error_model".into(),
+            schema_version: 1,
+            seed: 42,
+            factors: vec![SuspensionTimingFactor {
+                factor_id: 7,
+                distribution: SuspensionErrorDistribution::Rectangular,
+                scope: SuspensionTimingScope::IndependentSamples,
+                physical_loading_s: 0.001,
+                reported_loading_s: 0.0,
+            }],
+        };
+        let run = SuspensionSignalRun {
+            acquisition_id: 1,
+            timing: &timing,
+            operator: OP,
+        };
+        let spec = suspension_identification_spec();
+        let never_sample = |_, _| panic!("invalid request must not evaluate a signal");
+        for draws in [0, 4097] {
+            assert!(model
+                .propagate_signal(spec, &[run], draws, never_sample)
+                .is_err());
+        }
+        assert!(model.propagate_signal(spec, &[], 1, never_sample).is_err());
+        let many_runs: Vec<_> = (0..64)
+            .map(|acquisition_id| SuspensionSignalRun {
+                acquisition_id,
+                ..run
+            })
+            .collect();
+        assert!(model
+            .propagate_signal(spec, &many_runs, 4096, never_sample)
+            .is_err());
+        let mut malformed = timing.clone();
+        malformed[1].reported_capture_time_s = malformed[0].reported_capture_time_s;
+        let bad_run = SuspensionSignalRun {
+            timing: &malformed,
+            ..run
+        };
+        assert!(model
+            .propagate_signal(spec, &[bad_run], 1, never_sample)
+            .is_err());
+    }
+
+    #[test]
+    fn sampled_draws_refit_actual_signals_and_retain_domain_failures() {
+        use crate::suspension_identification::suspension_identification_spec;
+        use crate::suspension_uncertainty::SuspensionErrorDistribution;
+        use rne_robot::SuspensionIdentificationError;
+        let timing: Vec<_> = (0..200)
+            .map(|i| SuspensionCaptureTiming {
+                physical_capture_time_s: i as f64 * 0.01,
+                reported_capture_time_s: i as f64 * 0.01,
+            })
+            .collect();
+        let runs = [
+            SuspensionSignalRun {
+                acquisition_id: 1,
+                timing: &timing,
+                operator: OP,
+            },
+            SuspensionSignalRun {
+                acquisition_id: 2,
+                timing: &timing,
+                operator: OP,
+            },
+        ];
+        let mut model = SuspensionTimingErrorModel {
+            kind: "rne_suspension_timing_error_model".into(),
+            schema_version: 1,
+            seed: 42,
+            factors: vec![SuspensionTimingFactor {
+                factor_id: 7,
+                distribution: SuspensionErrorDistribution::Rectangular,
+                scope: SuspensionTimingScope::IndependentSamples,
+                physical_loading_s: 0.001,
+                reported_loading_s: 0.0,
+            }],
+        };
+        let signal = |id: u64, t: f64| {
+            let x = -0.06 + 0.01 * t * t + 0.001 * id as f64;
+            Ok((x, -200_000.0 * (x + 0.06) - 15_000.0 * 0.02 * t))
+        };
+        let spec = suspension_identification_spec();
+        let hidden = model.propagate_signal(spec, &runs, 8, signal).unwrap();
+        assert!(hidden.baseline.is_ok());
+        assert_eq!(
+            hidden,
+            model.propagate_signal(spec, &runs, 8, signal).unwrap()
+        );
+        assert_eq!(
+            &model
+                .propagate_signal(spec, &runs, 16, signal)
+                .unwrap()
+                .draws[..8],
+            &hidden.draws
+        );
+        model.factors[0].reported_loading_s = 0.001;
+        let reported = model.propagate_signal(spec, &runs, 8, signal).unwrap();
+        assert_ne!(hidden.draws, reported.draws);
+        assert!(reported.draws.iter().all(Result::is_ok));
+        model.factors[0].physical_loading_s = 0.0;
+        model.factors[0].reported_loading_s = 0.0;
+        let zero = model.propagate_signal(spec, &runs, 8, signal).unwrap();
+        assert!(zero.draws.iter().all(|draw| *draw == zero.baseline));
+        let failure = model
+            .propagate_signal(spec, &runs, 8, |_, _| {
+                anyhow::bail!("signal domain unavailable")
+            })
+            .unwrap();
+        assert_eq!(
+            failure.baseline,
+            Err(SuspensionIdentificationError::InvalidSample)
+        );
+        assert_eq!(
+            failure.draws,
+            vec![Err(SuspensionIdentificationError::InvalidSample); 8]
+        );
+        assert!(model
+            .propagate_signal(spec, &[runs[0], runs[0]], 8, |_, _| panic!(
+                "invalid request"
+            ))
+            .is_err());
+        model.factors[0].physical_loading_s = 10.0;
+        let invalid = model.propagate_signal(spec, &runs, 8, signal).unwrap();
+        assert!(invalid.baseline.is_ok());
+        assert_eq!(
+            invalid.draws,
+            vec![Err(SuspensionIdentificationError::InvalidSample); 8]
+        );
+    }
 
     #[test]
     fn seeded_timing_preserves_correlations_and_rejects_invalid_draws() {

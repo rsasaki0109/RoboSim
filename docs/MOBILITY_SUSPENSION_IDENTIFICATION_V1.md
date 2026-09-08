@@ -506,6 +506,47 @@ silently removed or claimed to recover the continuous physical coefficients
 exactly. The test distinguishes changing force samples from relabeling fixed
 samples and checks the actual training-only estimator, not a substitute formula.
 
+`SuspensionTimingErrorModel::propagate_signal` now aggregates physical sampling
+realizations for explicitly supplied continuous signals. Each `SuspensionSignalRun`
+retains a unique acquisition ID, nominal physical/reported times and derivative
+operator. The callback receives the acquisition ID and realized physical time;
+the estimator receives sampled position/force and derivatives computed only from
+reported timestamps. A callback must be pure, deterministic and valid over its
+declared domain; no interpolation or extrapolation of retained logs is inferred.
+No holdout or live physics advancement occurs in this offline API.
+
+Bounds are 64 unique acquisitions, 100,000 combined rows, 4,096 draws and
+10 million row-factor-draw evaluations. Invalid nominal clocks or duplicate IDs
+reject the request before signal evaluation. Per-realization clock, signal-domain
+and derivative errors remain `InvalidSample`, including a failed nominal baseline;
+estimator errors retain their categories. No retries or successful-draw filtering
+are performed. Callback cost, signal authenticity, finite aperture averaging,
+calibration binding and portable replay of the signal model remain outside this
+API. Synthetic signal tests are not physical suspension validation.
+
+Focused validation: all six `suspension_sampling` library tests passed, including
+invalid-clock, draw-count and workload rejection before callback evaluation,
+seeded draw-prefix stability, failed-realization retention and actual estimator
+differences between physical sampling and timestamp relabeling. Benchmark
+all-target Clippy passed with warnings denied.
+
+Full workspace validation for the sampling-aggregation change completed with
+exit code 0 on 2026-09-09 (`cargo run -p xtask -- ci`), with tracked files fixed
+through execution. The tested sampling source Git blob is
+`8ed8d65ba6c78984418e3eece1d2e4f88f85f3a9`. Mobility library tests passed
+161/161 with one existing long training test ignored (179.91 s); the suspension
+CLI integration test also passed. Workspace lint/tests, smoke/Python checks,
+OSS parity, 361 fuzz cases across nine boundaries and Behavior CI 10/10 seeds
+completed. External log:
+`E:\RNE-build\m3c-sensor\suspension-sampled-propagation-v1-ci.log`, SHA-256
+`3444965d10aa28c60b5a0b666f6ab9a679c6fa727e62af4d73768926ed05432a`.
+This default-feature CI is regression evidence, not a new MuJoCo-enabled run,
+physical calibration qualification or actual HIL. Negative performance evidence
+is retained: heading CEM tied its baseline at -10; mobile clutter CEM grasped but
+did not place. Clutter PPO scored -1.50/-1.37 and mobile clutter PPO -2.16/-1.61
+(random/trained); these smoke scores do not establish policy generalization.
+The flagship workflow explicitly reported `cross_backend=false`.
+
 `SuspensionTimingErrorModel` (`rne_suspension_timing_error_model`, schema 1)
 generates one explicitly indexed realization using WorldRandom. Independent
 factor sources carry signed physical/reported time loadings in seconds; the
@@ -572,6 +613,22 @@ deleted-draw rejection, clock-file tampering and forbidden option overrides.
 MuJoCo all-target Clippy passed with warnings denied. This covers Rapier/MuJoCo
 Mobility regressions but is not a full workspace CI result for this timing slice;
 the full-CI checkpoint above remains scoped to the earlier affine commit.
+
+Full workspace timing checkpoint (2026-09-09):
+`c6c6f0ed1ac45c6c80340db9f7c8375d9bf26028` completed
+`cargo run -p xtask -- ci` with exit code 0 and tracked files fixed throughout.
+Workspace formatting, boundary checks, Clippy, tests, smoke/RL, headless, OSS
+parity, 361 fuzz cases over nine boundaries and Behavior CI 10/10 passed.
+Default Mobility library: 159 passed, zero failed, one existing ignored test
+(169.02 s); the expanded diagnostic CLI test also passed. External log:
+`E:\RNE-build\m3c-sensor\suspension-timestamp-v1-ci.log`, SHA-256
+`ffab015de80af3582f961d31c4bad2b99140e86a22b699b7f3b20372fc9aa89c`.
+Performance limitations remain explicit: heading CEM -10 versus baseline -10;
+clutter PPO random -1.38 versus trained -1.37; mobile clutter CEM grasped but
+did not place; mobile clutter PPO random -2.34 versus trained -1.61. Flagship
+verification reports `cross_backend=false`. These checks establish regression
+integrity, not physical calibration, a complete timing-noise model, robust policy
+performance or an actual recorded/shadow/HIL comparison.
 
 Source review: [JCGM 101:2008, BIPM](https://www.bipm.org/en/doi/10.59161/jcgm101-2008)
 describes propagation of input probability distributions through a measurement
