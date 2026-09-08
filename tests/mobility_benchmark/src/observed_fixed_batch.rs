@@ -18,8 +18,8 @@ pub use replay::{
     FixedBatchReplay, FixedBatchReplayEvent, MAX_FIXED_REPLAY_BYTES,
 };
 pub use training_session::{
-    CapturedLearningAttempt, LearningAttemptReplayOutcome, SensorLearningSession,
-    MAX_LEARNING_SESSION_BYTES,
+    CapturedLearningAttempt, CapturedResetAttempt, LearningAttemptReplayOutcome, ResetAttemptStage,
+    SensorLearningSession, MAX_LEARNING_SESSION_BYTES,
 };
 
 /// One stable lane's completed transition or execution failure.

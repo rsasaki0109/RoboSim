@@ -42,8 +42,14 @@ The regression was first observed as an actual successful Rust result containing
 and all 12 MuJoCo-enabled benchmark tests matching `suspension` passed, as did
 both crates' all-target Clippy checks with warnings denied. The benchmark test
 also seals and decodes the finite JSON dataset before requiring the typed
-`ResidualExceeded` error. These focused checks do not constitute a new full CI
-run or qualify a physical dataset.
+`ResidualExceeded` error. These focused checks do not qualify a physical dataset.
+
+Full regression checkpoint: commit `c48c85e` subsequently completed
+`cargo run -p xtask -- ci` with exit code 0, including workspace lint/tests,
+smoke/RL, headless, OSS parity, 361 fuzz cases and Behavior CI 10/10 seeds.
+External log: `E:\RNE-build\m3c-sensor\suspension-finite-v1-ci.log`, SHA-256
+`459f8e6d76837652c2e944159c08f4a883bb266d3350336d76092061f15848ed`.
+This validates the software revision, not real-world suspension calibration.
 
 This design is consistent with an experimental quarter-car ARX study that uses
 accelerometers above and below the suspension and linear least-squares estimation on

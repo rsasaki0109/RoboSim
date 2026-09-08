@@ -131,6 +131,46 @@ metadata does not execute the attempt and must not upgrade its replay status.
 
 ## Integration and acceptance work still required
 
+Reset capture now has an opt-in in-memory path retaining pre-attempt history,
+requested lane/episode pairs, pre/post lane progress and observations returned
+before evidence recording. Construction/validation and post-application evidence
+failure are distinct boundaries. Caught panics invalidate the session without
+claiming rollback. An in-memory reset replay adapter restores history into fresh
+worlds and re-executes the reset, comparing its outcome, observations, progress,
+stage and learner counters. It does not verify unavailable solver state or build
+authenticity. A reset-specific writer now packages bounded prior history, contract
+and attempt artifacts into a new directory with the Capsule metadata written last.
+Replay is explicitly not attempted by the writer. The replay reader accepts the
+reset-specific artifact kind, checks bounded/hash-bound inputs and the expected
+backend/TaskSpec/build contract, then restores history and executes the requested
+reset. It compares the complete reset attempt value rather than a message alone.
+
+Reset regression evidence currently covers a later replacement factory returning
+an error or panicking, unchanged existing lane progress on construction failure,
+successful recovery and history replay after an ordinary error, and evidence
+error/panic after replacement. Fresh-world replay reproduces injected construction
+faults; healthy factories and altered update/drive-tick diagnostics do not reproduce
+them. The focused reset tests and MuJoCo-enabled all-target Clippy pass. Earlier
+batch regression coverage passed 30 tests with two long training jobs ignored;
+this is not a full CI result for the reset changes.
+
+The reset file format preserves reset-observation missingness and integer
+timestamps, not just zero-filled actor tensors. It binds prior history, requested
+lane/episode pairs, decision/update counters and execution stage to the
+backend/TaskSpec/build contract. Tests cover saved construction error/panic replay,
+healthy-factory non-reproduction and rehashed update-count tampering. Invalid
+initial observation fields are rejected before a directory is created. Declared
+metadata or a matching failure message alone never upgrades a replay claim.
+Injected partial filesystem-write failures and physical hardware resets remain
+outside this evidence; no unavailable post-reset solver state is certified.
+
+The complete MuJoCo-enabled mobility benchmark library run after these changes
+passed 159 tests with zero failures; two explicitly ignored long training jobs
+were not rerun (257.07 s). All-target Clippy with warnings denied passed after
+the final reset-observation check. Full workspace CI for this reset slice is
+still pending; the earlier `c48c85e` CI checkpoint covers suspension hardening,
+not these subsequent reset changes.
+
 Validation checkpoint: commit `99d9196` completed the full `cargo run -p xtask -- ci`
 with exit code 0, including workspace lint/tests, smoke and RL checks, headless,
 OSS parity, 361 fuzz cases, and Behavior CI 10/10 seeds. The external log is

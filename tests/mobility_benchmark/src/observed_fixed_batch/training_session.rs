@@ -4,6 +4,8 @@ use super::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+mod reset_capsule;
+
 /// Maximum input size of a v2 learning session (32 MiB); v1 retains its 8 MiB cap.
 pub const MAX_LEARNING_SESSION_BYTES: usize = 32 * 1024 * 1024;
 const MAX_BYTES: usize = MAX_LEARNING_SESSION_BYTES;
@@ -12,7 +14,7 @@ const MAX_EVENTS: usize = 16 * 1024;
 /// Outcome of actual fresh-factory execution, not a decoded producer claim.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LearningAttemptReplayOutcome {
-    /// History, requested actions, progress, outputs, update counts and failure
+    /// History, requested operation, progress, outputs, update counts and failure
     /// diagnostics match. Unavailable physical post-state is not verified.
     Reproduced,
     /// History restored but the new attempt did not match the recorded failure.
@@ -51,6 +53,41 @@ fn limits(version: u32) -> Result<(usize, usize)> {
         2 => Ok((MAX_EVENTS, MAX_BYTES)),
         _ => anyhow::bail!("unsupported session schema"),
     }
+}
+
+/// Entered reset boundary, not proof of an unavailable physical post-state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResetAttemptStage {
+    /// Reset validation and replacement-world construction, before batch return.
+    Construct,
+    /// Replacement worlds were applied; session evidence is being recorded.
+    Evidence,
+}
+
+/// Opt-in reset diagnostics; packaging does not establish failure reproduction.
+#[derive(Debug)]
+pub struct CapturedResetAttempt {
+    /// Bounded valid history retained before executing the reset.
+    pub before_checkpoint: Vec<u8>,
+    /// Exploration coordinate before reset; reset must not consume a decision.
+    pub decision_index: u64,
+    /// Actual learner update count before attempting reset.
+    pub updates_before: u64,
+    /// Actual learner update count after attempting reset.
+    pub updates_after: u64,
+    /// Requested lane IDs and episode indices, in caller order.
+    pub requested_lanes: Vec<(usize, u64)>,
+    /// Lane identities and progress before attempting reset.
+    pub before: Vec<SensorFixedLaneProgress>,
+    /// Lane identities and progress after the attempt, including failures.
+    pub after: Vec<SensorFixedLaneProgress>,
+    /// Returned reset observations retained before evidence recording.
+    pub observations: Option<Vec<SensorFixedObservation>>,
+    /// Last entered boundary, or None on success.
+    pub stage: Option<ResetAttemptStage>,
+    /// Reset success, explicit error, or caught panic diagnostic.
+    pub outcome: std::result::Result<Vec<SensorFixedObservation>, String>,
 }
 
 impl CapturedLearningAttempt {
@@ -341,8 +378,44 @@ where
         &self.learner
     }
 
+    /// Re-executes an in-memory failed reset after restoring its history into fresh
+    /// worlds. Compares diagnostics and returned observations, not unavailable
+    /// solver state. This does not authenticate a build or read serialized Capsules.
+    pub fn replay_captured_reset(
+        factory: F,
+        workers: usize,
+        expected: &CapturedResetAttempt,
+    ) -> Result<LearningAttemptReplayOutcome> {
+        ensure!(expected.outcome.is_err(), "reset capture is not a failure");
+        ensure!(
+            expected.before_checkpoint.len() <= MAX_BYTES,
+            "reset history exceeds bound"
+        );
+        ensure!(
+            expected.requested_lanes.len() <= MAX_SENSOR_BATCH_LANES,
+            "reset mask exceeds bound"
+        );
+        let mut restored = Self::from_checkpoint(factory, workers, &expected.before_checkpoint)?;
+        let actual = restored.capture_reset(&expected.requested_lanes)?;
+        let matches = actual.outcome.is_err()
+            && actual.outcome == expected.outcome
+            && actual.before_checkpoint == expected.before_checkpoint
+            && actual.decision_index == expected.decision_index
+            && actual.updates_before == expected.updates_before
+            && actual.updates_after == expected.updates_after
+            && actual.before == expected.before
+            && actual.after == expected.after
+            && actual.observations == expected.observations
+            && actual.stage == expected.stage;
+        Ok(if matches {
+            LearningAttemptReplayOutcome::Reproduced
+        } else {
+            LearningAttemptReplayOutcome::NotReproduced
+        })
+    }
+
     /// Reads bounded artifacts, restores history into fresh worlds and executes the
-    /// attempted step with the supplied factory. No existing world is modified.
+    /// attempted training step or reset with the supplied factory. No existing world is modified.
     /// Accepts initial captures with unavailable post-state and no replay claim;
     /// other envelope variants are unsupported rather than silently trusted.
     /// This does not verify unavailable physical state or authenticate build metadata.
@@ -390,11 +463,17 @@ where
             prior_version,
             limits(prior_version)?.1,
         )?;
+        let is_reset = capsule.attempt.kind == "rne_reset_execution_attempt";
+        let attempt_kind = if is_reset {
+            "rne_reset_execution_attempt"
+        } else {
+            "rne_learning_execution_attempt"
+        };
         let attempt = read_execution_artifact(
             directory,
             &capsule.attempt,
             "execution_attempt",
-            "rne_learning_execution_attempt",
+            attempt_kind,
             1,
             1024 * 1024,
         )?;
@@ -413,6 +492,35 @@ where
             "execution contract/backend/TaskSpec/build mismatch"
         );
         let attempt = decode_canonical_execution_json(&attempt)?;
+        if is_reset {
+            ensure!(
+                attempt["kind"] == attempt_kind
+                    && attempt["schema_version"] == 1
+                    && attempt["operation"] == "reset",
+                "unsupported reset attempt"
+            );
+            let lanes_value = attempt["requested_lanes"]
+                .as_array()
+                .context("reset mask is not an array")?;
+            ensure!(
+                lanes_value.len() <= MAX_SENSOR_BATCH_LANES,
+                "reset mask exceeds bound"
+            );
+            let lanes: Vec<(usize, u64)> =
+                serde_json::from_value(attempt["requested_lanes"].clone())?;
+            let mut restored = Self::from_checkpoint(factory, workers, &prior_bytes)?;
+            let actual = restored.capture_reset(&lanes)?;
+            let reproduced = actual.outcome.as_ref().err().is_some_and(|error| {
+                capsule.failure_code == "reset_attempt_error" && capsule.message == *error
+            }) && actual
+                .reset_attempt_value()
+                .is_ok_and(|value| value == attempt);
+            return Ok(if reproduced {
+                LearningAttemptReplayOutcome::Reproduced
+            } else {
+                LearningAttemptReplayOutcome::NotReproduced
+            });
+        }
         ensure!(
             attempt["kind"] == "rne_learning_execution_attempt"
                 && attempt["schema_version"] == 1
@@ -578,9 +686,58 @@ where
     /// Batch reset validation/construction is atomic. A post-reset evidence error
     /// invalidates the session, because physical reset has already occurred.
     pub fn reset_lanes(&mut self, lanes: &[(usize, u64)]) -> Result<Vec<SensorFixedObservation>> {
+        self.reset_lanes_inner(lanes, None)
+    }
+
+    /// Retains pre-reset history and post-attempt diagnostics. A caught panic
+    /// invalidates the session without claiming rollback. Requests larger than the
+    /// batch width are rejected before history copying. No filesystem is touched.
+    pub fn capture_reset(&mut self, lanes: &[(usize, u64)]) -> Result<CapturedResetAttempt> {
+        self.preflight()?;
+        ensure!(
+            lanes.len() <= self.batch.lanes.len(),
+            "reset capture mask exceeds batch width"
+        );
+        let mut capture = CapturedResetAttempt {
+            before_checkpoint: self.checkpoint()?,
+            decision_index: self.next_decision,
+            updates_before: self.learner.updates(),
+            updates_after: self.learner.updates(),
+            requested_lanes: lanes.to_vec(),
+            before: self.execution_progress(),
+            after: Vec::new(),
+            observations: None,
+            stage: Some(ResetAttemptStage::Construct),
+            outcome: Err("reset not attempted".to_string()),
+        };
+        capture.outcome = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.reset_lanes_inner(lanes, Some(&mut capture))
+        })) {
+            Ok(result) => result.map_err(|error| format!("{error:#}")),
+            Err(_) => {
+                self.usable = false;
+                Err("reset attempt panicked; session invalidated".to_string())
+            }
+        };
+        capture.after = self.execution_progress();
+        capture.updates_after = self.learner.updates();
+        Ok(capture)
+    }
+
+    fn reset_lanes_inner(
+        &mut self,
+        lanes: &[(usize, u64)],
+        mut capture: Option<&mut CapturedResetAttempt>,
+    ) -> Result<Vec<SensorFixedObservation>> {
         self.preflight()?;
         let observations = self.batch.reset_lanes(lanes)?;
         self.usable = false;
+        if let Some(capture) = capture.as_deref_mut() {
+            capture.observations = Some(observations.clone());
+            capture.stage = Some(ResetAttemptStage::Evidence);
+        }
+        #[cfg(test)]
+        self.inject_attempt_fault(rne_log::ExecutionStage::Evidence)?;
         let output = observations
             .iter()
             .map(SensorFixedObservation::actor_tensors)
@@ -594,6 +751,9 @@ where
             evidence_sha256,
         });
         self.usable = true;
+        if let Some(capture) = capture {
+            capture.stage = None;
+        }
         Ok(observations)
     }
 
@@ -718,6 +878,241 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn captured_reset_factory_failure_preserves_all_existing_lanes() {
+        for panic in [false, true] {
+            let calls = std::cell::Cell::new(0);
+            let fail = std::cell::Cell::new(false);
+            let factory = || {
+                calls.set(calls.get() + 1);
+                if fail.get() && calls.get() == 2 {
+                    if panic {
+                        panic!("injected replacement construction panic");
+                    }
+                    anyhow::bail!("injected replacement construction error");
+                }
+                Ok((
+                    rne_physics_rapier::RapierBackend::new(),
+                    rne_physics_rapier::RapierBackend::manifest(),
+                ))
+            };
+            let mut session = SensorLearningSession::new(factory, 620, 621, 622, 2, 1).unwrap();
+            session.step().unwrap();
+            let before = session.checkpoint().unwrap();
+            calls.set(0);
+            fail.set(true);
+            let mut captured = session.capture_reset(&[(0, 3), (1, 4)]).unwrap();
+            assert_eq!(calls.get(), 2);
+            assert!(captured.outcome.is_err());
+            assert_eq!(captured.stage, Some(ResetAttemptStage::Construct));
+            assert_eq!(captured.before, captured.after);
+            assert!(captured.observations.is_none());
+            assert_eq!(captured.before_checkpoint, before);
+            calls.set(0);
+            // Fresh history constructs two worlds, then reset constructs two more.
+            let replay_calls = std::cell::Cell::new(0);
+            let replay_factory = || {
+                replay_calls.set(replay_calls.get() + 1);
+                if replay_calls.get() == 4 {
+                    if panic {
+                        panic!("injected replacement construction panic");
+                    }
+                    anyhow::bail!("injected replacement construction error");
+                }
+                Ok((
+                    rne_physics_rapier::RapierBackend::new(),
+                    rne_physics_rapier::RapierBackend::manifest(),
+                ))
+            };
+            assert_eq!(
+                SensorLearningSession::replay_captured_reset(replay_factory, 2, &captured).unwrap(),
+                LearningAttemptReplayOutcome::Reproduced
+            );
+            // Reproducing the same error is insufficient when recorded progress
+            // or learner coordinates have been altered.
+            let root = tempfile::tempdir().unwrap();
+            let directory = root.path().join("reset-replay");
+            let build = rne_log::BuildMetadata::new(
+                "test",
+                "synthetic-test-build",
+                "test",
+                "test-target",
+                "test-compiler",
+                "0".repeat(64),
+            );
+            captured.write_new(&directory, &build).unwrap();
+            replay_calls.set(0);
+            assert_eq!(
+                SensorLearningSession::replay_failure_capsule(
+                    replay_factory,
+                    2,
+                    &directory,
+                    &build
+                )
+                .unwrap(),
+                LearningAttemptReplayOutcome::Reproduced
+            );
+            captured.updates_after += 1;
+            replay_calls.set(0);
+            assert_eq!(
+                SensorLearningSession::replay_captured_reset(replay_factory, 2, &captured).unwrap(),
+                LearningAttemptReplayOutcome::NotReproduced
+            );
+            captured.updates_after -= 1;
+            captured.after[0].progress.completed_drive_ticks += 1;
+            replay_calls.set(0);
+            assert_eq!(
+                SensorLearningSession::replay_captured_reset(replay_factory, 2, &captured).unwrap(),
+                LearningAttemptReplayOutcome::NotReproduced
+            );
+            captured.after[0].progress.completed_drive_ticks -= 1;
+            fail.set(false);
+            assert_eq!(
+                SensorLearningSession::replay_failure_capsule(factory, 2, &directory, &build)
+                    .unwrap(),
+                LearningAttemptReplayOutcome::NotReproduced
+            );
+            assert_eq!(
+                SensorLearningSession::replay_captured_reset(factory, 2, &captured).unwrap(),
+                LearningAttemptReplayOutcome::NotReproduced
+            );
+            let mut metadata = rne_log::execution_capsule::ExecutionFailureCapsule::decode(
+                &std::fs::read(directory.join("capsule.json")).unwrap(),
+            )
+            .unwrap();
+            let mut attempt: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(directory.join("attempt.json")).unwrap())
+                    .unwrap();
+            attempt["updates_after"] = serde_json::json!(captured.updates_after + 1);
+            let altered = serde_json::to_vec(&attempt).unwrap();
+            metadata.attempt.sha256 = format!("{:x}", Sha256::digest(&altered));
+            std::fs::write(directory.join("attempt.json"), altered).unwrap();
+            std::fs::write(
+                directory.join("capsule.json"),
+                serde_json::to_vec(&metadata).unwrap(),
+            )
+            .unwrap();
+            replay_calls.set(0);
+            assert_eq!(
+                SensorLearningSession::replay_failure_capsule(
+                    replay_factory,
+                    2,
+                    &directory,
+                    &build
+                )
+                .unwrap(),
+                LearningAttemptReplayOutcome::NotReproduced
+            );
+            if panic {
+                assert!(session.checkpoint().is_err());
+            } else {
+                assert_eq!(session.checkpoint().unwrap(), before);
+                fail.set(false);
+                let reset = session.capture_reset(&[(0, 3)]).unwrap();
+                assert!(reset.outcome.is_ok());
+                assert_eq!(reset.stage, None);
+                assert_eq!(reset.before[1], reset.after[1]);
+                let restored = SensorLearningSession::from_checkpoint(
+                    factory,
+                    2,
+                    &session.checkpoint().unwrap(),
+                )
+                .unwrap();
+                assert_eq!(
+                    session.checkpoint().unwrap(),
+                    restored.checkpoint().unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn captured_reset_distinguishes_rejection_from_applied_evidence_failure() {
+        let factory = || {
+            Ok((
+                rne_physics_rapier::RapierBackend::new(),
+                rne_physics_rapier::RapierBackend::manifest(),
+            ))
+        };
+        for panic in [false, true] {
+            let mut session = SensorLearningSession::new(factory, 620, 621, 622, 2, 1).unwrap();
+            session.step().unwrap();
+            let before = session.checkpoint().unwrap();
+            assert!(session.capture_reset(&[(0, 3), (0, 3), (0, 3)]).is_err());
+            assert_eq!(session.checkpoint().unwrap(), before);
+            let rejected = session.capture_reset(&[(2, 3)]).unwrap();
+            assert!(rejected.outcome.is_err());
+            assert_eq!(rejected.stage, Some(ResetAttemptStage::Construct));
+            assert_eq!(rejected.before, rejected.after);
+            assert!(rejected.observations.is_none());
+            assert_eq!(session.checkpoint().unwrap(), before);
+
+            let updates = session.learner.updates();
+            let decision = session.next_decision;
+            session.attempt_fault = Some((rne_log::ExecutionStage::Evidence, panic));
+            let mut captured = session.capture_reset(&[(0, 3)]).unwrap();
+            assert_eq!(captured.before_checkpoint, before);
+            assert!(captured.outcome.is_err());
+            assert_eq!(captured.stage, Some(ResetAttemptStage::Evidence));
+            assert_eq!(captured.decision_index, decision);
+            assert_eq!(captured.updates_before, updates);
+            assert_eq!(captured.updates_after, updates);
+            let root = tempfile::tempdir().unwrap();
+            let directory = root.path().join("reset-capsule");
+            let build = rne_log::BuildMetadata::new(
+                "test",
+                "synthetic-test-build",
+                "test",
+                "test-target",
+                "test-compiler",
+                "0".repeat(64),
+            );
+            let capsule = captured.write_new(&directory, &build).unwrap();
+            let decoded = rne_log::execution_capsule::ExecutionFailureCapsule::decode(
+                &std::fs::read(directory.join("capsule.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(capsule, decoded);
+            assert_eq!(
+                capsule.replay,
+                rne_log::execution_capsule::ExecutionReplayClaim::NotAttempted
+            );
+            let bytes = crate::observed_execution_capsule::read_execution_artifact(
+                &directory,
+                &capsule.attempt,
+                "execution_attempt",
+                "rne_reset_execution_attempt",
+                1,
+                1024 * 1024,
+            )
+            .unwrap();
+            let attempt: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                attempt["observations"][0]["latest"],
+                serde_json::Value::Null
+            );
+            assert_eq!(attempt["observations"][0]["time_ticks"], 0);
+            assert!(captured.write_new(&directory, &build).is_err());
+            assert_eq!(
+                std::fs::read(directory.join("attempt.json")).unwrap(),
+                bytes
+            );
+            assert_eq!(captured.observations.as_ref().unwrap().len(), 1);
+            captured.observations.as_mut().unwrap()[0].capture_ticks = Some(0);
+            let invalid_directory = root.path().join("invalid-reset");
+            assert!(captured.write_new(&invalid_directory, &build).is_err());
+            assert!(!invalid_directory.exists());
+            captured.observations.as_mut().unwrap()[0].capture_ticks = None;
+            assert_eq!(captured.after[0].episode_index, 3);
+            assert_eq!(captured.after[0].progress.completed_intervals, 0);
+            assert_eq!(captured.before[1], captured.after[1]);
+            assert_eq!(session.learner.updates(), updates);
+            assert_eq!(session.next_decision, decision);
+            assert!(session.checkpoint().is_err());
+            assert!(session.capture_reset(&[(0, 4)]).is_err());
+        }
+    }
 
     #[test]
     fn captured_attempt_preserves_progress_after_learning_and_evidence_boundary_faults() {
