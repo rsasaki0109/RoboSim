@@ -403,7 +403,10 @@ fn main() -> Result<()> {
                 "suspension-identification-fixture",
             )
         }
-        "suspension-uncertainty" | "suspension-uncertainty-verify" => {
+        "suspension-uncertainty"
+        | "suspension-uncertainty-verify"
+        | "suspension-derived-errors"
+        | "suspension-derived-errors-verify" => {
             ensure!(interval_tolerance_s.is_none() && root_seed.is_none()
                 && noise_root_seed.is_none() && episode_index.is_none() && lane_id.is_none()
                 && num_envs.is_none() && num_workers.is_none() && acquisition_manifest.is_none()
@@ -433,16 +436,36 @@ fn main() -> Result<()> {
                 bytes.len() <= MAX_SUSPENSION_RUN_BYTES,
                 "uncertainty input too large"
             );
-            let evidence = if backend == "suspension-uncertainty-verify" {
-                decode_suspension_uncertainty(&bytes, root)?
+            if matches!(
+                backend.as_str(),
+                "suspension-derived-errors" | "suspension-derived-errors-verify"
+            ) {
+                use rne_mobility_benchmark::suspension_derivative::{
+                    decode_suspension_derived_errors, encode_suspension_derived_errors,
+                    SuspensionDerivedErrorRequest,
+                };
+                let evidence = if backend == "suspension-derived-errors-verify" {
+                    decode_suspension_derived_errors(&bytes, root)?
+                } else {
+                    let request: SuspensionDerivedErrorRequest = serde_json::from_slice(&bytes)?;
+                    request.evaluate(root)?
+                };
+                (
+                    String::from_utf8(encode_suspension_derived_errors(&evidence, root)?)?,
+                    "suspension-derived-error-evidence",
+                )
             } else {
-                let request: SuspensionUncertaintyRequest = serde_json::from_slice(&bytes)?;
-                request.evaluate(root)?
-            };
-            (
-                String::from_utf8(encode_suspension_uncertainty(&evidence, root)?)?,
-                "suspension-uncertainty-evidence",
-            )
+                let evidence = if backend == "suspension-uncertainty-verify" {
+                    decode_suspension_uncertainty(&bytes, root)?
+                } else {
+                    let request: SuspensionUncertaintyRequest = serde_json::from_slice(&bytes)?;
+                    request.evaluate(root)?
+                };
+                (
+                    String::from_utf8(encode_suspension_uncertainty(&evidence, root)?)?,
+                    "suspension-uncertainty-evidence",
+                )
+            }
         }
         "suspension-acquired" | "suspension-acquired-verify" => {
             use rne_mobility_benchmark::suspension_runs::{
@@ -716,6 +739,8 @@ fn main() -> Result<()> {
                 | "suspension-acquired"
                 | "suspension-uncertainty"
                 | "suspension-uncertainty-verify"
+                | "suspension-derived-errors"
+                | "suspension-derived-errors-verify"
                 | "suspension-acquired-verify"
                 | "suspension-timing"
                 | "suspension-timing-verify"
@@ -742,6 +767,8 @@ fn main() -> Result<()> {
                 | "suspension-acquired-verify"
                 | "suspension-uncertainty"
                 | "suspension-uncertainty-verify"
+                | "suspension-derived-errors"
+                | "suspension-derived-errors-verify"
         ) || evidence_root.is_none(),
         "--evidence-root requires an acquisition verification or acquired suspension backend"
     );

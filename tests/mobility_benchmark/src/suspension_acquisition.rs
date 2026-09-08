@@ -752,12 +752,50 @@ mod tests {
                     .contains("independent velocity")
             );
             model.factors[0].velocity_loading_m_s = 0.0;
+            use crate::suspension_derivative::{
+                decode_suspension_derived_errors, encode_suspension_derived_errors,
+                SuspensionDerivedErrorRequest,
+            };
+            let mut errors = error_request.clone();
+            errors.acquisitions = derived.clone();
+            errors.model = model.clone();
+            let mut position_binding = errors.calibration[0].clone();
+            position_binding.signal = SuspensionSignalKind::Position;
+            position_binding.calibration_artifact =
+                derived.training[0].signals[0].calibration_artifact.clone();
+            errors.calibration.insert(0, position_binding);
+            let envelope = SuspensionDerivedErrorRequest {
+                errors,
+                bindings: bindings.clone(),
+            }
+            .evaluate(&root)
+            .unwrap();
+            assert_eq!(envelope.propagation, result);
+            let bytes = encode_suspension_derived_errors(&envelope, &root).unwrap();
+            assert_eq!(
+                decode_suspension_derived_errors(&bytes, &root).unwrap(),
+                envelope
+            );
+            let mut forged = envelope.clone();
+            forged.propagation.draws.clear();
+            assert!(forged.verify(&root).is_err());
+            forged = envelope.clone();
+            forged.schema_version = 2;
+            assert!(forged.verify(&root).is_err());
+            let mut unknown = serde_json::to_value(&envelope).unwrap();
+            unknown["qualified"] = serde_json::json!(true);
+            assert!(decode_suspension_derived_errors(
+                &serde_json::to_vec(&unknown).unwrap(),
+                &root
+            )
+            .is_err());
             fs::write(
                 root.join("calibration.txt"),
                 b"changed derivative procedure",
             )
             .unwrap();
             assert!(propagate_acquired_derived_errors(&derived, &model, &bindings, &root).is_err());
+            assert!(decode_suspension_derived_errors(&bytes, &root).is_err());
             fs::write(root.join("calibration.txt"), b"test-only calibration bytes").unwrap();
             assert_eq!(
                 result,

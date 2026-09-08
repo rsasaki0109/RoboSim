@@ -250,9 +250,41 @@ nominal training velocity and repeats the operator after position perturbations
 in every draw, before the actual fit. Independent velocity error loadings are
 rejected; invalid derivative draws retain `InvalidSample` in their original slots.
 Holdout values are not differentiated or fitted. Timestamps remain fixed: clock
-errors, gain errors, filtering, an evidence envelope and CLI for this new path,
-and physical qualification remain pending. Existing v1 additive requests keep
+errors, gain errors, filtering and physical qualification remain pending. The
+evidence envelope and CLI are described below. Existing v1 additive requests keep
 their previous semantics and never select a derivative implicitly.
+
+`SuspensionDerivedErrorRequest` adds a strict file-bound request around this path,
+including existing per-factor calibration bindings and the ordered derivative
+bindings. `rne_suspension_derived_error_evidence` schema 1 retains the exact
+request, baseline and all draw outcomes. Encoding verifies retained files and
+reruns propagation; decoding rejects inputs over 8 MiB, unknown fields and any
+recomputation mismatch. It emits no marginal-budget or probability-coverage
+verdict. Regression tests reject deleted outcomes, schema drift, unknown
+qualification fields and changed procedure bytes.
+
+CLI backends `suspension-derived-errors` and `suspension-derived-errors-verify`
+generate and replay this envelope using `--input`, `--evidence-root` and
+`--output`. They share the regular-file, 8 MiB bounded read and unrelated-option
+rejection of the existing uncertainty CLI. Assumptions are embedded in the
+request, not overridden by command-line seeds or tolerances. Process tests check
+generation, byte-identical replay and rejection of removed draw results without
+writing the requested output. Successful execution means computation/integrity,
+not successful fits or physical qualification. For example:
+
+```powershell
+cargo run -p rne_mobility_benchmark -- --backend suspension-derived-errors --input E:\data\derived-request.json --evidence-root E:\data --output E:\data\derived.json
+cargo run -p rne_mobility_benchmark -- --backend suspension-derived-errors-verify --input E:\data\derived.json --evidence-root E:\data --output E:\data\derived-replayed.json
+```
+
+CLI/envelope verification (2026-09-09): the acquired-run library regression
+including envelope recomputation passed; default all-target Clippy passed.
+The extended process-level CLI test passed with default features (1.14 s) and
+with MuJoCo (final test 1.34 s), including subsequent option-override and changed
+raw-source rejection. MuJoCo all-target Clippy passed (12.19 s). The default
+process run predates those final negative cases; the MuJoCo run includes them.
+The full-CI checkpoint immediately below is for the earlier operator commit,
+not this later CLI/envelope extension.
 
 Derivative slice verification (2026-09-09): default-feature suspension-related
 tests passed 29/29 (40.28 s), including the file-bound propagation API. The
@@ -262,6 +294,21 @@ suspension CLI regression passed (1.28 s); default and MuJoCo all-target Clippy
 passed with warnings denied. That CLI regression covers the existing envelopes,
 not a new derivative CLI. The full workspace checkpoint below predates this
 derivative slice; these results do not establish physical qualification.
+
+Full derivative checkpoint (2026-09-09):
+`9bbb43f9f3526774b08889b140e3c2c2c72676c6` completed
+`cargo run -p xtask -- ci` with exit code 0 and tracked files unchanged throughout.
+Workspace formatting, dependency checks, Clippy/tests, smoke/RL and headless
+checks, OSS parity, 361 fuzz cases across nine boundaries, and Behavior CI
+10/10 seeds passed. Default Mobility Benchmark library: 151 passed, zero failed,
+one long training job ignored (168.99 s); existing suspension CLI passed.
+External log: `E:\RNE-build\m3c-sensor\suspension-derivative-v1-ci.log`, SHA-256
+`ced475a4dfc05dabb05f5db5189dd3d5584eccb5cca1c6a40e82a7aa7adfe878`.
+Limits remain visible: heading CEM score -10 equals baseline -10; mobile clutter
+CEM grasped but did not place. Clutter PPO reported random -1.59 versus trained
+-1.37, and mobile clutter PPO -2.46 versus -1.61. Hardware safety-condition
+tests are not actual physical HIL. This checkpoint does not qualify real
+measurements or complete the remaining derivative CLI/clock/gain work.
 
 ### Uncertainty implementation boundary (2026-09-09)
 

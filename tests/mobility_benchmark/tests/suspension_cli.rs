@@ -289,7 +289,115 @@ fn whole_run_cli_generates_and_reverifies_all_diagnostic_envelopes() {
     assert!(!result.status.success());
     assert!(String::from_utf8_lossy(&result.stderr).contains("replay mismatch"));
     assert!(!rejected_uncertainty.exists());
+    {
+        use rne_mobility_benchmark::suspension_derivative::{
+            SuspensionDerivativeBinding, SuspensionDerivativeOperator,
+            SuspensionDerivedErrorRequest,
+        };
+        let mut errors = uncertainty_request.errors.clone();
+        let operator = SuspensionDerivativeOperator::NonuniformThreePointSecantEndsV1;
+        let dataset = &mut errors.acquisitions.runs.training[0].dataset;
+        let times: Vec<_> = dataset.samples.iter().map(|s| s.capture_time_s).collect();
+        let positions: Vec<_> = dataset.samples.iter().map(|s| s.position_m).collect();
+        for (sample, velocity) in dataset
+            .samples
+            .iter_mut()
+            .zip(operator.reconstruct(&times, &positions).unwrap())
+        {
+            sample.velocity_m_s = velocity;
+        }
+        dataset.seal().unwrap();
+        let manifest = &mut errors.acquisitions.training[0];
+        manifest.dataset_content_digest = dataset.content_digest.clone();
+        manifest.signals[1].origin = SuspensionSignalOrigin::Derived;
+        manifest.signals[1].calibration_kind = SuspensionCalibrationKind::DerivedSignalProcedure;
+        manifest.seal().unwrap();
+        let bindings = vec![SuspensionDerivativeBinding {
+            capture_id: manifest.capture_id.clone(),
+            procedure: manifest.signals[1].calibration_artifact.clone(),
+            operator,
+            absolute_tolerance_m_s: 0.0,
+        }];
+        let derived = SuspensionDerivedErrorRequest { errors, bindings };
+        let input = root.join("derived-input.json");
+        let output = root.join("derived-output.json");
+        let replay = root.join("derived-replay.json");
+        fs::write(&input, serde_json::to_vec(&derived).unwrap()).unwrap();
+        for (mode, source, destination) in [
+            ("suspension-derived-errors", &input, &output),
+            ("suspension-derived-errors-verify", &output, &replay),
+        ] {
+            let result = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
+                .args(["--backend", mode, "--input"])
+                .arg(source)
+                .arg("--evidence-root")
+                .arg(&root)
+                .arg("--output")
+                .arg(destination)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{mode}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+        assert_eq!(fs::read(&output).unwrap(), fs::read(&replay).unwrap());
+        let rejected_options = root.join("derived-rejected-options.json");
+        for (mode, source) in [
+            ("suspension-derived-errors", &input),
+            ("suspension-derived-errors-verify", &output),
+        ] {
+            for (option, value) in [("--seed", "123"), ("--interval-tolerance-s", "0.001")] {
+                let result = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
+                    .args(["--backend", mode, "--input"])
+                    .arg(source)
+                    .arg("--evidence-root")
+                    .arg(&root)
+                    .arg("--output")
+                    .arg(&rejected_options)
+                    .args([option, value])
+                    .output()
+                    .unwrap();
+                assert!(!result.status.success());
+                assert!(String::from_utf8_lossy(&result.stderr)
+                    .contains("assumptions must be embedded"));
+                assert!(!rejected_options.exists());
+            }
+        }
+        let mut forged: serde_json::Value =
+            serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+        forged["propagation"]["draws"] = serde_json::json!([]);
+        let bad_input = root.join("derived-forged.json");
+        let rejected = root.join("derived-rejected.json");
+        fs::write(&bad_input, serde_json::to_vec(&forged).unwrap()).unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
+            .args(["--backend", "suspension-derived-errors-verify", "--input"])
+            .arg(&bad_input)
+            .arg("--evidence-root")
+            .arg(&root)
+            .arg("--output")
+            .arg(&rejected)
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("replay mismatch"));
+        assert!(!rejected.exists());
+    }
     fs::write(root.join("raw-2.csv"), b"tampered").unwrap();
+    let rejected_derived = root.join("derived-rejected-source.json");
+    let result = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
+        .args(["--backend", "suspension-derived-errors-verify", "--input"])
+        .arg(root.join("derived-output.json"))
+        .arg("--evidence-root")
+        .arg(&root)
+        .arg("--output")
+        .arg(&rejected_derived)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("file size mismatch"));
+    assert!(!rejected_derived.exists());
     let result = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
         .args(["--backend", "suspension-uncertainty-verify", "--input"])
         .arg(&uncertainty_output)

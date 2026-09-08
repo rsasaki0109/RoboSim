@@ -8,6 +8,100 @@ use crate::suspension_acquisition::{
     SuspensionEvidenceFileRef, SuspensionPhysicalAcquisitionManifest, SuspensionSignalOrigin,
 };
 use crate::suspension_identification::SuspensionIdentificationDataset;
+use crate::suspension_runs::MAX_SUSPENSION_RUN_BYTES;
+use crate::suspension_uncertainty::{
+    propagate_acquired_derived_errors, SuspensionAcquiredErrorRequest, SuspensionErrorPropagation,
+};
+
+/// Exact file-bound inputs for derivative-aware additive error propagation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionDerivedErrorRequest {
+    /// Acquisitions, seeded error assumptions and per-factor calibration references.
+    pub errors: SuspensionAcquiredErrorRequest,
+    /// One explicit derivative interpretation per training acquisition, in order.
+    pub bindings: Vec<SuspensionDerivativeBinding>,
+}
+
+/// Replayable derivative diagnostics, without a coverage or budget-match verdict.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionDerivedErrorEvidence {
+    /// Must be `rne_suspension_derived_error_evidence`.
+    pub kind: String,
+    /// Independent evidence schema, currently 1.
+    pub schema_version: u32,
+    /// Exact source declarations and numerical assumptions.
+    pub request: SuspensionDerivedErrorRequest,
+    /// Baseline and every draw, including invalid and nonphysical fits.
+    pub propagation: SuspensionErrorPropagation,
+}
+
+impl SuspensionDerivedErrorRequest {
+    /// Verifies retained files and executes all draws, without discarding failures.
+    pub fn evaluate(&self, root: &std::path::Path) -> Result<SuspensionDerivedErrorEvidence> {
+        ensure!(
+            serde_json::to_vec(self)?.len() <= MAX_SUSPENSION_RUN_BYTES,
+            "derived error request too large"
+        );
+        self.errors.validate()?;
+        let propagation = propagate_acquired_derived_errors(
+            &self.errors.acquisitions,
+            &self.errors.model,
+            &self.bindings,
+            root,
+        )?;
+        let evidence = SuspensionDerivedErrorEvidence {
+            kind: "rne_suspension_derived_error_evidence".into(),
+            schema_version: 1,
+            request: self.clone(),
+            propagation,
+        };
+        ensure!(
+            serde_json::to_vec(&evidence)?.len() <= MAX_SUSPENSION_RUN_BYTES,
+            "derived error evidence too large"
+        );
+        Ok(evidence)
+    }
+}
+
+impl SuspensionDerivedErrorEvidence {
+    /// Reopens retained files and recomputes the entire evidence, not just a hash.
+    pub fn verify(&self, root: &std::path::Path) -> Result<()> {
+        ensure!(
+            serde_json::to_vec(self)?.len() <= MAX_SUSPENSION_RUN_BYTES,
+            "derived error evidence too large"
+        );
+        ensure!(
+            *self == self.request.evaluate(root)?,
+            "derived error evidence replay mismatch"
+        );
+        Ok(())
+    }
+}
+
+/// Strict 8 MiB-bounded decoding followed by file checks and actual recomputation.
+pub fn decode_suspension_derived_errors(
+    bytes: &[u8],
+    root: &std::path::Path,
+) -> Result<SuspensionDerivedErrorEvidence> {
+    ensure!(
+        bytes.len() <= MAX_SUSPENSION_RUN_BYTES,
+        "derived error evidence too large"
+    );
+    let evidence: SuspensionDerivedErrorEvidence = serde_json::from_slice(bytes)?;
+    evidence.verify(root)?;
+    Ok(evidence)
+}
+
+/// Verifies complete evidence before compact serialization.
+pub fn encode_suspension_derived_errors(
+    evidence: &SuspensionDerivedErrorEvidence,
+    root: &std::path::Path,
+) -> Result<Vec<u8>> {
+    evidence.verify(root)?;
+    Ok(serde_json::to_vec(evidence)?)
+}
 
 /// Caller-declared executable interpretation of one retained velocity procedure.
 /// The file reference binds bytes, not the truth of the caller's interpretation.
