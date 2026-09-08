@@ -796,6 +796,8 @@ pub struct SensorFixedEnvironment<B: PhysicsBackend> {
     runtime: SensorObservedRuntime<B>,
     latest: Option<SensorTickDecision>,
     poisoned: bool,
+    completed_intervals: u64,
+    last_successful_time_ticks: u64,
 }
 
 impl<B: PhysicsBackend> std::fmt::Debug for SensorFixedEnvironment<B> {
@@ -809,11 +811,25 @@ impl<B: PhysicsBackend> std::fmt::Debug for SensorFixedEnvironment<B> {
 }
 
 impl<B: PhysicsBackend> SensorFixedEnvironment<B> {
+    /// Reads diagnostic progress even when a failed execution poisoned the world.
+    /// This does not read solver state or claim a post-failure hash/crash time.
+    pub fn execution_progress(&self) -> rne_log::ExecutionProgress {
+        rne_log::ExecutionProgress {
+            completed_intervals: self.completed_intervals,
+            last_successful_time_ticks: self.last_successful_time_ticks,
+            completed_drive_ticks: self.runtime.completed_steps,
+            active_stage: self.runtime.active_stage,
+        }
+    }
+
     pub(crate) fn reset_contract(&self) -> &SensorObservedContract {
         &self.runtime.contract
     }
 
     pub(crate) fn reject_learning_output(&mut self) {
+        if !self.poisoned {
+            self.runtime.active_stage = Some(rne_log::ExecutionStage::LearningProjection);
+        }
         self.poisoned = true;
     }
 
@@ -842,6 +858,8 @@ impl<B: PhysicsBackend> SensorFixedEnvironment<B> {
             runtime: SensorObservedRuntime::new(backend, &manifest, contract)?,
             latest: None,
             poisoned: false,
+            completed_intervals: 0,
+            last_successful_time_ticks: 0,
         })
     }
 
@@ -900,6 +918,7 @@ impl<B: PhysicsBackend> SensorFixedEnvironment<B> {
                 self.latest = Some(decision);
                 fresh = true;
             }
+            self.runtime.active_stage = Some(rne_log::ExecutionStage::Evaluation);
             let body = self
                 .runtime
                 .world
@@ -912,6 +931,10 @@ impl<B: PhysicsBackend> SensorFixedEnvironment<B> {
             "non-finite fixed reward"
         );
         self.poisoned = false;
+        self.completed_intervals += 1;
+        self.last_successful_time_ticks =
+            self.runtime.completed_steps * SENSOR_OBSERVED_FIXED_DELTA_TICKS;
+        self.runtime.active_stage = None;
         Ok(SensorFixedStep {
             observation: self.snapshot(fresh),
             truncated: self.runtime.completed_steps == TOTAL_STEPS,
@@ -981,6 +1004,7 @@ struct SensorObservedRuntime<B: PhysicsBackend> {
     completed_steps: u64,
     contact_drive_steps: u64,
     last_estimator_left_sequence: u64,
+    active_stage: Option<rne_log::ExecutionStage>,
 }
 
 #[derive(Clone, Debug)]
@@ -1088,20 +1112,25 @@ impl<B: PhysicsBackend> SensorObservedRuntime<B> {
             completed_steps: 0,
             contact_drive_steps: 0,
             last_estimator_left_sequence: 0,
+            active_stage: None,
         })
     }
 
     fn tick(&mut self, command_voltage_v: f64) -> Result<Option<SensorTickDecision>> {
         let fixed_delta = SimDuration::from_ticks(SENSOR_OBSERVED_FIXED_DELTA_TICKS);
         let dt_s = fixed_delta.as_seconds().value();
+        self.active_stage = Some(rne_log::ExecutionStage::ApplyWrench);
         if let Some(wrench) = self.pending_wrench.take() {
             self.backend
                 .apply_external_body_wrench(self.physics_world, wrench)?;
         }
+        self.active_stage = Some(rne_log::ExecutionStage::Physics);
         self.backend.step(self.physics_world, fixed_delta)?;
+        self.active_stage = Some(rne_log::ExecutionStage::Synchronize);
         self.backend
             .sync_to_ecs(&mut self.world, self.physics_world)?;
 
+        self.active_stage = Some(rne_log::ExecutionStage::Drive);
         let carrier_patch = aggregate_wheel_contact_patch(
             self.vehicle,
             self.backend.contact_points(self.physics_world)?,
@@ -1161,7 +1190,9 @@ impl<B: PhysicsBackend> SensorObservedRuntime<B> {
                 sensor.latency_ticks = latency;
             }
         }
+        self.active_stage = Some(rne_log::ExecutionStage::Sensors);
         sample_frontends(&mut self.world, decision_time, &mut self.bus)?;
+        self.active_stage = Some(rne_log::ExecutionStage::Estimation);
         let Some(left_frame) = self
             .bus
             .latest_available::<IncrementalEncoderFeedback>(LEFT_ENCODER_STREAM, decision_time)

@@ -17,7 +17,10 @@ pub use replay::{
     record_fixed_batch_replay_with_noise_root, verify_fixed_batch_replay, FixedBatchOperation,
     FixedBatchReplay, FixedBatchReplayEvent, MAX_FIXED_REPLAY_BYTES,
 };
-pub use training_session::{SensorLearningSession, MAX_LEARNING_SESSION_BYTES};
+pub use training_session::{
+    CapturedLearningAttempt, LearningAttemptReplayOutcome, SensorLearningSession,
+    MAX_LEARNING_SESSION_BYTES,
+};
 
 /// One stable lane's completed transition or execution failure.
 #[derive(Clone, Debug, PartialEq)]
@@ -31,6 +34,20 @@ pub struct SensorFixedLaneStep {
     /// Successful 10 ms transition or error. An error may follow partial physical
     /// progress; that lane requires reset. Other lane outcomes are retained.
     pub outcome: std::result::Result<SensorFixedStep, String>,
+}
+
+/// Evaluator-only lane identity and progress, readable after execution failure.
+/// This is diagnostic metadata, not an actor input or a replay-verified Capsule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct SensorFixedLaneProgress {
+    /// Stable zero-based lane identity, independent of worker scheduling.
+    pub lane_id: usize,
+    /// Episode currently owned by this lane; partial resets may diverge.
+    pub episode_index: u64,
+    /// Explicit physical reset seed for this episode.
+    pub episode_seed: u64,
+    /// Episode-local completion boundaries, not an inferred failure timestamp.
+    pub progress: rne_log::ExecutionProgress,
 }
 
 struct Lane<B: PhysicsBackend> {
@@ -142,6 +159,21 @@ where
         self.lanes
             .iter()
             .map(|lane| lane.environment.observation())
+            .collect()
+    }
+
+    /// Returns diagnostic progress in stable lane order, including poisoned lanes.
+    /// Does not read backend state, advance clocks, or certify replay reproduction.
+    pub fn execution_progress(&self) -> Vec<SensorFixedLaneProgress> {
+        self.lanes
+            .iter()
+            .enumerate()
+            .map(|(lane_id, lane)| SensorFixedLaneProgress {
+                lane_id,
+                episode_index: lane.episode_index,
+                episode_seed: lane.episode_seed,
+                progress: lane.environment.execution_progress(),
+            })
             .collect()
     }
 
@@ -408,12 +440,108 @@ mod tests {
                 ))
             };
             let mut session = SensorLearningSession::new(factory, 620, 621, 622, 3, 2).unwrap();
-            let failed = session.step().unwrap();
+            let before = session.checkpoint().unwrap();
+            let capture = session.capture_step().unwrap();
+            assert_eq!(capture.before_checkpoint, before);
+            assert_eq!(capture.decision_index, 0);
+            assert_eq!(capture.updates_before, 0);
+            assert_eq!(capture.updates_after, 2);
+            assert_eq!(capture.requested_actions_v.as_ref().unwrap().len(), 3);
+            assert_eq!(capture.after, session.execution_progress());
+            assert_eq!(capture.before[1].progress, Default::default());
+            let root = tempfile::tempdir().unwrap();
+            let directory = root.path().join("capsule");
+            let build = rne_log::BuildMetadata::new(
+                "test",
+                "synthetic-test-build",
+                "test",
+                "test-target",
+                "test-compiler",
+                "0".repeat(64),
+            );
+            let mut capsule = capture.write_new(&directory, &build).unwrap();
+            calls.store(0, Ordering::Relaxed);
+            assert_eq!(
+                SensorLearningSession::replay_failure_capsule(factory, 1, &directory, &build)
+                    .unwrap(),
+                LearningAttemptReplayOutcome::Reproduced
+            );
+            let healthy_factory = || Ok((RapierBackend::new(), RapierBackend::manifest()));
+            assert_eq!(
+                SensorLearningSession::replay_failure_capsule(
+                    healthy_factory,
+                    1,
+                    &directory,
+                    &build
+                )
+                .unwrap(),
+                LearningAttemptReplayOutcome::NotReproduced
+            );
+            let wrong_build = rne_log::BuildMetadata::new(
+                "test",
+                "different-build",
+                "test",
+                "test-target",
+                "test-compiler",
+                "0".repeat(64),
+            );
+            let calls_before = calls.load(Ordering::Relaxed);
+            assert!(SensorLearningSession::replay_failure_capsule(
+                factory,
+                1,
+                &directory,
+                &wrong_build
+            )
+            .is_err());
+            assert_eq!(calls.load(Ordering::Relaxed), calls_before);
+            // Even a correctly rehashed attempt cannot substitute for execution.
+            let mut altered: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(directory.join("attempt.json")).unwrap())
+                    .unwrap();
+            altered["updates_after"] = serde_json::json!(3);
+            let altered = serde_json::to_vec(&altered).unwrap();
+            std::fs::write(directory.join("attempt.json"), &altered).unwrap();
+            use sha2::Digest;
+            capsule.attempt.sha256 = format!("{:x}", sha2::Sha256::digest(&altered));
+            std::fs::write(
+                directory.join("capsule.json"),
+                serde_json::to_vec(&capsule).unwrap(),
+            )
+            .unwrap();
+            calls.store(0, Ordering::Relaxed);
+            assert_eq!(
+                SensorLearningSession::replay_failure_capsule(factory, 1, &directory, &build)
+                    .unwrap(),
+                LearningAttemptReplayOutcome::NotReproduced
+            );
+            let failed = capture.outcome.unwrap();
+            assert_eq!(capture.batch_output.unwrap(), failed);
             assert_eq!(failed.failures.len(), 1);
             assert_eq!(failed.failures[0].lane_id, 1);
             assert_eq!(session.learner().updates(), 2);
+            let progress = session.execution_progress();
+            assert_eq!(
+                progress[1].progress.active_stage,
+                Some(rne_log::ExecutionStage::Physics)
+            );
+            assert_eq!(progress[1].progress.completed_intervals, 0);
+            assert_eq!(progress[1].progress.completed_drive_ticks, 0);
+            assert_eq!(progress[0].progress.completed_intervals, 1);
+            assert_eq!(progress[2].progress.completed_intervals, 1);
             let saved = session.checkpoint().unwrap();
+            let rejected = session.capture_step().unwrap();
+            assert!(rejected.outcome.is_err());
+            assert_eq!(
+                rejected.stage,
+                Some(rne_log::ExecutionStage::ActionSelection)
+            );
+            assert!(rejected.requested_actions_v.is_none());
+            assert!(rejected.batch_output.is_none());
+            assert_eq!(rejected.before, rejected.after);
+            assert_eq!(rejected.updates_before, rejected.updates_after);
+            assert_eq!(saved, session.checkpoint().unwrap());
             assert!(session.step().is_err());
+            assert_eq!(session.execution_progress(), progress);
             assert_eq!(saved, session.checkpoint().unwrap());
             session.reset_lanes(&[(1, 3)]).unwrap();
             assert!(session.step().unwrap().failures.is_empty());
@@ -422,7 +550,22 @@ mod tests {
             calls.store(0, Ordering::Relaxed);
             let mut restored = SensorLearningSession::from_checkpoint(factory, 1, &bytes).unwrap();
             assert_eq!(bytes, restored.checkpoint().unwrap());
+            assert_eq!(session.execution_progress(), restored.execution_progress());
+            assert_eq!(restored.execution_progress()[1].episode_index, 3);
+            assert_eq!(
+                restored.execution_progress()[1]
+                    .progress
+                    .last_successful_time_ticks,
+                10_000_000
+            );
+            assert_eq!(
+                restored.execution_progress()[0]
+                    .progress
+                    .last_successful_time_ticks,
+                20_000_000
+            );
             assert_eq!(session.step().unwrap(), restored.step().unwrap());
+            assert_eq!(session.execution_progress(), restored.execution_progress());
             assert_eq!(session.learner(), restored.learner());
         }
     }
@@ -523,19 +666,74 @@ mod tests {
                 ))
             };
             let mut batch = SensorFixedBatch::new(factory, 42, 3, 2).unwrap();
+            assert_eq!(
+                batch.lanes[1].environment.execution_progress(),
+                Default::default()
+            );
             failing.store(mode, Ordering::Relaxed);
             let outcomes = batch.step(&[3.0; 3]).unwrap();
             assert!(outcomes[0].outcome.is_ok());
             assert!(outcomes[1].outcome.is_err());
             assert!(outcomes[2].outcome.is_ok());
+            let failed_progress = batch.lanes[1].environment.execution_progress();
+            let diagnostics = batch.execution_progress();
+            assert_eq!(
+                diagnostics
+                    .iter()
+                    .map(|lane| lane.lane_id)
+                    .collect::<Vec<_>>(),
+                vec![0, 1, 2]
+            );
+            assert_eq!(diagnostics[1].progress, failed_progress);
+            assert_eq!(diagnostics[1].episode_index, 0);
+            assert_eq!(diagnostics[1].episode_seed, derive_episode_seed(42, 1, 0));
+            // Learning projection must not replace a preceding physical failure.
+            batch.lanes[1].environment.reject_learning_output();
+            assert_eq!(batch.execution_progress()[1].progress, failed_progress);
+            assert_eq!(
+                failed_progress,
+                rne_log::ExecutionProgress {
+                    active_stage: Some(rne_log::ExecutionStage::Physics),
+                    ..Default::default()
+                }
+            );
+            assert_eq!(
+                batch.lanes[0].environment.execution_progress(),
+                rne_log::ExecutionProgress {
+                    completed_intervals: 1,
+                    last_successful_time_ticks: 10_000_000,
+                    completed_drive_ticks: 10,
+                    active_stage: None,
+                }
+            );
             assert!(batch.observations()[1].is_err());
             assert!(batch.step(&[3.0; 3]).is_err());
+            assert_eq!(
+                batch.lanes[1].environment.execution_progress(),
+                failed_progress
+            );
             assert_eq!(
                 batch.observations()[0].as_ref().unwrap().time_ticks,
                 10_000_000
             );
             batch.reset_lanes(&[(1, 1)]).unwrap();
+            assert_eq!(
+                batch.lanes[1].environment.execution_progress(),
+                Default::default()
+            );
             let recovered = batch.step(&[3.0; 3]).unwrap();
+            let diagnostics = batch.execution_progress();
+            assert_eq!(diagnostics[0].episode_index, 0);
+            assert_eq!(diagnostics[1].episode_index, 1);
+            assert_eq!(diagnostics[1].episode_seed, derive_episode_seed(42, 1, 1));
+            assert_eq!(
+                diagnostics[0].progress.last_successful_time_ticks,
+                20_000_000
+            );
+            assert_eq!(
+                diagnostics[1].progress.last_successful_time_ticks,
+                10_000_000
+            );
             assert!(recovered.iter().all(|lane| lane.outcome.is_ok()));
             assert_eq!(
                 recovered[0]

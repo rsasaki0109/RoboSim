@@ -185,19 +185,24 @@ Even a recomputed digest does not waive timing or controller checks. This is not
 raw-sensor estimator replay or full-physics replay; those remain separate evidence
 requirements. Validation/round-trip and rehashed-mutation tests passed, along with
 all 16 focused caster tests and MuJoCo-feature all-target Clippy. Full workspace
-CI for this complete caster slice remains pending.
+CI for frozen commit `bd4afbfc677ff59d876fd81171ebd8090d5139f5` completed
+with exit 0 on 2026-09-08, including workspace checks, RL smokes, headless/OSS
+parity, 361 fuzz cases and Behavior CI 10/10. The log is
+`E:\RNE-build\m3c-sensor\caster-observed-v2-ci.log`, SHA-256
+`6ea895a5c2a009a389599f1d19cb40a73347c9e95bd7c9652c3cace01765c6f8`.
 The original open-loop contract is retained. Before/after Rapier trace files are
 byte-identical after the shared-plant refactor (SHA-256
 `45c87f423f5a744f0eb12fbcbad004957bb0250589280fe6224fa23f1fba7a30`;
 `E:\RNE-build\m3c-sensor\diff-caster-refactor-before.json` and
 `diff-caster-refactor-after.json`). All ten focused caster/controller tests and
-benchmark all-target Clippy passed; the new closed-loop changes have not yet run
-through full CI. The prior `98c7c40` full CI does not cover this addition.
+benchmark all-target Clippy passed at the earlier refactor stage. The complete
+closed-loop slice is covered by the later `bd4afbf` full CI above, not the prior
+`98c7c40` run.
 
 Export preliminary evidence to a new external filename with:
 
 ```powershell
-cargo run -p rne_mobility_benchmark --example diff_caster_sensor_loop -- rapier E:\RNE-build\m3c-sensor\caster-observed-v1.json
+cargo run -p rne_mobility_benchmark --example diff_caster_sensor_loop -- rapier E:\RNE-build\m3c-sensor\caster-observed-v2.json
 ```
 
 Add `--imu-blackout` after the output path to exercise the outage. With

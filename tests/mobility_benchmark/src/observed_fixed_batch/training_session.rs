@@ -9,11 +9,223 @@ pub const MAX_LEARNING_SESSION_BYTES: usize = 32 * 1024 * 1024;
 const MAX_BYTES: usize = MAX_LEARNING_SESSION_BYTES;
 const MAX_EVENTS: usize = 16 * 1024;
 
+/// Outcome of actual fresh-factory execution, not a decoded producer claim.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LearningAttemptReplayOutcome {
+    /// History, requested actions, progress, outputs, update counts and failure
+    /// diagnostics match. Unavailable physical post-state is not verified.
+    Reproduced,
+    /// History restored but the new attempt did not match the recorded failure.
+    NotReproduced,
+}
+
+/// In-memory diagnostic capture of one attempted training operation.
+/// Not a serialized Capsule or proof that an external failure reproduces.
+#[derive(Debug)]
+pub struct CapturedLearningAttempt {
+    /// Bounded, valid session checkpoint captured before attempting execution.
+    pub before_checkpoint: Vec<u8>,
+    /// Exploration coordinate requested, not a lane-local clock.
+    pub decision_index: u64,
+    /// Lane identities and last known progress before the attempt.
+    pub before: Vec<SensorFixedLaneProgress>,
+    /// Requested voltages, or None if action selection did not complete.
+    pub requested_actions_v: Option<Vec<f64>>,
+    /// Completed batch output, retained even if subsequent learning/evidence fails.
+    pub batch_output: Option<LearningBatchStep>,
+    /// Entered session boundary; lane diagnostics give finer physical stages.
+    pub stage: Option<rne_log::ExecutionStage>,
+    /// Actual learner updates before the attempt.
+    pub updates_before: u64,
+    /// Actual learner updates after the attempt; not inferred from requested actions.
+    pub updates_after: u64,
+    /// Post-attempt diagnostics, not post-failure physical-state hashes.
+    pub after: Vec<SensorFixedLaneProgress>,
+    /// Normal step result, explicit error, or caught panic diagnostic.
+    pub outcome: std::result::Result<LearningBatchStep, String>,
+}
+
 fn limits(version: u32) -> Result<(usize, usize)> {
     match version {
         1 => Ok((1024, 8 * 1024 * 1024)),
         2 => Ok((MAX_EVENTS, MAX_BYTES)),
         _ => anyhow::bail!("unsupported session schema"),
+    }
+}
+
+impl CapturedLearningAttempt {
+    fn attempt_value(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "rne_learning_execution_attempt", "schema_version": 1,
+            "operation": "train", "decision_index": self.decision_index,
+            "before": self.before, "after": self.after,
+            "requested_actions_v": self.requested_actions_v,
+            "batch_output": self.batch_output, "stage": self.stage,
+            "updates_before": self.updates_before, "updates_after": self.updates_after,
+            "outcome": self.outcome,
+        })
+    }
+
+    /// Packages a failed attempt into a new directory; never overwrites evidence.
+    /// This binds exact bytes but does not verify execution or attest supplied build
+    /// provenance. Partial files remain on write failure. No post-failure physical
+    /// hash is fabricated, and replay is explicitly not attempted by this method.
+    pub fn write_new(
+        &self,
+        directory: &std::path::Path,
+        build: &rne_log::BuildMetadata,
+    ) -> Result<rne_log::execution_capsule::ExecutionFailureCapsule> {
+        use rne_log::execution_capsule::{
+            ExecutionFailureCapsule, ExecutionReplayClaim, PostAttemptEvidence,
+        };
+        use std::io::Write;
+        ensure!(
+            self.before_checkpoint.len() <= MAX_BYTES,
+            "prior checkpoint exceeds bound"
+        );
+        let mut prior: Snapshot = serde_json::from_slice(&self.before_checkpoint)?;
+        ensure!(
+            self.before_checkpoint.len() <= limits(prior.schema_version)?.1,
+            "prior schema byte limit"
+        );
+        ensure!(
+            (1..=MAX_SENSOR_BATCH_LANES).contains(&prior.num_envs)
+                && prior.events.len() <= limits(prior.schema_version)?.0,
+            "prior history bounds"
+        );
+        prior.backend.validate()?;
+        let expected_digest = std::mem::take(&mut prior.content_sha256);
+        ensure!(
+            digest(&prior)? == expected_digest,
+            "prior history digest mismatch"
+        );
+        prior.content_sha256 = expected_digest;
+        let (learner, next) =
+            SensorTableLearner::from_checkpoint(prior.learner_checkpoint.as_bytes())?;
+        ensure!(
+            next == self.decision_index
+                && next
+                    == prior
+                        .events
+                        .iter()
+                        .filter(|event| event.operation == Operation::Train)
+                        .count() as u64
+                && learner.updates() == self.updates_before,
+            "prior learner/attempt coordinate mismatch"
+        );
+        ensure!(
+            self.before.len() == prior.num_envs && self.after.len() == prior.num_envs,
+            "attempt lane count mismatch"
+        );
+        for (index, (before, after)) in self.before.iter().zip(&self.after).enumerate() {
+            ensure!(
+                before.lane_id == index
+                    && after.lane_id == index
+                    && before.episode_index == after.episode_index
+                    && before.episode_seed == after.episode_seed
+                    && before.episode_seed
+                        == derive_episode_seed(
+                            prior.physical_root,
+                            index as u64,
+                            before.episode_index
+                        ),
+                "attempt lane identity mismatch"
+            );
+            ensure!(
+                after
+                    .progress
+                    .completed_intervals
+                    .checked_sub(before.progress.completed_intervals)
+                    .is_some_and(|delta| delta <= 1)
+                    && after
+                        .progress
+                        .completed_drive_ticks
+                        .checked_sub(before.progress.completed_drive_ticks)
+                        .is_some_and(|delta| delta <= 10)
+                    && after.progress.last_successful_time_ticks
+                        >= before.progress.last_successful_time_ticks,
+                "invalid attempt progress"
+            );
+        }
+        if let Some(actions) = &self.requested_actions_v {
+            ensure!(
+                actions.len() == prior.num_envs && actions.iter().all(|value| value.is_finite()),
+                "invalid attempt actions"
+            );
+        }
+        ensure!(
+            self.updates_after
+                .checked_sub(self.updates_before)
+                .is_some_and(|delta| delta <= prior.num_envs as u64),
+            "invalid learner update delta"
+        );
+        if let Ok(output) = &self.outcome {
+            ensure!(
+                self.batch_output.as_ref() == Some(output) && self.stage.is_none(),
+                "completed outcome mismatch"
+            );
+        }
+        let message = match &self.outcome {
+            Err(error) => error.clone(),
+            Ok(output) => {
+                ensure!(
+                    !output.failures.is_empty(),
+                    "successful attempt is not a failure capsule"
+                );
+                "one or more execution lanes failed".to_string()
+            }
+        };
+        let contract = serde_json::to_vec(&serde_json::json!({
+            "kind": "rne_learning_execution_contract", "schema_version": 1,
+            "backend": prior.backend, "task_spec": crate::observed::sensor_fixed_task_spec(), "build": build,
+        }))?;
+        let attempt = serde_json::to_vec(&self.attempt_value())?;
+        for bytes in [&contract, &attempt] {
+            ensure!(
+                bytes.len() <= 1024 * 1024,
+                "execution metadata artifact exceeds bound"
+            );
+        }
+        let reference = |role: &str, kind: &str, version, path: &str, bytes: &[u8]| {
+            rne_log::ArtifactRef::new(
+                role,
+                kind,
+                version,
+                path,
+                format!("{:x}", Sha256::digest(bytes)),
+            )
+        };
+        let capsule = ExecutionFailureCapsule {
+            kind: "rne_execution_failure_capsule".into(), schema_version: 1,
+            failure_code: if self.outcome.is_err() { "learning_attempt_error" } else { "lane_execution_error" }.into(),
+            message,
+            contract: reference("execution_contract", "rne_learning_execution_contract", 1, "contract.json", &contract)?,
+            prior_history: reference("prior_history", "rne_learning_session", prior.schema_version, "prior-history.json", &self.before_checkpoint)?,
+            attempt: reference("execution_attempt", "rne_learning_execution_attempt", 1, "attempt.json", &attempt)?,
+            post_attempt: PostAttemptEvidence::Unavailable { reason: "capture records progress only; no post-attempt physical-state snapshot was collected".into() },
+            replay: ExecutionReplayClaim::NotAttempted,
+        };
+        capsule.validate()?;
+        let metadata = serde_json::to_vec(&capsule)?;
+        ensure!(
+            metadata.len() <= rne_log::execution_capsule::MAX_EXECUTION_CAPSULE_BYTES,
+            "capsule byte limit"
+        );
+        std::fs::create_dir(directory).context("create new execution capsule directory")?;
+        for (name, bytes) in [
+            ("contract.json", contract.as_slice()),
+            ("prior-history.json", self.before_checkpoint.as_slice()),
+            ("attempt.json", attempt.as_slice()),
+            ("capsule.json", metadata.as_slice()),
+        ] {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(directory.join(name))?;
+            file.write_all(bytes)?;
+            file.sync_all()?;
+        }
+        Ok(capsule)
     }
 }
 
@@ -69,6 +281,8 @@ pub struct SensorLearningSession<B: PhysicsBackend, F> {
     initial_sha256: String,
     events: Vec<Event>,
     usable: bool,
+    #[cfg(test)]
+    attempt_fault: Option<(rne_log::ExecutionStage, bool)>,
 }
 
 impl<B: PhysicsBackend, F> std::fmt::Debug for SensorLearningSession<B, F> {
@@ -115,12 +329,120 @@ where
             initial_sha256,
             events: Vec::new(),
             usable: true,
+            #[cfg(test)]
+            attempt_fault: None,
         })
     }
 
     /// Read-only learned policy; callers cannot mutate session learning state.
+    ///
+    /// See also [`Self::replay_failure_capsule`] for independent failure verification.
     pub fn learner(&self) -> &SensorTableLearner {
         &self.learner
+    }
+
+    /// Reads bounded artifacts, restores history into fresh worlds and executes the
+    /// attempted step with the supplied factory. No existing world is modified.
+    /// Accepts initial captures with unavailable post-state and no replay claim;
+    /// other envelope variants are unsupported rather than silently trusted.
+    /// This does not verify unavailable physical state or authenticate build metadata.
+    pub fn replay_failure_capsule(
+        factory: F,
+        workers: usize,
+        directory: &std::path::Path,
+        expected_build: &rne_log::BuildMetadata,
+    ) -> Result<LearningAttemptReplayOutcome> {
+        use crate::observed_execution_capsule::{
+            decode_canonical_execution_json, read_execution_artifact,
+        };
+        use rne_log::execution_capsule::{
+            ExecutionFailureCapsule, ExecutionReplayClaim, PostAttemptEvidence,
+            MAX_EXECUTION_CAPSULE_BYTES,
+        };
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::fs::File::open(directory.join("capsule.json"))?
+            .take(MAX_EXECUTION_CAPSULE_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)?;
+        let capsule = ExecutionFailureCapsule::decode(&bytes)?;
+        ensure!(
+            capsule.replay == ExecutionReplayClaim::NotAttempted
+                && matches!(
+                    capsule.post_attempt,
+                    PostAttemptEvidence::Unavailable { .. }
+                ),
+            "unsupported learning execution envelope variant"
+        );
+        let contract = read_execution_artifact(
+            directory,
+            &capsule.contract,
+            "execution_contract",
+            "rne_learning_execution_contract",
+            1,
+            1024 * 1024,
+        )?;
+        let prior_version = capsule.prior_history.schema_version;
+        let prior_bytes = read_execution_artifact(
+            directory,
+            &capsule.prior_history,
+            "prior_history",
+            "rne_learning_session",
+            prior_version,
+            limits(prior_version)?.1,
+        )?;
+        let attempt = read_execution_artifact(
+            directory,
+            &capsule.attempt,
+            "execution_attempt",
+            "rne_learning_execution_attempt",
+            1,
+            1024 * 1024,
+        )?;
+        let prior: Snapshot = serde_json::from_slice(&prior_bytes)?;
+        ensure!(
+            prior.schema_version == prior_version,
+            "prior history reference version mismatch"
+        );
+        let contract = decode_canonical_execution_json(&contract)?;
+        ensure!(
+            contract
+                == serde_json::json!({
+                    "kind": "rne_learning_execution_contract", "schema_version": 1,
+                    "backend": prior.backend, "task_spec": crate::observed::sensor_fixed_task_spec(), "build": expected_build,
+                }),
+            "execution contract/backend/TaskSpec/build mismatch"
+        );
+        let attempt = decode_canonical_execution_json(&attempt)?;
+        ensure!(
+            attempt["kind"] == "rne_learning_execution_attempt"
+                && attempt["schema_version"] == 1
+                && attempt["operation"] == "train",
+            "unsupported learning attempt"
+        );
+        let mut restored = Self::from_checkpoint(factory, workers, &prior_bytes)?;
+        let actual = restored.capture_step()?;
+        let actual_failure = match &actual.outcome {
+            Err(error) => Some(("learning_attempt_error", error.as_str())),
+            Ok(output) if !output.failures.is_empty() => {
+                Some(("lane_execution_error", "one or more execution lanes failed"))
+            }
+            _ => None,
+        };
+        Ok(
+            if actual_failure == Some((capsule.failure_code.as_str(), capsule.message.as_str()))
+                && attempt == actual.attempt_value()
+            {
+                LearningAttemptReplayOutcome::Reproduced
+            } else {
+                LearningAttemptReplayOutcome::NotReproduced
+            },
+        )
+    }
+
+    /// Evaluator-only lane progress, available even after an unrecorded failure.
+    /// This does not checkpoint the session, certify learner updates or resume it.
+    pub fn execution_progress(&self) -> Vec<SensorFixedLaneProgress> {
+        self.batch.execution_progress()
     }
 
     fn preflight(&self) -> Result<()> {
@@ -143,11 +465,53 @@ where
     /// during evidence generation invalidates the session rather than producing
     /// an incomplete checkpoint. Such errors require external diagnosis.
     pub fn step(&mut self) -> Result<LearningBatchStep> {
+        self.step_inner(None)
+    }
+
+    /// Captures a valid pre-attempt checkpoint, then executes one training step.
+    /// Pre-capture errors return without execution. A caught panic invalidates the
+    /// session; this does not roll back physics or claim a recoverable solver state.
+    /// History copying is opt-in and retains the existing schema-specific byte cap.
+    pub fn capture_step(&mut self) -> Result<CapturedLearningAttempt> {
+        self.preflight()?;
+        let mut capture = CapturedLearningAttempt {
+            before_checkpoint: self.checkpoint()?,
+            decision_index: self.next_decision,
+            before: self.execution_progress(),
+            requested_actions_v: None,
+            batch_output: None,
+            stage: None,
+            updates_before: self.learner.updates(),
+            updates_after: self.learner.updates(),
+            after: Vec::new(),
+            outcome: Err("attempt not executed".to_string()),
+        };
+        capture.outcome = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.step_inner(Some(&mut capture))
+        })) {
+            Ok(result) => result.map_err(|error| format!("{error:#}")),
+            Err(_) => {
+                self.usable = false;
+                Err("training attempt panicked; session invalidated".to_string())
+            }
+        };
+        capture.updates_after = self.learner.updates();
+        capture.after = self.execution_progress();
+        Ok(capture)
+    }
+
+    fn step_inner(
+        &mut self,
+        mut capture: Option<&mut CapturedLearningAttempt>,
+    ) -> Result<LearningBatchStep> {
         self.preflight()?;
         let next = self
             .next_decision
             .checked_add(1)
             .context("decision counter overflow")?;
+        if let Some(capture) = capture.as_deref_mut() {
+            capture.stage = Some(rne_log::ExecutionStage::ActionSelection);
+        }
         let actions = self
             .batch
             .observations()
@@ -162,9 +526,24 @@ where
                 )
             })
             .collect::<Result<Vec<_>>>()?;
+        if let Some(capture) = capture.as_deref_mut() {
+            capture.requested_actions_v = Some(actions.clone());
+            capture.stage = Some(rne_log::ExecutionStage::BatchExecution);
+        }
         self.usable = false;
         let output = self.batch.step_learning(&actions)?;
+        if let Some(capture) = capture.as_deref_mut() {
+            capture.batch_output = Some(output.clone());
+            capture.stage = Some(rne_log::ExecutionStage::Learning);
+        }
+        #[cfg(test)]
+        self.inject_attempt_fault(rne_log::ExecutionStage::Learning)?;
         self.learner.learn(&output.transitions)?;
+        if let Some(capture) = capture.as_deref_mut() {
+            capture.stage = Some(rne_log::ExecutionStage::Evidence);
+        }
+        #[cfg(test)]
+        self.inject_attempt_fault(rne_log::ExecutionStage::Evidence)?;
         let learner_sha256 = digest(&self.learner.checkpoint(next)?)?;
         let evidence_sha256 = replay::evidence_digest(
             &self.batch,
@@ -178,7 +557,21 @@ where
         });
         self.next_decision = next;
         self.usable = true;
+        if let Some(capture) = capture {
+            capture.stage = None;
+        }
         Ok(output)
+    }
+
+    #[cfg(test)]
+    fn inject_attempt_fault(&self, stage: rne_log::ExecutionStage) -> Result<()> {
+        if let Some((selected, panic)) = self.attempt_fault {
+            if selected == stage {
+                assert!(!panic, "injected attempt-boundary panic");
+                anyhow::bail!("injected attempt-boundary error");
+            }
+        }
+        Ok(())
     }
 
     /// Resets selected lanes without consuming an exploration coordinate or update.
@@ -325,6 +718,213 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn captured_attempt_preserves_progress_after_learning_and_evidence_boundary_faults() {
+        let factory = || {
+            Ok((
+                rne_physics_rapier::RapierBackend::new(),
+                rne_physics_rapier::RapierBackend::manifest(),
+            ))
+        };
+        for stage in [
+            rne_log::ExecutionStage::Learning,
+            rne_log::ExecutionStage::Evidence,
+        ] {
+            for panic in [false, true] {
+                let mut session = SensorLearningSession::new(factory, 620, 621, 622, 2, 1).unwrap();
+                let before = session.checkpoint().unwrap();
+                session.attempt_fault = Some((stage, panic));
+                let captured = session.capture_step().unwrap();
+                assert_eq!(captured.before_checkpoint, before);
+                assert!(captured.outcome.is_err());
+                assert_eq!(captured.stage, Some(stage));
+                assert_eq!(captured.updates_before, 0);
+                assert_eq!(
+                    captured.updates_after,
+                    if stage == rne_log::ExecutionStage::Learning {
+                        0
+                    } else {
+                        2
+                    }
+                );
+                assert_eq!(captured.batch_output.as_ref().unwrap().transitions.len(), 2);
+                assert!(captured.batch_output.as_ref().unwrap().failures.is_empty());
+                assert!(captured
+                    .after
+                    .iter()
+                    .all(|lane| lane.progress.completed_intervals == 1
+                        && lane.progress.last_successful_time_ticks == 10_000_000));
+                assert_eq!(session.next_decision, 0);
+                assert!(session.events.is_empty());
+                assert!(session.checkpoint().is_err());
+                assert!(session.capture_step().is_err());
+                let root = tempfile::tempdir().unwrap();
+                let directory = root.path().join("failure");
+                let build = rne_log::BuildMetadata::new(
+                    "test",
+                    "synthetic-test-build",
+                    "test",
+                    "test-target",
+                    "test-compiler",
+                    "0".repeat(64),
+                );
+                let capsule = captured.write_new(&directory, &build).unwrap();
+                let metadata = std::fs::read(directory.join("capsule.json")).unwrap();
+                assert_eq!(
+                    rne_log::execution_capsule::ExecutionFailureCapsule::decode(&metadata).unwrap(),
+                    capsule
+                );
+                assert_eq!(
+                    capsule.replay,
+                    rne_log::execution_capsule::ExecutionReplayClaim::NotAttempted
+                );
+                assert!(matches!(
+                    capsule.post_attempt,
+                    rne_log::execution_capsule::PostAttemptEvidence::Unavailable { .. }
+                ));
+                use crate::observed_execution_capsule::read_execution_artifact;
+                let history = read_execution_artifact(
+                    &directory,
+                    &capsule.prior_history,
+                    "prior_history",
+                    "rne_learning_session",
+                    2,
+                    MAX_BYTES,
+                )
+                .unwrap();
+                assert_eq!(history, before);
+                let contract = read_execution_artifact(
+                    &directory,
+                    &capsule.contract,
+                    "execution_contract",
+                    "rne_learning_execution_contract",
+                    1,
+                    1024 * 1024,
+                )
+                .unwrap();
+                let contract: serde_json::Value = serde_json::from_slice(&contract).unwrap();
+                assert_eq!(contract["build"], serde_json::to_value(&build).unwrap());
+                assert_eq!(
+                    contract["task_spec"],
+                    serde_json::to_value(crate::observed::sensor_fixed_task_spec()).unwrap()
+                );
+                let attempt = read_execution_artifact(
+                    &directory,
+                    &capsule.attempt,
+                    "execution_attempt",
+                    "rne_learning_execution_attempt",
+                    1,
+                    1024 * 1024,
+                )
+                .unwrap();
+                let decoded: serde_json::Value = serde_json::from_slice(&attempt).unwrap();
+                assert_eq!(decoded["stage"], serde_json::to_value(stage).unwrap());
+                assert_eq!(decoded["updates_after"], captured.updates_after);
+                assert!(captured.write_new(&directory, &build).is_err());
+                assert_eq!(
+                    std::fs::read(directory.join("capsule.json")).unwrap(),
+                    metadata
+                );
+                assert_eq!(
+                    std::fs::read(directory.join("attempt.json")).unwrap(),
+                    attempt
+                );
+                std::fs::write(directory.join("attempt.json"), b"{}").unwrap();
+                assert!(read_execution_artifact(
+                    &directory,
+                    &capsule.attempt,
+                    "execution_attempt",
+                    "rne_learning_execution_attempt",
+                    1,
+                    1024 * 1024
+                )
+                .is_err());
+                // Restoring valid history does not reproduce this newly injected fault.
+                let mut restored =
+                    SensorLearningSession::from_checkpoint(factory, 2, &before).unwrap();
+                let success = restored.capture_step().unwrap();
+                assert!(success.outcome.is_ok());
+                let successful_directory = root.path().join("not-a-failure");
+                assert!(success.write_new(&successful_directory, &build).is_err());
+                assert!(!successful_directory.exists());
+            }
+        }
+    }
+
+    #[test]
+    fn captured_attempt_rejects_unusable_session_before_execution() {
+        let mut session = SensorLearningSession::new(
+            || {
+                Ok((
+                    rne_physics_rapier::RapierBackend::new(),
+                    rne_physics_rapier::RapierBackend::manifest(),
+                ))
+            },
+            620,
+            621,
+            622,
+            2,
+            1,
+        )
+        .unwrap();
+        let before = session.execution_progress();
+        session.usable = false;
+        assert!(session.capture_step().is_err());
+        assert_eq!(session.execution_progress(), before);
+        assert_eq!(session.learner().updates(), 0);
+        assert_eq!(session.next_decision, 0);
+    }
+
+    #[test]
+    fn captured_attempt_invalid_bindings_create_no_directory() {
+        let build = rne_log::BuildMetadata::new(
+            "test",
+            "synthetic-test-build",
+            "test",
+            "test-target",
+            "test-compiler",
+            "0".repeat(64),
+        );
+        for mutation in 0..5 {
+            let mut session = SensorLearningSession::new(
+                || {
+                    Ok((
+                        rne_physics_rapier::RapierBackend::new(),
+                        rne_physics_rapier::RapierBackend::manifest(),
+                    ))
+                },
+                620,
+                621,
+                622,
+                2,
+                1,
+            )
+            .unwrap();
+            session.attempt_fault = Some((rne_log::ExecutionStage::Evidence, false));
+            let mut capture = session.capture_step().unwrap();
+            match mutation {
+                0 => {
+                    let mut prior: serde_json::Value =
+                        serde_json::from_slice(&capture.before_checkpoint).unwrap();
+                    prior["physical_root"] = serde_json::json!(999);
+                    capture.before_checkpoint = serde_json::to_vec(&prior).unwrap();
+                }
+                1 => capture.decision_index += 1,
+                2 => capture.updates_before += 1,
+                3 => capture.after[0].episode_seed += 1,
+                4 => capture.requested_actions_v.as_mut().unwrap()[0] = f64::NAN,
+                _ => unreachable!(),
+            }
+            let root = tempfile::tempdir().unwrap();
+            let directory = root.path().join("invalid");
+            assert!(
+                capture.write_new(&directory, &build).is_err(),
+                "mutation {mutation}"
+            );
+            assert!(!directory.exists());
+        }
+    }
 
     fn resume<B, F>(factory: F)
     where

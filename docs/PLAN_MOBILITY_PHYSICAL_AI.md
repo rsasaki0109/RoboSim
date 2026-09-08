@@ -349,8 +349,12 @@ and cross-backend results.
     response, debounced lift/recontact events, and cross-backend curb impulse rather than
     solver-sensitive peak-force parity; see
     [`MOBILITY_ROAD_EXCITATION_V1.md`](MOBILITY_ROAD_EXCITATION_V1.md). M3-C remains open
-    until suspension/tire parameters are identified from physical logs and the caster
-    plant joins a sensor-only loop. A new identification-contract subgate now fits the
+    until suspension/tire parameters are identified from physical logs. The caster
+    plant now joins a sensor-only encoder/IMU loop with measured motor feedback,
+    capture-age watchdog, nominal motor feedforward and PI feedback. Both backends
+    pass deterministic tracking/outage tests; v2 evidence checks timing and controller
+    replay. Full CI passed at `bd4afbf`; this is not physical-log validation.
+    A new identification-contract subgate now fits the
     linear strut stiffness, damping, and equilibrium coordinate from bounded timestamped
     force logs with deterministic train/holdout splitting, physical bounds, residual
     gates, provenance propagation, and tamper detection. The fitted parameters now replace
@@ -389,9 +393,13 @@ and cross-backend results.
     evaluator tracking-error reward over all ten physics ticks, including stale-sensor
     intervals. Bounded reset/action history replay binds backend, reset contracts,
     observations, rewards and completed physical hashes; CLI-generated 331-operation
-    proofs are byte-identical across worker counts within each backend. A training
-    adapter, cross-backend fixed-task acceptance metrics and common Capsule integration
-    for this new replay format remain next steps; see
+    proofs are byte-identical across worker counts within each backend. A bounded
+    training adapter and replay-verified learning session are now implemented, with
+    42,240-update full-job replay and continuation checks on each backend; see
+    [`MOBILITY_FALLIBLE_LEARNING_BOUNDARY.md`](MOBILITY_FALLIBLE_LEARNING_BOUNDARY.md).
+    Common Capsule integration for partially completed execution remains pending;
+    replaying successful history does not prove that a new runtime fault reproduces.
+    The fixed-step contract is documented in
     [`MOBILITY_SYNCHRONOUS_ENV_DESIGN.md`](MOBILITY_SYNCHRONOUS_ENV_DESIGN.md).
     Broader per-wheel/Ackermann resets, physical-log acquisition, recorded/shadow/HIL
     validation, and the final real-vehicle exit gate remain open.

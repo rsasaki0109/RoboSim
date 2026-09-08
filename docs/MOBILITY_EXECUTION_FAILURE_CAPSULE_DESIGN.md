@@ -1,7 +1,86 @@
 # Execution-failure evidence: observed gap and next contract
 
-Status: design based on current code; no new capsule schema implemented yet.
-The learning-session v2 implementation is frozen while its long validation runs.
+Status: progress instrumentation, opt-in attempt capture and a shared metadata
+schema, exact-byte artifact intake and initial-capture execution replay are implemented.
+Broader variants and full regression qualification remain open.
+
+Focused qualification on 2026-09-08: 39 `rne_log` library tests passed, including
+legacy Capsule golden compatibility; the MuJoCo-enabled mobility library passed
+156 tests with zero failures and two long training jobs ignored by the normal test
+selection. MuJoCo-feature all-target Clippy passed with warnings denied. These
+results include no-directory-on-invalid-bindings, actual failure replay, healthy
+non-reproduction, wrong-build rejection and rehashed-attempt mismatch tests. They
+do not replace full workspace CI or rerun the two ignored long training jobs.
+Learning-session v2 full-job replay and full CI have passed; the subsequent
+caster sensor-loop full CI also passed at `bd4afbf`. This execution-failure
+integration is not covered or implied by those earlier passing runs.
+
+The first instrumentation slice adds common `rne_log::ExecutionStage` and
+`ExecutionProgress` diagnostic types. The fixed environment exposes progress even
+after poisoning: successfully returned control intervals and their local time are
+separate from completed physics/ECS/drive ticks. Stages are recorded before entering
+fallible work, including physics, synchronization, sensor sampling and estimation.
+A backend error after internal physical progress can therefore report the Physics
+stage with zero recorded drive ticks; zero does not claim the backend stayed still.
+Reset clears these episode-local counters. These diagnostics do not yet capture
+actions, lane identity, hashes or replay outcomes and are not a complete Capsule.
+The batch's read-only `execution_progress()` additionally binds each diagnostic to
+its stable lane ID, episode index and reset seed, without querying a poisoned
+backend. Returned diagnostics remain evaluator-only and preserve divergent local
+clocks after partial resets. They are not serialized into the legacy replay schema.
+The learning session exposes the same diagnostics. Learning projection preserves
+an earlier poisoned lane's failure stage; only rejection of an otherwise completed
+interval is labeled `LearningProjection`. Tests exercise the real session path for
+both post-physics errors and panics, including healthy-lane learner updates, rejected
+retries, partial reset and fresh-factory replay with a different worker count.
+
+`SensorLearningSession::capture_step()` is an opt-in in-memory attempt capture.
+It first obtains a bounded valid checkpoint; failure there executes no step. It
+retains requested voltages only after action selection succeeds, completed batch
+outputs before learner/evidence work, actual before/after learner update counts,
+and lane diagnostics. Session boundaries distinguish action selection, the batch
+call (which also includes preflight/projection), learning and evidence generation.
+A caught attempt panic invalidates the session rather than claiming rollback.
+Normal `step()` does not copy the checkpoint/history. Allocation aborts and failures
+in diagnostic capture itself are not claimed recoverable. Captures can be packaged
+with `write_new`; writing alone never produces a verified replay verdict.
+The writer separates contract, prior history, attempt and Capsule into four files,
+binds exact bytes with SHA-256, refuses existing directories and syncs each file.
+It rejects wholly successful outcomes and declares physical post-state unavailable
+and replay not attempted. Supplied build provenance is not authenticated. Writer
+round-trip, overwrite refusal, success rejection and tamper tests pass. Injected
+partial-write acceptance tests remain pending.
+Tests injecting errors and panics at the learning/evidence call boundaries
+pass and retain physical results and actual update counts; these are test-local
+faults, not failures observed in hardware or inside a production learner.
+
+`rne_log::execution_capsule` now defines a separate v1 metadata envelope with
+mandatory contract, prior-history and attempted-operation references. Post-attempt
+state is explicitly captured or unavailable with a reason. Replay status is named
+a producer claim: decoding neither authenticates it nor executes a replay. The
+1 MiB bounded decoder validates roles, canonical references, unique paths and text
+bounds without reading files. Legacy Capsule serialization is unchanged. Domain
+adapters must still verify exact referenced bytes and schemas, bind backend/TaskSpec/
+build, package the live attempt and actually re-execute before claiming reproduction.
+
+The benchmark's `observed_execution_capsule::read_execution_artifact` provides
+bounded exact-byte intake (at most 32 MiB per reference). Callers supply trusted
+role/kind/version and a per-artifact cap; normalized/canonical paths must remain
+inside the evidence root, and SHA-256 covers all bytes including whitespace.
+It does not validate payload semantics or authenticate a producer. Its filesystem
+assumption is a stable local directory, not an adversary racing path replacement.
+`SensorLearningSession::replay_failure_capsule` verifies references and expected
+backend/TaskSpec/build, reconstructs history using a fresh factory, and executes
+the captured operation. It returns Reproduced only when actions, lane progress,
+outputs, learner update counts and failure diagnostics match. It does not update
+the stored claim or verify unavailable physical post-state. Current support is
+initial captures with replay NotAttempted and post-state Unavailable; captured
+post-state/report variants are rejected explicitly. Contract and attempt JSON
+must match the writer's compact encoding, rejecting duplicate keys and alternate
+representations. Post-physics error and panic fixtures pass reproduction with
+different worker counts; a healthy factory returns NotReproduced. Wrong build
+identity rejects before construction, and rehashed changed update counts do not
+pass actual re-execution. These are synthetic fault tests, not hardware evidence.
 
 ## Observed incompatibility
 

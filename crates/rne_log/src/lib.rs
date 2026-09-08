@@ -4,6 +4,8 @@
 
 pub mod artifact;
 pub mod capsule;
+pub mod execution;
+pub mod execution_capsule;
 pub mod record;
 pub mod replay;
 
@@ -19,6 +21,7 @@ pub use capsule::{
     FAILURE_CAPSULE_KIND, FAILURE_CAPSULE_SCHEMA_VERSION, FAILURE_CAPSULE_VERSION,
 };
 
+pub use execution::{ExecutionProgress, ExecutionStage};
 pub use record::{
     frame_header, LogRecord, ReplayCompatibility, ReplayCompatibilityError, ReplayHeader,
     ReplayRandomSnapshot, ReplayRandomSnapshotError, ReplayRngState, SimulationLog,
