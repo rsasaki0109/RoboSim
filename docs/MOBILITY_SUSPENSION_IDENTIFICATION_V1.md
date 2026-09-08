@@ -28,8 +28,22 @@ the optimizer from seeing its holdout points. Acceptance independently requires:
 - strictly increasing finite capture times and finite SI measurements;
 - at least 80 training and 20 holdout samples;
 - 50–500 kN/m stiffness, 0.5–50 kN s/m damping, and -0.20–0.10 m equilibrium position;
-- training and holdout force RMSE no greater than 25 N;
+- finite training and holdout force RMSE no greater than 25 N;
 - complete dataset/result digest binding and deterministic recomputation.
+
+Finite input samples can still overflow during force prediction or residual
+squaring. Non-finite residual metrics fail with `ResidualExceeded`, including
+NaN cancellation between overflowing spring and damping terms. Regression tests
+exercise these cases using held-out samples so that the fitted coefficients
+remain unchanged; ordinary finite fits retain the existing arithmetic.
+
+The regression was first observed as an actual successful Rust result containing
+`holdout_rmse_n: NaN`. After rejection was added, all 53 `rne_robot` library tests
+and all 12 MuJoCo-enabled benchmark tests matching `suspension` passed, as did
+both crates' all-target Clippy checks with warnings denied. The benchmark test
+also seals and decodes the finite JSON dataset before requiring the typed
+`ResidualExceeded` error. These focused checks do not constitute a new full CI
+run or qualify a physical dataset.
 
 This design is consistent with an experimental quarter-car ARX study that uses
 accelerometers above and below the suspension and linear least-squares estimation on

@@ -54,7 +54,7 @@ pub enum SuspensionIdentificationError {
     /// The fitted stiffness, damping, or equilibrium position is outside physical bounds.
     #[error("identified suspension parameters are outside declared physical bounds")]
     NonPhysicalResult,
-    /// Training or holdout residuals exceed the declared acceptance bounds.
+    /// Training or holdout residuals are non-finite or exceed acceptance bounds.
     #[error("suspension identification residual exceeds its declared bound")]
     ResidualExceeded,
 }
@@ -254,7 +254,10 @@ pub fn identify_suspension_strut(
     }
     let training_rmse_n = (training_squared_error / training_sample_count as f64).sqrt();
     let holdout_rmse_n = (holdout_squared_error / holdout_sample_count as f64).sqrt();
-    if training_rmse_n > spec.maximum_training_rmse_n
+    if !training_rmse_n.is_finite()
+        || !holdout_rmse_n.is_finite()
+        || !maximum_absolute_holdout_residual_n.is_finite()
+        || training_rmse_n > spec.maximum_training_rmse_n
         || holdout_rmse_n > spec.maximum_holdout_rmse_n
     {
         return Err(SuspensionIdentificationError::ResidualExceeded);
@@ -2152,6 +2155,21 @@ mod tests {
         assert!(result.training_rmse_n < 1.0);
         assert!(result.holdout_rmse_n < 1.0);
         assert!(result.maximum_absolute_holdout_residual_n < 2.0);
+    }
+
+    #[test]
+    fn suspension_identification_rejects_nonfinite_holdout_arithmetic() {
+        for (position_m, velocity_m_s) in [(1.0e308, -1.0e308), (1.0e308, 0.0), (1.0e160, 0.0)] {
+            let mut samples = suspension_identification_samples();
+            // Only a held-out sample changes: fitted coefficients remain ordinary.
+            samples[199].position_m = position_m;
+            samples[199].velocity_m_s = velocity_m_s;
+            assert_eq!(
+                identify_suspension_strut(suspension_identification_spec(), &samples),
+                Err(SuspensionIdentificationError::ResidualExceeded),
+                "finite inputs must not admit non-finite residual arithmetic: {position_m}, {velocity_m_s}"
+            );
+        }
     }
 
     #[test]

@@ -294,6 +294,22 @@ mod tests {
     }
 
     #[test]
+    fn decoded_finite_dataset_rejects_overflowing_holdout_prediction() {
+        let mut dataset = synthetic_suspension_identification_dataset().unwrap();
+        let index = suspension_identification_spec().holdout_stride - 1;
+        dataset.samples[index].position_m = 1.0e308;
+        dataset.samples[index].velocity_m_s = -1.0e308;
+        dataset.seal().unwrap();
+        let bytes = serde_json::to_vec(&dataset).unwrap();
+        let decoded = decode_suspension_identification_dataset(&bytes).unwrap();
+        let error = identify_suspension_dataset(&decoded).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<rne_robot::systems::SuspensionIdentificationError>(),
+            Some(&rne_robot::systems::SuspensionIdentificationError::ResidualExceeded)
+        );
+    }
+
+    #[test]
     fn dataset_and_result_tampering_are_rejected() {
         let dataset = synthetic_suspension_identification_dataset().unwrap();
         let evidence = identify_suspension_dataset(&dataset).unwrap();

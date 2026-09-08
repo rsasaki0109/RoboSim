@@ -131,6 +131,14 @@ metadata does not execute the attempt and must not upgrade its replay status.
 
 ## Integration and acceptance work still required
 
+Validation checkpoint: commit `99d9196` completed the full `cargo run -p xtask -- ci`
+with exit code 0, including workspace lint/tests, smoke and RL checks, headless,
+OSS parity, 361 fuzz cases, and Behavior CI 10/10 seeds. The external log is
+`E:\RNE-build\m3c-sensor\execution-capsule-v1-ci.log`, SHA-256
+`abbf6015fd342edb2ca054880a10f7675f1f5e7c48f4f4b25715ef2d96f02c29`.
+This is software regression evidence for that revision, not physical calibration
+or hardware/HIL validation.
+
 Capture the last valid session and attempted inputs before crossing a fallible
 boundary. Retain healthy-lane outputs and actual learner update counts. When the
 post-step recorder itself fails, return an explicit incomplete-evidence outcome;
