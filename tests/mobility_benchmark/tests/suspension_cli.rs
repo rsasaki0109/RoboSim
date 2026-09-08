@@ -459,6 +459,90 @@ fn whole_run_cli_generates_and_reverifies_all_diagnostic_envelopes() {
             assert!(!result.status.success());
             assert!(!rejected.exists());
             fs::write(root.join("affine-clock.txt"), clock_bytes).unwrap();
+            use rne_mobility_benchmark::suspension_sampling::{
+                SuspensionTimingErrorModel, SuspensionTimingFactor, SuspensionTimingScope,
+            };
+            use rne_mobility_benchmark::suspension_timestamp_acquisition::*;
+            let timestamp = SuspensionTimestampRequest {
+                acquisitions: affine.acquisitions.clone(),
+                derivatives: affine.derivatives.clone(),
+                draws: 8,
+                model: SuspensionTimingErrorModel {
+                    kind: "rne_suspension_timing_error_model".into(),
+                    schema_version: 1,
+                    seed: 42,
+                    factors: vec![SuspensionTimingFactor {
+                        factor_id: 7,
+                        distribution: SuspensionErrorDistribution::Normal,
+                        scope: SuspensionTimingScope::IndependentSamples,
+                        physical_loading_s: 0.0,
+                        reported_loading_s: 10.0,
+                    }],
+                },
+                clocks: affine
+                    .calibration
+                    .iter()
+                    .filter(|b| b.domain == Timebase)
+                    .cloned()
+                    .collect(),
+            };
+            let input = root.join("timestamp-input.json");
+            let output = root.join("timestamp-output.json");
+            let replay = root.join("timestamp-replay.json");
+            fs::write(&input, serde_json::to_vec(&timestamp).unwrap()).unwrap();
+            for (mode, source, destination) in [
+                ("suspension-timestamp-errors", &input, &output),
+                ("suspension-timestamp-errors-verify", &output, &replay),
+            ] {
+                let result = invoke(mode, source, destination, &[]);
+                assert!(
+                    result.status.success(),
+                    "{mode}: {}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+            }
+            assert_eq!(fs::read(&output).unwrap(), fs::read(&replay).unwrap());
+            let evidence: SuspensionTimestampEvidence =
+                serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+            assert_eq!(evidence.propagation.draws.len(), 8);
+            assert!(evidence.propagation.draws.iter().all(Result::is_err));
+            let rejected = root.join("timestamp-rejected.json");
+            for (mode, source) in [
+                ("suspension-timestamp-errors", &input),
+                ("suspension-timestamp-errors-verify", &output),
+            ] {
+                for extra in [["--seed", "123"], ["--interval-tolerance-s", "0.001"]] {
+                    let result = invoke(mode, source, &rejected, &extra);
+                    assert!(!result.status.success());
+                    assert!(String::from_utf8_lossy(&result.stderr)
+                        .contains("assumptions must be embedded"));
+                    assert!(!rejected.exists());
+                }
+            }
+            let mut forged = evidence;
+            forged.propagation.draws.clear();
+            let forged_path = root.join("timestamp-forged.json");
+            fs::write(&forged_path, serde_json::to_vec(&forged).unwrap()).unwrap();
+            let result = invoke(
+                "suspension-timestamp-errors-verify",
+                &forged_path,
+                &rejected,
+                &[],
+            );
+            assert!(!result.status.success());
+            assert!(String::from_utf8_lossy(&result.stderr).contains("replay mismatch"));
+            assert!(!rejected.exists());
+            let clock_bytes = fs::read(root.join("affine-clock.txt")).unwrap();
+            fs::write(root.join("affine-clock.txt"), b"tampered").unwrap();
+            let result = invoke(
+                "suspension-timestamp-errors-verify",
+                &output,
+                &rejected,
+                &[],
+            );
+            assert!(!result.status.success());
+            assert!(!rejected.exists());
+            fs::write(root.join("affine-clock.txt"), clock_bytes).unwrap();
         }
         let input = root.join("derived-input.json");
         let output = root.join("derived-output.json");

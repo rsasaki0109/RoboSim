@@ -451,6 +451,128 @@ draw deletion, rejected seed/tolerance overrides, and changed clock-file rejecti
 without an output artifact. These results do not replace workspace CI or physical
 data validation.
 
+Full workspace checkpoint (2026-09-09): commit
+`1d51f8c16d74d27ede540c834fec826f69c4852b` completed
+`cargo run -p xtask -- ci` with exit code 0 and tracked files fixed throughout.
+Workspace formatting, boundaries, Clippy, tests, smoke/RL, headless, OSS parity,
+361 fuzz cases across nine boundaries and Behavior CI 10/10 passed. Mobility
+library: 154 passed, zero failed, one existing ignored test (187.13 s); the
+extended diagnostic CLI integration test passed. External log:
+`E:\RNE-build\m3c-sensor\suspension-affine-v1-ci.log`, SHA-256
+`a394f23315064184355cb9db2498206dbb6c1b35b9770865d3d0cd6c21aed8f6`.
+Negative performance evidence is retained: heading CEM -10 versus baseline -10;
+clutter PPO random -1.29 versus trained -1.37; mobile clutter CEM grasped but did
+not place; mobile clutter PPO random -1.93 versus trained -1.61. The flagship
+workflow explicitly reports `cross_backend=false`. Full CI is regression
+evidence, not physical calibration, complete learning performance or actual HIL.
+
+### Next timing slice: timestamp error versus sampling aperture
+
+[Analog Devices MT-007, pp. 2–4](https://www.analog.com/media/en/training-seminars/tutorials/MT-007.pdf)
+distinguishes fixed aperture delay from sample-to-sample aperture jitter and
+relates timing jitter to measurement-value error through the input signal slope.
+RNE design consequence: perturbing stored timestamp labels alone must not be
+described as simulating ADC aperture jitter. A timestamp-uncertainty realization
+may retain measured values and reconstruct velocity on uncertain times; a
+sampling-time realization must evaluate a declared continuous signal model at
+the displaced capture times, or explicitly declare its interpolation/error model.
+Transport latency remains a third, separate effect. Tests must expose different
+outcomes on a changing signal, retain invalid clock order and avoid counting the
+same acquisition timing uncertainty twice. No sampling aperture, interpolation,
+or independent-jitter distribution is inferred from a nominal sample rate or a
+synchronization bound. This extension is not implemented by the affine v1 API.
+
+The offline `suspension_sampling` primitives now distinguish these operations:
+`relabel_suspension_timestamps` preserves each measured position/force pair and
+reconstructs velocity with explicit replacement labels; `capture_suspension_signal`
+evaluates a caller-supplied deterministic signal at explicit physical times and
+reconstructs velocity only from reported times. Physical and reported clocks
+must both be finite, strictly increasing and bounded to 3..=100,000 rows; they
+are validated before signal evaluation. Signal-domain errors, nonfinite values
+and derivative failures reject the entire realization without trimming or repair.
+This is point sampling, not finite-aperture averaging, a causal physics sampler
+or implicit interpolation of real logs. Callback purity and signal validity are
+caller responsibilities. No random distribution, calibration certificate binding,
+transport delay or CLI evidence extension is introduced by these primitives.
+
+The estimator regression uses continuous quadratic motion and the physical
+linear spring/damper force law, retaining all rows including secant endpoints.
+Stretching timestamp labels by `a` while preserving measured values multiplies
+the fitted damping by `a`. Sampling at stretched physical times but reporting
+the original times divides damping by `a` relative to the same captures with
+correctly reported times. Stiffness is unchanged in each paired comparison.
+These are separate paired baselines: finite-difference endpoint errors are not
+silently removed or claimed to recover the continuous physical coefficients
+exactly. The test distinguishes changing force samples from relabeling fixed
+samples and checks the actual training-only estimator, not a substitute formula.
+
+`SuspensionTimingErrorModel` (`rne_suspension_timing_error_model`, schema 1)
+generates one explicitly indexed realization using WorldRandom. Independent
+factor sources carry signed physical/reported time loadings in seconds; the
+same latent value couples both clocks. A factor is constant within an acquisition
+or independent per row. Different acquisition IDs derive independent streams;
+cross-acquisition shared clock errors are not represented by this model.
+Limits per call are 100,000 rows, 16 ordered unique factors and draw indices
+0..4095. Calling draws in another order does not alter their values. Invalid
+realized clock order, overflow and nonfinite loadings are errors, never redrawn
+or sorted. A caller aggregating draws must keep these errors at their original
+indices. This generator has no retained calibration binding or CLI evidence yet,
+and does not infer a jitter distribution
+from an acquisition's synchronization bound. Its independent-sample option must
+not be assumed to model correlated oscillator phase noise without evidence.
+
+`SuspensionTimingErrorModel::propagate_labels` now executes a bounded aggregate
+of timestamp-label realizations on the whole-run training split. Each draw
+reconstructs velocity and uses the actual pooled estimator; holdout values do
+not enter sampling or fitting. Clock/derivative failures remain `InvalidSample`
+in their draw slots, while estimator errors retain their original categories.
+The nominal baseline also reconstructs velocity from the declared operators.
+Limits are 4,096 draws and 10 million row-factor-draw evaluations, in addition to
+the whole-run request bounds. Any nonzero physical-time loading is rejected:
+retained measured samples are not an implicit continuous signal and cannot
+support resampling without another declared model. File/calibration verification
+and replayable evidence are not yet provided by this numerical API.
+
+The separate `SuspensionTimestampRequest` now binds this numerical API to whole
+acquisition manifests, explicit nominal derivative procedures, and retained
+clock interpretations. It requires one nominal timebase binding per training
+acquisition, then one per nonzero timestamp factor/acquisition in declared order.
+Factor clock IDs and calibration references must match the nominal declaration;
+capture and acquisition identities must match the source manifest. All raw,
+channel/procedure and clock files are verified before fitting. Physical-time
+loadings are rejected rather than silently reduced to timestamp-label errors.
+Installed-clock identity and interpretation of certificate contents remain caller
+assertions, not authentication or proof of the error distribution.
+
+`rne_suspension_timestamp_evidence` schema 1 retains the complete request and all
+outcomes. Strict 8 MiB decode/encode verification reopens retained files and
+recomputes every draw; missing/reordered bindings, changed clock/capture IDs,
+deleted draws and changed certificate bytes are rejected. All-failed draws are
+still valid diagnostic evidence when faithfully recomputed, not a success verdict.
+The CLI modes below generate and reverify this evidence. It does not include physical
+sampling simulation, finite aperture, filter uncertainty or physical validation.
+
+```powershell
+cargo run -p rne_mobility_benchmark -- --backend suspension-timestamp-errors --input E:/RNE-data/timestamp-request.json --evidence-root E:/RNE-data/retained --output E:/RNE-data/timestamp-evidence.json
+cargo run -p rne_mobility_benchmark -- --backend suspension-timestamp-errors-verify --input E:/RNE-data/timestamp-evidence.json --evidence-root E:/RNE-data/retained --output E:/RNE-data/timestamp-replayed.json
+```
+
+These paths are examples, not supplied physical data. Both modes require a
+regular input file capped at 8 MiB and permit only backend/input/evidence-root/
+output options. Seed, interval-tolerance and other overrides are rejected; all
+assumptions must be embedded. Successful processing with all failed draws means
+those failures were preserved, not that the calibration or model was accepted.
+Verification failure writes no output artifact.
+
+Timing-slice regression (2026-09-09, working tree): the MuJoCo-enabled Mobility
+library completed with 187 passed, zero failed and two existing ignored long
+training tests (197.81 s). The extended CLI integration test passed (2.42 s),
+including all-failed timestamp draw preservation, byte-identical reverify output,
+deleted-draw rejection, clock-file tampering and forbidden option overrides.
+MuJoCo all-target Clippy passed with warnings denied. This covers Rapier/MuJoCo
+Mobility regressions but is not a full workspace CI result for this timing slice;
+the full-CI checkpoint above remains scoped to the earlier affine commit.
+
 Source review: [JCGM 101:2008, BIPM](https://www.bipm.org/en/doi/10.59161/jcgm101-2008)
 describes propagation of input probability distributions through a measurement
 model. [Cameron, Gelbach and Miller, NBER t0344](https://www.nber.org/papers/t0344)

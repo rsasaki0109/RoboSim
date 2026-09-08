@@ -24,6 +24,8 @@ pub mod suspension_affine_acquisition;
 pub mod suspension_derivative;
 pub mod suspension_identification;
 pub mod suspension_runs;
+pub mod suspension_sampling;
+pub mod suspension_timestamp_acquisition;
 pub mod suspension_uncertainty;
 
 use anyhow::{ensure, Result};

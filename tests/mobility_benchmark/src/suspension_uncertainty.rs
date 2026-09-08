@@ -631,6 +631,63 @@ mod tests {
     }
 
     #[test]
+    fn timestamp_draws_refit_and_keep_failed_clock_realizations() {
+        use crate::suspension_derivative::SuspensionDerivativeOperator;
+        use crate::suspension_sampling::{
+            SuspensionTimingErrorModel, SuspensionTimingFactor, SuspensionTimingScope,
+        };
+        let (mut request, _) = fixture();
+        let operators = [SuspensionDerivativeOperator::NonuniformThreePointSecantEndsV1];
+        let mut model = SuspensionTimingErrorModel {
+            kind: "rne_suspension_timing_error_model".into(),
+            schema_version: 1,
+            seed: 42,
+            factors: vec![SuspensionTimingFactor {
+                factor_id: 7,
+                distribution: SuspensionErrorDistribution::Normal,
+                scope: SuspensionTimingScope::IndependentSamples,
+                physical_loading_s: 0.0,
+                reported_loading_s: 0.0001,
+            }],
+        };
+        let result = model.propagate_labels(&request, &operators, 8).unwrap();
+        assert!(result.baseline.is_ok());
+        assert_eq!(
+            result,
+            model.propagate_labels(&request, &operators, 8).unwrap()
+        );
+        assert!(result.draws.iter().any(|draw| *draw != result.baseline));
+        assert_eq!(
+            &model
+                .propagate_labels(&request, &operators, 16)
+                .unwrap()
+                .draws[..8],
+            &result.draws
+        );
+        request.holdout[0].dataset.samples[0].force_n += 100.0;
+        request.holdout[0].dataset.seal().unwrap();
+        assert_eq!(
+            result,
+            model.propagate_labels(&request, &operators, 8).unwrap()
+        );
+        model.factors[0].reported_loading_s = 10.0;
+        let failed = model.propagate_labels(&request, &operators, 8).unwrap();
+        assert_eq!(
+            failed.draws,
+            vec![Err(SuspensionIdentificationError::InvalidSample); 8]
+        );
+        model.factors[0].reported_loading_s = 0.0;
+        let zero = model.propagate_labels(&request, &operators, 8).unwrap();
+        assert!(zero.draws.iter().all(|draw| *draw == zero.baseline));
+        model.factors[0].physical_loading_s = 1e-9;
+        assert!(model.propagate_labels(&request, &operators, 8).is_err());
+        model.factors[0].physical_loading_s = 0.0;
+        assert!(model.propagate_labels(&request, &[], 8).is_err());
+        assert!(model.propagate_labels(&request, &operators, 0).is_err());
+        assert!(model.propagate_labels(&request, &operators, 4097).is_err());
+    }
+
+    #[test]
     fn affine_draws_replay_scale_damping_and_preserve_failed_slots() {
         use crate::suspension_derivative::{
             SuspensionAffineCorrection, SuspensionAffineErrorModel, SuspensionAffineFactor,

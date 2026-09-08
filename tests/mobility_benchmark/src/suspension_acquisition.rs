@@ -828,6 +828,64 @@ mod tests {
                     }
                 }
                 let propagated = affine.propagate(&root).unwrap();
+                use crate::suspension_sampling::{
+                    SuspensionTimingErrorModel, SuspensionTimingFactor, SuspensionTimingScope,
+                };
+                use crate::suspension_timestamp_acquisition::*;
+                let timestamp = SuspensionTimestampRequest {
+                    acquisitions: derived.clone(),
+                    derivatives: bindings.clone(),
+                    draws: 8,
+                    model: SuspensionTimingErrorModel {
+                        kind: "rne_suspension_timing_error_model".into(),
+                        schema_version: 1,
+                        seed: 42,
+                        factors: vec![SuspensionTimingFactor {
+                            factor_id: 7,
+                            distribution: SuspensionErrorDistribution::Normal,
+                            scope: SuspensionTimingScope::IndependentSamples,
+                            physical_loading_s: 0.0,
+                            reported_loading_s: 0.0001,
+                        }],
+                    },
+                    clocks: affine
+                        .calibration
+                        .iter()
+                        .filter(|binding| binding.domain == Timebase)
+                        .cloned()
+                        .collect(),
+                };
+                let timestamp_evidence = timestamp.evaluate(&root).unwrap();
+                let timestamp_bytes =
+                    encode_suspension_timestamp(&timestamp_evidence, &root).unwrap();
+                assert_eq!(
+                    timestamp_evidence,
+                    decode_suspension_timestamp(&timestamp_bytes, &root).unwrap()
+                );
+                let mut forged_timestamp = timestamp_evidence.clone();
+                forged_timestamp.propagation.draws.clear();
+                assert!(forged_timestamp.verify(&root).is_err());
+                let mut bad_timestamp = timestamp.clone();
+                bad_timestamp.clocks.pop();
+                assert!(bad_timestamp.evaluate(&root).is_err());
+                bad_timestamp = timestamp.clone();
+                bad_timestamp.clocks[1].instrument_id = "other-clock".into();
+                assert!(bad_timestamp.evaluate(&root).is_err());
+                bad_timestamp = timestamp.clone();
+                bad_timestamp.clocks[0].capture_id = "other-capture".into();
+                assert!(bad_timestamp.evaluate(&root).is_err());
+                bad_timestamp = timestamp.clone();
+                bad_timestamp.model.factors[0].physical_loading_s = 1e-9;
+                assert!(bad_timestamp.evaluate(&root).is_err());
+                bad_timestamp = timestamp.clone();
+                bad_timestamp.model.factors[0].reported_loading_s = 10.0;
+                let failed_timestamp = bad_timestamp.evaluate(&root).unwrap();
+                assert!(failed_timestamp
+                    .propagation
+                    .draws
+                    .iter()
+                    .all(Result::is_err));
+                failed_timestamp.verify(&root).unwrap();
                 let envelope = affine.evaluate(&root).unwrap();
                 let bytes = encode_suspension_affine(&envelope, &root).unwrap();
                 assert_eq!(envelope, decode_suspension_affine(&bytes, &root).unwrap());
@@ -860,6 +918,7 @@ mod tests {
                 fs::write(root.join("clock.txt"), b"TEST-ONLY calibration bytes").unwrap();
                 assert!(affine.propagate(&root).is_err());
                 assert!(decode_suspension_affine(&bytes, &root).is_err());
+                assert!(decode_suspension_timestamp(&timestamp_bytes, &root).is_err());
                 fs::write(root.join("clock.txt"), b"test-only calibration bytes").unwrap();
                 assert_eq!(propagated, affine.propagate(&root).unwrap());
             }
