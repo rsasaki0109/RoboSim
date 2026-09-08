@@ -403,6 +403,45 @@ fn main() -> Result<()> {
                 "suspension-identification-fixture",
             )
         }
+        "suspension-acquired" | "suspension-acquired-verify" => {
+            use rne_mobility_benchmark::suspension_runs::{
+                decode_suspension_acquired_evidence, decode_suspension_acquired_request,
+                encode_suspension_acquired_evidence, MAX_SUSPENSION_RUN_BYTES,
+            };
+            use std::io::Read;
+            let input = input
+                .as_deref()
+                .context("acquired suspension requires --input")?;
+            let root = evidence_root
+                .as_deref()
+                .context("acquired suspension requires --evidence-root")?;
+            let file = std::fs::File::open(input)?;
+            ensure!(
+                file.metadata()?.is_file(),
+                "acquired input must be a regular file"
+            );
+            let mut bytes = Vec::new();
+            file.take(MAX_SUSPENSION_RUN_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)?;
+            let evidence = if backend == "suspension-acquired-verify" {
+                ensure!(
+                    interval_tolerance_s.is_none(),
+                    "verification uses the embedded tolerance; do not override it"
+                );
+                decode_suspension_acquired_evidence(&bytes, root)?
+            } else {
+                decode_suspension_acquired_request(&bytes)?.identify(
+                    root,
+                    interval_tolerance_s.context(
+                        "acquired suspension requires --interval-tolerance-s from clock evidence",
+                    )?,
+                )?
+            };
+            (
+                String::from_utf8(encode_suspension_acquired_evidence(&evidence, root)?)?,
+                "suspension-acquired-evidence",
+            )
+        }
         "suspension-timing" | "suspension-timing-verify" => {
             use rne_mobility_benchmark::suspension_runs::{
                 decode_suspension_run_request, decode_suspension_timing, encode_suspension_timing,
@@ -605,6 +644,14 @@ fn main() -> Result<()> {
             "suspension-identification"
                 | "identified-road-compare"
                 | "suspension-acquisition-verify"
+                | "suspension-acquired"
+                | "suspension-acquired-verify"
+                | "suspension-timing"
+                | "suspension-timing-verify"
+                | "suspension-excitation"
+                | "suspension-excitation-verify"
+                | "suspension-run-identification"
+                | "suspension-run-verify"
                 | "sensor-replay-rapier"
                 | "sensor-replay-mujoco"
         ) || input.is_none(),
@@ -615,8 +662,11 @@ fn main() -> Result<()> {
         "--acquisition-manifest is valid only with suspension-acquisition-verify"
     );
     ensure!(
-        backend == "suspension-acquisition-verify" || evidence_root.is_none(),
-        "--evidence-root is valid only with suspension-acquisition-verify"
+        matches!(
+            backend.as_str(),
+            "suspension-acquisition-verify" | "suspension-acquired" | "suspension-acquired-verify"
+        ) || evidence_root.is_none(),
+        "--evidence-root requires an acquisition verification or acquired suspension backend"
     );
     let randomized_backend = matches!(
         backend.as_str(),

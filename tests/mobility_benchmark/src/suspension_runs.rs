@@ -10,6 +10,167 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
+/// Whole-run inputs bound to acquisition declarations; metadata is not authentication.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionAcquiredRunRequest {
+    /// Existing immutable training/holdout split and parameter gates.
+    pub runs: SuspensionRunRequest,
+    /// One manifest per training run, in exactly the same order.
+    pub training: Vec<crate::suspension_acquisition::SuspensionPhysicalAcquisitionManifest>,
+    /// One manifest per holdout run, in exactly the same order.
+    pub holdout: Vec<crate::suspension_acquisition::SuspensionPhysicalAcquisitionManifest>,
+}
+
+impl SuspensionAcquiredRunRequest {
+    /// Binds every dataset and rejects shared raw captures or mixed physical subjects.
+    /// This checks declarations only; use `verify_files` to verify retained bytes.
+    pub fn validate(&self) -> Result<()> {
+        self.runs.validate()?;
+        ensure!(
+            self.training.len() == self.runs.training.len()
+                && self.holdout.len() == self.runs.holdout.len(),
+            "acquisition manifest count mismatch"
+        );
+        ensure!(
+            serde_json::to_vec(self)?.len() <= MAX_SUSPENSION_RUN_BYTES,
+            "acquired request too large"
+        );
+        let first = &self.training[0];
+        let mut captures = BTreeSet::new();
+        let mut raw_hashes = BTreeSet::new();
+        for (run, manifest) in self
+            .runs
+            .training
+            .iter()
+            .chain(&self.runs.holdout)
+            .zip(self.training.iter().chain(&self.holdout))
+        {
+            manifest.validate(&run.dataset)?;
+            ensure!(
+                captures.insert(&manifest.capture_id),
+                "duplicate physical capture identity"
+            );
+            ensure!(
+                raw_hashes.insert(&manifest.raw_capture.sha256),
+                "duplicate physical raw capture"
+            );
+            ensure!(
+                manifest.vehicle_id == first.vehicle_id && manifest.strut_id == first.strut_id,
+                "mixed physical suspension subjects"
+            );
+        }
+        Ok(())
+    }
+
+    /// Streams all raw/calibration references from one explicitly supplied external root.
+    /// Hash checks do not attest independent acquisition or certificate authenticity.
+    pub fn verify_files(&self, root: &std::path::Path) -> Result<()> {
+        self.validate()?;
+        for (run, manifest) in self
+            .runs
+            .training
+            .iter()
+            .chain(&self.runs.holdout)
+            .zip(self.training.iter().chain(&self.holdout))
+        {
+            manifest.verify_files(&run.dataset, root)?;
+        }
+        Ok(())
+    }
+
+    /// Verifies retained source bytes before fitting; does not grant physical qualification.
+    pub fn identify(
+        &self,
+        root: &std::path::Path,
+        interval_tolerance_s: f64,
+    ) -> Result<SuspensionAcquiredRunEvidence> {
+        self.verify_files(root)?;
+        let evidence = SuspensionAcquiredRunEvidence {
+            kind: "rne_suspension_acquired_run_evidence".into(),
+            schema_version: 1,
+            timing: identify_suspension_timing(&self.runs, interval_tolerance_s)?,
+            training: self.training.clone(),
+            holdout: self.holdout.clone(),
+        };
+        ensure!(
+            serde_json::to_vec(&evidence)?.len() <= MAX_SUSPENSION_RUN_BYTES,
+            "acquired evidence too large"
+        );
+        Ok(evidence)
+    }
+}
+
+/// Portable acquisition declarations plus recomputable fit; never an authenticity verdict.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionAcquiredRunEvidence {
+    /// Must be `rne_suspension_acquired_run_evidence`.
+    pub kind: String,
+    /// Independent envelope version, currently 1.
+    pub schema_version: u32,
+    /// Unchanged timing evidence, including exact datasets and split.
+    pub timing: SuspensionTimingEvidence,
+    /// Training acquisition manifests in input order.
+    pub training: Vec<crate::suspension_acquisition::SuspensionPhysicalAcquisitionManifest>,
+    /// Holdout acquisition manifests in input order.
+    pub holdout: Vec<crate::suspension_acquisition::SuspensionPhysicalAcquisitionManifest>,
+}
+
+impl SuspensionAcquiredRunEvidence {
+    /// Rechecks retained external bytes and recomputes all results; no stored verdict is trusted.
+    pub fn verify(&self, root: &std::path::Path) -> Result<()> {
+        ensure!(
+            serde_json::to_vec(self)?.len() <= MAX_SUSPENSION_RUN_BYTES,
+            "acquired evidence too large"
+        );
+        let request = SuspensionAcquiredRunRequest {
+            runs: self.timing.excitation.run_evidence.request.clone(),
+            training: self.training.clone(),
+            holdout: self.holdout.clone(),
+        };
+        ensure!(
+            *self == request.identify(root, self.timing.interval_tolerance_s)?,
+            "acquired evidence replay mismatch"
+        );
+        Ok(())
+    }
+}
+
+/// Strict bounded intake decoding; external files are checked separately by `identify`.
+pub fn decode_suspension_acquired_request(bytes: &[u8]) -> Result<SuspensionAcquiredRunRequest> {
+    ensure!(
+        bytes.len() <= MAX_SUSPENSION_RUN_BYTES,
+        "acquired request too large"
+    );
+    let request: SuspensionAcquiredRunRequest = serde_json::from_slice(bytes)?;
+    request.validate()?;
+    Ok(request)
+}
+
+/// Strict bounded decoding followed by external-file verification and actual refitting.
+pub fn decode_suspension_acquired_evidence(
+    bytes: &[u8],
+    root: &std::path::Path,
+) -> Result<SuspensionAcquiredRunEvidence> {
+    ensure!(
+        bytes.len() <= MAX_SUSPENSION_RUN_BYTES,
+        "acquired evidence too large"
+    );
+    let evidence: SuspensionAcquiredRunEvidence = serde_json::from_slice(bytes)?;
+    evidence.verify(root)?;
+    Ok(evidence)
+}
+
+/// Verifies both retained files and recomputed results before emitting bounded compact JSON.
+pub fn encode_suspension_acquired_evidence(
+    evidence: &SuspensionAcquiredRunEvidence,
+    root: &std::path::Path,
+) -> Result<Vec<u8>> {
+    evidence.verify(root)?;
+    Ok(serde_json::to_vec(evidence)?)
+}
+
 /// Replayable per-acquisition residual timing, without an independence verdict.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

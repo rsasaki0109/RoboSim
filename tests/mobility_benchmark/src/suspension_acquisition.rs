@@ -547,6 +547,108 @@ mod tests {
     }
 
     #[test]
+    fn acquired_run_binding_rejects_reused_raw_capture_and_mixed_subjects() {
+        use crate::suspension_runs::{
+            SuspensionAcquiredRunRequest, SuspensionRunInput, SuspensionRunRequest,
+        };
+        let first = recorded_dataset();
+        let mut second = first.clone();
+        second.dataset_id = "recorded.second".into();
+        second.samples[0].force_n += 1.0;
+        second.seal().unwrap();
+        let training = manifest(&first);
+        let mut holdout = manifest(&second);
+        holdout.capture_id = "bench.capture.002".into();
+        holdout.seal().unwrap();
+        let mut request = SuspensionAcquiredRunRequest {
+            runs: SuspensionRunRequest {
+                kind: "rne_suspension_run_request".into(),
+                schema_version: 1,
+                spec: crate::suspension_identification::suspension_identification_spec(),
+                training: vec![SuspensionRunInput {
+                    acquisition_id: 1,
+                    dataset: first,
+                }],
+                holdout: vec![SuspensionRunInput {
+                    acquisition_id: 2,
+                    dataset: second,
+                }],
+            },
+            training: vec![training],
+            holdout: vec![holdout],
+        };
+        assert!(request
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("raw capture"));
+        request.holdout[0].raw_capture = file_ref("second.csv", b"different test-only capture");
+        request.holdout[0].seal().unwrap();
+        request.validate().unwrap();
+        let request_bytes = serde_json::to_vec(&request).unwrap();
+        assert_eq!(
+            crate::suspension_runs::decode_suspension_acquired_request(&request_bytes).unwrap(),
+            request
+        );
+        let mut unknown = serde_json::to_value(&request).unwrap();
+        unknown["verified"] = serde_json::json!(true);
+        assert!(crate::suspension_runs::decode_suspension_acquired_request(
+            &serde_json::to_vec(&unknown).unwrap()
+        )
+        .is_err());
+        assert!(
+            crate::suspension_runs::decode_suspension_acquired_request(&vec![
+                b' ';
+                crate::suspension_runs::MAX_SUSPENSION_RUN_BYTES
+                    + 1
+            ])
+            .is_err()
+        );
+        let mut swapped = request.clone();
+        std::mem::swap(&mut swapped.training, &mut swapped.holdout);
+        assert!(swapped.validate().is_err());
+        let root =
+            std::env::temp_dir().join(format!("rne-acquired-evidence-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("raw.csv"), b"test-only raw capture bytes").unwrap();
+        fs::write(root.join("second.csv"), b"different test-only capture").unwrap();
+        fs::write(root.join("procedure.txt"), b"test-only procedure bytes").unwrap();
+        fs::write(root.join("calibration.txt"), b"test-only calibration bytes").unwrap();
+        let evidence = request.identify(&root, 1e-9).unwrap();
+        let bytes =
+            crate::suspension_runs::encode_suspension_acquired_evidence(&evidence, &root).unwrap();
+        assert_eq!(
+            crate::suspension_runs::decode_suspension_acquired_evidence(&bytes, &root).unwrap(),
+            evidence
+        );
+        let mut forged = evidence.clone();
+        forged.schema_version = 2;
+        assert!(forged.verify(&root).is_err());
+        forged = evidence.clone();
+        forged.timing.holdout[0].mean_residual_n += 1.0;
+        assert!(forged.verify(&root).is_err());
+        fs::write(root.join("second.csv"), b"changed capture").unwrap();
+        assert!(
+            crate::suspension_runs::decode_suspension_acquired_evidence(&bytes, &root).is_err()
+        );
+        fs::remove_dir_all(&root).unwrap();
+        assert!(request.identify(&root, 1e-9).is_err());
+        request.holdout[0].strut_id = "rear.right".into();
+        request.holdout[0].seal().unwrap();
+        assert!(request
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("subjects"));
+        request.holdout.clear();
+        assert!(request
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("count"));
+    }
+
+    #[test]
     fn stream_verification_bounds_growth_and_rejects_truncation() {
         use std::io::Cursor;
         let reference = file_ref("sample.bin", b"abc");

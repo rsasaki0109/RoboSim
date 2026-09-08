@@ -204,6 +204,42 @@ raw-source hashes and distinguish derived velocity from measured velocity.
 
 ### Identification validation upgrade
 
+`SuspensionAcquiredRunRequest` adds an acquisition intake around the
+unchanged whole-run request. Ordered manifests must bind every dataset, have
+distinct capture IDs and raw-capture SHA-256 hashes, and name the same vehicle
+and strut. `verify_files` checks retained files under an explicit root;
+`identify` performs this check before fitting. This rejects whole-container reuse,
+not overlapping/transformed captures, and does not authenticate calibration
+certificates. The returned `rne_suspension_acquired_run_evidence` schema 1
+retains ordered manifests and unchanged timing evidence. Its bounded strict
+decoder rechecks external files and reruns identification; the encoder does
+the same before writing compact JSON (8 MiB bound). There is no offline path
+that trusts a saved verification verdict. CLI `--backend suspension-acquired`
+requires `--input`, `--evidence-root` and an explicit `--interval-tolerance-s`;
+`suspension-acquired-verify` takes the saved evidence and external root and rejects
+a tolerance override. Both bound input reads to 8 MiB plus one rejection byte.
+No physical qualification is implied by this intake or by test-only recorded-source fixtures.
+
+Acquired-intake slice validation (2026-09-08): the MuJoCo-enabled benchmark
+library passed 167 tests with zero failures and two ignored long-training tests
+(230.68 s); all-target Clippy passed with warnings denied. A process-level CLI
+regression passed generation, verification and byte-identical output for the
+whole-run, excitation and timing envelopes. Acquired-intake positive and negative
+paths are covered at library level; its process-level success path remains to
+be exercised. These tests use synthetic/test-only fixtures, not real calibration
+or physical model-accuracy evidence. Full workspace CI for this slice is pending.
+
+Acquisition integrity commit `2b7f8dd5c53337ad87da671182a8cfa3486f87a2`
+completed `cargo run -p xtask -- ci` with exit 0 on 2026-09-08, with tracked
+files fixed throughout. Log:
+`E:\RNE-build\m3c-sensor\suspension-acquisition-integrity-v1-ci.log`, SHA-256
+`07d098e6bd95da8828b253d0698f43165b4640b257523357998e940afdab2e58`.
+Workspace lint/tests, smoke/RL workflows, headless checks, OSS parity,
+361 fuzz cases across 9 boundaries and Behavior CI 10/10 seeds completed.
+Separate MuJoCo-enabled benchmark library validation passed 166 tests with
+2 long-training tests ignored (218.31 s), plus all-target Clippy. These checks
+do not establish physical calibration, acquisition independence or actual HIL.
+
 Acquisition manifest validation rejects repeated file paths declaring different
 sizes or SHA-256 hashes, including references shared across raw capture,
 procedure and calibration roles. Identical references remain shareable and are
@@ -340,8 +376,9 @@ successful CLI execution establishes processing/integrity, not model acceptance.
 SHA-256 is integrity binding, not authentication. No acquisition-manifest checks
 are implied by this path, and recorded source labels remain unverified declarations.
 
-This is not physical qualification. Training-only conditioning, uncertainty
-and acquisition-manifest integration remain to implement. Distinct caller IDs
+This is not physical qualification. Training-only conditioning and acquisition
+binding are available through the additive envelopes above; uncertainty remains
+unimplemented. Distinct caller IDs alone
 do not detect duplicated raw captures or establish independent measurements.
 
 Whole-run slice validation (2026-09-08): `rne_robot --lib` passed 56 tests;
