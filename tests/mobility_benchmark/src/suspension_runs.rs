@@ -10,6 +10,97 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
+/// Replayable per-acquisition residual timing, without an independence verdict.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionTimingEvidence {
+    /// Must be `rne_suspension_timing_evidence`.
+    pub kind: String,
+    /// Independent envelope schema, currently 1.
+    pub schema_version: u32,
+    /// Caller-declared clock interval tolerance; not an estimated calibration.
+    pub interval_tolerance_s: f64,
+    /// Embedded fit inputs and training-only excitation diagnostics.
+    pub excitation: SuspensionExcitationEvidence,
+    /// Training diagnostics in declared acquisition order.
+    pub training: Vec<rne_robot::systems::SuspensionResidualTiming>,
+    /// Holdout diagnostics evaluated with the frozen training fit.
+    pub holdout: Vec<rne_robot::systems::SuspensionResidualTiming>,
+}
+
+/// Recomputes each run separately; clocks and residual sequences are never joined.
+pub fn identify_suspension_timing(
+    request: &SuspensionRunRequest,
+    interval_tolerance_s: f64,
+) -> Result<SuspensionTimingEvidence> {
+    let excitation = identify_suspension_excitation(request)?;
+    let diagnose = |runs: &[SuspensionRunInput]| -> Result<Vec<_>> {
+        runs.iter()
+            .map(|run| {
+                Ok(rne_robot::systems::suspension_residual_timing(
+                    excitation.run_evidence.report.fit,
+                    SuspensionIdentificationRun {
+                        acquisition_id: run.acquisition_id,
+                        samples: &run.dataset.samples,
+                    },
+                    interval_tolerance_s,
+                )?)
+            })
+            .collect()
+    };
+    let training = diagnose(&request.training)?;
+    let holdout = diagnose(&request.holdout)?;
+    let evidence = SuspensionTimingEvidence {
+        kind: "rne_suspension_timing_evidence".into(),
+        schema_version: 1,
+        interval_tolerance_s,
+        excitation,
+        training,
+        holdout,
+    };
+    ensure!(
+        serde_json::to_vec(&evidence)?.len() <= MAX_SUSPENSION_RUN_BYTES,
+        "timing evidence too large"
+    );
+    Ok(evidence)
+}
+
+/// Executes the embedded request again before emitting bounded compact JSON.
+pub fn encode_suspension_timing(evidence: &SuspensionTimingEvidence) -> Result<Vec<u8>> {
+    ensure!(
+        *evidence
+            == identify_suspension_timing(
+                &evidence.excitation.run_evidence.request,
+                evidence.interval_tolerance_s
+            )?,
+        "timing evidence replay mismatch"
+    );
+    let bytes = serde_json::to_vec(evidence)?;
+    ensure!(
+        bytes.len() <= MAX_SUSPENSION_RUN_BYTES,
+        "timing evidence too large"
+    );
+    Ok(bytes)
+}
+
+/// Bounded strict decoder, recomputing every fit and diagnostic rather than trusting it.
+pub fn decode_suspension_timing(bytes: &[u8]) -> Result<SuspensionTimingEvidence> {
+    ensure!(
+        bytes.len() <= MAX_SUSPENSION_RUN_BYTES,
+        "timing evidence too large"
+    );
+    let evidence: SuspensionTimingEvidence = serde_json::from_slice(bytes)?;
+    ensure!(
+        evidence
+            == identify_suspension_timing(
+                &evidence.excitation.run_evidence.request,
+                evidence.interval_tolerance_s
+            )?,
+        "timing evidence replay mismatch"
+    );
+    Ok(evidence)
+}
+
 /// Whole-run evidence with training-only excitation diagnostics; not uncertainty.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -275,6 +366,24 @@ mod tests {
                 dataset: second,
             }],
         }
+    }
+
+    #[test]
+    fn timing_evidence_replays_and_rejects_forged_diagnostics() {
+        let request = request();
+        let evidence = identify_suspension_timing(&request, 1e-9).unwrap();
+        let bytes = encode_suspension_timing(&evidence).unwrap();
+        assert_eq!(decode_suspension_timing(&bytes).unwrap(), evidence);
+        assert_eq!(evidence.training.len(), request.training.len());
+        assert_eq!(evidence.holdout.len(), request.holdout.len());
+        let mut forged = evidence.clone();
+        forged.holdout[0].mean_residual_n += 1.0;
+        assert!(encode_suspension_timing(&forged).is_err());
+        assert!(decode_suspension_timing(&serde_json::to_vec(&forged).unwrap()).is_err());
+        forged = evidence;
+        forged.schema_version = 2;
+        assert!(decode_suspension_timing(&serde_json::to_vec(&forged).unwrap()).is_err());
+        assert!(identify_suspension_timing(&request, f64::NAN).is_err());
     }
 
     #[test]

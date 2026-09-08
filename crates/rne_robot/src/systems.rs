@@ -73,6 +73,117 @@ pub struct SuspensionIdentificationRun<'a> {
     pub samples: &'a [SuspensionForceSample],
 }
 
+/// Within-acquisition residual timing and lag-one diagnostics.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionResidualTiming {
+    /// Caller-supplied acquisition identity.
+    pub acquisition_id: u64,
+    /// Number of evaluated samples.
+    pub sample_count: usize,
+    /// Smallest observed adjacent capture interval in seconds.
+    pub minimum_interval_s: f64,
+    /// Largest observed adjacent capture interval in seconds.
+    pub maximum_interval_s: f64,
+    /// Caller-declared absolute tolerance against the first interval.
+    pub interval_tolerance_s: f64,
+    /// Whether every interval matches the first within the declared tolerance.
+    pub uniform_within_tolerance: bool,
+    /// Mean predicted-minus-measured force in newtons.
+    pub mean_residual_n: f64,
+    /// Lag-one centered autocorrelation with full-run energy denominator.
+    /// Absent for nonuniform timing or constant residuals, never replaced by zero.
+    pub lag_one_autocorrelation: Option<f64>,
+}
+
+/// Evaluates frozen fit residuals without refitting or joining acquisition clocks.
+///
+/// Uses `sum((e[i]-mean)*(e[i+1]-mean))/sum((e[i]-mean)^2)` only on a
+/// uniform-within-tolerance grid. Unequal intervals are retained as diagnostics;
+/// no interpolation, effective sample size or confidence interval is invented.
+/// The caller must justify the tolerance from clock evidence. This function is
+/// a diagnostic and does not certify the provenance or acceptance of `fit`.
+pub fn suspension_residual_timing(
+    fit: SuspensionIdentificationResult,
+    run: SuspensionIdentificationRun<'_>,
+    interval_tolerance_s: f64,
+) -> Result<SuspensionResidualTiming, SuspensionIdentificationError> {
+    if !interval_tolerance_s.is_finite()
+        || interval_tolerance_s < 0.0
+        || !fit.stiffness_n_per_m.is_finite()
+        || fit.stiffness_n_per_m <= 0.0
+        || !fit.damping_n_s_per_m.is_finite()
+        || fit.damping_n_s_per_m < 0.0
+        || !fit.equilibrium_position_m.is_finite()
+    {
+        return Err(SuspensionIdentificationError::InvalidSpec);
+    }
+    validate_suspension_samples(run.samples)?;
+    if run.samples.len() < 3 {
+        return Err(SuspensionIdentificationError::InsufficientSamples);
+    }
+    let first_interval = run.samples[1].capture_time_s - run.samples[0].capture_time_s;
+    let mut minimum_interval_s = f64::INFINITY;
+    let mut maximum_interval_s = 0.0_f64;
+    let mut uniform_within_tolerance = true;
+    for pair in run.samples.windows(2) {
+        let interval = pair[1].capture_time_s - pair[0].capture_time_s;
+        if !interval.is_finite() {
+            return Err(SuspensionIdentificationError::InvalidSample);
+        }
+        minimum_interval_s = minimum_interval_s.min(interval);
+        maximum_interval_s = maximum_interval_s.max(interval);
+        uniform_within_tolerance &= (interval - first_interval).abs() <= interval_tolerance_s;
+    }
+    let residual = |s: &SuspensionForceSample| {
+        fit.stiffness_n_per_m * (fit.equilibrium_position_m - s.position_m)
+            - fit.damping_n_s_per_m * s.velocity_m_s
+            - s.force_n
+    };
+    let mut scale = 0.0_f64;
+    for s in run.samples {
+        let value = residual(s);
+        if !value.is_finite() {
+            return Err(SuspensionIdentificationError::ResidualExceeded);
+        }
+        scale = scale.max(value.abs());
+    }
+    let scale = if scale == 0.0 { 1.0 } else { scale };
+    let origin = residual(&run.samples[0]) / scale;
+    let offset = run
+        .samples
+        .iter()
+        .map(|s| (residual(s) / scale - origin) / run.samples.len() as f64)
+        .sum::<f64>();
+    let mean_residual_n = (origin + offset) * scale;
+    if !mean_residual_n.is_finite() {
+        return Err(SuspensionIdentificationError::ResidualExceeded);
+    }
+    let centered = |s: &SuspensionForceSample| (residual(s) / scale - origin) - offset;
+    let energy = run.samples.iter().map(|s| centered(s).powi(2)).sum::<f64>();
+    let lag_one_autocorrelation = if uniform_within_tolerance && energy > 0.0 {
+        Some(
+            run.samples
+                .windows(2)
+                .map(|p| centered(&p[0]) * centered(&p[1]))
+                .sum::<f64>()
+                / energy,
+        )
+    } else {
+        None
+    };
+    Ok(SuspensionResidualTiming {
+        acquisition_id: run.acquisition_id,
+        sample_count: run.samples.len(),
+        minimum_interval_s,
+        maximum_interval_s,
+        interval_tolerance_s,
+        uniform_within_tolerance,
+        mean_residual_n,
+        lag_one_autocorrelation,
+    })
+}
+
 /// Training-only excitation diagnostics for the centered two-column design.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -2375,6 +2486,119 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn suspension_residual_timing_preserves_clock_and_constant_missingness() {
+        let fit = identify_suspension_strut(
+            suspension_identification_spec(),
+            &suspension_identification_samples(),
+        )
+        .unwrap();
+        let mut samples: Vec<_> = [1.0, -1.0, 1.0, -1.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, residual)| SuspensionForceSample {
+                capture_time_s: i as f64,
+                position_m: fit.equilibrium_position_m,
+                velocity_m_s: 0.0,
+                force_n: -residual,
+            })
+            .collect();
+        let diagnose = |samples: &[SuspensionForceSample], tolerance| {
+            suspension_residual_timing(
+                fit,
+                SuspensionIdentificationRun {
+                    acquisition_id: 42,
+                    samples,
+                },
+                tolerance,
+            )
+            .unwrap()
+        };
+        let regular = diagnose(&samples, 0.0);
+        assert_eq!(regular.lag_one_autocorrelation, Some(-0.75));
+        assert_eq!(regular.mean_residual_n, 0.0);
+        assert_eq!(regular.minimum_interval_s, 1.0);
+        assert_eq!(regular.acquisition_id, 42);
+        samples[3].capture_time_s = 4.0;
+        let irregular = diagnose(&samples, 0.0);
+        assert!(!irregular.uniform_within_tolerance);
+        assert_eq!(irregular.maximum_interval_s, 2.0);
+        assert_eq!(irregular.lag_one_autocorrelation, None);
+        samples[3].capture_time_s = 3.0;
+        for sample in &mut samples {
+            sample.force_n = -2.0;
+        }
+        let constant = diagnose(&samples, 0.0);
+        assert!(constant.uniform_within_tolerance);
+        assert_eq!(constant.mean_residual_n, 2.0);
+        assert_eq!(constant.lag_one_autocorrelation, None);
+    }
+
+    #[test]
+    fn suspension_residual_timing_rejects_invalid_arithmetic_and_respects_tolerance() {
+        let fit = identify_suspension_strut(
+            suspension_identification_spec(),
+            &suspension_identification_samples(),
+        )
+        .unwrap();
+        let mut samples: Vec<_> = [0.0, 1.0, 2.125]
+            .into_iter()
+            .enumerate()
+            .map(|(i, capture_time_s)| SuspensionForceSample {
+                capture_time_s,
+                position_m: fit.equilibrium_position_m,
+                velocity_m_s: 0.0,
+                force_n: i as f64 - 1.0,
+            })
+            .collect();
+        let diagnose = |samples: &[SuspensionForceSample], tolerance| {
+            suspension_residual_timing(
+                fit,
+                SuspensionIdentificationRun {
+                    acquisition_id: 7,
+                    samples,
+                },
+                tolerance,
+            )
+        };
+        let accepted = diagnose(&samples, 0.125).unwrap();
+        assert!(accepted.uniform_within_tolerance);
+        assert_eq!(accepted.lag_one_autocorrelation, Some(0.0));
+        assert_eq!(
+            diagnose(&samples, 0.0625).unwrap().lag_one_autocorrelation,
+            None
+        );
+        for sample in &mut samples {
+            sample.capture_time_s += 1024.0;
+        }
+        assert_eq!(diagnose(&samples, 0.125).unwrap(), accepted);
+        for tolerance in [-1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                diagnose(&samples, tolerance),
+                Err(SuspensionIdentificationError::InvalidSpec)
+            );
+        }
+        assert_eq!(
+            diagnose(&samples[..2], 0.0),
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+        samples[0].capture_time_s = -f64::MAX;
+        samples[1].capture_time_s = f64::MAX / 2.0;
+        samples[2].capture_time_s = f64::MAX;
+        assert_eq!(
+            diagnose(&samples, 0.0),
+            Err(SuspensionIdentificationError::InvalidSample)
+        );
+        for (i, sample) in samples.iter_mut().enumerate() {
+            sample.capture_time_s = i as f64;
+        }
+        samples[0].position_m = f64::MAX;
+        assert_eq!(
+            diagnose(&samples, 0.0),
+            Err(SuspensionIdentificationError::ResidualExceeded)
+        );
     }
 
     #[test]

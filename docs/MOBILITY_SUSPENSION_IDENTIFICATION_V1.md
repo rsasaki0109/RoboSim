@@ -204,6 +204,31 @@ raw-source hashes and distinguish derived velocity from measured velocity.
 
 ### Identification validation upgrade
 
+`rne_robot::systems::suspension_residual_timing` evaluates a frozen fit on one
+acquisition without refitting or joining run boundaries. It retains interval
+min/max, caller-declared absolute interval tolerance, mean force residual and
+optional lag-one autocorrelation. Following [NIST's definition](https://www.itl.nist.gov/div898/handbook/eda/section3/eda35c.htm),
+the centered adjacent-product sum uses full-run centered energy as denominator.
+Only intervals matching the first within the declared tolerance admit this
+statistic; irregular timing and constant residuals return `None`, not zero.
+No interpolation, independence verdict, effective sample size or uncertainty
+interval is inferred.
+
+The benchmark library's separate `rne_suspension_timing_evidence` schema 1
+embeds the unchanged excitation/run evidence, a caller-declared interval
+tolerance, and ordered training/holdout timing diagnostics. Every acquisition
+is evaluated separately using the frozen training fit. The strict decoder and
+encoder rerun the embedded request and compare the complete envelope; both use
+the same 8 MiB bound. This is replay integrity, not source authentication or
+physical qualification. Each acquisition must contain at least three samples.
+The library API is available as `identify_suspension_timing`,
+`encode_suspension_timing`, and `decode_suspension_timing`. The CLI backend
+`suspension-timing` takes a whole-run request via `--input` and requires explicit
+`--interval-tolerance-s` justified by clock evidence. Backend
+`suspension-timing-verify` takes saved timing evidence via `--input` and rejects
+a tolerance override: it replays the embedded declaration. Existing artifact
+schemas and acceptance gates are unchanged.
+
 The additive `rne_robot::systems::suspension_training_excitation` diagnostic
 accepts training acquisitions only. It returns centered position/velocity RMS
 in SI units, correlation, and the L2 condition number of the centered design
@@ -234,8 +259,14 @@ and invalid inputs. The MuJoCo-enabled benchmark library passed 163 tests with
 zero failures and two ignored long training jobs (250.30 s); all-target Clippy
 passed after the envelope/CLI addition. The four run-artifact tests include
 diagnostic recomputation and tamper rejection. These are focused and benchmark
-regression checks, not full workspace CI for the excitation changes; the
-`fdecb2e` full-CI checkpoint below predates them.
+regression checks. Subsequently, commit
+`6deb13e36acfb273f5cf79178c17308f68b2c440` completed the full
+`cargo run -p xtask -- ci` with exit code 0, with tracked files unchanged
+through execution. The run ended with OSS parity, 361 fuzz cases across nine
+boundaries and Behavior CI 10/10 seeds. External log:
+`E:\RNE-build\m3c-sensor\suspension-excitation-v1-ci.log`, SHA-256
+`8299f7b9ec95a499031c5e64faa22ffcd2f46b56eae9fedb4fb35fc5917208ae`.
+This does not qualify real measurements or supply parameter uncertainty/HIL evidence.
 
 Inspection of `identify_suspension_strut` confirms that v1 holds out every
 `holdout_stride`th point from a single ordered sequence. This prevents direct

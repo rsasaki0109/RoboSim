@@ -35,6 +35,7 @@ fn main() -> Result<()> {
     let mut failure_replay = None;
     let mut fault = None;
     let mut input = None;
+    let mut interval_tolerance_s = None;
     let mut acquisition_manifest = None;
     let mut evidence_root = None;
     let mut num_envs = None;
@@ -66,6 +67,18 @@ fn main() -> Result<()> {
                 input = Some(PathBuf::from(
                     args.next().context("--input requires a path")?,
                 ));
+            }
+            "--interval-tolerance-s" => {
+                let value = args
+                    .next()
+                    .context("--interval-tolerance-s requires a value")?
+                    .parse::<f64>()
+                    .context("interval tolerance must be a number")?;
+                ensure!(
+                    value.is_finite() && value >= 0.0,
+                    "interval tolerance must be finite and nonnegative"
+                );
+                interval_tolerance_s = Some(value);
             }
             "--acquisition-manifest" => {
                 acquisition_manifest = Some(PathBuf::from(
@@ -388,6 +401,42 @@ fn main() -> Result<()> {
             (
                 serde_json::to_string_pretty(&dataset)? + "\n",
                 "suspension-identification-fixture",
+            )
+        }
+        "suspension-timing" | "suspension-timing-verify" => {
+            use rne_mobility_benchmark::suspension_runs::{
+                decode_suspension_run_request, decode_suspension_timing, encode_suspension_timing,
+                identify_suspension_timing, MAX_SUSPENSION_RUN_BYTES,
+            };
+            use std::io::Read;
+            let input = input
+                .as_deref()
+                .context("suspension timing requires --input")?;
+            let file = std::fs::File::open(input)?;
+            ensure!(
+                file.metadata()?.is_file(),
+                "timing input must be a regular file"
+            );
+            let mut bytes = Vec::new();
+            file.take(MAX_SUSPENSION_RUN_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)?;
+            let evidence = if backend == "suspension-timing-verify" {
+                ensure!(
+                    interval_tolerance_s.is_none(),
+                    "verification uses the embedded tolerance; do not override it"
+                );
+                decode_suspension_timing(&bytes)?
+            } else {
+                identify_suspension_timing(
+                    &decode_suspension_run_request(&bytes)?,
+                    interval_tolerance_s.context(
+                        "suspension timing requires --interval-tolerance-s from clock evidence",
+                    )?,
+                )?
+            };
+            (
+                String::from_utf8(encode_suspension_timing(&evidence)?)?,
+                "suspension-timing-evidence",
             )
         }
         "suspension-excitation" | "suspension-excitation-verify" => {
