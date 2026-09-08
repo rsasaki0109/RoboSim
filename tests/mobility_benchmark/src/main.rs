@@ -522,14 +522,20 @@ fn main() -> Result<()> {
                 .as_deref()
                 .context("--backend suspension-acquisition-verify requires --evidence-root")?;
             let dataset = read_suspension_identification_dataset(input)?;
-            let metadata = std::fs::metadata(manifest_path)
+            use std::io::Read;
+            let file = std::fs::File::open(manifest_path)
+                .with_context(|| format!("open {}", manifest_path.display()))?;
+            let metadata = file
+                .metadata()
                 .with_context(|| format!("inspect {}", manifest_path.display()))?;
             ensure!(
                 metadata.is_file()
                     && metadata.len() <= MAX_SUSPENSION_ACQUISITION_MANIFEST_BYTES as u64,
                 "suspension acquisition manifest is not a bounded regular file"
             );
-            let bytes = std::fs::read(manifest_path)
+            let mut bytes = Vec::new();
+            file.take(MAX_SUSPENSION_ACQUISITION_MANIFEST_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)
                 .with_context(|| format!("read {}", manifest_path.display()))?;
             let manifest = decode_suspension_acquisition_manifest(&bytes, &dataset)?;
             manifest.verify_files(&dataset, evidence_root)?;

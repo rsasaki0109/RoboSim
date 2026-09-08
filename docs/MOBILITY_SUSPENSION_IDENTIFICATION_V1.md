@@ -204,6 +204,26 @@ raw-source hashes and distinguish derived velocity from measured velocity.
 
 ### Identification validation upgrade
 
+Acquisition manifest validation rejects repeated file paths declaring different
+sizes or SHA-256 hashes, including references shared across raw capture,
+procedure and calibration roles. Identical references remain shareable and are
+read once. This check runs before file-read deduplication and also applies to
+the strict manifest decoder, even if the conflicting manifest has been resealed.
+Manifest CLI reads are capped at the schema limit plus one detection byte.
+Referenced evidence streams use metadata from the opened handle and read at
+most the declared size plus one byte, rejecting growth or truncation. These
+bounds do not provide an atomic filesystem snapshot or authenticate the source.
+
+Residual timing commit `357ea1fd4bcbefcea63ed21f51140a86798b75ea` completed
+`cargo run -p xtask -- ci` with exit 0 on 2026-09-08, with tracked files fixed
+throughout the run. Log: `E:\RNE-build\m3c-sensor\suspension-timing-v1-ci.log`,
+SHA-256 `aa21587037023c84ff11fc1dcc4cf04d910e0f2572011f2e42a71490b0eb5884`.
+This includes workspace formatting/Clippy/tests, smoke and learning workflows,
+headless checks, OSS parity, 361 fuzz cases across 9 boundaries and Behavior CI
+10/10 seeds. Separate MuJoCo-enabled suspension-run tests (5 passed) and
+all-target Clippy passed before this run. This is regression evidence, not
+physical calibration, uncertainty qualification or actual HIL evidence.
+
 `rne_robot::systems::suspension_residual_timing` evaluates a frozen fit on one
 acquisition without refitting or joining run boundaries. It retains interval
 min/max, caller-declared absolute interval tolerance, mean force residual and

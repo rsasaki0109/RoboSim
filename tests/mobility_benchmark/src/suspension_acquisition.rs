@@ -6,7 +6,7 @@ use crate::suspension_identification::{
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -287,6 +287,18 @@ impl SuspensionPhysicalAcquisitionManifest {
         for signal in &self.signals {
             signal.validate()?;
         }
+        // A shared calibration file is valid only with one consistent byte identity.
+        // Check before deduplicating file reads, including cross-role references.
+        let mut references = BTreeMap::new();
+        for artifact in self.artifacts() {
+            if let Some(previous) = references.insert(artifact.path.as_str(), artifact) {
+                ensure!(
+                    previous == artifact,
+                    "conflicting suspension evidence references for {}",
+                    artifact.path
+                );
+            }
+        }
         let reference_rate_hz = self.signals[0].sample_rate_hz;
         ensure!(
             self.signals
@@ -361,26 +373,39 @@ fn verify_file(root: &Path, artifact: &SuspensionEvidenceFileRef) -> Result<()> 
         canonical.starts_with(root),
         "suspension evidence path escaped root"
     );
-    let metadata = canonical
+    let file = File::open(&canonical).with_context(|| format!("open {}", canonical.display()))?;
+    let metadata = file
         .metadata()
         .with_context(|| format!("inspect {}", canonical.display()))?;
     ensure!(
         metadata.is_file() && metadata.len() == artifact.size_bytes,
         "suspension evidence file size mismatch"
     );
-    let mut file =
-        File::open(&canonical).with_context(|| format!("open {}", canonical.display()))?;
+    verify_stream(file, artifact).with_context(|| format!("read {}", canonical.display()))
+}
+
+fn verify_stream(reader: impl Read, artifact: &SuspensionEvidenceFileRef) -> Result<()> {
+    artifact.validate()?;
+    let mut file = reader.take(artifact.size_bytes + 1);
+    let mut bytes_read = 0_u64;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
     loop {
-        let count = file
-            .read(&mut buffer)
-            .with_context(|| format!("read {}", canonical.display()))?;
+        let count = file.read(&mut buffer)?;
         if count == 0 {
             break;
         }
+        bytes_read += count as u64;
+        ensure!(
+            bytes_read <= artifact.size_bytes,
+            "suspension evidence file grew during verification"
+        );
         hasher.update(&buffer[..count]);
     }
+    ensure!(
+        bytes_read == artifact.size_bytes,
+        "suspension evidence file shrank during verification"
+    );
     ensure!(
         format!("sha256:{:x}", hasher.finalize()) == artifact.sha256,
         "suspension evidence file SHA-256 mismatch"
@@ -522,6 +547,77 @@ mod tests {
     }
 
     #[test]
+    fn stream_verification_bounds_growth_and_rejects_truncation() {
+        use std::io::Cursor;
+        let reference = file_ref("sample.bin", b"abc");
+        verify_stream(Cursor::new(b"abc"), &reference).unwrap();
+        let mut growing = Cursor::new(b"abc-extra-bytes");
+        assert!(verify_stream(&mut growing, &reference)
+            .unwrap_err()
+            .to_string()
+            .contains("grew"));
+        assert_eq!(growing.position(), reference.size_bytes + 1);
+        assert!(verify_stream(Cursor::new(b"ab"), &reference)
+            .unwrap_err()
+            .to_string()
+            .contains("shrank"));
+        assert!(verify_stream(Cursor::new(b"abd"), &reference)
+            .unwrap_err()
+            .to_string()
+            .contains("SHA-256"));
+        struct Broken;
+        impl Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("injected read failure"))
+            }
+        }
+        assert!(verify_stream(Broken, &reference)
+            .unwrap_err()
+            .to_string()
+            .contains("injected"));
+    }
+
+    #[test]
+    fn shared_evidence_paths_require_identical_size_and_digest() {
+        let dataset = recorded_dataset();
+        let original = manifest(&dataset);
+        original.validate(&dataset).unwrap();
+        for change_size in [false, true] {
+            let mut conflicting = original.clone();
+            // The first calibration reference remains valid; the later one must
+            // not escape validation merely because its path was already visited.
+            if change_size {
+                conflicting.signals[1].calibration_artifact.size_bytes += 1;
+            } else {
+                conflicting.signals[1].calibration_artifact.sha256 =
+                    format!("sha256:{}", "0".repeat(64));
+            }
+            conflicting.seal().unwrap();
+            assert!(conflicting
+                .validate(&dataset)
+                .unwrap_err()
+                .to_string()
+                .contains("conflicting"));
+            assert!(decode_suspension_acquisition_manifest(
+                &serde_json::to_vec(&conflicting).unwrap(),
+                &dataset
+            )
+            .is_err());
+        }
+        let mut cross_role = original.clone();
+        cross_role.acquisition_procedure = cross_role.raw_capture.clone();
+        cross_role.seal().unwrap();
+        cross_role.validate(&dataset).unwrap();
+        cross_role.acquisition_procedure.size_bytes += 1;
+        cross_role.seal().unwrap();
+        assert!(cross_role
+            .validate(&dataset)
+            .unwrap_err()
+            .to_string()
+            .contains("conflicting"));
+    }
+
+    #[test]
     fn external_files_are_streamed_and_tampering_is_detected() {
         let dataset = recorded_dataset();
         let manifest = manifest(&dataset);
@@ -539,6 +635,14 @@ mod tests {
         fs::write(root.join("calibration.txt"), b"test-only calibration bytes").unwrap();
 
         manifest.verify_files(&dataset, &root).unwrap();
+        let mut conflicting = manifest.clone();
+        conflicting.signals[1].calibration_artifact.sha256 = format!("sha256:{}", "0".repeat(64));
+        conflicting.seal().unwrap();
+        assert!(conflicting
+            .verify_files(&dataset, &root)
+            .unwrap_err()
+            .to_string()
+            .contains("conflicting"));
         fs::write(root.join("calibration.txt"), b"tampered calibration bytes").unwrap();
         assert!(manifest.verify_files(&dataset, &root).is_err());
         fs::remove_dir_all(&root).unwrap();
