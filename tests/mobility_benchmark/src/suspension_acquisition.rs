@@ -389,7 +389,9 @@ fn verify_stream(reader: impl Read, artifact: &SuspensionEvidenceFileRef) -> Res
     let mut file = reader.take(artifact.size_bytes + 1);
     let mut bytes_read = 0_u64;
     let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    // Windows executable main threads can have a 1 MiB stack. Keep streamed
+    // evidence independent of that limit, including nested CLI verification.
+    let mut buffer = vec![0_u8; 64 * 1024];
     loop {
         let count = file.read(&mut buffer)?;
         if count == 0 {

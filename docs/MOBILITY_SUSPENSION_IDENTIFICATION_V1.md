@@ -225,9 +225,29 @@ library passed 167 tests with zero failures and two ignored long-training tests
 (230.68 s); all-target Clippy passed with warnings denied. A process-level CLI
 regression passed generation, verification and byte-identical output for the
 whole-run, excitation and timing envelopes. Acquired-intake positive and negative
-paths are covered at library level; its process-level success path remains to
-be exercised. These tests use synthetic/test-only fixtures, not real calibration
-or physical model-accuracy evidence. Full workspace CI for this slice is pending.
+paths are covered at library level. The subsequently added process-level acquired
+test exposed a stack overflow in retained-file verification: the 1 MiB stack
+buffer was too large for the Windows CLI main thread. Verification now uses a
+64 KiB heap buffer, preserving exact byte bounds and streaming SHA-256 checks;
+the expanded process-level regression passed with MuJoCo enabled, along with
+six acquisition tests and all-target Clippy (2026-09-09). It checks generation,
+reverification, identical output bytes and rejection without output after raw
+file tampering. The default-feature CLI regression also passed, including the
+specific size-mismatch diagnostic and absence of output after tampering;
+default-feature all-target Clippy passed with warnings denied. These tests use
+synthetic/test-only fixtures, not real calibration
+or physical model-accuracy evidence.
+
+Commit `6688d7fad18cd7ab80791ff283440bf47efb3e3d` completed
+`cargo run -p xtask -- ci` with exit 0 on 2026-09-09, with tracked files
+unchanged throughout. Log:
+`E:\RNE-build\m3c-sensor\suspension-acquired-intake-v1-ci.log`, SHA-256
+`38b53fbf241e8696a5e22cce1e5322e3cca46ae6ef5ae47357fc24a728c36ebd`.
+Workspace lint/tests, smoke/RL, headless, OSS parity, 361 fuzz cases across
+9 boundaries and Behavior CI 10/10 seeds completed. RL execution success is
+not universal task success: clutter PPO scored -1.37 versus random -1.27,
+and mobile clutter CEM grasped but did not place. No physical qualification
+or actual HIL completion is established by this CI run.
 
 Acquisition integrity commit `2b7f8dd5c53337ad87da671182a8cfa3486f87a2`
 completed `cargo run -p xtask -- ci` with exit 0 on 2026-09-08, with tracked
