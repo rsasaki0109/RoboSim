@@ -20,6 +20,7 @@ pub mod recorded_ipin;
 pub mod recorded_nclt;
 pub mod road_excitation;
 pub mod suspension_acquisition;
+pub mod suspension_derivative;
 pub mod suspension_identification;
 pub mod suspension_runs;
 pub mod suspension_uncertainty;

@@ -453,12 +453,86 @@ fn propagate_validated_errors(
     request: &SuspensionRunRequest,
     model: &SuspensionErrorModel,
 ) -> Result<SuspensionErrorPropagation> {
+    propagate_with_derivatives(request, model, None)
+}
+
+/// Verifies retained acquisitions and reconstructs training velocity in every draw.
+/// Bindings must cover every training run in order. Additive velocity loadings
+/// must be zero: velocity error comes exclusively from differentiating position.
+/// Timestamps remain fixed; clock/gain/filter error propagation is not implemented.
+/// Failures stay in their draw slots. This is not a complete uncertainty budget.
+pub fn propagate_acquired_derived_errors(
+    acquisitions: &SuspensionAcquiredRunRequest,
+    model: &SuspensionErrorModel,
+    bindings: &[crate::suspension_derivative::SuspensionDerivativeBinding],
+    root: &std::path::Path,
+) -> Result<SuspensionErrorPropagation> {
+    validate_error_model(&acquisitions.runs, model)?;
+    acquisitions.validate()?;
+    ensure!(
+        bindings.len() == acquisitions.training.len(),
+        "derivative binding count mismatch"
+    );
+    ensure!(
+        model
+            .factors
+            .iter()
+            .all(|factor| factor.velocity_loading_m_s == 0.0),
+        "derived velocity forbids independent velocity error loadings"
+    );
+    for ((binding, run), manifest) in bindings
+        .iter()
+        .zip(&acquisitions.runs.training)
+        .zip(&acquisitions.training)
+    {
+        binding.validate(&run.dataset, manifest)?;
+    }
+    acquisitions.verify_files(root)?;
+    let operators: Vec<_> = bindings.iter().map(|binding| binding.operator).collect();
+    propagate_with_derivatives(&acquisitions.runs, model, Some(&operators))
+}
+
+fn reconstruct_runs(
+    samples: &mut [Vec<rne_robot::SuspensionForceSample>],
+    operators: &[crate::suspension_derivative::SuspensionDerivativeOperator],
+) -> Result<(), SuspensionIdentificationError> {
+    for (run, operator) in samples.iter_mut().zip(operators) {
+        let times: Vec<_> = run.iter().map(|sample| sample.capture_time_s).collect();
+        let positions: Vec<_> = run.iter().map(|sample| sample.position_m).collect();
+        let velocities = operator
+            .reconstruct(&times, &positions)
+            .map_err(|_| SuspensionIdentificationError::InvalidSample)?;
+        for (sample, velocity) in run.iter_mut().zip(velocities) {
+            sample.velocity_m_s = velocity;
+        }
+    }
+    Ok(())
+}
+
+fn propagate_with_derivatives(
+    request: &SuspensionRunRequest,
+    model: &SuspensionErrorModel,
+    operators: Option<&[crate::suspension_derivative::SuspensionDerivativeOperator]>,
+) -> Result<SuspensionErrorPropagation> {
+    let mut nominal: Vec<_> = request
+        .training
+        .iter()
+        .map(|run| run.dataset.samples.clone())
+        .collect();
+    if let Some(operators) = operators {
+        ensure!(
+            operators.len() == nominal.len(),
+            "derivative operator count mismatch"
+        );
+        reconstruct_runs(&mut nominal, operators)?;
+    }
     let training: Vec<_> = request
         .training
         .iter()
-        .map(|run| SuspensionIdentificationRun {
+        .zip(&nominal)
+        .map(|(run, samples)| SuspensionIdentificationRun {
             acquisition_id: run.acquisition_id,
-            samples: &run.dataset.samples,
+            samples,
         })
         .collect();
     let baseline = fit_suspension_training_runs(request.spec, &training);
@@ -487,6 +561,12 @@ fn propagate_validated_errors(
                     sample.velocity_m_s += value * factor.velocity_loading_m_s;
                     sample.force_n += value * factor.force_loading_n;
                 }
+            }
+        }
+        if let Some(operators) = operators {
+            if let Err(error) = reconstruct_runs(&mut samples, operators) {
+                outcomes.push(Err(error));
+                continue;
             }
         }
         let runs: Vec<_> = training
@@ -548,6 +628,42 @@ mod tests {
                 }],
             },
         )
+    }
+
+    #[test]
+    fn derivative_draws_recompute_velocity_and_retain_failures() {
+        use crate::suspension_derivative::SuspensionDerivativeOperator;
+        let (mut request, mut model) = fixture();
+        let operators = [SuspensionDerivativeOperator::NonuniformThreePointSecantEndsV1];
+        let mut nominal = vec![request.training[0].dataset.samples.clone()];
+        reconstruct_runs(&mut nominal, &operators).unwrap();
+        request.training[0].dataset.samples = nominal.remove(0);
+        request.training[0].dataset.seal().unwrap();
+        model.factors[0].force_loading_n = 0.0;
+        model.factors[0].scope = SuspensionErrorScope::Sample;
+        let propagated = propagate_with_derivatives(&request, &model, Some(&operators)).unwrap();
+        assert_eq!(
+            propagated,
+            propagate_with_derivatives(&request, &model, Some(&operators)).unwrap()
+        );
+        let independent = propagate_suspension_errors(&request, &model).unwrap();
+        assert_eq!(propagated.baseline, independent.baseline);
+        assert_ne!(propagated.draws, independent.draws);
+        for sample in &mut request.holdout[0].dataset.samples {
+            sample.force_n += 1000.0;
+        }
+        request.holdout[0].dataset.seal().unwrap();
+        assert_eq!(
+            propagated,
+            propagate_with_derivatives(&request, &model, Some(&operators)).unwrap()
+        );
+        model.factors[0].position_loading_m = f64::MAX;
+        let failed = propagate_with_derivatives(&request, &model, Some(&operators)).unwrap();
+        assert_eq!(failed.draws.len(), model.draws);
+        assert!(failed
+            .draws
+            .contains(&Err(SuspensionIdentificationError::InvalidSample)));
+        assert!(propagate_with_derivatives(&request, &model, Some(&[])).is_err());
     }
 
     #[test]

@@ -531,6 +531,67 @@ mod tests {
     }
 
     #[test]
+    fn derived_velocity_binding_checks_nominal_rows_and_retained_procedure() {
+        use crate::suspension_derivative::{
+            SuspensionDerivativeBinding, SuspensionDerivativeOperator,
+        };
+        let mut dataset = recorded_dataset();
+        let operator = SuspensionDerivativeOperator::NonuniformThreePointSecantEndsV1;
+        let times: Vec<_> = dataset.samples.iter().map(|s| s.capture_time_s).collect();
+        let positions: Vec<_> = dataset.samples.iter().map(|s| s.position_m).collect();
+        let velocities = operator.reconstruct(&times, &positions).unwrap();
+        for (sample, velocity) in dataset.samples.iter_mut().zip(&velocities) {
+            sample.velocity_m_s = *velocity;
+        }
+        dataset.seal().unwrap();
+        let mut manifest = manifest(&dataset);
+        let binding = SuspensionDerivativeBinding {
+            capture_id: manifest.capture_id.clone(),
+            procedure: manifest.signals[1].calibration_artifact.clone(),
+            operator,
+            absolute_tolerance_m_s: 0.0,
+        };
+        assert_eq!(binding.validate(&dataset, &manifest).unwrap(), velocities);
+        let root =
+            std::env::temp_dir().join(format!("rne-derived-velocity-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("raw.csv"), b"test-only raw capture bytes").unwrap();
+        fs::write(root.join("procedure.txt"), b"test-only procedure bytes").unwrap();
+        fs::write(root.join("calibration.txt"), b"test-only calibration bytes").unwrap();
+        assert_eq!(
+            binding.verify_files(&dataset, &manifest, &root).unwrap(),
+            velocities
+        );
+        fs::write(root.join("calibration.txt"), b"tampered").unwrap();
+        assert!(binding.verify_files(&dataset, &manifest, &root).is_err());
+        // The owned test-only directory contains no external dataset.
+        fs::remove_dir_all(&root).unwrap();
+        let mut wrong = binding.clone();
+        wrong.capture_id.push_str("-other");
+        assert!(wrong.validate(&dataset, &manifest).is_err());
+        wrong = binding.clone();
+        wrong.procedure.sha256 = format!("sha256:{}", "0".repeat(64));
+        assert!(wrong.validate(&dataset, &manifest).is_err());
+        for tolerance in [-1.0, f64::NAN, f64::INFINITY] {
+            wrong = binding.clone();
+            wrong.absolute_tolerance_m_s = tolerance;
+            assert!(wrong.validate(&dataset, &manifest).is_err());
+        }
+        dataset.samples[0].velocity_m_s += 0.001;
+        dataset.seal().unwrap();
+        manifest.dataset_content_digest = dataset.content_digest.clone();
+        manifest.seal().unwrap();
+        assert!(binding.validate(&dataset, &manifest).is_err());
+        wrong = binding.clone();
+        wrong.absolute_tolerance_m_s = 0.002;
+        assert!(wrong.validate(&dataset, &manifest).is_ok());
+        manifest.signals[1].origin = SuspensionSignalOrigin::Measured;
+        manifest.signals[1].calibration_kind = SuspensionCalibrationKind::Iso17025;
+        manifest.seal().unwrap();
+        assert!(wrong.validate(&dataset, &manifest).is_err());
+    }
+
+    #[test]
     fn physical_manifest_requires_physical_source_complete_channels_and_digest() {
         let dataset = recorded_dataset();
         let manifest = manifest(&dataset);
@@ -647,6 +708,62 @@ mod tests {
             }],
         };
         let propagated = error_request.propagate(&root).unwrap();
+        {
+            use crate::suspension_derivative::{
+                SuspensionDerivativeBinding, SuspensionDerivativeOperator,
+            };
+            let mut derived = request.clone();
+            let operator = SuspensionDerivativeOperator::NonuniformThreePointSecantEndsV1;
+            let dataset = &mut derived.runs.training[0].dataset;
+            let times: Vec<_> = dataset.samples.iter().map(|s| s.capture_time_s).collect();
+            let positions: Vec<_> = dataset.samples.iter().map(|s| s.position_m).collect();
+            for (sample, velocity) in dataset
+                .samples
+                .iter_mut()
+                .zip(operator.reconstruct(&times, &positions).unwrap())
+            {
+                sample.velocity_m_s = velocity;
+            }
+            dataset.seal().unwrap();
+            derived.training[0].dataset_content_digest = dataset.content_digest.clone();
+            derived.training[0].seal().unwrap();
+            let bindings = vec![SuspensionDerivativeBinding {
+                capture_id: derived.training[0].capture_id.clone(),
+                procedure: derived.training[0].signals[1].calibration_artifact.clone(),
+                operator,
+                absolute_tolerance_m_s: 0.0,
+            }];
+            let mut model = error_request.model.clone();
+            model.factors[0].position_loading_m = 0.001;
+            model.factors[0].scope = SuspensionErrorScope::Sample;
+            let result =
+                propagate_acquired_derived_errors(&derived, &model, &bindings, &root).unwrap();
+            assert_eq!(result.draws.len(), model.draws);
+            assert_eq!(
+                result,
+                propagate_acquired_derived_errors(&derived, &model, &bindings, &root).unwrap()
+            );
+            assert!(propagate_acquired_derived_errors(&derived, &model, &[], &root).is_err());
+            model.factors[0].velocity_loading_m_s = 1e-9;
+            assert!(
+                propagate_acquired_derived_errors(&derived, &model, &bindings, &root)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("independent velocity")
+            );
+            model.factors[0].velocity_loading_m_s = 0.0;
+            fs::write(
+                root.join("calibration.txt"),
+                b"changed derivative procedure",
+            )
+            .unwrap();
+            assert!(propagate_acquired_derived_errors(&derived, &model, &bindings, &root).is_err());
+            fs::write(root.join("calibration.txt"), b"test-only calibration bytes").unwrap();
+            assert_eq!(
+                result,
+                propagate_acquired_derived_errors(&derived, &model, &bindings, &root).unwrap()
+            );
+        }
         let interpretations: Vec<_> = [
             SuspensionSignalKind::Position,
             SuspensionSignalKind::Velocity,

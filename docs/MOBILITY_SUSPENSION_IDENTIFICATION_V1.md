@@ -202,6 +202,67 @@ Before retaining any archive on the external SSD, inspect available metadata
 for those requirements and budget both archive and extraction sizes; preserve
 raw-source hashes and distinguish derived velocity from measured velocity.
 
+### Derived-velocity acquisition review (2026-09-09)
+
+Liu and He's [damper dynamometer study](https://www.intechopen.com/chapters/80002)
+(2022, DOI `10.5772/intechopen.101510`) describes timestamped ADC measurements,
+force/displacement calibration and velocity obtained by differentiating
+displacement. It also reports disagreement with manufacturer curves and leaves
+calibration versus specimen differences unresolved. The inspected chapter did
+not supply a retained raw acquisition plus calibration package suitable for this
+gate. Its figures are not substituted for independent raw time series.
+
+Implementation consequence (RNE design inference): the existing `Derived` and
+`DerivedSignalProcedure` labels bind a document but do not execute that procedure.
+Independent additive velocity perturbations cannot stand in for the correlated
+velocity error created by differentiating noisy position. The next processing
+slice must explicitly bind the derivative/filter operator, boundary behavior and
+actual sample times; reconstruct the nominal derived channel; then rerun the same
+operator on each perturbed position/time realization before fitting. It must
+retain invalid clock realizations and forbid silent sample removal or treatment
+of filtered samples as independent. Tests must distinguish a common position
+offset (zero derivative change) from sample noise and clock scale error. No
+operator may be inferred from a graph or the nominal sampling rate alone.
+
+The offline `suspension_derivative::SuspensionDerivativeOperator` now provides
+`nonuniform_three_point_secant_ends_v1`: the interior derivative of a quadratic
+through three adjacent positions at their actual times, with adjacent secants at
+both endpoints. It returns exactly one velocity per input row, requires 3 to
+100000 finite samples with strictly increasing local timestamps, and rejects
+non-finite arithmetic instead of trimming rows. It performs no filtering,
+resampling or cross-acquisition differentiation. Interior samples require future
+data, so this is not a causal controller-visible sensor.
+
+Regression cases cover a nonuniform quadratic, explicit endpoint values, local
+clock translation, common offset cancellation, opposite-signed neighbour errors
+from one noisy position, inverse clock-scale response, malformed clocks and
+overflow rejection. `SuspensionDerivativeBinding` now binds the capture identity,
+exact derived-velocity procedure reference, explicit operator and caller-declared
+absolute tolerance (m/s). It reconstructs every nominal velocity, including both
+endpoints, and rejects any mismatch without replacing recorded values. Its
+`verify_files` path also checks all retained acquisition files. File identity is
+not authentication or proof that the declared operator correctly interprets a
+human-readable procedure. A fixture checks rehashed nominal drift, mismatched
+capture/procedure, measured-versus-derived identity, invalid tolerances and file
+tampering. The opt-in `propagate_acquired_derived_errors` API validates one binding
+per training capture and retained files for the complete split. It reconstructs
+nominal training velocity and repeats the operator after position perturbations
+in every draw, before the actual fit. Independent velocity error loadings are
+rejected; invalid derivative draws retain `InvalidSample` in their original slots.
+Holdout values are not differentiated or fitted. Timestamps remain fixed: clock
+errors, gain errors, filtering, an evidence envelope and CLI for this new path,
+and physical qualification remain pending. Existing v1 additive requests keep
+their previous semantics and never select a derivative implicitly.
+
+Derivative slice verification (2026-09-09): default-feature suspension-related
+tests passed 29/29 (40.28 s), including the file-bound propagation API. The
+MuJoCo-enabled benchmark library passed 179 tests with zero failures and two
+explicitly ignored long training jobs (202.53 s). The existing process-level
+suspension CLI regression passed (1.28 s); default and MuJoCo all-target Clippy
+passed with warnings denied. That CLI regression covers the existing envelopes,
+not a new derivative CLI. The full workspace checkpoint below predates this
+derivative slice; these results do not establish physical qualification.
+
 ### Uncertainty implementation boundary (2026-09-09)
 
 Source review: [JCGM 101:2008, BIPM](https://www.bipm.org/en/doi/10.59161/jcgm101-2008)
@@ -316,8 +377,8 @@ No interval is silently conditioned on successful fits. Bounds are 4096 draws,
 input limits. Tests cover seed replay, holdout independence, retained failures,
 shared error not disappearing with repeated measurements, and cancellation from
 oppositely signed correlated channel errors. This is an assumption-evaluation
-API, not a calibrated physical evidence artifact: retained calibration binding,
-gain and clock errors, derivative/filter propagation, model discrepancy and
+API, not physical qualification. Retained calibration binding is provided by
+the acquired envelopes below; gain and clock errors, derivative/filter propagation, model discrepancy and
 coverage/convergence assessment still require implementation and validation.
 
 Random streams are derived hierarchically (root seed, factor identity, then draw
@@ -367,9 +428,11 @@ CLI entry points are `suspension-uncertainty` and
 `suspension-uncertainty-verify`; both require `--input`, `--evidence-root` and
 an output destination for a retained artifact. Requests carry their own seed,
 draw count, distributions, sharing and coverage-factor interpretations; no
-interval-tolerance flag is needed. Example using external-SSD paths:
+interval-tolerance flag is needed.
 Unrelated switches (including `--seed` and `--interval-tolerance-s`) are rejected
 before reading input or running propagation; assumptions belong in the request.
+
+Example using external-SSD paths:
 
 ```powershell
 cargo run -p rne_mobility_benchmark -- --backend suspension-uncertainty --input E:\data\uncertainty-request.json --evidence-root E:\data --output E:\data\uncertainty.json
@@ -387,8 +450,22 @@ Pre-commit verification of this additive uncertainty implementation included 65
 tests passed, 0 failed and 2 ignored (188.73 s), followed by the process-level
 suspension CLI test and feature-enabled Clippy with warnings denied. These checks
 cover synthetic regression and cross-backend execution, not physical calibration
-or actual HIL. The full workspace CI checkpoint above still applies to `2936f53`,
-not these subsequent uncertainty changes.
+or actual HIL.
+
+Full workspace checkpoint (2026-09-09):
+`6acf7c40e5a9e605e3f1f28f57f1ff5b81dbe5a6` completed
+`cargo run -p xtask -- ci` with exit code 0 and tracked files unchanged throughout.
+This included workspace formatting, dependency boundaries, Clippy/tests,
+smoke/RL checks, headless checks, OSS parity, 361 fuzz cases across nine
+boundaries, and Behavior CI 10/10 seeds. External log:
+`E:\RNE-build\m3c-sensor\suspension-uncertainty-v1-ci.log`, SHA-256
+`97ed4dbf109422a8c80b06f4ccf0e38e201e7ccc87b344d67ddd3b14e591bb9a`.
+The Python API compatibility check passed with 24 exports. Retain the limits:
+clutter PPO reported random -1.38 versus trained -1.37; mobile clutter PPO
+reported -2.43 versus -1.61; mobile clutter CEM grasped but did not place;
+heading CEM remained -10 versus baseline -10. The flagship capsule check
+explicitly reported `cross_backend=false`. These are regression results, not
+physical calibration, task-success generalization, or actual HIL evidence.
 
 ### Identification validation upgrade
 
@@ -596,8 +673,9 @@ SHA-256 is integrity binding, not authentication. No acquisition-manifest checks
 are implied by this path, and recorded source labels remain unverified declarations.
 
 This is not physical qualification. Training-only conditioning and acquisition
-binding are available through the additive envelopes above; uncertainty remains
-unimplemented. Distinct caller IDs alone
+binding and declared additive error propagation are available through the
+envelopes above; physical uncertainty qualification remains incomplete.
+Distinct caller IDs alone
 do not detect duplicated raw captures or establish independent measurements.
 
 Whole-run slice validation (2026-09-08): `rne_robot --lib` passed 56 tests;
