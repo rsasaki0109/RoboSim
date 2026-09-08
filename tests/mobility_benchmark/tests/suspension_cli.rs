@@ -168,7 +168,140 @@ fn whole_run_cli_generates_and_reverifies_all_diagnostic_envelopes() {
         );
     }
     assert_eq!(fs::read(&output).unwrap(), fs::read(&replay).unwrap());
+    use rne_mobility_benchmark::suspension_uncertainty::*;
+    let uncertainty_request = SuspensionUncertaintyRequest {
+        errors: SuspensionAcquiredErrorRequest {
+            kind: "rne_suspension_acquired_error_request".into(),
+            schema_version: 1,
+            acquisitions: acquired.clone(),
+            model: SuspensionErrorModel {
+                kind: "rne_suspension_additive_error_model".into(),
+                schema_version: 1,
+                seed: 42,
+                draws: 8,
+                factors: vec![SuspensionErrorFactor {
+                    factor_id: 1,
+                    distribution: SuspensionErrorDistribution::Normal,
+                    scope: SuspensionErrorScope::SharedTraining,
+                    position_loading_m: 0.0,
+                    velocity_loading_m_s: 0.0,
+                    force_loading_n: 1e8,
+                }],
+            },
+            calibration: vec![SuspensionFactorCalibrationBinding {
+                factor_id: 1,
+                acquisition_id: 1,
+                signal: SuspensionSignalKind::Force,
+                calibration_artifact: acquired.training[0].signals[2].calibration_artifact.clone(),
+                interpretation:
+                    "Test-only deliberately inconsistent error budget; no physical qualification."
+                        .into(),
+            }],
+        },
+        interpretations: [
+            SuspensionSignalKind::Position,
+            SuspensionSignalKind::Velocity,
+            SuspensionSignalKind::Force,
+        ]
+        .into_iter()
+        .map(|signal| SuspensionCoverageInterpretation {
+            acquisition_id: 1,
+            signal,
+            coverage_factor: 2.0,
+            absolute_tolerance_si: 1e-12,
+        })
+        .collect(),
+    };
+    let uncertainty_input = root.join("uncertainty-input.json");
+    let uncertainty_output = root.join("uncertainty-output.json");
+    let uncertainty_replay = root.join("uncertainty-replay.json");
+    fs::write(
+        &uncertainty_input,
+        serde_json::to_vec(&uncertainty_request).unwrap(),
+    )
+    .unwrap();
+    for (mode, source, destination) in [
+        (
+            "suspension-uncertainty",
+            &uncertainty_input,
+            &uncertainty_output,
+        ),
+        (
+            "suspension-uncertainty-verify",
+            &uncertainty_output,
+            &uncertainty_replay,
+        ),
+    ] {
+        let result = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
+            .args(["--backend", mode, "--input"])
+            .arg(source)
+            .arg("--evidence-root")
+            .arg(&root)
+            .arg("--output")
+            .arg(destination)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{mode}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    let bytes = fs::read(&uncertainty_output).unwrap();
+    for (option, value) in [("--interval-tolerance-s", "0.001"), ("--seed", "123")] {
+        let destination = root.join(format!("unexpected-{}.json", &option[2..]));
+        let result = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
+            .args(["--backend", "suspension-uncertainty", "--input"])
+            .arg(&uncertainty_input)
+            .arg("--evidence-root")
+            .arg(&root)
+            .arg("--output")
+            .arg(&destination)
+            .args([option, value])
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("assumptions must be embedded"));
+        assert!(!destination.exists());
+    }
+    assert_eq!(bytes, fs::read(&uncertainty_replay).unwrap());
+    let uncertainty = decode_suspension_uncertainty(&bytes, &root).unwrap();
+    assert!(uncertainty.budget.iter().all(|entry| !entry.matched));
+    assert!(uncertainty
+        .propagation
+        .draws
+        .iter()
+        .any(|draw| draw.is_err()));
+    let mut forged = uncertainty.clone();
+    forged.propagation.draws.clear();
+    let forged_input = root.join("uncertainty-forged.json");
+    fs::write(&forged_input, serde_json::to_vec(&forged).unwrap()).unwrap();
+    let rejected_uncertainty = root.join("uncertainty-rejected.json");
+    let result = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
+        .args(["--backend", "suspension-uncertainty-verify", "--input"])
+        .arg(&forged_input)
+        .arg("--evidence-root")
+        .arg(&root)
+        .arg("--output")
+        .arg(&rejected_uncertainty)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("replay mismatch"));
+    assert!(!rejected_uncertainty.exists());
     fs::write(root.join("raw-2.csv"), b"tampered").unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
+        .args(["--backend", "suspension-uncertainty-verify", "--input"])
+        .arg(&uncertainty_output)
+        .arg("--evidence-root")
+        .arg(&root)
+        .arg("--output")
+        .arg(&rejected_uncertainty)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("file size mismatch"));
+    assert!(!rejected_uncertainty.exists());
     let rejected_output = root.join("rejected.json");
     let result = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
         .args(["--backend", "suspension-acquired-verify", "--input"])

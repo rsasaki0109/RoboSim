@@ -274,6 +274,122 @@ This envelope verifies embedded data and computation, not retained acquisition
 files or calibration authenticity. Integration with the acquired-run file-checking
 envelope and propagated measurement uncertainty remain future work.
 
+Influence regression checkpoint (2026-09-09): commit
+`2936f5384a89886d9ed9e89df7004932b7d882f3` completed `cargo run -p xtask -- ci`
+with exit code 0 and tracked files unchanged during the run. This covered
+formatting, dependency boundaries, workspace Clippy/tests, executable smokes,
+Python/RL, headless, OSS parity, 361 fuzz cases across 9 boundaries and behavior
+CI 10/10 seeds. Mobility Benchmark library results were 140 passed, 0 failed,
+1 ignored; influence core tests and the generate/reverify CLI regression passed.
+Retained log: `E:\RNE-build\m3c-sensor\suspension-influence-v1-ci.log`, SHA-256
+`63539f1057e427ac78fc1706adf53cfaf2f14eb7fe97ebb41eb370c3f3dd2e76`.
+Negative performance evidence remains: clutter PPO trained -1.37 versus random
+-1.35; mobile clutter CEM grasped but did not place; heading CEM matched its -10
+baseline. CI success is not a claim of improved learned control, calibrated
+physical parameter coverage or actual HIL completion.
+
+The additive `fit_suspension_training_runs` estimator exposes one training-only
+fit for repeated measurement-model evaluations, without computing all deletion
+fits. It shares the existing solver and run validation. Regression tests compare
+it to the influence baseline and check the analytic common-offset identity:
+adding `dx` to every position and `dF` to every force moves equilibrium by
+`dx + dF/k` while leaving stiffness and damping unchanged. Duplicating a capture
+under a different caller-supplied ID does not erase this shared calibration shift;
+this core test deliberately does not claim independent acquisitions. A full
+probability model, seeded propagation and physical coverage validation are still
+required before reporting measurement-uncertainty intervals.
+
+The benchmark `suspension_uncertainty::propagate_suspension_errors` now evaluates
+an explicit additive error-factor model through that estimator. Each independent
+zero-mean/unit-variance latent source has signed position/velocity/force loadings
+in SI units and a sharing scope (all training, one acquisition, or one sample).
+Sharing one source across channels represents correlation; multiple sources add
+their loading outer products. Normal and rectangular distributions are explicit;
+loadings use standard uncertainty, never an automatic conversion of retained
+expanded uncertainty. Corrections are added to measured inputs; timestamps and
+holdout inputs are unchanged. A WorldRandom root seed and versioned stream
+derivation make replay deterministic in the same numerical environment.
+
+All draw results, including invalid and nonphysical fits, are returned in order.
+No interval is silently conditioned on successful fits. Bounds are 4096 draws,
+16 factors and 10 million sample-factor evaluations, in addition to whole-run
+input limits. Tests cover seed replay, holdout independence, retained failures,
+shared error not disappearing with repeated measurements, and cancellation from
+oppositely signed correlated channel errors. This is an assumption-evaluation
+API, not a calibrated physical evidence artifact: retained calibration binding,
+gain and clock errors, derivative/filter propagation, model discrepancy and
+coverage/convergence assessment still require implementation and validation.
+
+Random streams are derived hierarchically (root seed, factor identity, then draw
+identity), not by a symmetric XOR of factor and draw hashes. A regression covers
+the swapped-key alias of the latter scheme. Increasing the draw count preserves
+the existing prefix for all three scopes. Additional tests reject unsupported
+schema/fields, duplicate factor identities, zero draws and excessive total work.
+These stream checks do not establish statistical independence of physical errors.
+
+`SuspensionAcquiredErrorRequest` binds those assumptions to the existing acquired
+run request. Every nonzero factor/channel loading requires an ordered reference
+to that channel's exact retained calibration artifact for every training capture,
+plus a bounded caller explanation of loading, distribution and sharing. Missing,
+extra or conflicting bindings are rejected. All raw, procedure and calibration
+files (including holdout provenance) are verified before propagation. Tests reject
+changed calibration bytes and replay identically after the original bytes return.
+This establishes retained-file linkage only: the explanation is not parsed as a
+certificate, expanded uncertainties are not automatically reconciled with factor
+loadings, and the synthetic fixture does not establish physical qualification.
+
+The separate `audit_budget` operation now compares every training channel's
+modeled marginal standard uncertainty with the manifest's `U/k`, using an
+explicit positive coverage factor and SI absolute tolerance per channel. This
+follows the definition of expanded uncertainty in [NIST's coverage-factor
+explanation](https://physics.nist.gov/cuu/Uncertainty/coverage.html); it does not
+assume that k=2 is universally applicable or guarantees 95% coverage. The modeled
+value is a stable hypot accumulation of independent factor loadings. Negative
+loadings still contribute variance; common errors are not divided by sample count.
+Missing/invalid interpretations reject the audit; numerical mismatches, including
+unmodeled channels, remain `matched=false` results. All acquisition files are
+verified before returning the report. A passing marginal comparison does not
+validate distributions, correlations, interpretation of certificate text, or
+output coverage.
+
+`SuspensionUncertaintyRequest::evaluate` combines that audit and propagation into
+`rne_suspension_uncertainty_evidence` schema 1. The envelope retains the exact
+acquisitions, calibration bindings, coverage interpretations, error model, seed,
+all budget comparisons and all draw outcomes. Encoding and decoding recompute
+the whole result after verifying retained files; neither stored pass flags nor
+successful draws are trusted. The 8 MiB input/output bound includes all embedded
+data, and decoding rejects unknown fields. Regression tests retain unsuccessful
+draws, reject dropped outcomes, forged budget flags, changed schema and calibration
+bytes, and round-trip the valid evidence. This is not an authenticated certificate
+or a physical coverage claim.
+
+CLI entry points are `suspension-uncertainty` and
+`suspension-uncertainty-verify`; both require `--input`, `--evidence-root` and
+an output destination for a retained artifact. Requests carry their own seed,
+draw count, distributions, sharing and coverage-factor interpretations; no
+interval-tolerance flag is needed. Example using external-SSD paths:
+Unrelated switches (including `--seed` and `--interval-tolerance-s`) are rejected
+before reading input or running propagation; assumptions belong in the request.
+
+```powershell
+cargo run -p rne_mobility_benchmark -- --backend suspension-uncertainty --input E:\data\uncertainty-request.json --evidence-root E:\data --output E:\data\uncertainty.json
+cargo run -p rne_mobility_benchmark -- --backend suspension-uncertainty-verify --input E:\data\uncertainty.json --evidence-root E:\data --output E:\data\uncertainty-replayed.json
+```
+
+Process tests exercise generation and byte-identical reverification, retained
+budget mismatches and failed draws, rejection of deleted draw outcomes, and
+rejection of changed source files without writing an output artifact. Successful
+exit means processing/verification succeeded, not that the budget matched or that
+every sampled fit was physical. No confidence interval is emitted.
+
+Pre-commit verification of this additive uncertainty implementation included 65
+`rne_robot` library tests and, with `mujoco` enabled, 173 Mobility Benchmark library
+tests passed, 0 failed and 2 ignored (188.73 s), followed by the process-level
+suspension CLI test and feature-enabled Clippy with warnings denied. These checks
+cover synthetic regression and cross-backend execution, not physical calibration
+or actual HIL. The full workspace CI checkpoint above still applies to `2936f53`,
+not these subsequent uncertainty changes.
+
 ### Identification validation upgrade
 
 `SuspensionAcquiredRunRequest` adds an acquisition intake around the

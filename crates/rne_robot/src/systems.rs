@@ -105,16 +105,33 @@ pub struct SuspensionTrainingInfluence {
     pub deletions: Vec<SuspensionAcquisitionInfluence>,
 }
 
-/// Refits after deleting each complete training run, preserving sample/local-clock order.
+/// Fits complete training acquisitions without inspecting holdout data or residual gates.
 ///
-/// Accepts 1 through 64 runs; a single run retains an insufficient-samples deletion.
-/// Validates all inputs before fitting. Uses coefficient and training-count bounds,
-/// but does not evaluate training/holdout residual gates. No holdout data are accepted.
-/// This diagnostic neither selects a model nor establishes uncertainty coverage.
-pub fn suspension_training_influence(
+/// Uses the same centered least-squares solver and physical parameter bounds as
+/// ordinary identification. This is an estimator, not a model acceptance verdict.
+/// Input clocks are validated separately for every acquisition. Callers performing
+/// repeated uncertainty draws must retain failures and bound their total workload.
+pub fn fit_suspension_training_runs(
     spec: SuspensionIdentificationSpec,
     runs: &[SuspensionIdentificationRun<'_>],
-) -> Result<SuspensionTrainingInfluence, SuspensionIdentificationError> {
+) -> Result<SuspensionTrainingCoefficients, SuspensionIdentificationError> {
+    validate_suspension_training_runs(spec, runs)?;
+    let (stiffness_n_per_m, damping_n_s_per_m, equilibrium_position_m) =
+        fit_suspension_training_coefficients(
+            spec,
+            runs.iter().flat_map(|run| run.samples.iter().copied()),
+        )?;
+    Ok(SuspensionTrainingCoefficients {
+        stiffness_n_per_m,
+        damping_n_s_per_m,
+        equilibrium_position_m,
+    })
+}
+
+fn validate_suspension_training_runs(
+    spec: SuspensionIdentificationSpec,
+    runs: &[SuspensionIdentificationRun<'_>],
+) -> Result<(), SuspensionIdentificationError> {
     if !spec.is_valid() || runs.len() > 64 {
         return Err(SuspensionIdentificationError::InvalidSpec);
     }
@@ -131,6 +148,20 @@ pub fn suspension_training_influence(
         }
         validate_suspension_samples(run.samples)?;
     }
+    Ok(())
+}
+
+/// Refits after deleting each complete training run, preserving sample/local-clock order.
+///
+/// Accepts 1 through 64 runs; a single run retains an insufficient-samples deletion.
+/// Validates all inputs before fitting. Uses coefficient and training-count bounds,
+/// but does not evaluate training/holdout residual gates. No holdout data are accepted.
+/// This diagnostic neither selects a model nor establishes uncertainty coverage.
+pub fn suspension_training_influence(
+    spec: SuspensionIdentificationSpec,
+    runs: &[SuspensionIdentificationRun<'_>],
+) -> Result<SuspensionTrainingInfluence, SuspensionIdentificationError> {
+    validate_suspension_training_runs(spec, runs)?;
     let fit = |omit: Option<usize>| {
         fit_suspension_training_coefficients(
             spec,
@@ -2598,6 +2629,58 @@ mod tests {
             Err(SuspensionIdentificationError::RankDeficient)
         );
         assert_eq!(report.deletions[1].coefficients, single.baseline);
+    }
+
+    #[test]
+    fn suspension_training_estimator_matches_baseline_and_propagates_common_offset() {
+        let spec = suspension_identification_spec();
+        let samples = suspension_identification_samples();
+        let run = SuspensionIdentificationRun {
+            acquisition_id: 1,
+            samples: &samples,
+        };
+        let baseline = fit_suspension_training_runs(spec, &[run]).unwrap();
+        assert_eq!(
+            Ok(baseline),
+            suspension_training_influence(spec, &[run])
+                .unwrap()
+                .baseline
+        );
+        let mut shifted = samples.clone();
+        for sample in &mut shifted {
+            sample.position_m += 0.001;
+            sample.force_n += 100.0;
+        }
+        let shifted_run = SuspensionIdentificationRun {
+            acquisition_id: 2,
+            samples: &shifted,
+        };
+        let fit = fit_suspension_training_runs(spec, &[shifted_run]).unwrap();
+        assert!((fit.stiffness_n_per_m - baseline.stiffness_n_per_m).abs() < 1e-6);
+        assert!((fit.damping_n_s_per_m - baseline.damping_n_s_per_m).abs() < 1e-6);
+        assert!(
+            (fit.equilibrium_position_m
+                - baseline.equilibrium_position_m
+                - 0.001
+                - 100.0 / baseline.stiffness_n_per_m)
+                .abs()
+                < 1e-10
+        );
+        // Repeated samples from the same calibration do not erase its common offset.
+        let repeated = SuspensionIdentificationRun {
+            acquisition_id: 3,
+            samples: &shifted,
+        };
+        let doubled = fit_suspension_training_runs(spec, &[shifted_run, repeated]).unwrap();
+        assert!((doubled.equilibrium_position_m - fit.equilibrium_position_m).abs() < 1e-10);
+        assert_eq!(
+            fit_suspension_training_runs(spec, &[run, run]),
+            Err(SuspensionIdentificationError::DuplicateAcquisition)
+        );
+        assert_eq!(
+            fit_suspension_training_runs(spec, &[]),
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
     }
 
     #[test]

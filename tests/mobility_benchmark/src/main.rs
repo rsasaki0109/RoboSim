@@ -403,6 +403,47 @@ fn main() -> Result<()> {
                 "suspension-identification-fixture",
             )
         }
+        "suspension-uncertainty" | "suspension-uncertainty-verify" => {
+            ensure!(interval_tolerance_s.is_none() && root_seed.is_none()
+                && noise_root_seed.is_none() && episode_index.is_none() && lane_id.is_none()
+                && num_envs.is_none() && num_workers.is_none() && acquisition_manifest.is_none()
+                && failure_replay.is_none() && fault.is_none(),
+                "uncertainty backend accepts only --backend, --input, --evidence-root and --output; assumptions must be embedded in the request");
+            use rne_mobility_benchmark::suspension_runs::MAX_SUSPENSION_RUN_BYTES;
+            use rne_mobility_benchmark::suspension_uncertainty::{
+                decode_suspension_uncertainty, encode_suspension_uncertainty,
+                SuspensionUncertaintyRequest,
+            };
+            use std::io::Read;
+            let source = input
+                .as_deref()
+                .context("suspension uncertainty requires --input")?;
+            let root = evidence_root
+                .as_deref()
+                .context("suspension uncertainty requires --evidence-root")?;
+            let file = std::fs::File::open(source)?;
+            ensure!(
+                file.metadata()?.is_file(),
+                "uncertainty input must be a regular file"
+            );
+            let mut bytes = Vec::new();
+            file.take(MAX_SUSPENSION_RUN_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)?;
+            ensure!(
+                bytes.len() <= MAX_SUSPENSION_RUN_BYTES,
+                "uncertainty input too large"
+            );
+            let evidence = if backend == "suspension-uncertainty-verify" {
+                decode_suspension_uncertainty(&bytes, root)?
+            } else {
+                let request: SuspensionUncertaintyRequest = serde_json::from_slice(&bytes)?;
+                request.evaluate(root)?
+            };
+            (
+                String::from_utf8(encode_suspension_uncertainty(&evidence, root)?)?,
+                "suspension-uncertainty-evidence",
+            )
+        }
         "suspension-acquired" | "suspension-acquired-verify" => {
             use rne_mobility_benchmark::suspension_runs::{
                 decode_suspension_acquired_evidence, decode_suspension_acquired_request,
@@ -673,6 +714,8 @@ fn main() -> Result<()> {
                 | "identified-road-compare"
                 | "suspension-acquisition-verify"
                 | "suspension-acquired"
+                | "suspension-uncertainty"
+                | "suspension-uncertainty-verify"
                 | "suspension-acquired-verify"
                 | "suspension-timing"
                 | "suspension-timing-verify"
@@ -694,7 +737,11 @@ fn main() -> Result<()> {
     ensure!(
         matches!(
             backend.as_str(),
-            "suspension-acquisition-verify" | "suspension-acquired" | "suspension-acquired-verify"
+            "suspension-acquisition-verify"
+                | "suspension-acquired"
+                | "suspension-acquired-verify"
+                | "suspension-uncertainty"
+                | "suspension-uncertainty-verify"
         ) || evidence_root.is_none(),
         "--evidence-root requires an acquisition verification or acquired suspension backend"
     );

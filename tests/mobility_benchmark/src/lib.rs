@@ -22,6 +22,7 @@ pub mod road_excitation;
 pub mod suspension_acquisition;
 pub mod suspension_identification;
 pub mod suspension_runs;
+pub mod suspension_uncertainty;
 
 use anyhow::{ensure, Result};
 use rne_robot::{

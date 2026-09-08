@@ -617,6 +617,129 @@ mod tests {
         fs::write(root.join("procedure.txt"), b"test-only procedure bytes").unwrap();
         fs::write(root.join("calibration.txt"), b"test-only calibration bytes").unwrap();
         let evidence = request.identify(&root, 1e-9).unwrap();
+        use crate::suspension_uncertainty::*;
+        let error_request = SuspensionAcquiredErrorRequest {
+            kind: "rne_suspension_acquired_error_request".into(),
+            schema_version: 1,
+            acquisitions: request.clone(),
+            model: SuspensionErrorModel {
+                kind: "rne_suspension_additive_error_model".into(),
+                schema_version: 1,
+                seed: 42,
+                draws: 8,
+                factors: vec![SuspensionErrorFactor {
+                    factor_id: 7,
+                    distribution: SuspensionErrorDistribution::Normal,
+                    scope: SuspensionErrorScope::SharedTraining,
+                    position_loading_m: 0.0,
+                    velocity_loading_m_s: 0.0,
+                    force_loading_n: 100.0,
+                }],
+            },
+            calibration: vec![SuspensionFactorCalibrationBinding {
+                factor_id: 7,
+                acquisition_id: request.runs.training[0].acquisition_id,
+                signal: SuspensionSignalKind::Force,
+                calibration_artifact: request.training[0].signals[2].calibration_artifact.clone(),
+                interpretation:
+                    "Synthetic test-only 100 N shared Gaussian assumption, not certificate-derived."
+                        .into(),
+            }],
+        };
+        let propagated = error_request.propagate(&root).unwrap();
+        let interpretations: Vec<_> = [
+            SuspensionSignalKind::Position,
+            SuspensionSignalKind::Velocity,
+            SuspensionSignalKind::Force,
+        ]
+        .into_iter()
+        .map(|signal| SuspensionCoverageInterpretation {
+            acquisition_id: request.runs.training[0].acquisition_id,
+            signal,
+            coverage_factor: 2.0,
+            absolute_tolerance_si: 1e-12,
+        })
+        .collect();
+        let budget = error_request.audit_budget(&root, &interpretations).unwrap();
+        assert_eq!(budget.len(), 3);
+        assert!(budget.iter().all(|entry| !entry.matched));
+        assert_eq!(budget[2].modeled_standard_uncertainty_si, 100.0);
+        let mut uncertainty_request = SuspensionUncertaintyRequest {
+            errors: error_request.clone(),
+            interpretations: interpretations.clone(),
+        };
+        uncertainty_request.errors.model.factors[0].force_loading_n = 1e8;
+        let uncertainty = uncertainty_request.evaluate(&root).unwrap();
+        assert!(uncertainty
+            .propagation
+            .draws
+            .iter()
+            .any(|draw| draw.is_err()));
+        let uncertainty_bytes = encode_suspension_uncertainty(&uncertainty, &root).unwrap();
+        assert_eq!(
+            decode_suspension_uncertainty(&uncertainty_bytes, &root).unwrap(),
+            uncertainty
+        );
+        let mut corrupted = uncertainty.clone();
+        corrupted.propagation.draws.pop();
+        assert!(encode_suspension_uncertainty(&corrupted, &root).is_err());
+        assert!(
+            decode_suspension_uncertainty(&serde_json::to_vec(&corrupted).unwrap(), &root).is_err()
+        );
+        corrupted = uncertainty.clone();
+        corrupted.budget[0].matched = true;
+        assert!(corrupted.verify(&root).is_err());
+        corrupted = uncertainty.clone();
+        corrupted.schema_version = 2;
+        assert!(corrupted.verify(&root).is_err());
+        let mut unknown = serde_json::to_value(&uncertainty).unwrap();
+        unknown["qualified"] = serde_json::json!(true);
+        assert!(
+            decode_suspension_uncertainty(&serde_json::to_vec(&unknown).unwrap(), &root).is_err()
+        );
+        assert!(decode_suspension_uncertainty(
+            &vec![b' '; crate::suspension_runs::MAX_SUSPENSION_RUN_BYTES + 1],
+            &root
+        )
+        .is_err());
+        let mut consistent = error_request.clone();
+        consistent.model.factors[0].force_loading_n = 3e-6;
+        let mut extra = consistent.model.factors[0].clone();
+        extra.factor_id = 8;
+        extra.force_loading_n = -4e-6;
+        consistent.model.factors.push(extra);
+        let mut binding = consistent.calibration[0].clone();
+        binding.factor_id = 8;
+        consistent.calibration.push(binding);
+        let budget = consistent.audit_budget(&root, &interpretations).unwrap();
+        assert!(budget[2].matched);
+        assert!((budget[2].modeled_standard_uncertainty_si - 5e-6).abs() < 1e-15);
+        assert!(!budget[0].matched); // Unmodeled position uncertainty remains visible.
+        assert!(consistent
+            .audit_budget(&root, &interpretations[..2])
+            .is_err());
+        let mut invalid = interpretations.clone();
+        invalid[0].coverage_factor = 0.0;
+        assert!(consistent.audit_budget(&root, &invalid).is_err());
+        assert_eq!(
+            propagated,
+            propagate_suspension_errors(&request.runs, &error_request.model).unwrap()
+        );
+        let mut missing = error_request.clone();
+        missing.calibration.clear();
+        assert!(missing.validate().is_err());
+        let mut wrong = error_request.clone();
+        wrong.calibration[0].calibration_artifact.sha256 = format!("sha256:{}", "0".repeat(64));
+        assert!(wrong.validate().is_err());
+        wrong = error_request.clone();
+        wrong.calibration[0].interpretation.clear();
+        assert!(wrong.validate().is_err());
+        fs::write(root.join("calibration.txt"), b"corrupted calibration bytes").unwrap();
+        assert!(error_request.propagate(&root).is_err());
+        assert!(error_request.audit_budget(&root, &interpretations).is_err());
+        assert!(decode_suspension_uncertainty(&uncertainty_bytes, &root).is_err());
+        fs::write(root.join("calibration.txt"), b"test-only calibration bytes").unwrap();
+        assert_eq!(error_request.propagate(&root).unwrap(), propagated);
         let bytes =
             crate::suspension_runs::encode_suspension_acquired_evidence(&evidence, &root).unwrap();
         assert_eq!(
