@@ -230,6 +230,96 @@ random -2.08 / trained -1.61. Passing smoke execution does not certify learning
 quality or physical fidelity. The separately recorded real-current error remains
 unqualified and is not overridden by this CI result.
 
+Speed-dynamics protocol inspection (2026-09-09): the identification parent
+[README](https://data.mendeley.com/public-files/datasets/5xvg43r9r8/files/65d00740-e209-4d52-9105-76050d0a5e87/file_downloaded)
+and [summary script](https://data.mendeley.com/public-files/datasets/5xvg43r9r8/files/c21b66ea-b527-49ba-b4cc-57034abcba9e/file_downloaded)
+were read without executing scripts. They specify APRBS, PWM-count input and
+RPM output. Crucially, the script transcribes GUI coefficients/metrics rather
+than fitting the raw log. It reconstructs row time as zero followed by cumulative
+preceding `DT_ms`. GUI datapoint counts also differ from retained raw-log counts
+(10 ms: GUI 6,000 versus raw 3,089). A local raw-log fit must not claim exact
+reproduction of GUI training data or its reported accuracy.
+
+The separate continuous-PI 10 ms
+[validation README](https://data.mendeley.com/public-files/datasets/5xvg43r9r8/files/62ccc3d6-a181-4e9d-bc18-5014324461fa/file_downloaded)
+declares a 2026-05-05 capture with 2,084 samples and a different identified plant,
+`32.96 / (s + 29.12)`, versus `32.87 / (s + 28.9)` in the earlier identification
+folder. Its plotting wrapper delegates normalized-step analysis and disables
+automatic displayed metrics; it is not independent motor-parameter identification.
+The official listing gives `raw_data_10ms.txt` as 119,139 bytes, file ID
+`caca4c05-a564-4ccb-a171-bcaa057dca3a`, server-declared SHA-256
+`80b817f3869e7dbc089d1f1f1e9b0eed96899a7ecffcdb13ac80ed7b1cef27ea`.
+This validation raw file is not yet downloaded. Before using it, inspect command
+and speed row alignment and preserve closed-loop feedback confounding. A frozen
+PWM-to-speed model can be checked on recorded inputs, but this alone neither
+validates the deployed controller nor identifies resistance/torque constants.
+
+The PI raw file was subsequently acquired under a 150,000-byte streaming bound,
+matched the exact declared size/hash, and was stored create-new at
+`E:\RoboSim-external-data\mobility-openmct-5xvg43r9r8-v1\pi-validation-10ms-raw.txt`.
+The strict Rust reader accepted 2,084 rows with two missing DMM rows, 983 distinct
+IDs and 1,099 reused-ID rows, ages 0.8–33.5 ms. All declared intervals are 10 ms.
+
+A read-only preliminary arithmetic check froze the earlier GUI model
+`32.87/(s+28.9)` for both logs. The explicit assumed convention holds preceding-row
+PWM over the preceding declared interval, using exact scalar zero-order-hold
+propagation: `a=exp(-28.9*dt_s)`, `b=(32.87/28.9)*(1-a)` and
+`speed[k+1]=a*speed[k]+b*PWM[k]`. Free-running prediction initializes once from
+the first measured speed; one-step prediction uses the preceding measured speed.
+No coefficients were fitted, no delay was optimized and no residuals were removed.
+Over 3,088 identification transitions, free-running/one-step/persistence RMSE was
+3.4710961826986626 / 3.721353187124806 / 6.00792869913467 RPM. Over 2,083 separate
+PI transitions it was 3.4978654689956237 / 3.5552266569535935 /
+5.954540540502496 RPM. These preliminary numbers are not a certified clock
+alignment, independent GUI fit reproduction, physical parameter identification,
+or replay of the closed-loop controller. A tested reusable response evaluator
+must preserve the model and alignment assumptions with per-transition evidence.
+
+`recorded_openmct::response::evaluate_speed_response` now implements this explicit
+preceding-row ZOH convention with a supplied steady-state gain and positive time
+constant. It retains all transition indices, durations, PWM inputs, measured speeds,
+free-running/one-step predictions and residuals, plus persistence residuals and
+untrimmed aggregate RMSE. `exp_m1` avoids cancellation in short-interval input gain.
+It does not fit parameters, infer timing, substitute REF for PWM, or qualify
+physical constants. The first ten focused tests passed. The read-only
+`openmct_speed_response` example now emits the model, alignment convention,
+initial speed, every transition and aggregate errors as JSON. With gain
+1.1373702422145329 RPM/PWM-count and time constant 0.03460207612456748 s,
+Rust exactly reproduced the preliminary reported RMSE values above for both
+retained real logs. Additional tiny-interval, signed-input, invalid-coefficient,
+insufficient-data and overflow tests passed: eleven focused tests total, with
+all-target crate Clippy passing. The subsequent `cargo run -p xtask -- ci`
+completed with exit code zero on 2026-09-09. Mobility library tests passed
+175/175 with one additional ignored test (171.38 s), plus the fixed CLI,
+three NCLT audit tests and suspension CLI test. Workspace Clippy/tests,
+smokes, headless checks, OSS parity, fuzz-smoke (361 cases across nine boundaries)
+and Behavior CI (10/10 seeds) passed. This was the default CI configuration,
+not a new MuJoCo-feature or cross-backend qualification run.
+
+Evidence log: `E:\RNE-build\m3c-sensor\openmct-speed-response-v1-ci.log`, SHA-256
+`e118c0940ca3fce9824383afc789c6245867a8caf4706a404dd374873b7cd617`;
+response source Git blob `95cc2aa7d04c1553ea9bfb82d4d54aae7f686e61`.
+Retain limitations despite the successful process: heading CEM score/baseline
+both -10; clutter PPO random/trained -1.39/-1.37; mobile CEM grasped but did
+not place; mobile PPO random/trained -1.88/-1.61; flagship evidence reports
+`cross_backend=false`. These smoke outcomes do not establish the full Mobility
+Foundation goal or independently validated physical motor constants.
+
+Validation-method follow-up (2026-09-09): MathWorks' primary documentation on
+[model validation](https://www.mathworks.com/help/ident/ug/validating-models-after-estimation.html)
+distinguishes estimation from independent validation data and warns about
+reusing estimation data. Its
+[residual analysis guidance](https://www.mathworks.com/help/ident/ug/what-is-residual-analysis.html)
+also checks residual autocorrelation and correlation with past inputs; feedback
+can create correlation with future inputs. Consequently the next OpenMCT
+identification slice must retain signed lag conventions and separate the PI
+capture's closed-loop provenance from the identification capture. Aggregate RMSE
+alone is insufficient. The already-inspected PI capture is a development
+evaluation, not an untouched final test for subsequent model selection. Reserve
+a further capture before tuning; record training-only preprocessing and frozen
+coefficients. These are remaining requirements, not implemented diagnostics or
+an assertion that independent physical validation has been achieved.
+
 Next acquisition gate: obtain an explicit file listing and bounded individual raw
 logs on external storage; inspect units, measured versus commanded voltage, motor
 and load identity, clock construction, current-reference synchronization and

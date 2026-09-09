@@ -9,6 +9,7 @@ use std::io::Read;
 
 pub mod calibration;
 pub mod evaluation;
+pub mod response;
 
 /// Maximum original log size, including metadata and line endings.
 pub const MAX_OPENMCT_BYTES: usize = 8 * 1024 * 1024;
