@@ -18,6 +18,7 @@ pub mod per_wheel_observed;
 pub mod recorded_ddmr;
 pub mod recorded_ipin;
 pub mod recorded_nclt;
+pub mod recorded_openmct;
 pub mod road_excitation;
 pub mod suspension_acquisition;
 pub mod suspension_affine_acquisition;

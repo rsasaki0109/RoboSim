@@ -6,6 +6,132 @@ Uninspected candidate descriptions are not verified channel manifests.
 
 ## Selection and limits
 
+### Additional electrical-identification candidate (2026-09-09)
+
+The authors' [OpenMCT DC motor dataset, version 1](https://data.mendeley.com/datasets/5xvg43r9r8/1)
+(DOI `10.17632/5xvg43r9r8.1`, published 2026-05-11) declares CC BY 4.0,
+13 raw logs and over 52,000 rows. Its description lists PWM, speed, loop interval,
+raw/filtered current sensing and digital-multimeter current when enabled, together
+with calibration, APRBS, PI/discrete-controller and chirp experiments. This is a
+bench motor candidate, not a differential/skid or Ackermann vehicle validation.
+The linked SSRN article returned HTTP 403 during screening; its contents were not
+reviewed. No raw file, calibration table or processing script has been downloaded
+or executed, and file sizes/hashes remain unknown.
+
+The public site's client bundle subsequently established the anonymous listing
+route `/public-api/datasets/5xvg43r9r8/files?folder_id=root&version=1`
+(Accept `application/vnd.mendeley-public-dataset.1+json`) and folder route
+`/public-api/datasets/5xvg43r9r8/folders/1`. These returned metadata successfully;
+the guessed `/versions/1` route did not exist. Root documentation is individually
+available: `DATA_DESCRIPTION.md` 15,112 bytes, `DATASET_METADATA.md` 2,535 bytes,
+`LICENSE` 385 bytes and `README.md` 2,841 bytes. The listing declares SHA-256
+`f015801923f2fd17b833159f1de2f64b60450913d5ad1c774a5a3118e86f5479`
+for `DATA_DESCRIPTION.md` (file ID `85b0dbe5-c0ec-4a7b-bcc9-82aa44688b22`).
+This is server-declared metadata, not yet a locally verified content hash.
+Folder metadata separates current calibration, static characterization,
+system identification, continuous/discrete validation and optional characterization.
+Read these small documentation files before selecting any experiment log; the
+root documentation sizes do not bound the experiment folders or complete dataset.
+
+Documentation-only inspection subsequently read the data description, hardware
+metadata, calibration README and calibration MATLAB source (without executing it).
+The declared hardware is Teensy 4.0, DRV8874 IPROPI, TSINY ts-25GA370H-20 and
+Siglent SDM3045X. Speed is RPM, `DT_ms` is a loop interval, and PWM is a command;
+`CURRENT_RAW` is ADC counts while `CURRENT_AVG` already uses firmware filtering
+and an earlier calibration. Missing DMM fields use `nan` and sample ID `-1`.
+The DMM is asynchronous and reused IDs do not represent independent measurements.
+
+The inspected [calibration script](https://data.mendeley.com/public-files/datasets/5xvg43r9r8/files/2ba66e22-88b5-4fd7-88ea-59433626db22/file_downloaded)
+constructs time by cumulative loop intervals, takes absolute DMM current, selects
+age <= 10 ms and one minimum-age row per DMM ID, then removes residuals beyond
+4 * 1.4826 * MAD after an initial linear fit. Its final RMSE is computed on the
+retained fitting rows, not independent holdout. Negative calibrated values are
+clipped for displayed output. An RNE audit must retain rejected-row counts,
+unclipped residuals and DMM identity; this processing is not signed current or
+clock-calibration evidence. The fit mask also lacks an explicit nonnegative-age
+check, so raw age validity needs independent inspection.
+
+The calibration folder listing declares `raw_data.txt` 258,643 bytes, file ID
+`187827aa-3750-4d23-b513-ddf00d64480c`. Next acquire this individual log with a
+300,000-byte hard bound and verify its server-declared SHA-256, then audit all
+rows before fitting.
+
+Bounded acquisition completed: the exact 258,643 bytes matched server SHA-256
+`9dfa5b4ffaea999ef3792537b3a17611feb6ee3da0add47c63857cb11f0179a3` and were saved
+without overwrite at
+`E:\RoboSim-external-data\mobility-openmct-5xvg43r9r8-v1\current-calibration-raw.txt`.
+A preliminary PowerShell CSV inspection (not yet a strict production reader)
+found 4,558 rows, two missing DMM rows, 3,947 distinct valid DMM IDs and 609 reused
+rows. Reused IDs retained identical DMM time/current in this inspection. There
+were no negative ages; valid ages ranged 0.8–57.6 ms. Nonnegative ADC and age
+0–10 ms selected 1,952 rows with 1,952 distinct DMM IDs before residual rejection.
+All loop-interval fields were exactly 20 ms; cumulative interval sum is 91.16 s,
+not an independently measured acquisition duration. ADC counts ranged 0–296.
+These observations do not yet reproduce the fit, certify timing or provide an
+independent validation capture. The next reader must validate exact headers,
+column count, finite required channels, missing-DMM tuples, integer IDs and
+source ordering rather than relying on permissive `ConvertFrom-Csv` parsing.
+
+`recorded_openmct::read_openmct` now implements an offline strict reader with
+8 MiB/100,000-row/1,024-byte-line bounds and exact-byte hashing. It retains signed
+DMM current, original RPM, PWM commands, raw ADC and filtered source current
+separately. The documented missing tuple becomes `None`, never zero. Reused DMM
+IDs must retain bit-identical current/time; ID or DMM-time regression is rejected.
+No age selection, absolute-value conversion, calibration, filtering or resampling
+occurs in ingestion. Metadata dates are retained as declarations, not converted
+to a simulation clock. Focused synthetic tests cover preservation and rejection;
+validation is in progress. The read-only `openmct_audit` example has now read the
+physical file successfully through this strict reader: 4,558 rows, two missing
+DMM rows, 3,947 distinct IDs, 609 reused rows, age range 0.8–57.6 ms and the exact
+SHA-256 above matched the preliminary audit. The first two synthetic tests and
+all-target Clippy passed. After adding byte/row/line-bound and read-error tests,
+all three focused tests passed (0.33 s), together with all-target Clippy. Full
+workspace validation subsequently passed as recorded below. This is successful
+ingestion, not calibration acceptance.
+
+```text
+cargo run -p rne_mobility_benchmark --example openmct_audit -- <external raw-log.txt>
+```
+
+The frozen reader implementation (Git blob
+`4f204f9b36401ddbd13565bdc673abe7c5397a90`) completed `cargo run -p xtask -- ci`
+with exit 0. Mobility library: 167 passed, zero failures, one ignored long training
+job (182.73 s). Workspace lint/tests, headless, OSS parity, 361 fuzz cases and
+Behavior CI 10/10 seeds passed. External log:
+`E:\RNE-build\m3c-sensor\openmct-ingestion-v1-ci.log`, SHA-256
+`b5e8bf2b92538f82526819353828dd744aed4fc76bb754c6f195571a99619feb`.
+This default-feature run does not establish MuJoCo feature coverage. Negative
+results remain: heading CEM score -10 equals baseline; clutter PPO -1.37 is below
+random 2.01; mobile CEM does not place; flagship evidence is `cross_backend=false`.
+
+A separate read-only PowerShell recomputation on the acquired raw log reproduced
+the author's selection and linear/MAD-refit arithmetic: 1,952 candidates, 1,654
+retained and 298 rejected; slope 1.1860067240413787 mA/count, intercept
+-1.4498528146829202 mA. Unclipped retained-fit RMSE was 5.037074098976796 mA,
+whereas all-candidate RMSE under that same refit was 12.773130702197356 mA.
+Initial OLS all-candidate RMSE was 12.413588291154817 mA. This independent
+implementation check used permissive CSV parsing after strict ingestion succeeded;
+it is not yet a reusable RNE calibration API or an independent validation capture.
+Do not interpret rejected samples as known sensor faults or fit residuals as a
+calibrated noise distribution. A future tested reproduction must retain every
+candidate and its selection reason, and report excluded and retained errors.
+
+Next acquisition gate: obtain an explicit file listing and bounded individual raw
+logs on external storage; inspect units, measured versus commanded voltage, motor
+and load identity, clock construction, current-reference synchronization and
+calibration residuals before choosing identifiable parameters. Freeze separate
+excitation/validation runs before fitting. A PWM channel alone is not measured
+terminal voltage; do not infer physical electrical constants from it without the
+missing conversion and instrumentation evidence.
+
+The [AutoDRIVE Nigel author repository](https://github.com/Tinker-Twins/AutoDRIVE-Nigel-Dataset)
+is a separate Ackermann candidate with timestamp, steering, tick-count and inertial
+columns. Its README declares approximately 1.50 GB for the camera-free dataset
+and 66 GB for the full dataset. Neither was downloaded. The linked Zenodo record
+returned HTTP 429. Physical versus simulator capture provenance and calibration
+are not established by the inspected README, so it is not accepted as real-log
+qualification. Do not clone the full repository merely to inspect its schema.
+
 | Primary source | Potential RNE use | Evidence gap / decision |
 | --- | --- | --- |
 | [Michigan NCLT](https://robots.engin.umich.edu/nclt/index.html) | Wheel/IMU replay and estimator timing checks | First bounded format-inspection candidate; not independent drivetrain or suspension validation. |
