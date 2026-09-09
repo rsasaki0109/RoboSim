@@ -150,6 +150,86 @@ baseline; mobile clutter CEM grasped but did not place; flagship evidence report
 and mobile clutter PPO random -1.84 / trained -1.61. These smoke scores do not
 establish general learning performance or sim-to-real transfer.
 
+Next-run screening (2026-09-09): the official 10 ms identification folder lists
+`raw_data.txt`, file ID `6f95a940-fe9a-483b-bdbd-a47f5fa3acda`, 173,345 bytes,
+server-declared SHA-256
+`198770b1bb27f13617531b0fbbc6ade83b69e3032562f19dc33c8bb7f19e3f24`.
+Its [README](https://data.mendeley.com/public-files/datasets/5xvg43r9r8/files/28b1dfba-2e5d-4df6-bcde-ccea0ec343d4/file_downloaded)
+was read and declares 3,089 samples, nominal 10 ms timing, PWM command range
+0–227 and measured speed range -6–268 RPM. It reports GUI continuous-transfer
+fits, including `32.87 / (s + 28.9)`; these are author-reported fits, not locally
+reproduced or independent validation results. The raw file has not yet been
+downloaded or hash-verified. Before applying the frozen current calibration,
+inspect whether it contains usable DMM references; before dynamics validation,
+select a different capture for holdout and verify the sampling/command convention.
+PWM-to-speed fitting alone cannot identify physical voltage/current constants.
+
+The 10 ms raw log was subsequently downloaded with a 200,000-byte streaming
+bound, exact size and SHA-256 verification, and create-new storage at
+`E:\RoboSim-external-data\mobility-openmct-5xvg43r9r8-v1\identification-10ms-raw.txt`.
+The strict Rust reader accepted all 3,089 rows: one missing DMM row, 1,401 distinct
+DMM IDs, 1,687 repeated-ID rows, ages 0.7–47.7 ms, and all declared loop intervals
+10 ms. Constant declared intervals do not independently establish actual timing.
+
+A read-only arithmetic check applied the frozen calibration-recording Rust law
+to this different capture, without fitting on it, clipping predictions or rejecting
+residuals. The same age <= 10 ms/freshest-per-ID selection left 600 references.
+Current-magnitude RMSE was 0.03386975527905495 A, MAE 0.009484439084428132 A,
+mean reference-minus-prediction residual -0.0005510977590963855 A and maximum
+absolute residual 0.5413756008579356 A. This substantially exceeds the retained
+calibration-recording RMSE; it must not be replaced by a refitted or trimmed score.
+It is a separate-capture diagnostic, not a preregistered acceptance test, an
+independent instrument calibration, or qualified physical current fidelity.
+Asynchronous DMM integration and reused samples limit temporal correspondence;
+the source of the large errors has not been established.
+
+`recorded_openmct::evaluation::evaluate_current_calibration` now implements a
+training-only fit followed by frozen-law evaluation. Every evaluation row retains
+its original DMM identity/time/age, unclipped prediction, optional residual and
+selection flag. Selected-reference RMSE and maximum error use no residual rejection.
+Exact-byte and identical-numeric-row duplicate captures are rejected, but this
+does not certify independent acquisition or detect every overlapping capture.
+The first seven focused tests passed. The read-only
+`openmct_calibration_evaluation` example ran on both physical captures and reproduced
+600 selected references, RMSE 0.0338697552790549 A and maximum error
+0.541375600857936 A. It emits every evaluation row as JSON on stdout. Expanded
+selection/absence/overflow tests are running; full CI for this new API is pending.
+
+The largest selected residual occurs at zero-based source row 1,501: ADC 498,
+predicted magnitude 0.5891814957579355 A versus DMM -0.0478058949 A (ID 1,658,
+time 14.995629 s, age 9.7 ms). Immediately preceding rows change PWM from 227
+to zero, followed by reported speed falling from 256 RPM. This establishes
+coincidence with a command transient, not a proven causal explanation. Evaluation
+ADC values span 0–623, exceeding the calibration raw range 0–296; even that raw
+range is not the fitted-row support interval. The evaluation API now reports the
+inclusive retained-fit ADC interval, each original ADC value and an extrapolation
+flag. The interval uses only `Fit` rows, not residual-rejected/missing/stale/reused
+training rows. Neither extrapolation nor a negative prediction removes a row
+from error aggregation. Interval membership is not an accuracy guarantee.
+All nine focused tests and crate all-target Clippy passed after this extension.
+The physical-log run reports a retained-fit ADC interval of **0–152 counts**, not
+the raw calibration interval 0–296. Of 3,089 evaluation rows, 35 are outside this
+interval; 12 of the 600 selected DMM references are outside. All remain in the
+untrimmed RMSE (0.03386975527905494 A) and maximum-error
+(0.5413756008579356 A) calculation.
+
+Frozen-evaluation CI (2026-09-09): `cargo run -p xtask -- ci` completed with
+exit code 0. Formatting, dependency boundaries, workspace all-target Clippy,
+workspace tests, smokes, headless checks and OSS parity passed; fuzz covered 361
+cases across nine boundaries and Behavior CI passed 10/10 seeds. Mobility passed
+173 tests with one ignored long-training test (189.76 s); fixed CLI passed
+(1.41 s), NCLT audit passed three tests and suspension CLI passed (2.24 s).
+Evaluation module Git blob: `cf55ef425a47bc8514b636bf0c7a293d8b87eb49`.
+Log: `E:\RNE-build\m3c-sensor\openmct-frozen-evaluation-v1-ci.log`, SHA-256
+`c4417585ffb04ce17cb1cd7ad19d7f5fcdb29f4601df7e24028abf42220bf534`.
+This is default-feature coverage, not a new MuJoCo-feature qualification.
+Negative observations remain explicit: heading CEM score -10 equals baseline,
+mobile CEM grasped but did not place, and flagship reports `cross_backend=false`.
+Clutter PPO reported random -1.68 / trained -1.37; mobile clutter PPO reported
+random -2.08 / trained -1.61. Passing smoke execution does not certify learning
+quality or physical fidelity. The separately recorded real-current error remains
+unqualified and is not overridden by this CI result.
+
 Next acquisition gate: obtain an explicit file listing and bounded individual raw
 logs on external storage; inspect units, measured versus commanded voltage, motor
 and load identity, clock construction, current-reference synchronization and
