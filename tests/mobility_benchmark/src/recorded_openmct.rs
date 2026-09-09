@@ -7,6 +7,8 @@ use anyhow::{ensure, Context, Result};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 
+pub mod calibration;
+
 /// Maximum original log size, including metadata and line endings.
 pub const MAX_OPENMCT_BYTES: usize = 8 * 1024 * 1024;
 const HEADER: &str =

@@ -15,8 +15,9 @@ raw/filtered current sensing and digital-multimeter current when enabled, togeth
 with calibration, APRBS, PI/discrete-controller and chirp experiments. This is a
 bench motor candidate, not a differential/skid or Ackermann vehicle validation.
 The linked SSRN article returned HTTP 403 during screening; its contents were not
-reviewed. No raw file, calibration table or processing script has been downloaded
-or executed, and file sizes/hashes remain unknown.
+reviewed. At initial screening, no raw file, calibration table or processing script
+had been downloaded or executed, and file sizes/hashes were unknown. Subsequent
+bounded inspection and raw-log reproduction are recorded below.
 
 The public site's client bundle subsequently established the anonymous listing
 route `/public-api/datasets/5xvg43r9r8/files?folder_id=root&version=1`
@@ -115,6 +116,39 @@ it is not yet a reusable RNE calibration API or an independent validation captur
 Do not interpret rejected samples as known sensor faults or fit residuals as a
 calibrated noise distribution. A future tested reproduction must retain every
 candidate and its selection reason, and report excluded and retained errors.
+
+`recorded_openmct::calibration::reproduce_current_calibration` now implements the
+fixed published selection/MAD-refit protocol in Rust. Every original row keeps
+a missing/stale/reused/residual-rejected/fit decision. Candidate indices and
+unclipped final-law residuals remain available, together with both initial and
+refitted laws in A/count and A, and all-candidate/retained RMSE in A. This is
+descriptive reproduction on a single recording, not an independent calibration
+validation API or a signed-current model. Focused reader/calibration tests pass
+(6 tests, including MAD rejection visibility, zero MAD, insufficient/rank-deficient
+excitation and numerical overflow); focused crate Clippy passes. The read-only
+`openmct_calibration_reproduction` example also ran against the external raw log:
+4,558 rows, 1,952 candidates, 1,654 retained and 298 residual-rejected. The Rust fit
+is 0.0011860067240414037 A/count with intercept -0.0014498528146834992 A;
+retained RMSE is 0.005037074098976795 A and all-candidate RMSE is
+0.012773130702197143 A. These agree with the independent arithmetic reproduction
+above to floating-point precision. This is still the same recording, not an
+independent validation dataset.
+
+Calibration reproduction CI (2026-09-09): `cargo run -p xtask -- ci` completed
+with exit code 0, covering formatting, dependency boundaries, workspace Clippy,
+workspace tests, smokes, headless checks, OSS parity, 361 fuzz cases across nine
+boundaries and Behavior CI 10/10. The mobility library passed 170 tests with one
+explicitly ignored long-training test (204.14 s); the fixed CLI test passed
+(1.33 s), NCLT audit passed three tests, and suspension CLI passed (2.31 s).
+The calibration module Git blob was `4edfdd0ae0748a19a2e15cdaef40898d4a8634dd`.
+Log: `E:\RNE-build\m3c-sensor\openmct-calibration-v1-ci.log`, SHA-256
+`8555f89b79d3fbb664f1aaa19c3aceca351826ae7ace0eff18199489627e9eab`.
+This default-feature CI does not claim a new MuJoCo-feature run or physical
+qualification. Negative observations remain: heading CEM matched its -10
+baseline; mobile clutter CEM grasped but did not place; flagship evidence reports
+`cross_backend=false`. Clutter PPO reported random -1.52 / trained -1.37,
+and mobile clutter PPO random -1.84 / trained -1.61. These smoke scores do not
+establish general learning performance or sim-to-real transfer.
 
 Next acquisition gate: obtain an explicit file listing and bounded individual raw
 logs on external storage; inspect units, measured versus commanded voltage, motor
