@@ -690,6 +690,27 @@ mod tests {
         fs::write(root.join("procedure.txt"), b"test-only procedure bytes").unwrap();
         fs::write(root.join("calibration.txt"), b"test-only calibration bytes").unwrap();
         let evidence = request.identify(&root, 1e-9).unwrap();
+        use crate::suspension_robust::{
+            decode_suspension_acquired_huber, SuspensionAcquiredHuberEvidence, SuspensionHuberSpec,
+        };
+        let robust = SuspensionAcquiredHuberEvidence::evaluate(
+            &request,
+            SuspensionHuberSpec {
+                delta_n: 10.0,
+                maximum_iterations: 100,
+                prediction_tolerance_n: 1e-7,
+            },
+            &root,
+        )
+        .unwrap();
+        let robust_bytes = serde_json::to_vec(&robust).unwrap();
+        assert_eq!(
+            decode_suspension_acquired_huber(&robust_bytes, &root).unwrap(),
+            robust
+        );
+        let mut forged_robust = robust.clone();
+        forged_robust.evaluation.iterate.weights.clear();
+        assert!(forged_robust.verify(&root).is_err());
         let standalone = request.training[0].signals[2].calibration_artifact.clone();
         standalone.verify(&root).unwrap();
         assert!(standalone.verify(&root.join("raw.csv")).is_err());
@@ -701,6 +722,7 @@ mod tests {
         assert!(invalid.verify(&root).is_err());
         fs::write(root.join("calibration.txt"), b"TEST-ONLY calibration bytes").unwrap();
         assert!(standalone.verify(&root).is_err());
+        assert!(decode_suspension_acquired_huber(&robust_bytes, &root).is_err());
         fs::write(root.join("calibration.txt"), b"test-only calibration bytes").unwrap();
         standalone.verify(&root).unwrap();
         use crate::suspension_uncertainty::*;

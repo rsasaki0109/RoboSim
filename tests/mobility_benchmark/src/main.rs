@@ -410,7 +410,9 @@ fn main() -> Result<()> {
         | "suspension-affine-errors"
         | "suspension-affine-errors-verify"
         | "suspension-timestamp-errors"
-        | "suspension-timestamp-errors-verify" => {
+        | "suspension-timestamp-errors-verify"
+        | "suspension-huber"
+        | "suspension-huber-verify" => {
             ensure!(interval_tolerance_s.is_none() && root_seed.is_none()
                 && noise_root_seed.is_none() && episode_index.is_none() && lane_id.is_none()
                 && num_envs.is_none() && num_workers.is_none() && acquisition_manifest.is_none()
@@ -441,6 +443,29 @@ fn main() -> Result<()> {
                 "uncertainty input too large"
             );
             if matches!(
+                backend.as_str(),
+                "suspension-huber" | "suspension-huber-verify"
+            ) {
+                use rne_mobility_benchmark::suspension_robust::{
+                    decode_suspension_acquired_huber, SuspensionAcquiredHuberEvidence,
+                    SuspensionAcquiredHuberRequest,
+                };
+                let evidence = if backend == "suspension-huber-verify" {
+                    decode_suspension_acquired_huber(&bytes, root)?
+                } else {
+                    let request: SuspensionAcquiredHuberRequest = serde_json::from_slice(&bytes)?;
+                    SuspensionAcquiredHuberEvidence::evaluate(
+                        &request.acquisitions,
+                        request.robust_spec,
+                        root,
+                    )?
+                };
+                evidence.verify(root)?;
+                (
+                    serde_json::to_string(&evidence)?,
+                    "suspension-huber-evidence",
+                )
+            } else if matches!(
                 backend.as_str(),
                 "suspension-timestamp-errors" | "suspension-timestamp-errors-verify"
             ) {
@@ -785,6 +810,8 @@ fn main() -> Result<()> {
                 | "suspension-affine-errors-verify"
                 | "suspension-timestamp-errors"
                 | "suspension-timestamp-errors-verify"
+                | "suspension-huber"
+                | "suspension-huber-verify"
                 | "suspension-acquired-verify"
                 | "suspension-timing"
                 | "suspension-timing-verify"
@@ -817,6 +844,8 @@ fn main() -> Result<()> {
                 | "suspension-affine-errors-verify"
                 | "suspension-timestamp-errors"
                 | "suspension-timestamp-errors-verify"
+                | "suspension-huber"
+                | "suspension-huber-verify"
         ) || evidence_root.is_none(),
         "--evidence-root requires an acquisition verification or acquired suspension backend"
     );

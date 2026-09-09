@@ -16,6 +16,99 @@ wall-clock access or random resampling.
 
 ## Identification and validation contract
 
+### Force-residual robust fit (numerical diagnostic only)
+
+The current v1 coefficient solver is centered ordinary least squares. A separate
+opt-in Huber diagnostic is implemented; the existing v1 solver and evidence remain
+unchanged. The [SciPy Huber reference](https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.huber.html)
+defines a quadratic loss for small residuals and a linear tail, with an explicit
+transition scale. For force residual `r_n`, declare `delta_n > 0` in newton:
+`loss = 0.5*r_n^2` when `abs(r_n) <= delta_n`, otherwise
+`delta_n*(abs(r_n)-0.5*delta_n)`. This reduces large force-residual influence;
+it does not address arbitrary position/velocity leverage, errors in variables,
+correlated acquisition bias, hysteresis or an incorrect force law.
+
+Implementation acceptance requirements:
+
+- Training-only iteratively reweighted least squares, retaining all samples and
+  acquisition IDs; weight `min(1, delta_n/abs(r_n))`, with weight one at zero.
+- Explicit finite iteration/work limits and convergence tolerance; retain the
+  final iterate and non-convergence status rather than presenting it as a fit.
+- Unconstrained coefficient iterations followed by the existing physical bounds
+  on the final result; a nonphysical OLS starting point must not prevent recovery.
+- Preserve unweighted training/holdout residual metrics and ordinary least-squares
+  comparison. Never downweight holdout, tune `delta_n` on it, or conceal a failed
+  original force-RMSE gate behind a smaller robust objective.
+- Verify clean-data recovery, force-outlier resistance, leverage limitations,
+  rank failure, nonfinite arithmetic, deterministic replay and holdout isolation.
+- Embed scale and iteration assumptions in independently replayable evidence
+  before exposing the estimator through acquisition CLI workflows.
+
+`suspension_robust::fit_suspension_huber_iterate` now supplies the bounded numerical
+IRLS path with explicit newton-valued prediction-change stopping tolerance, final
+unconstrained coefficients, final weights and unweighted RMSE. It takes training
+runs only, and does not apply physical acceptance or access holdout.
+`evaluate_suspension_huber` separately validates a whole-run request, retains the
+ordinary training-only fit (including its failure), checks final physical bounds
+and evaluates untouched holdout force RMSE and maximum residual. Its `passed`
+requires convergence and the unchanged physical/training/holdout gates. Failed
+gates retain the iterate and diagnostics rather than erasing the result. Both roles
+retain each acquisition's ID, count, unweighted RMSE and maximum absolute residual
+in input order; any per-run RMSE failure also fails the overall verdict even if
+the pooled RMSE passes. The maximum residual is diagnostic, not a new threshold.
+Tests also retain a negative leverage example: a grossly corrupted position/force
+pair drives the residual-robust solver to an incorrect coefficient. A separate
+negative-stiffness/damping fixture converges with small holdout residuals but
+fails physical bounds. Residual robustness is not predictor calibration. The
+three focused numerical tests and all-target Clippy passed before envelope work;
+acquisition-file and CLI integration are covered by the full CI checkpoint below.
+
+`SuspensionHuberEvidence` now binds the complete whole-run request, explicit robust
+specification and evaluation in independent `rne_suspension_huber_evidence` schema
+1. Compact encode and strict decode are bounded to 8 MiB and recompute the entire
+evaluation, including final weights, per-run residuals, OLS errors and failed
+verdicts. This numerical envelope is not acquisition-file verification, certificate
+authentication or physical qualification. Unsupported versions and altered stored
+results are rejected; numerical execution errors still reject evidence creation.
+
+`SuspensionAcquiredHuberEvidence` adds independent
+`rne_suspension_acquired_huber_evidence` schema 1. Evaluation verifies all declared
+training/holdout raw and calibration file bytes under the supplied external root
+before fitting. Bounded decoding (8 MiB) repeats file verification and the full
+numerical evaluation. Certificate authenticity, interpretation of the Huber scale,
+and execution of declared raw-to-sample processing procedures are not established
+by byte hashes. Test-only acquisition
+fixtures are not physical measurement evidence.
+
+CLI modes `--backend suspension-huber` and `--backend suspension-huber-verify`
+require `--input`, `--evidence-root` and `--output`. Generation takes a strict
+`SuspensionAcquiredHuberRequest` containing `acquisitions` and `robust_spec`;
+verification takes the acquired evidence above. Numerical conditions must be
+embedded in the input; unrelated seed/timing overrides are rejected before input
+processing. Both modes recheck retained files and emit compact verified evidence.
+Successful execution means processing succeeded, not that `evaluation.passed` is
+true. Existing evidence output is not overwritten.
+It must not yet be used as a qualified fitted vehicle profile.
+
+Full workspace validation of the Huber implementation completed with exit code 0
+using `cargo run -p xtask -- ci`, with tracked files fixed during execution.
+The mobility library passed 164 tests with zero failures and one ignored long
+training job; the acquisition CLI integration test also passed. Workspace
+lint/tests, headless checks, OSS parity, 361 fuzz cases across nine boundaries,
+and Behavior CI 10/10 seeds passed. The tested robust module Git blob is
+`7271566e2ca20f27f500a50d86afbbd96cb4ac99`. External log:
+`E:\RNE-build\m3c-sensor\suspension-huber-v1-ci.log`, SHA-256
+`0d1188dfc272be2ed1c0afaababeaa382b94e5c4e0d55ec711a31b3bd7f6fa5a`.
+Separate MuJoCo-enabled all-target Clippy passed with warnings denied. The mobility
+library passed 192 tests with zero failures and two ignored long training jobs
+(215.19 s); the whole-run acquisition CLI integration passed (2.62 s). This covers
+the Huber tests and existing two-backend sensor-only and road-input regressions,
+not every workspace crate with every optional feature enabled.
+The default-feature flagship workflow reported `cross_backend=false`, and
+mobile clutter CEM retained `placed=false`; neither is promoted to task success.
+These checks establish software regression evidence, not physical calibration,
+uncertainty coverage or actual HIL.
+
 The force equation is rewritten as a three-coefficient linear regression. Position,
 velocity, and force are centered before solving the two-variable normal equation,
 reducing intercept conditioning error. A near-singular position/velocity excitation
@@ -546,6 +639,14 @@ is retained: heading CEM tied its baseline at -10; mobile clutter CEM grasped bu
 did not place. Clutter PPO scored -1.50/-1.37 and mobile clutter PPO -2.16/-1.61
 (random/trained); these smoke scores do not establish policy generalization.
 The flagship workflow explicitly reported `cross_backend=false`.
+
+Additional verification of commit `55d6073` completed on 2026-09-09:
+`cargo test -p rne_mobility_benchmark --features mujoco --lib` passed 189 tests
+with zero failures and two existing long training jobs ignored (211.61 s).
+MuJoCo-enabled all-target Clippy also passed with warnings denied. This includes
+the actual two-backend road-excitation tolerance checks, Ackermann sensor-loop
+contracts and the six sampling tests. It does not convert synthetic identification
+fixtures into physical calibration evidence, nor establish actual HIL.
 
 `SuspensionTimingErrorModel` (`rne_suspension_timing_error_model`, schema 1)
 generates one explicitly indexed realization using WorldRandom. Independent

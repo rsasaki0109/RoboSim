@@ -487,6 +487,50 @@ fn whole_run_cli_generates_and_reverifies_all_diagnostic_envelopes() {
                     .collect(),
             };
             let input = root.join("timestamp-input.json");
+            {
+                use rne_mobility_benchmark::suspension_robust::*;
+                let request = SuspensionAcquiredHuberRequest {
+                    acquisitions: affine.acquisitions.clone(),
+                    robust_spec: SuspensionHuberSpec {
+                        delta_n: 10.0,
+                        maximum_iterations: 100,
+                        prediction_tolerance_n: 1e-7,
+                    },
+                };
+                let source = root.join("huber-input.json");
+                let output = root.join("huber-output.json");
+                let replay = root.join("huber-replay.json");
+                let rejected = root.join("huber-rejected.json");
+                fs::write(&source, serde_json::to_vec(&request).unwrap()).unwrap();
+                for (mode, input, destination) in [
+                    ("suspension-huber", &source, &output),
+                    ("suspension-huber-verify", &output, &replay),
+                ] {
+                    let result = invoke(mode, input, destination, &[]);
+                    assert!(
+                        result.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&result.stderr)
+                    );
+                    let result = invoke(mode, input, &rejected, &["--seed", "123"]);
+                    assert!(!result.status.success());
+                    assert!(String::from_utf8_lossy(&result.stderr)
+                        .contains("assumptions must be embedded"));
+                    assert!(!rejected.exists());
+                }
+                assert_eq!(fs::read(&output).unwrap(), fs::read(&replay).unwrap());
+                let mut forged: SuspensionAcquiredHuberEvidence =
+                    serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+                forged.evaluation.iterate.weights.clear();
+                let forged_path = root.join("huber-forged.json");
+                fs::write(&forged_path, serde_json::to_vec(&forged).unwrap()).unwrap();
+                assert!(
+                    !invoke("suspension-huber-verify", &forged_path, &rejected, &[])
+                        .status
+                        .success()
+                );
+                assert!(!rejected.exists());
+            }
             let output = root.join("timestamp-output.json");
             let replay = root.join("timestamp-replay.json");
             fs::write(&input, serde_json::to_vec(&timestamp).unwrap()).unwrap();
