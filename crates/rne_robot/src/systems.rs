@@ -37,6 +37,116 @@ pub enum MobilityPlantEvaluationError {
     InvalidTimeStep,
 }
 
+/// Failure returned by first-order steering-actuator identification.
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SteeringActuatorIdentificationError {
+    /// Bounds, split, timing tolerance, or residual gates are invalid.
+    #[error("invalid steering actuator identification specification")]
+    InvalidSpec,
+    /// A sample is non-finite, unordered, nonuniform, or outside declared travel.
+    #[error("invalid steering actuator identification sample")]
+    InvalidSample,
+    /// Training or holdout lacks enough command-error excitation.
+    #[error("insufficient steering actuator identification excitation")]
+    InsufficientExcitation,
+    /// The fitted discrete response is not a stable first-order lag.
+    #[error("steering actuator response is not an identifiable stable first-order lag")]
+    Unidentifiable,
+    /// The fitted time constant falls outside the declared physical bounds.
+    #[error("identified steering actuator time constant is outside declared bounds")]
+    NonPhysicalResult,
+    /// Training or holdout residual exceeds its declared bound.
+    #[error("steering actuator identification residual exceeds its declared bound")]
+    ResidualExceeded,
+}
+
+/// One synchronized command/direct-angle sample for steering identification.
+///
+/// `command_target_rad` is the target held from this capture until the next
+/// sample. `measured_position_rad` must be a direct steering-angle measurement,
+/// not a command echo or pose-derived proxy.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SteeringActuatorIdentificationSample {
+    /// Monotonic capture time in seconds within one acquisition.
+    pub capture_time_s: f64,
+    /// Steering target held over the following interval, in radians.
+    pub command_target_rad: f64,
+    /// Direct completed steering-angle measurement in radians.
+    pub measured_position_rad: f64,
+}
+
+/// Frozen split and acceptance gates for first-order steering identification.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SteeringActuatorIdentificationSpec {
+    /// Number of leading transitions used exclusively for fitting.
+    pub training_transition_count: usize,
+    /// Allowed absolute deviation from the first capture interval, in seconds.
+    pub interval_tolerance_s: f64,
+    /// Minimum absolute command error retained as an excited transition, in radians.
+    pub minimum_abs_command_error_rad: f64,
+    /// Minimum accepted time constant in seconds.
+    pub minimum_time_constant_s: f64,
+    /// Maximum accepted time constant in seconds.
+    pub maximum_time_constant_s: f64,
+    /// Maximum training one-step RMS angle residual in radians.
+    pub maximum_training_rms_rad: f64,
+    /// Maximum holdout one-step RMS angle residual in radians.
+    pub maximum_holdout_rms_rad: f64,
+    /// Minimum declared steering travel in radians.
+    pub minimum_position_rad: f64,
+    /// Maximum declared steering travel in radians.
+    pub maximum_position_rad: f64,
+}
+
+impl SteeringActuatorIdentificationSpec {
+    fn is_valid(&self) -> bool {
+        [
+            self.interval_tolerance_s,
+            self.minimum_abs_command_error_rad,
+            self.minimum_time_constant_s,
+            self.maximum_time_constant_s,
+            self.maximum_training_rms_rad,
+            self.maximum_holdout_rms_rad,
+            self.minimum_position_rad,
+            self.maximum_position_rad,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+            && self.training_transition_count >= 2
+            && self.interval_tolerance_s >= 0.0
+            && self.minimum_abs_command_error_rad > 0.0
+            && self.minimum_time_constant_s > 0.0
+            && self.minimum_time_constant_s < self.maximum_time_constant_s
+            && self.maximum_training_rms_rad >= 0.0
+            && self.maximum_holdout_rms_rad >= 0.0
+            && self.minimum_position_rad < self.maximum_position_rad
+            && self.minimum_abs_command_error_rad
+                < self.maximum_position_rad - self.minimum_position_rad
+    }
+}
+
+/// Accepted first-order steering fit and frozen holdout evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SteeringActuatorIdentificationResult {
+    /// Uniform capture interval used by the discrete fit, in seconds.
+    pub capture_interval_s: f64,
+    /// Fitted continuous-time first-order time constant in seconds.
+    pub time_constant_s: f64,
+    /// Fitted discrete response fraction `1 - exp(-dt / tau)`.
+    pub discrete_response_ratio: f64,
+    /// Excited training transitions used by the fit.
+    pub training_transition_count: usize,
+    /// Excited holdout transitions evaluated without refitting.
+    pub holdout_transition_count: usize,
+    /// Training one-step RMS angle residual in radians.
+    pub training_rms_rad: f64,
+    /// Holdout one-step RMS angle residual in radians.
+    pub holdout_rms_rad: f64,
+}
+
 /// Failure returned by deterministic suspension-force identification.
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SuspensionIdentificationError {
@@ -1739,6 +1849,128 @@ pub fn evaluate_steering_actuator(
         command_saturated,
         rate_limited,
         stuck,
+    })
+}
+
+/// Identifies an unsaturated first-order command-to-steering-angle response.
+///
+/// The fit uses only the leading training transitions and evaluates a frozen
+/// coefficient on the remaining holdout transitions. For each excited interval,
+/// it solves `position[k+1] - position[k] = b * (command[k] - position[k])`,
+/// then reports `tau = -dt / ln(1 - b)`. Samples must share one uniform capture
+/// grid and remain inside declared travel. The caller must prequalify that the
+/// selected acquisition excludes rate saturation, deadband, backlash, and stuck
+/// faults; this function does not silently absorb those effects into `tau`.
+pub fn identify_steering_actuator_first_order(
+    spec: SteeringActuatorIdentificationSpec,
+    samples: &[SteeringActuatorIdentificationSample],
+) -> Result<SteeringActuatorIdentificationResult, SteeringActuatorIdentificationError> {
+    if !spec.is_valid() {
+        return Err(SteeringActuatorIdentificationError::InvalidSpec);
+    }
+    if samples.len() < 5 || spec.training_transition_count >= samples.len() - 1 {
+        return Err(SteeringActuatorIdentificationError::InsufficientExcitation);
+    }
+    if samples.iter().any(|sample| {
+        !sample.capture_time_s.is_finite()
+            || !sample.command_target_rad.is_finite()
+            || !sample.measured_position_rad.is_finite()
+            || !(spec.minimum_position_rad..=spec.maximum_position_rad)
+                .contains(&sample.command_target_rad)
+            || !(spec.minimum_position_rad..=spec.maximum_position_rad)
+                .contains(&sample.measured_position_rad)
+    }) {
+        return Err(SteeringActuatorIdentificationError::InvalidSample);
+    }
+    let capture_interval_s = samples[1].capture_time_s - samples[0].capture_time_s;
+    if !capture_interval_s.is_finite() || capture_interval_s <= 0.0 {
+        return Err(SteeringActuatorIdentificationError::InvalidSample);
+    }
+    for pair in samples.windows(2) {
+        let interval_s = pair[1].capture_time_s - pair[0].capture_time_s;
+        if !interval_s.is_finite()
+            || interval_s <= 0.0
+            || (interval_s - capture_interval_s).abs() > spec.interval_tolerance_s
+        {
+            return Err(SteeringActuatorIdentificationError::InvalidSample);
+        }
+    }
+
+    let mut training_error_delta_sum = 0.0;
+    let mut training_error_squared_sum = 0.0;
+    let mut training_transition_count = 0;
+    let mut holdout_transition_count = 0;
+    for (index, pair) in samples.windows(2).enumerate() {
+        let error_rad = pair[0].command_target_rad - pair[0].measured_position_rad;
+        if error_rad.abs() < spec.minimum_abs_command_error_rad {
+            continue;
+        }
+        if index < spec.training_transition_count {
+            let delta_rad = pair[1].measured_position_rad - pair[0].measured_position_rad;
+            training_error_delta_sum += error_rad * delta_rad;
+            training_error_squared_sum += error_rad * error_rad;
+            training_transition_count += 1;
+        } else {
+            holdout_transition_count += 1;
+        }
+    }
+    if training_transition_count < 2 || holdout_transition_count < 2 {
+        return Err(SteeringActuatorIdentificationError::InsufficientExcitation);
+    }
+    if !training_error_squared_sum.is_finite()
+        || training_error_squared_sum <= f64::EPSILON
+        || !training_error_delta_sum.is_finite()
+    {
+        return Err(SteeringActuatorIdentificationError::Unidentifiable);
+    }
+    let discrete_response_ratio = training_error_delta_sum / training_error_squared_sum;
+    if !discrete_response_ratio.is_finite()
+        || discrete_response_ratio <= 0.0
+        || discrete_response_ratio >= 1.0
+    {
+        return Err(SteeringActuatorIdentificationError::Unidentifiable);
+    }
+    let time_constant_s = -capture_interval_s / (-discrete_response_ratio).ln_1p();
+    if !time_constant_s.is_finite()
+        || !(spec.minimum_time_constant_s..=spec.maximum_time_constant_s).contains(&time_constant_s)
+    {
+        return Err(SteeringActuatorIdentificationError::NonPhysicalResult);
+    }
+
+    let residual_sum = |training: bool| {
+        samples
+            .windows(2)
+            .enumerate()
+            .filter_map(|(index, pair)| {
+                let error_rad = pair[0].command_target_rad - pair[0].measured_position_rad;
+                ((error_rad.abs() >= spec.minimum_abs_command_error_rad)
+                    && ((index < spec.training_transition_count) == training))
+                    .then(|| {
+                        let predicted_rad =
+                            pair[0].measured_position_rad + discrete_response_ratio * error_rad;
+                        (predicted_rad - pair[1].measured_position_rad).powi(2)
+                    })
+            })
+            .sum::<f64>()
+    };
+    let training_rms_rad = (residual_sum(true) / training_transition_count as f64).sqrt();
+    let holdout_rms_rad = (residual_sum(false) / holdout_transition_count as f64).sqrt();
+    if !training_rms_rad.is_finite()
+        || !holdout_rms_rad.is_finite()
+        || training_rms_rad > spec.maximum_training_rms_rad
+        || holdout_rms_rad > spec.maximum_holdout_rms_rad
+    {
+        return Err(SteeringActuatorIdentificationError::ResidualExceeded);
+    }
+
+    Ok(SteeringActuatorIdentificationResult {
+        capture_interval_s,
+        time_constant_s,
+        discrete_response_ratio,
+        training_transition_count,
+        holdout_transition_count,
+        training_rms_rad,
+        holdout_rms_rad,
     })
 }
 
@@ -3871,6 +4103,88 @@ mod tests {
                 0.0,
             ),
             Err(MobilityPlantEvaluationError::InvalidTimeStep)
+        );
+    }
+
+    fn steering_identification_spec() -> SteeringActuatorIdentificationSpec {
+        SteeringActuatorIdentificationSpec {
+            training_transition_count: 6,
+            interval_tolerance_s: 1.0e-12,
+            minimum_abs_command_error_rad: 0.01,
+            minimum_time_constant_s: 0.01,
+            maximum_time_constant_s: 0.5,
+            maximum_training_rms_rad: 1.0e-12,
+            maximum_holdout_rms_rad: 1.0e-12,
+            minimum_position_rad: -0.5,
+            maximum_position_rad: 0.5,
+        }
+    }
+
+    fn steering_identification_samples() -> Vec<SteeringActuatorIdentificationSample> {
+        let dt_s = 0.01;
+        let response = 1.0 - (-dt_s / 0.08_f64).exp();
+        let mut position_rad = 0.0;
+        (0..=12)
+            .map(|index| {
+                let command_target_rad = match index {
+                    0..=3 => 0.4,
+                    4..=7 => -0.3,
+                    _ => 0.2,
+                };
+                let sample = SteeringActuatorIdentificationSample {
+                    capture_time_s: index as f64 * dt_s,
+                    command_target_rad,
+                    measured_position_rad: position_rad,
+                };
+                position_rad += response * (command_target_rad - position_rad);
+                sample
+            })
+            .collect()
+    }
+
+    #[test]
+    fn steering_identification_recovers_time_constant_without_holdout_refit() {
+        let result = identify_steering_actuator_first_order(
+            steering_identification_spec(),
+            &steering_identification_samples(),
+        )
+        .unwrap();
+
+        assert!((result.capture_interval_s - 0.01).abs() < 1.0e-15);
+        assert!((result.time_constant_s - 0.08).abs() < 1.0e-12);
+        assert_eq!(result.training_transition_count, 6);
+        assert_eq!(result.holdout_transition_count, 6);
+        assert!(result.training_rms_rad < 1.0e-15);
+        assert!(result.holdout_rms_rad < 1.0e-15);
+    }
+
+    #[test]
+    fn steering_identification_rejects_clock_drift_echo_and_holdout_error() {
+        let spec = steering_identification_spec();
+        let mut nonuniform = steering_identification_samples();
+        nonuniform[3].capture_time_s += 0.001;
+        assert_eq!(
+            identify_steering_actuator_first_order(spec, &nonuniform),
+            Err(SteeringActuatorIdentificationError::InvalidSample)
+        );
+
+        let command_echo = (0..=12)
+            .map(|index| SteeringActuatorIdentificationSample {
+                capture_time_s: index as f64 * 0.01,
+                command_target_rad: 0.2,
+                measured_position_rad: 0.2,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            identify_steering_actuator_first_order(spec, &command_echo),
+            Err(SteeringActuatorIdentificationError::InsufficientExcitation)
+        );
+
+        let mut corrupted_holdout = steering_identification_samples();
+        corrupted_holdout[10].measured_position_rad += 0.01;
+        assert_eq!(
+            identify_steering_actuator_first_order(spec, &corrupted_holdout),
+            Err(SteeringActuatorIdentificationError::ResidualExceeded)
         );
     }
 

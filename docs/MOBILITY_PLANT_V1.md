@@ -56,6 +56,16 @@ travel, and failure response from synchronized command and direct steering-angle
 measurements. Backlash, compliance, load-dependent servo response, and linkage
 forces remain unavailable until represented by a separately validated tier.
 
+`identify_steering_actuator_first_order` provides the first evidence gate for the
+unsaturated lag tier. It requires a uniform monotonic capture clock and direct
+angle samples, fits only a declared leading training split, and evaluates frozen
+one-step residuals on a later holdout split. The discrete fit is
+`delta_angle = b * (command - angle)` with `tau = -dt / ln(1 - b)`.
+Command echoes, insufficient command-error excitation, unstable response ratios,
+out-of-travel samples, clock drift, nonphysical time constants, and excessive
+training or holdout residuals fail explicitly. Callers must prequalify and retain
+separate rate-saturated, deadband, backlash, and fault segments.
+
 ## Wheel assembly
 
 `WheelAssemblySpec` declares unloaded radius, width, axle inertia, rolling resistance, and
