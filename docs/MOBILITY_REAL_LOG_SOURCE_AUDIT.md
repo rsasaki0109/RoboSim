@@ -1006,6 +1006,23 @@ scan messages; they were not extracted into a separate dataset.
 - Attribution: Giannis Badakis, Michalis Galanis and Zengjie Zhang,
   *Driving Data of a Real F1tenth Car*, Zenodo record 12536536, CC BY 4.0.
 
+For whole-run separation, the official API was rechecked on 2026-09-13 before a
+second download. `ex-hard-r1_2023-06-12-19-50-37.bag` is a distinct continuous run
+with exactly 92,374,784 bytes and Zenodo MD5
+`6f3feda005530bfe586b8dda3545301a`. It is the candidate independent final run for
+an aggregate command-to-motion experiment; the existing hard-r2 run may be used
+for training/development only. Filename similarity does not prove identical vehicle
+configuration, calibration, or clock mapping, so both manifests must be compared
+before model fitting.
+
+The pinned `scripts/acquire_f1tenth_hard_r1.py` downloader was committed before
+accessing the second bag. It streams only the exact official content URL into a
+create-new `.partial`, enforces response length and a hard byte cap, verifies the
+official MD5 while independently computing SHA-256, fsyncs, and promotes to the
+final name only after all checks pass. Synthetic tests cover success, declared-
+length drift, overflow, checksum failure, and overwrite refusal. Raw bytes remain
+on the external SSD and are never committed.
+
 A read-only, bounded standard-library byte audit, following the record layout in
 the [official ROS implementation](https://github.com/ros/ros_comm/blob/noetic-devel/tools/rosbag/src/rosbag/bag.py),
 found ROS bag v2, 105 uncompressed chunks and 25 connections. Message definitions
