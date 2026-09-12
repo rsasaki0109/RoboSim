@@ -1229,6 +1229,47 @@ ordering and header-to-recorder clock residuals on these exposed runs. Since
 `/cmd_vel` has no header, this can qualify a deterministic bag-time replay policy,
 not command capture time or physical input-to-motion delay.
 
+### Exposed clock-domain diagnostic
+
+`scripts/audit_f1tenth_clocks.py` implements that narrower contract. It reads only
+timestamps from the allowlisted exposed runs, centers epoch-scale integers before
+an affine diagnostic, and never changes a source timestamp. Synthetic tests cover
+large epochs, drift, duplicate/reversed recorder time, missing channels and partial
+stamps. All 19 F1TENTH audit tests pass together.
+
+Bag timestamps are strictly increasing with no duplicates for `/cmd_vel`, VESC,
+VICON pose and VICON twist in both runs. This qualifies deterministic replay in
+the rosbag recorder-time domain. It does **not** qualify capture time: `/cmd_vel`
+has no header, and its transport delay is unknown.
+
+The header-to-bag affine diagnostics reinforce that boundary:
+
+| Exposed run/channel | scale error | absolute residual p50 | p95 | p99 | maximum |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| hard-r1 VESC | +21.47 ppm | 3.10 ms | 12.12 ms | 66.87 ms | 258.84 ms |
+| hard-r1 VICON pose | -77.22 ppm | 3.97 ms | 12.45 ms | 54.79 ms | 982.20 ms |
+| hard-r1 VICON twist | -78.21 ppm | 3.85 ms | 12.42 ms | 56.39 ms | 981.73 ms |
+| hard-r2 VESC | +39.29 ppm | 2.87 ms | 6.42 ms | 90.48 ms | 323.20 ms |
+| hard-r2 VICON pose | -148.68 ppm | 5.85 ms | 15.59 ms | 112.75 ms | 976.80 ms |
+| hard-r2 VICON twist | -109.22 ppm | 4.79 ms | 12.38 ms | 110.38 ms | 854.48 ms |
+
+These are recorder-versus-header residuals, not one-way latency observations.
+The varying drift and near-one-second maxima forbid silently translating command
+bag time into VICON capture time or identifying actuator delay from their offset.
+No fitted clock mapping is applied. A first identification slice may use one shared
+bag-time origin as a replay experiment with timing uncertainty declared; it must
+not claim capture-aligned physical dynamics.
+
+The retained reports are 6,053 bytes with file SHA-256
+`8f18d4472ff450f93aaa82ecf23ba4aa7f1d9dda26d7a2ce8b48f295f31c9431`
+and content digest
+`5602c0d3941570f9bdb67574836745fd0ba9b5112e463377cdb86004b7a25911`
+for hard-r1, and 6,033 bytes with file SHA-256
+`4501bf0ac8590df426502ab2720971b3683044eef5b751214d7ce25a6ccbf4a1`
+and content digest
+`c53b0cebbd19d4798d2802e2623baf67c984588ebae747e66cb938df5e96524c`
+for hard-r2. They remain external beside the control audits.
+
 The existing [suspension identification gate](MOBILITY_SUSPENSION_IDENTIFICATION_V1.md)
 requires strut displacement, velocity and generalized force plus acquisition evidence.
 None of these candidate descriptions establishes that contract. Keep its physical
