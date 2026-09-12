@@ -1083,8 +1083,8 @@ from the topic/type names. Independently checked pose differences and documented
 server/driver conventions are required before selecting a yaw-rate reference.
 
 The independent audit is reproducible with `scripts/audit_f1tenth_source.py`.
-It verifies the pinned size and SHA-256 before parsing; it rejects different
-captures instead of silently assuming their schemas or calibration. It checks
+It verifies each allowlisted run's pinned filename, size and SHA-256 before parsing;
+it rejects every other capture instead of silently assuming its schema or calibration. It checks
 decoded counts against the source connection index and prints a stable JSON digest.
 Only the five listed channels are deserialized; no dataset is exported or fitted.
 Use the external dependency directory and disable bytecode writes:
@@ -1101,6 +1101,16 @@ The chosen Python must provide `rosbags==0.11.3` and its dependencies. Synthetic
 audit tests do not import rosbags and do not require physical data. The captured
 report is `E:\RNE-build\m3c-sensor\f1tenth-independent-audit.json`, with digest
 `f0427731ef2388e97dc29fa1906385fa18db57786a4409c9e97673193d418710`.
+
+The separately acquired hard-r1 final candidate passed the same independent reader
+audit without timestamp repair. It contains 9,920 `/cmd_vel`, 9,939 motor-speed
+command, 6,318 VESC, 21,001 VICON pose and 20,992 VICON twist messages. All 6,318
+VESC input-voltage values are zero and 6,164 fault values are outside the embedded
+0-through-6 declaration, so the second run independently preserves rather than
+resolves the electrical-channel anomaly. The source audit content digest is
+`03be5032...66a10`; the retained 2,440-byte pretty-JSON file has SHA-256
+`66568431...d3a1` at
+`E:\RNE-build\m3c-sensor\f1tenth-hard-r1-source-audit.json`.
 
 ### Pose/twist consistency diagnostic
 
@@ -1155,6 +1165,17 @@ All 11 synthetic audit tests passed. Schema-v2 evidence is
 `c9050e373ff763e0e9ea390adbf5ca185d5383f6b9a5925e1f6beb72b32fa49d`.
 Neither diagnostic performs clock synchronization, independent reference
 qualification, electrical identification or an acceptance-threshold fit.
+
+Applying the unchanged diagnostic to hard-r1 yielded 20,665 endpoint pairs and
+20,611 fully covered integral pairs. Its world-planar endpoint difference RMS is
+0.653431202 m/s; integrated displacement difference RMS is 0.002527062 m. The
+unapplied angular scales are 105.682534 for endpoint rates and 94.970268 for
+integrated increments, closely reproducing the unexplained order-100 discrepancy
+seen in hard-r2. This repeated symptom strengthens the driver/convention
+investigation priority but is not permission to fit or apply that scale. The audit
+content digest is `5163f71c...5c1ae`; the retained 1,579-byte file has SHA-256
+`d6416edc...dfc3` at
+`E:\RNE-build\m3c-sensor\f1tenth-hard-r1-reference-audit.json`.
 
 The existing [suspension identification gate](MOBILITY_SUSPENSION_IDENTIFICATION_V1.md)
 requires strut displacement, velocity and generalized force plus acquisition evidence.
