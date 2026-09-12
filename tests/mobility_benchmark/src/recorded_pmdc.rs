@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub mod data;
+pub mod identification;
 
 /// Stable artifact kind for the predeclared PMDC identification protocol.
 pub const PMDC_PROTOCOL_KIND: &str = "rne_pmdc_identification_protocol";

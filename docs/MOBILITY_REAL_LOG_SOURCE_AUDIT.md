@@ -641,6 +641,16 @@ final-access-marked input. Its real-data headless check confirms eight complete 
 the offline conversion and benchmark consumer agree on identity and units; it does not
 add independent sensor calibration.
 
+Training-only system identification now uses the frozen pivoted-Householder QR and
+whole-run CV contract. Both electrical candidates pass their numerical and sign gates,
+but the quasi-static effective model scores `0.1879165` current NRMSE while the dynamic
+Euler candidate scores `0.5788032`; the predeclared selector therefore retains the
+simpler candidate. The selected electrical and mechanical fit is bound to the exact
+training record digest and protocol digest, has content SHA-256
+`dc9995c3c0b76abeb03b6dfbce8e696ea66091221fbbf7b082c81f0785af361d`, and repeated
+byte-for-byte. This evidence remains explicitly training-only and effective: development
+metrics, individual motor constants and physical accuracy are all unqualified.
+
 The [AutoDRIVE Nigel author repository](https://github.com/Tinker-Twins/AutoDRIVE-Nigel-Dataset)
 is a separate Ackermann candidate with timestamp, steering, tick-count and inertial
 columns. Its README declares approximately 1.50 GB for the camera-free dataset

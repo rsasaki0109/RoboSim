@@ -115,5 +115,21 @@ real run verified all eight 2,009-sample trials and their exact record digest, c
 2,008 observations per run, observed 8.888--10.040 ms encoder intervals and a maximum
 52.916 rad/s reconstructed output speed, and produced protocol SHA-256
 `36f24bd335546e1d72d4008258095cb7d0bd6fb9ddac5d86d1dd62520dafb874`.
-Model fitting and development evaluation remain unimplemented at this checkpoint;
-therefore no accuracy or physical-parameter qualification is claimed.
+The training-only Householder QR and leave-one-run-out selector are now implemented in
+the `identification` module. The real training run produced quasi-static current CV NRMSE
+`0.18791653864470365` versus dynamic-Euler `0.5788031949514254`, so the predeclared
+minimum-improvement rule selected the quasi-static candidate. Its effective coefficients
+are `[1.2388305336356662 A/V, -0.26864626638620326 A*s/rad,
+0.1247964480392027 A]`. The mechanical effective coefficients are
+`[132.42043309504652 rad/(s^2*A), -1.1864679240528229 1/s,
+-27.06566822378421 rad/s^2, -24.70591462709988 rad/s^2]`. The minimum relative QR
+diagonal is `0.013836966815852048`, above the frozen rank threshold.
+
+The content-bound evidence is 1,649 bytes, has embedded content SHA-256
+`dc9995c3c0b76abeb03b6dfbce8e696ea66091221fbbf7b082c81f0785af361d`, and file
+SHA-256 `bc64be96806d6eb3fbe7a53c58c2af935b113a74e3ffba191e2fb0ba42938477`.
+A second execution with the same binary produced byte-identical evidence before its
+temporary copy was removed. The dynamic candidate's much worse score is diagnostic of
+this effective observation path; it does not prove zero armature inductance. Development
+evaluation remains unimplemented and unread, and no physical-parameter qualification is
+claimed.

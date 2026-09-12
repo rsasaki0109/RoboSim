@@ -71,7 +71,11 @@ The bounded Rust decoder now verifies the Python-produced training record stream
 preserves all complete runs and reconstructs SI output speed from source count/time pairs
 without reading development or final rows. Its headless real-data check agrees on all
 16,072 records. The deterministic QR fitter and predeclared run-wise model selection are
-the next M5 slice.
+also implemented. Real training CV selects the quasi-static effective current model over
+the dynamic Euler candidate (`0.1879` versus `0.5788` NRMSE), fits the physically signed
+mechanical coefficient model above the rank gate, and emits byte-repeatable content-bound
+evidence. One-shot development execution and independent calibration are the next M5
+slice; neither final run has been opened.
 
 M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus
