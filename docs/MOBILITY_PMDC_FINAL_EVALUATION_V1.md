@@ -33,4 +33,12 @@ part of the active Mobility Physical AI goal, not a reason to weaken this contra
 
 The executable contract and drift tests are in `recorded_pmdc::final_protocol`. The
 `pmdc_final_protocol` example prints its canonical SHA-256 without accessing final data.
-At this checkpoint both final runs remain sealed and no final metric exists.
+After that pre-data contract commit, the dedicated sealer was separately committed and
+then executed exactly once. It exclusively created one external-SSD artifact containing
+both complete final runs: 2,009 records from trial 10 and 2,009 from trial 11. The artifact
+is 1,261,025 bytes with SHA-256 `94c28290...772d2`; its 4,018 canonical record lines have
+SHA-256 `722af621...1409`. These identities are frozen in Rust independently of the
+protocol digest, so the already-bound protocol cannot silently change.
+
+At this checkpoint the final partition has been read and losslessly sealed, but its
+response values have not been evaluated and no final metric or verdict exists.

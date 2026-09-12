@@ -13,6 +13,14 @@ pub const PMDC_TRAINING_IDENTIFICATION_CONTENT_SHA256: &str =
 /// Exposed one-shot development evidence bound by final protocol v1.
 pub const PMDC_DEVELOPMENT_EVALUATION_CONTENT_SHA256: &str =
     "1cf7b5769d7e3a6f86fc6fc9d86a67ea821ce437d09948b0ddbe87635f024c71";
+/// Exact byte length of the exclusively created final-partition artifact.
+pub const PMDC_FINAL_ARTIFACT_BYTES: usize = 1_261_025;
+/// SHA-256 of the complete final-partition JSONL artifact, including manifest and trailer.
+pub const PMDC_FINAL_ARTIFACT_SHA256: &str =
+    "94c2829014d9e82adbd101f6c78f15257d71c24147d539f6fdc0a401bd6772d2";
+/// SHA-256 of the 4,018 canonical final record lines, excluding manifest and trailer.
+pub const PMDC_FINAL_RECORDS_SHA256: &str =
+    "722af6217cb801bb4a56557095f2924a6f4931415be6f87a950978092df11409";
 
 /// Aggregation level at which a final metric must pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,5 +184,17 @@ mod tests {
         let mut changed = pmdc_final_evaluation_protocol();
         changed.final_trials.reverse();
         assert!(changed.validate().is_err());
+    }
+
+    #[test]
+    fn final_seal_identity_is_frozen_separately_from_the_protocol() {
+        assert_eq!(PMDC_FINAL_ARTIFACT_BYTES, 1_261_025);
+        assert_eq!(PMDC_FINAL_ARTIFACT_SHA256.len(), 64);
+        assert_eq!(PMDC_FINAL_RECORDS_SHA256.len(), 64);
+        assert_ne!(PMDC_FINAL_ARTIFACT_SHA256, PMDC_FINAL_RECORDS_SHA256);
+        assert_eq!(
+            pmdc_final_evaluation_protocol().sha256().unwrap(),
+            "c8ed0ce2f34fa90fd1797b42dee02f2aa721760f504d9590c1e3b659220fca53"
+        );
     }
 }

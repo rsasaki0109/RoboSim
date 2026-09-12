@@ -79,11 +79,14 @@ steps. It is now permanently development-exposed and cannot be reused for tuning
 final runs remain sealed while a separate final-evaluation contract is frozen; independent
 calibration also remains open.
 
-The final PMDC contract is now frozen while both response runs remain unread. It binds the
+The final PMDC contract was frozen while both response runs remained unread. It binds the
 selected training and exposed development evidence, forbids refit or threshold changes,
-and requires unchanged per-run, pooled and worst-run gates. It also fails closed on common
-Failure Capsule packaging because that schema currently requires a fixed simulation clock;
-recorded nonuniform timestamp support must be added rather than silently resampling data.
+and requires unchanged per-run, pooled and worst-run gates. A separately committed sealer
+then performed the sole final-partition read and losslessly retained both 2,009-sample runs
+on the external SSD. Its exact file and record-stream identities are now frozen in Rust;
+responses remain unevaluated. The contract also fails closed on common Failure Capsule
+packaging because that schema currently requires a fixed simulation clock; recorded
+nonuniform timestamp support must be added rather than silently resampling data.
 
 M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus
