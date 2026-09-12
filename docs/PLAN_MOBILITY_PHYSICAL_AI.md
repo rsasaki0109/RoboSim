@@ -87,6 +87,8 @@ on the external SSD. Its exact file and record-stream identities are now frozen 
 responses remain unevaluated. The contract also fails closed on common Failure Capsule
 packaging because that schema currently requires a fixed simulation clock; recorded
 nonuniform timestamp support must be added rather than silently resampling data.
+The content-bound final decoder and twelve-gate evaluator are implemented and tested;
+their executable code is frozen before the sole real final execution.
 
 M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus

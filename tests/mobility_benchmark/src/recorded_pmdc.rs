@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 
 pub mod data;
 pub mod evaluation;
+pub mod final_evaluation;
 pub mod final_protocol;
 pub mod identification;
 

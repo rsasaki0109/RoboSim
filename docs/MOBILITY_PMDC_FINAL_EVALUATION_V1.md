@@ -42,3 +42,12 @@ protocol digest, so the already-bound protocol cannot silently change.
 
 At this checkpoint the final partition has been read and losslessly sealed, but its
 response values have not been evaluated and no final metric or verdict exists.
+
+The final evaluator is now frozen in `recorded_pmdc::final_evaluation` before its first
+real execution. It re-verifies the exact training identification and final artifact,
+performs no refit, and records twelve ordered gate objects. Each `per_run` gate retains
+two named scalar values; each `pooled` and `worst_run` gate retains one scalar value.
+The evidence validator also requires every worst-run value to equal the maximum of its
+two per-run values. The headless writer reserves a new output path before opening either
+input, writes pass or fail evidence, and only then returns a failing exit status when a
+gate is missed. No real final evaluation has occurred at this pre-execution checkpoint.
