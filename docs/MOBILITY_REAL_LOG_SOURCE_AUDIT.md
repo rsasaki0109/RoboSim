@@ -1009,9 +1009,9 @@ scan messages; they were not extracted into a separate dataset.
 For whole-run separation, the official API was rechecked on 2026-09-13 before a
 second download. `ex-hard-r1_2023-06-12-19-50-37.bag` is a distinct continuous run
 with exactly 92,374,784 bytes and Zenodo MD5
-`6f3feda005530bfe586b8dda3545301a`. It is the candidate independent final run for
-an aggregate command-to-motion experiment; the existing hard-r2 run may be used
-for training/development only. Filename similarity does not prove identical vehicle
+`6f3feda005530bfe586b8dda3545301a`. It was initially only a candidate independent
+final run for an aggregate command-to-motion experiment; the existing hard-r2 run
+was already development-exposed. Filename similarity does not prove identical vehicle
 configuration, calibration, or clock mapping, so both manifests must be compared
 before model fitting.
 
@@ -1176,6 +1176,12 @@ investigation priority but is not permission to fit or apply that scale. The aud
 content digest is `5163f71c...5c1ae`; the retained 1,579-byte file has SHA-256
 `d6416edc...dfc3` at
 `E:\RNE-build\m3c-sensor\f1tenth-hard-r1-reference-audit.json`.
+Because this audit decoded and reduced hard-r1 pose/twist response values before an
+identification model and acceptance thresholds were frozen, hard-r1 is now also
+development-exposed and cannot serve as an untouched final performance run. Hard-r1
+and hard-r2 may support source screening and protocol design only. A future final run
+must be a separately pinned, unread complete run and its conversion/evaluation rules
+must be committed before response access.
 
 The existing [suspension identification gate](MOBILITY_SUSPENSION_IDENTIFICATION_V1.md)
 requires strut displacement, velocity and generalized force plus acquisition evidence.
