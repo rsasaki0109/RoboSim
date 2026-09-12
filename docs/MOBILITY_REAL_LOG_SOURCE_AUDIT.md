@@ -492,6 +492,56 @@ voltage-driven motor evaluator. Physical use still requires measured bus voltage
 and an identified bridge-loss model; the retained OpenMCT PWM/speed logs do not
 supply them.
 
+### PMDC geared-motor voltage/current candidate
+
+The 2022 Data in Brief article
+[Direct current geared motor data](https://pmc.ncbi.nlm.nih.gov/articles/PMC8752902/)
+and its immutable Mendeley dataset v2
+[2rkpsss6fd](https://data.mendeley.com/datasets/2rkpsss6fd/2) are the first inspected
+candidate that materially closes OpenMCT's command/voltage gap. The authors declare
+two identical-model PMDC worm-geared AGV motors, a VNH2SP30 H-bridge, ACS712 current
+measurement, divided measurements of both motor terminals, an 1,800-pulse/revolution
+incremental encoder, Arduino Mega 2560 acquisition at 100 Hz, and CC BY 4.0 data.
+Every experimental table exposes source time in microseconds, encoder count, derived
+RPM, raw and converted current, raw and converted voltages at both terminals, their
+motor-terminal potential difference, motor state, and PWM command. Experiments include
+no-load PRBS7/PRBS9 and periodic inputs plus step tests without load and with declared
+1–4 kg shaft loads.
+
+The official API reports one file, `MotorsData_rev.xlsx`, 28,724,353 bytes, file id
+`d5996ce4-77b2-4246-aa60-b4ccf26e5770`, and SHA-256
+`85203c4b3ad6fbdd05221e1be7fd41ce733376c0f316d7fd5542b604a6854605`.
+It was acquired with a 30 MiB streaming cap and create-new destination at
+`E:\RoboSim-external-data\mobility-pmdc-2rkpsss6fd-v2\MotorsData_rev.xlsx`;
+local size and digest match. The archive has 37 ZIP members and 176,571,375
+uncompressed bytes, so readers must enforce both compressed and expanded bounds and
+must not expand it onto the internal SSD.
+
+Read-only structure inspection found 23 sheets: one description sheet, paired Motor A/B
+sheets for PRBS7, PRBS9, sine, triangle and square inputs, and paired loaded/unloaded
+step sheets. The ordinary waveform/PRBS trials are vertically concatenated complete
+runs; PRBS9 Motor A has eleven explicit `time` headers. Step trials form a sparse
+two-dimensional grid of 13-column blocks: 122/152 no-load runs for A/B and 283/315
+loaded runs for A/B. No source cells contain formulas except `StepNoLoad-MotorA!C256`,
+whose expression is `(A256-B256)/1000000`. A strict importer must reject or explicitly
+preserve that non-raw cell rather than silently trusting a spreadsheet cached value.
+
+Before inspecting response values beyond structural header rows, freeze the first
+identification split within the same physical Motor A: PRBS9 complete trials 1–8 are
+training, trial 9 is development, and trials 10–11 are untouched final tests. Never
+split adjacent rows from one run across these roles. PRBS7, periodic waveforms, Motor B,
+and every step/load sheet remain outside initial model selection. This split does not
+pre-authorize a model form or pass threshold.
+
+This source is better evidence, not yet physical qualification. Terminal voltage and
+current are Arduino/frontend measurements with source-derived conversion; their static
+and dynamic calibration uncertainty, simultaneous ADC phase, anti-alias behavior and
+clock accuracy still require audit. The concentrated load mass is not a measured torque;
+shaft geometry, direction and load dynamics must be resolved before using loaded trials
+to identify torque constant, friction, gearbox efficiency or inertia. The initial importer
+must retain raw and converted channels, motor state, every sample clock and complete-run
+identity, and must report formula cells and malformed blocks without repairing them.
+
 The [AutoDRIVE Nigel author repository](https://github.com/Tinker-Twins/AutoDRIVE-Nigel-Dataset)
 is a separate Ackermann candidate with timestamp, steering, tick-count and inertial
 columns. Its README declares approximately 1.50 GB for the camera-free dataset

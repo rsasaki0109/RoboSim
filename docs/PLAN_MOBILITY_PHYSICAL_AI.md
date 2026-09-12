@@ -45,6 +45,15 @@ reflected inertia, and rolling resistance. The assumptions and identification re
 are frozen in [`MOBILITY_PLANT_V1.md`](MOBILITY_PLANT_V1.md); no contact-backend integration
 or tire-fidelity claim is included yet.
 
+The command boundary now also includes an averaged `PwmMotorCommandFrontendSpec`.
+It maps signed controller counts and runtime bus voltage into a terminal-voltage request
+without converting empirical PWM response into motor resistance, constants or inertia.
+Count saturation, polarity and declared bridge loss are explicit; switching ripple,
+decay mode, current regulation, battery sag and thermal effects remain outside this tier.
+The real-log audit has acquired a bounded PMDC geared-motor candidate with simultaneously
+recorded terminal voltage/current/speed and frozen complete-run splits; its strict importer,
+calibration audit and physical parameter qualification remain active M5 work.
+
 M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus
 free-moment boundary. Rapier implements it and conformance checks force response, lever-arm
