@@ -9,10 +9,26 @@ import hashlib
 import importlib.metadata
 import json
 import math
+from dataclasses import dataclass
 from pathlib import Path
 
-SOURCE_BYTES = 84_985_680
-SOURCE_SHA256 = "3ba7b5c13da68227bf8af27370e7205f142dca4ca3340c8b1b51feba70cc22ac"
+
+@dataclass(frozen=True)
+class SourceSpec:
+    """Exact immutable identity for one admitted complete run."""
+
+    bytes: int
+    sha256: str
+
+
+SOURCE_SPECS = {
+    "ex-hard-r1_2023-06-12-19-50-37.bag": SourceSpec(
+        92_374_784, "682fb7d5256bd2adf79c04eebbfae8e31abe559d930fcd18a260c6ee4daede81"
+    ),
+    "ex-hard-r2_2023-06-12-19-59-52.bag": SourceSpec(
+        84_985_680, "3ba7b5c13da68227bf8af27370e7205f142dca4ca3340c8b1b51feba70cc22ac"
+    ),
+}
 TOPICS = {
     "/cmd_vel": "geometry_msgs/msg/Twist",
     "/commands/motor/speed": "std_msgs/msg/Float64",
@@ -22,20 +38,24 @@ TOPICS = {
 }
 
 
-def verify_source(path):
+def verify_source(path, source_specs=SOURCE_SPECS):
     """Stream-hash exactly the selected immutable capture before opening a bag."""
-    if not path.is_file() or path.stat().st_size != SOURCE_BYTES:
-        raise ValueError("expected the pinned 84,985,680-byte F1TENTH run")
+    spec = source_specs.get(path.name)
+    if spec is None:
+        raise ValueError("F1TENTH run is not in the immutable allowlist")
+    if not path.is_file() or path.stat().st_size != spec.bytes:
+        raise ValueError("F1TENTH source byte count differs from its pinned run")
     digest = hashlib.sha256()
     count = 0
     with path.open("rb") as stream:
         while block := stream.read(1024 * 1024):
             count += len(block)
-            if count > SOURCE_BYTES:
+            if count > spec.bytes:
                 raise ValueError("source grew beyond pinned size")
             digest.update(block)
-    if count != SOURCE_BYTES or digest.hexdigest() != SOURCE_SHA256:
+    if count != spec.bytes or digest.hexdigest() != spec.sha256:
         raise ValueError("source hash mismatch; refusing unqualified input")
+    return spec
 
 
 class ChannelAudit:
@@ -93,7 +113,7 @@ class ChannelAudit:
 
 
 def audit(path):
-    verify_source(path)
+    source = verify_source(path)
     # Delayed import keeps synthetic contract tests independent of ROS tooling.
     from rosbags.rosbag1 import Reader
     from rosbags.typesys import Stores, get_typestore, get_types_from_msg
@@ -131,8 +151,9 @@ def audit(path):
     report = {
         "schema_version": 1,
         "kind": "rne_f1tenth_source_audit",
-        "source_sha256": SOURCE_SHA256,
-        "source_bytes": SOURCE_BYTES,
+        "source_file": path.name,
+        "source_sha256": source.sha256,
+        "source_bytes": source.bytes,
         "reader_version": importlib.metadata.version("rosbags"),
         "channels": {t: channels[t].report() for t in sorted(channels)},
         "physical_accuracy_validated": False,

@@ -11,7 +11,7 @@ import json
 import math
 from pathlib import Path
 
-from audit_f1tenth_source import SOURCE_SHA256, verify_source
+from audit_f1tenth_source import verify_source
 
 
 def yaw(quaternion):
@@ -137,7 +137,7 @@ def compare_integrals(poses, twists):
 
 
 def audit(path):
-    verify_source(path)
+    source = verify_source(path)
     from rosbags.rosbag1 import Reader
     from rosbags.typesys import Stores, get_typestore, get_types_from_msg
 
@@ -145,6 +145,11 @@ def audit(path):
     base = "/vrpn_client_node/Car_2_Tracking/"
     with Reader(path) as reader:
         connections = [c for c in reader.connections if c.topic in (base + "pose", base + "twist")]
+        expected = {base + "pose": 0, base + "twist": 0}
+        if {connection.topic for connection in connections} != set(expected):
+            raise ValueError("required reference channels missing")
+        for connection in connections:
+            expected[connection.topic] += connection.msgcount
         store = get_typestore(Stores.EMPTY)
         definitions = {}
         for c in connections:
@@ -163,11 +168,16 @@ def audit(path):
                 poses.append((ns, msg.pose.position.x, msg.pose.position.y, yaw((q.x, q.y, q.z, q.w))))
             else:
                 twists.append((ns, msg.twist.linear.x, msg.twist.linear.y, msg.twist.angular.z))
-    if len(poses) != 13426 or len(twists) != 13402:
-        raise ValueError("pinned capture count mismatch")
+    if len(poses) != expected[base + "pose"] or len(twists) != expected[base + "twist"]:
+        raise ValueError("decoded reference count differs from bag connection index")
     report = compare(poses, twists)
     report["interval_integral_comparison"] = compare_integrals(poses, twists)
-    report.update(kind="rne_f1tenth_reference_consistency", schema_version=2, source_sha256=SOURCE_SHA256)
+    report.update(
+        kind="rne_f1tenth_reference_consistency",
+        schema_version=2,
+        source_file=path.name,
+        source_sha256=source.sha256,
+    )
     canonical = json.dumps(report, sort_keys=True, separators=(",", ":"), allow_nan=False)
     report["audit_sha256"] = hashlib.sha256(canonical.encode()).hexdigest()
     return report

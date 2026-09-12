@@ -2,9 +2,8 @@
 
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
-from audit_f1tenth_source import ChannelAudit, verify_source
+from audit_f1tenth_source import ChannelAudit, SourceSpec, verify_source
 
 
 class AuditTests(unittest.TestCase):
@@ -42,9 +41,9 @@ class AuditTests(unittest.TestCase):
 
     def test_matching_size_cannot_substitute_for_hash(self):
         path = Path(__file__)
-        with patch("audit_f1tenth_source.SOURCE_BYTES", path.stat().st_size):
-            with self.assertRaisesRegex(ValueError, "hash mismatch"):
-                verify_source(path)
+        specs = {path.name: SourceSpec(path.stat().st_size, "0" * 64)}
+        with self.assertRaisesRegex(ValueError, "hash mismatch"):
+            verify_source(path, specs)
 
 
 if __name__ == "__main__":
