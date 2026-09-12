@@ -67,6 +67,12 @@ coefficient model, solver/rank rules and one-shot development gates before devel
 responses are inspected. Fitting, development execution, independent calibration and
 physical parameter qualification remain active M5 work.
 
+The bounded Rust decoder now verifies the Python-produced training record stream,
+preserves all complete runs and reconstructs SI output speed from source count/time pairs
+without reading development or final rows. Its headless real-data check agrees on all
+16,072 records. The deterministic QR fitter and predeclared run-wise model selection are
+the next M5 slice.
+
 M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus
 free-moment boundary. Rapier implements it and conformance checks force response, lever-arm

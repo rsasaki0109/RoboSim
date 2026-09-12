@@ -108,6 +108,12 @@ against trial 9 and rerun the same gate. Any revised protocol must declare trial
 and keep the two final runs sealed until an independent development source is selected.
 
 The executable frozen representation and drift tests are in
-`tests/mobility_benchmark/src/recorded_pmdc.rs`. Model fitting and development evaluation
-remain unimplemented at this checkpoint; therefore no accuracy or physical-parameter
-qualification is claimed.
+`tests/mobility_benchmark/src/recorded_pmdc.rs`. The bounded content decoder and SI
+observation reconstruction are in its `data` module, and the headless
+`pmdc_training_check` example applies them to the retained training artifact. The first
+real run verified all eight 2,009-sample trials and their exact record digest, constructed
+2,008 observations per run, observed 8.888--10.040 ms encoder intervals and a maximum
+52.916 rad/s reconstructed output speed, and produced protocol SHA-256
+`36f24bd335546e1d72d4008258095cb7d0bd6fb9ddac5d86d1dd62520dafb874`.
+Model fitting and development evaluation remain unimplemented at this checkpoint;
+therefore no accuracy or physical-parameter qualification is claimed.

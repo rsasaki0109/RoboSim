@@ -634,6 +634,13 @@ whole-run leave-one-out training selection and effective coefficient ratios only
 predeclares a one-shot development gate while keeping both final runs unavailable. No
 development response metric has been calculated at this point.
 
+The Rust-side `recorded_pmdc::data` decoder independently binds the training record digest
+and rejects oversized, noncanonical, interleaved, incomplete, nonfinite, nonmonotonic or
+final-access-marked input. Its real-data headless check confirms eight complete runs,
+16,072 source samples and 16,064 actual-time encoder observations. This establishes that
+the offline conversion and benchmark consumer agree on identity and units; it does not
+add independent sensor calibration.
+
 The [AutoDRIVE Nigel author repository](https://github.com/Tinker-Twins/AutoDRIVE-Nigel-Dataset)
 is a separate Ackermann candidate with timestamp, steering, tick-count and inertial
 columns. Its README declares approximately 1.50 GB for the camera-free dataset
