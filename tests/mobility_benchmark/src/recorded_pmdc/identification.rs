@@ -207,7 +207,7 @@ fn type7_quantile(values: &[f64], probability: f64) -> Result<f64> {
     Ok(ordered[lower] + fraction * (ordered[upper] - ordered[lower]))
 }
 
-fn robust_range(values: &[f64]) -> Result<f64> {
+pub(super) fn robust_range(values: &[f64]) -> Result<f64> {
     let range = type7_quantile(values, 0.95)? - type7_quantile(values, 0.05)?;
     ensure!(
         range.is_finite() && range > 0.0,
@@ -389,7 +389,7 @@ fn fit_mechanical(runs: &[Vec<PmdcObservation>], threshold: f64) -> Result<Least
     Ok(fit)
 }
 
-fn identify_observations(
+pub(super) fn identify_observations(
     records_sha256: &str,
     runs: &[Vec<PmdcObservation>],
 ) -> Result<PmdcTrainingIdentification> {
@@ -570,7 +570,7 @@ pub fn identify_pmdc_training(training: &PmdcTrainingSet) -> Result<PmdcTraining
     Ok(evidence)
 }
 
-fn verify_observations(
+pub(super) fn verify_observations(
     evidence: &PmdcTrainingIdentification,
     records_sha256: &str,
     runs: &[Vec<PmdcObservation>],

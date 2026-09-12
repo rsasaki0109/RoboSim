@@ -130,6 +130,21 @@ The content-bound evidence is 1,649 bytes, has embedded content SHA-256
 SHA-256 `bc64be96806d6eb3fbe7a53c58c2af935b113a74e3ffba191e2fb0ba42938477`.
 A second execution with the same binary produced byte-identical evidence before its
 temporary copy was removed. The dynamic candidate's much worse score is diagnostic of
-this effective observation path; it does not prove zero armature inductance. Development
-evaluation remains unimplemented and unread, and no physical-parameter qualification is
-claimed.
+this effective observation path; it does not prove zero armature inductance.
+
+After metric-order, provenance and synthetic-rollout tests passed, trial 9 was evaluated
+exactly once. All 2,007 free-run comparisons passed the frozen development gates:
+
+| Metric | Value | Maximum | Result |
+|---|---:|---:|---|
+| current rollout NRMSE | 0.1712644606 | 0.20 | pass |
+| output-speed rollout NRMSE | 0.0160645098 | 0.15 | pass |
+| current signed-bias fraction | 0.0004376794 | 0.05 | pass |
+| output-speed signed-bias fraction | 0.0051925769 | 0.05 | pass |
+
+The saved evidence has embedded content SHA-256
+`1cf7b5769d7e3a6f86fc6fc9d86a67ea821ce437d09948b0ddbe87635f024c71`
+and file SHA-256 `aa62cfee528e1687f40e869298bd523ab4c1d324d3273c9083f55e1ff3d216fd`.
+It explicitly records development evaluated, final unread and physical parameters
+unqualified. Trial 9 is now exposed and must not be used to tune and rerun protocol v1.
+Both final trials remain sealed pending a separately frozen final-evaluation contract.

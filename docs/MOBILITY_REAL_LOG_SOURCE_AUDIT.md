@@ -651,6 +651,16 @@ training record digest and protocol digest, has content SHA-256
 byte-for-byte. This evidence remains explicitly training-only and effective: development
 metrics, individual motor constants and physical accuracy are all unqualified.
 
+After the evaluation implementation and synthetic gates were complete, trial 9 was read
+once. The 2,007-step free rollout passed current NRMSE `0.1712645 <= 0.20`, output-speed
+NRMSE `0.0160645 <= 0.15`, current bias fraction `0.0004377 <= 0.05`, and speed bias
+fraction `0.0051926 <= 0.05`. The immutable evaluation evidence has content SHA-256
+`1cf7b5769d7e3a6f86fc6fc9d86a67ea821ce437d09948b0ddbe87635f024c71` and file
+SHA-256 `aa62cfee528e1687f40e869298bd523ab4c1d324d3273c9083f55e1ff3d216fd`.
+Trial 9 is now development-exposed and will not be rerun or used for tuning. Final trials
+10--11 were not read and remain sealed. Passing this effective-model gate still does not
+qualify individual motor constants, sensor calibration or vehicle-level dynamics.
+
 The [AutoDRIVE Nigel author repository](https://github.com/Tinker-Twins/AutoDRIVE-Nigel-Dataset)
 is a separate Ackermann candidate with timestamp, steering, tick-count and inertial
 columns. Its README declares approximately 1.50 GB for the camera-free dataset

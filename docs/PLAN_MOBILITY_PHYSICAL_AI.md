@@ -64,8 +64,8 @@ is not the conversion of adjacent `rawCurrent`, and a fixed-10-ms encoder-derive
 and its Rust representation now freeze actual-timestamp encoder reconstruction,
 whole-run cross-validation, two effective electrical candidates, a coupled mechanical
 coefficient model, solver/rank rules and one-shot development gates before development
-responses are inspected. Fitting, development execution, independent calibration and
-physical parameter qualification remain active M5 work.
+responses are inspected. Fitting and the one-shot development execution are complete;
+independent calibration and physical parameter qualification remain active M5 work.
 
 The bounded Rust decoder now verifies the Python-produced training record stream,
 preserves all complete runs and reconstructs SI output speed from source count/time pairs
@@ -74,8 +74,10 @@ without reading development or final rows. Its headless real-data check agrees o
 also implemented. Real training CV selects the quasi-static effective current model over
 the dynamic Euler candidate (`0.1879` versus `0.5788` NRMSE), fits the physically signed
 mechanical coefficient model above the rank gate, and emits byte-repeatable content-bound
-evidence. One-shot development execution and independent calibration are the next M5
-slice; neither final run has been opened.
+evidence. Trial 9 then passed all four predeclared free-run development gates over 2,007
+steps. It is now permanently development-exposed and cannot be reused for tuning. The two
+final runs remain sealed while a separate final-evaluation contract is frozen; independent
+calibration also remains open.
 
 M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus

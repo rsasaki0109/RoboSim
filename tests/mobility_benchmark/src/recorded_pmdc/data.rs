@@ -1,6 +1,9 @@
 //! Content-bound decoder and SI observation reconstruction for retained PMDC training data.
 
-use super::{pmdc_identification_protocol, PMDC_SOURCE_SHA256, PMDC_TRAINING_RECORDS_SHA256};
+use super::{
+    pmdc_identification_protocol, PMDC_DEVELOPMENT_RECORDS_SHA256, PMDC_SOURCE_SHA256,
+    PMDC_TRAINING_RECORDS_SHA256,
+};
 use anyhow::{ensure, Context, Result};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -8,6 +11,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// Maximum accepted lossless training artifact size.
 pub const MAX_PMDC_TRAINING_BYTES: usize = 8 * 1024 * 1024;
+/// Maximum accepted lossless development artifact size.
+pub const MAX_PMDC_DEVELOPMENT_BYTES: usize = 1024 * 1024;
 // The pinned 2,223-byte manifest is the longest source line; data rows are <=361 bytes.
 const MAX_LINE_BYTES: usize = 4096;
 const CHANNELS: [&str; 12] = [
@@ -64,6 +69,17 @@ pub struct PmdcTrainingSet {
     pub runs: Vec<PmdcRun>,
 }
 
+/// Exact one-run development input, kept distinct from training by type.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PmdcDevelopmentSet {
+    /// Published source workbook digest.
+    pub source_sha256: String,
+    /// Digest over canonical development JSONL record lines.
+    pub records_sha256: String,
+    /// Frozen trial 9 and all its unmodified samples.
+    pub run: PmdcRun,
+}
+
 /// SI observation reconstructed at the later endpoint of an encoder interval.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PmdcObservation {
@@ -106,6 +122,7 @@ struct Trailer {
 }
 
 struct DecodeContract<'a> {
+    partition: &'a str,
     source_sha256: &'a str,
     records_sha256: &'a str,
     trials: &'a [u8],
@@ -151,8 +168,8 @@ fn decode_with_contract(bytes: &[u8], contract: DecodeContract<'_>) -> Result<Pm
         "PMDC manifest kind drift"
     );
     ensure!(
-        manifest.partition == "training",
-        "PMDC artifact is not training"
+        manifest.partition == contract.partition,
+        "PMDC artifact partition drift"
     );
     ensure!(
         !manifest.final_partition_read,
@@ -210,7 +227,7 @@ fn decode_with_contract(bytes: &[u8], contract: DecodeContract<'_>) -> Result<Pm
     for line in &lines[1..lines.len() - 1] {
         let record: Record = serde_json::from_str(line).context("decode PMDC record")?;
         ensure!(
-            record.partition == "training",
+            record.partition == contract.partition,
             "PMDC record partition drift"
         );
         while record.run_id != runs[run_index].run_id {
@@ -277,12 +294,38 @@ pub fn decode_pmdc_training(bytes: &[u8]) -> Result<PmdcTrainingSet> {
     decode_with_contract(
         bytes,
         DecodeContract {
+            partition: "training",
             source_sha256: PMDC_SOURCE_SHA256,
             records_sha256: PMDC_TRAINING_RECORDS_SHA256,
             trials: &pmdc_identification_protocol().training_trials,
             samples_per_trial: 2009,
         },
     )
+}
+
+/// Decode only the exact trial-9 development artifact admitted by protocol v1.
+pub fn decode_pmdc_development(bytes: &[u8]) -> Result<PmdcDevelopmentSet> {
+    ensure!(
+        bytes.len() <= MAX_PMDC_DEVELOPMENT_BYTES,
+        "PMDC development artifact exceeds bounded input"
+    );
+    let decoded = decode_with_contract(
+        bytes,
+        DecodeContract {
+            partition: "development",
+            source_sha256: PMDC_SOURCE_SHA256,
+            records_sha256: PMDC_DEVELOPMENT_RECORDS_SHA256,
+            trials: &pmdc_identification_protocol().development_trials,
+            samples_per_trial: 2009,
+        },
+    )?;
+    let mut runs = decoded.runs;
+    ensure!(runs.len() == 1, "PMDC development run-count drift");
+    Ok(PmdcDevelopmentSet {
+        source_sha256: decoded.source_sha256,
+        records_sha256: decoded.records_sha256,
+        run: runs.remove(0),
+    })
 }
 
 impl PmdcRun {
@@ -392,6 +435,7 @@ mod tests {
         let decoded = decode_with_contract(
             &bytes,
             DecodeContract {
+                partition: "training",
                 source_sha256: "fixture-source",
                 records_sha256: &digest,
                 trials: &trials,
@@ -415,6 +459,7 @@ mod tests {
             decode_with_contract(
                 input,
                 DecodeContract {
+                    partition: "training",
                     source_sha256: "fixture-source",
                     records_sha256: expected,
                     trials: &trials,
