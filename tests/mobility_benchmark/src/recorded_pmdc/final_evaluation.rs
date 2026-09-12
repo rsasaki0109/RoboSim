@@ -11,12 +11,20 @@ use super::{
     },
     PmdcElectricalCandidate, PMDC_SOURCE_SHA256, PMDC_TRAINING_RECORDS_SHA256,
 };
-use anyhow::{ensure, Result};
+use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// Stable artifact kind for the one permitted PMDC final evaluation.
 pub const PMDC_FINAL_EVALUATION_KIND: &str = "rne_pmdc_final_evaluation";
+/// SHA-256 of the one retained pretty-JSON final evaluation file.
+pub const PMDC_FINAL_EVALUATION_ARTIFACT_SHA256: &str =
+    "59f0f967d89ac8d76ff9f3af0821e05f293175b4d4596bc0a0e383c8524d2c32";
+/// Exact byte length of the one retained final evaluation file.
+pub const PMDC_FINAL_EVALUATION_ARTIFACT_BYTES: usize = 4_791;
+/// Content digest emitted by the sole final evaluation.
+pub const PMDC_FINAL_EVALUATION_CONTENT_SHA256: &str =
+    "5f4e0b8abaf4a26ec60d901ebb8513253ff8a6a7ca7633175b5722425b9a520b";
 
 /// One scalar contributing to a final gate.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -177,8 +185,7 @@ fn evaluation_digest(evidence: &PmdcFinalEvaluation) -> Result<String> {
 }
 
 impl PmdcFinalEvaluation {
-    /// Validate order, aggregation shape, thresholds, verdict, scope and digest.
-    pub fn validate(&self) -> Result<()> {
+    fn validate_structure(&self) -> Result<()> {
         let protocol = pmdc_final_evaluation_protocol();
         ensure!(
             self.kind == PMDC_FINAL_EVALUATION_KIND
@@ -270,6 +277,36 @@ impl PmdcFinalEvaluation {
         );
         Ok(())
     }
+
+    /// Validate the exact sole result, including order, gates, scope and frozen digest.
+    pub fn validate(&self) -> Result<()> {
+        self.validate_structure()?;
+        ensure!(
+            self.content_sha256 == PMDC_FINAL_EVALUATION_CONTENT_SHA256,
+            "PMDC final evaluation result identity drift"
+        );
+        Ok(())
+    }
+}
+
+/// Decode and validate only the exact retained final-evaluation artifact.
+pub fn decode_pmdc_final_evaluation(bytes: &[u8]) -> Result<PmdcFinalEvaluation> {
+    ensure!(
+        bytes.len() == PMDC_FINAL_EVALUATION_ARTIFACT_BYTES,
+        "PMDC final evaluation byte length drift"
+    );
+    ensure!(
+        format!("{:x}", Sha256::digest(bytes)) == PMDC_FINAL_EVALUATION_ARTIFACT_SHA256,
+        "PMDC final evaluation artifact digest drift"
+    );
+    ensure!(
+        bytes.ends_with(b"\n") && !bytes.contains(&b'\r'),
+        "PMDC final evaluation must use canonical LF text"
+    );
+    let evidence: PmdcFinalEvaluation =
+        serde_json::from_slice(bytes).context("decode PMDC final evaluation")?;
+    evidence.validate()?;
+    Ok(evidence)
 }
 
 /// Evaluate both exact final runs once with the frozen training model and gates.
@@ -508,17 +545,26 @@ mod tests {
     #[test]
     fn evidence_schema_rejects_worst_run_or_scope_drift() {
         let evidence = schema_fixture();
-        evidence.validate().unwrap();
+        evidence.validate_structure().unwrap();
+        assert!(evidence.validate().is_err());
 
         let mut changed = evidence.clone();
         changed.metrics[2].values[0].value = 0.02;
         changed.metrics[2].values[0].passed = true;
         changed.content_sha256 = evaluation_digest(&changed).unwrap();
-        assert!(changed.validate().is_err());
+        assert!(changed.validate_structure().is_err());
 
         let mut changed = evidence;
         changed.common_failure_capsule_created = true;
         changed.content_sha256 = evaluation_digest(&changed).unwrap();
-        assert!(changed.validate().is_err());
+        assert!(changed.validate_structure().is_err());
+    }
+
+    #[test]
+    fn sole_result_and_artifact_identities_are_frozen() {
+        assert_eq!(PMDC_FINAL_EVALUATION_ARTIFACT_BYTES, 4_791);
+        assert_eq!(PMDC_FINAL_EVALUATION_ARTIFACT_SHA256.len(), 64);
+        assert_eq!(PMDC_FINAL_EVALUATION_CONTENT_SHA256.len(), 64);
+        assert!(decode_pmdc_final_evaluation(b"not-the-retained-evidence").is_err());
     }
 }

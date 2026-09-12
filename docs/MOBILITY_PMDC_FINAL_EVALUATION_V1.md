@@ -40,14 +40,29 @@ is 1,261,025 bytes with SHA-256 `94c28290...772d2`; its 4,018 canonical record l
 SHA-256 `722af621...1409`. These identities are frozen in Rust independently of the
 protocol digest, so the already-bound protocol cannot silently change.
 
-At this checkpoint the final partition has been read and losslessly sealed, but its
-response values have not been evaluated and no final metric or verdict exists.
-
-The final evaluator is now frozen in `recorded_pmdc::final_evaluation` before its first
+The final evaluator was then frozen in `recorded_pmdc::final_evaluation` before its first
 real execution. It re-verifies the exact training identification and final artifact,
 performs no refit, and records twelve ordered gate objects. Each `per_run` gate retains
 two named scalar values; each `pooled` and `worst_run` gate retains one scalar value.
 The evidence validator also requires every worst-run value to equal the maximum of its
 two per-run values. The headless writer reserves a new output path before opening either
 input, writes pass or fail evidence, and only then returns a failing exit status when a
-gate is missed. No real final evaluation has occurred at this pre-execution checkpoint.
+gate is missed.
+
+The sole final evaluation passed all twelve gates over 2,007 rollout comparisons in each
+run. Values below are dimensionless and use the unchanged training scales:
+
+| Metric | Trial 10 | Trial 11 | Pooled | Worst run | Maximum |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Current rollout NRMSE | 0.177537 | 0.180339 | 0.178943 | 0.180339 | 0.20 |
+| Output-speed rollout NRMSE | 0.014450 | 0.014655 | 0.014553 | 0.014655 | 0.15 |
+| Current signed-bias fraction | 0.037847 | 0.042101 | 0.039974 | 0.042101 | 0.05 |
+| Output-speed signed-bias fraction | 0.006282 | 0.006551 | 0.006416 | 0.006551 | 0.05 |
+
+The retained 4,791-byte evidence file has SHA-256 `59f0f967...d2c32` and content digest
+`5f4e0b8a...a520b`; both are frozen in Rust. A first command with an incorrect training
+filename failed at the training-file `stat` before reading either input or computing any
+metric. Its verified zero-byte reservation is retained as
+`pmdc-final-evaluation-v1.failed-preflight-empty` rather than erased. The corrected sole
+evaluation did not refit, reselect, change thresholds, resample timestamps, qualify
+individual physical constants, or create a misleading fixed-clock Failure Capsule.

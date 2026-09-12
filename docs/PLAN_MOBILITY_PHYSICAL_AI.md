@@ -75,20 +75,22 @@ also implemented. Real training CV selects the quasi-static effective current mo
 the dynamic Euler candidate (`0.1879` versus `0.5788` NRMSE), fits the physically signed
 mechanical coefficient model above the rank gate, and emits byte-repeatable content-bound
 evidence. Trial 9 then passed all four predeclared free-run development gates over 2,007
-steps. It is now permanently development-exposed and cannot be reused for tuning. The two
-final runs remain sealed while a separate final-evaluation contract is frozen; independent
-calibration also remains open.
+steps. It is now permanently development-exposed and cannot be reused for tuning.
+Independent calibration remains open.
 
 The final PMDC contract was frozen while both response runs remained unread. It binds the
 selected training and exposed development evidence, forbids refit or threshold changes,
 and requires unchanged per-run, pooled and worst-run gates. A separately committed sealer
 then performed the sole final-partition read and losslessly retained both 2,009-sample runs
 on the external SSD. Its exact file and record-stream identities are now frozen in Rust;
-responses remain unevaluated. The contract also fails closed on common Failure Capsule
+the separately precommitted evaluator then executed once and all twelve per-run, pooled,
+and worst-run gates passed. The exact 4,791-byte evaluation evidence and content identities
+are frozen in Rust. The contract also fails closed on common Failure Capsule
 packaging because that schema currently requires a fixed simulation clock; recorded
 nonuniform timestamp support must be added rather than silently resampling data.
-The content-bound final decoder and twelve-gate evaluator are implemented and tested;
-their executable code is frozen before the sole real final execution.
+This closes effective-model generalization for this one published PMDC acquisition path,
+not calibration, transferable individual motor constants, tire/chassis identification,
+or whole-vehicle physical validation.
 
 M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus
