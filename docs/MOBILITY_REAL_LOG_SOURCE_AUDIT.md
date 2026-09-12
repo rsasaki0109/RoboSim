@@ -402,20 +402,42 @@ coefficient change: free-run RMSE 3.82074878375445 RPM, one-step RMSE
 3.92807772783069 RPM, persistence RMSE 10.0218352010364 RPM. These values describe
 this capture, not confidence bounds or an independently calibrated accuracy
 guarantee. This capture is now consumed for this frozen model; subsequent tuning
-cannot claim it as an untouched test. A tested Rust residual-lag API remains
-outstanding. The physical-qualification flag remains false.
+cannot claim it as an untouched test. The residual-lag API below is diagnostic
+only and does not add a statistical acceptance gate. The physical-qualification
+flag remains false.
 
-A post-evaluation read-only PowerShell diagnostic (not yet a tested Rust API)
-centered all 979 one-step residuals and preceding-row PWM inputs by their
-respective full-record means. At transition-index lag one, the residual
-autocorrelation is -0.230733112785153 and residual/past-input correlation is
-0.202307041918555. The input is 0.04 s before the target measurement: each
+The tested `diagnose_one_step_residual_lags` API and read-only
+`openmct_speed_residuals` example now center all 979 one-step residuals and
+preceding-row PWM inputs by their respective full-record means. At
+transition-index lag one, Rust reproduces residual autocorrelation
+-0.230733112785153 and residual/past-input correlation 0.202307041918555.
+The selected input is 0.04 s before the target measurement because each
 transition already carries a one-row-old input. Numerators use the 978
 overlapping pairs; denominators use full-record centered energies (their
-geometric mean for cross-correlation). These are descriptive correlations, not
-whiteness-test p-values or confidence-qualified rejection thresholds. They
-motivate tested lag diagnostics rather than treating low RMSE as model adequacy.
-No model was changed after seeing these reserved-capture diagnostics.
+geometric mean for cross-correlation). Lags zero through five report input ages
+0.02, 0.04, 0.06, 0.08, 0.10 and 0.12 s, with residual/input correlations
+0.0273660, 0.2023070, 0.1296043, 0.0881915, 0.0648940 and 0.0537172.
+Nonuniform captures retain per-lag minimum, mean and maximum input age rather
+than pretending row lag is fixed time. Tests reject invalid intervals,
+constant residuals, constant PWM and out-of-bound work. These are descriptive
+correlations, not whiteness-test p-values or confidence-qualified rejection
+thresholds. No model was changed after seeing the reserved-capture diagnostics.
+All 14 OpenMCT tests and all-target mobility-benchmark Clippy passed after this
+addition (2026-09-12). The subsequent default `xtask ci` log reaches its final
+successful stage: Mobility completed with 178 passed, zero failed and one
+ignored (163.14 s), followed by doc-tests, smoke/headless checks, OSS parity,
+fuzz-smoke (361 cases across nine boundaries) and Behavior CI (10/10 seeds).
+The response source blob is `56b8f836a16e9712e2533f0edd3b97c974b40461`
+and CLI blob is `060dfce08d648c1e40c6f37417060cc1ccb77912`.
+Evidence log `E:\RNE-build\m3c-sensor\openmct-speed-residuals-v1-ci.log`
+is 246,131 bytes with SHA-256
+`b079eae86be2b804df978a83251f36073267eaee63b8cdaa7ed65adaf9e3ca92`.
+No cargo/xtask process remains after reconnecting; the interactive exit-code
+record was not retained. The log reaches Behavior CI without a later failure.
+Negative evidence remains visible: heading CEM equals its -10 baseline, clutter
+PPO reports random/trained -1.45/-1.37, mobile CEM grasps but does not place,
+mobile PPO reports -2.21/-1.61 and flagship reports `cross_backend=false`.
+This default run is not MuJoCo-feature or physical qualification.
 
 Identification CI evidence: workspace Clippy passed; the Mobility library
 completed with 177 passed, zero failed and one ignored (201.94 s), followed by
