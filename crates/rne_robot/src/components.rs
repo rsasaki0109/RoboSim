@@ -209,6 +209,54 @@ impl DcMotorSpec {
     }
 }
 
+/// Sign convention applied by an averaged PWM motor-command frontend.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PwmMotorCommandPolarity {
+    /// Positive command counts request positive motor-terminal voltage.
+    #[default]
+    Normal,
+    /// Positive command counts request negative motor-terminal voltage.
+    Inverted,
+}
+
+/// Backend-neutral mapping from signed PWM command counts to average terminal voltage.
+///
+/// This frontend deliberately ends at a voltage request. [`DcMotorSpec`] remains the
+/// physical plant and applies its own terminal-voltage and current limits. The mapping is
+/// a switching-cycle average, not a model of PWM ripple, decay mode, current regulation,
+/// battery sag, dead time, or semiconductor temperature. Those effects require explicit
+/// evidence and a higher-fidelity drive model rather than changes to motor constants.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PwmMotorCommandFrontendSpec {
+    /// Absolute command count corresponding to 100 percent duty cycle.
+    pub full_scale_command_count: f64,
+    /// Total H-bridge on-state voltage loss at the declared operating point, in volts.
+    pub bridge_on_state_voltage_drop_v: f64,
+    /// Electrical sign convention between command and motor terminals.
+    pub polarity: PwmMotorCommandPolarity,
+}
+
+impl Default for PwmMotorCommandFrontendSpec {
+    fn default() -> Self {
+        Self {
+            full_scale_command_count: 255.0,
+            bridge_on_state_voltage_drop_v: 0.0,
+            polarity: PwmMotorCommandPolarity::Normal,
+        }
+    }
+}
+
+impl PwmMotorCommandFrontendSpec {
+    /// Returns whether the scaling and on-state loss are finite and physically valid.
+    pub fn is_valid(self) -> bool {
+        self.full_scale_command_count.is_finite()
+            && self.full_scale_command_count > 0.0
+            && self.bridge_on_state_voltage_drop_v.is_finite()
+            && self.bridge_on_state_voltage_drop_v >= 0.0
+    }
+}
+
 /// Dynamic electrical state retained by a DC motor evaluator.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

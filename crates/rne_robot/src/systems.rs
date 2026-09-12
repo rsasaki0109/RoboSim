@@ -6,8 +6,9 @@ use crate::components::{
     AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
     DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
     LongitudinalDrivePathState, LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState,
-    MultirotorFlight, RigidRoadPatchSpec, RigidRoadProfileSpec, SuspensionStrutSpec,
-    TransmissionSpec, VehicleDynamics, WheelAssemblySpec, WheelStationSpec,
+    MultirotorFlight, PwmMotorCommandFrontendSpec, PwmMotorCommandPolarity, RigidRoadPatchSpec,
+    RigidRoadProfileSpec, SuspensionStrutSpec, TransmissionSpec, VehicleDynamics,
+    WheelAssemblySpec, WheelStationSpec,
 };
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
@@ -817,6 +818,23 @@ pub struct DcMotorEvaluation {
     pub current_saturated: bool,
 }
 
+/// Completed averaged mapping from a signed PWM command to a voltage request.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PwmMotorCommandEvaluation {
+    /// Command after saturation at the declared full-scale count.
+    pub clamped_command_count: f64,
+    /// Signed duty ratio after polarity mapping, bounded to `[-1, 1]`.
+    pub signed_duty_ratio: f64,
+    /// Ideal average terminal voltage before bridge on-state loss, in volts.
+    pub ideal_average_voltage_v: f64,
+    /// Average terminal-voltage request after bridge on-state loss, in volts.
+    pub terminal_voltage_request_v: f64,
+    /// Non-negative average voltage magnitude removed by bridge on-state loss, in volts.
+    pub average_bridge_loss_v: f64,
+    /// Whether the requested command exceeded the declared command-count range.
+    pub command_saturated: bool,
+}
+
 impl DcMotorEvaluation {
     /// Converts this completed evaluation into sensor-source telemetry.
     ///
@@ -1603,6 +1621,52 @@ fn zero_tire_evaluation() -> CombinedSlipTireEvaluation {
         lateral_peak_force_n: 0.0,
         friction_utilization: 0.0,
     }
+}
+
+/// Maps signed PWM command counts to an average motor-terminal voltage request.
+///
+/// The ideal switching-cycle average is `duty * bus_voltage`. The declared H-bridge
+/// on-state loss is present only during the energized fraction, so the returned request is
+/// `duty * max(bus_voltage - bridge_drop, 0)`. This deterministic control-oriented map does
+/// not choose coast versus brake recirculation and must not be used to infer motor electrical
+/// constants from command-count response data alone.
+pub fn evaluate_pwm_motor_command(
+    spec: PwmMotorCommandFrontendSpec,
+    command_count: f64,
+    bus_voltage_v: f64,
+) -> Result<PwmMotorCommandEvaluation, MobilityPlantEvaluationError> {
+    if !spec.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    if !command_count.is_finite() || !bus_voltage_v.is_finite() || bus_voltage_v < 0.0 {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+
+    let command_saturated = command_count.abs() > spec.full_scale_command_count;
+    let clamped_command_count = command_count.clamp(
+        -spec.full_scale_command_count,
+        spec.full_scale_command_count,
+    );
+    let polarity_sign = match spec.polarity {
+        PwmMotorCommandPolarity::Normal => 1.0,
+        PwmMotorCommandPolarity::Inverted => -1.0,
+    };
+    let signed_duty_ratio = polarity_sign * clamped_command_count / spec.full_scale_command_count;
+    let ideal_average_voltage_v = signed_duty_ratio * bus_voltage_v;
+    let available_on_state_voltage_v =
+        (bus_voltage_v - spec.bridge_on_state_voltage_drop_v).max(0.0);
+    let terminal_voltage_request_v = signed_duty_ratio * available_on_state_voltage_v;
+    let average_bridge_loss_v =
+        signed_duty_ratio.abs() * bus_voltage_v.min(spec.bridge_on_state_voltage_drop_v);
+
+    Ok(PwmMotorCommandEvaluation {
+        clamped_command_count,
+        signed_duty_ratio,
+        ideal_average_voltage_v,
+        terminal_voltage_request_v,
+        average_bridge_loss_v,
+        command_saturated,
+    })
 }
 
 /// Evaluates one DC motor from terminal voltage and completed rotor velocity.
@@ -3551,6 +3615,71 @@ mod tests {
         assert_eq!(evaluation.shaft_torque_nm, 1.59);
         assert!(evaluation.voltage_saturated);
         assert!(evaluation.current_saturated);
+    }
+
+    #[test]
+    fn pwm_motor_frontend_preserves_the_command_voltage_plant_boundary() {
+        let frontend = PwmMotorCommandFrontendSpec {
+            full_scale_command_count: 100.0,
+            bridge_on_state_voltage_drop_v: 2.0,
+            polarity: PwmMotorCommandPolarity::Normal,
+        };
+        let mapped = evaluate_pwm_motor_command(frontend, 25.0, 12.0).unwrap();
+        assert_eq!(mapped.clamped_command_count, 25.0);
+        assert_eq!(mapped.signed_duty_ratio, 0.25);
+        assert_eq!(mapped.ideal_average_voltage_v, 3.0);
+        assert_eq!(mapped.terminal_voltage_request_v, 2.5);
+        assert_eq!(mapped.average_bridge_loss_v, 0.5);
+        assert!(!mapped.command_saturated);
+
+        let motor = evaluate_dc_motor(
+            DcMotorSpec {
+                supply_voltage_v: 12.0,
+                ..DcMotorSpec::default()
+            },
+            DcMotorState::default(),
+            mapped.terminal_voltage_request_v,
+            0.0,
+            0.001,
+        )
+        .unwrap();
+        assert_eq!(motor.terminal_voltage_v, 2.5);
+    }
+
+    #[test]
+    fn pwm_motor_frontend_clamps_counts_and_reports_polarity_and_losses() {
+        let frontend = PwmMotorCommandFrontendSpec {
+            full_scale_command_count: 100.0,
+            bridge_on_state_voltage_drop_v: 20.0,
+            polarity: PwmMotorCommandPolarity::Inverted,
+        };
+        let mapped = evaluate_pwm_motor_command(frontend, 125.0, 12.0).unwrap();
+        assert_eq!(mapped.clamped_command_count, 100.0);
+        assert_eq!(mapped.signed_duty_ratio, -1.0);
+        assert_eq!(mapped.ideal_average_voltage_v, -12.0);
+        assert_eq!(mapped.terminal_voltage_request_v, 0.0);
+        assert_eq!(mapped.average_bridge_loss_v, 12.0);
+        assert!(mapped.command_saturated);
+    }
+
+    #[test]
+    fn pwm_motor_frontend_rejects_invalid_electrical_evidence() {
+        let invalid_spec = PwmMotorCommandFrontendSpec {
+            full_scale_command_count: 0.0,
+            ..PwmMotorCommandFrontendSpec::default()
+        };
+        assert_eq!(
+            evaluate_pwm_motor_command(invalid_spec, 0.0, 12.0),
+            Err(MobilityPlantEvaluationError::InvalidSpec)
+        );
+        assert_eq!(
+            evaluate_pwm_motor_command(PwmMotorCommandFrontendSpec::default(), f64::NAN, 12.0,),
+            Err(MobilityPlantEvaluationError::InvalidInput)
+        );
+        assert_eq!(
+            evaluate_pwm_motor_command(PwmMotorCommandFrontendSpec::default(), 1.0, -12.0),
+            Err(MobilityPlantEvaluationError::InvalidInput)
+        );
     }
 
     #[test]

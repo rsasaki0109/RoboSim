@@ -461,6 +461,37 @@ excitation/validation runs before fitting. A PWM channel alone is not measured
 terminal voltage; do not infer physical electrical constants from it without the
 missing conversion and instrumentation evidence.
 
+### PWM command / physical plant boundary
+
+The backend-neutral motor plant continues to accept requested terminal voltage in
+volts. `PwmMotorCommandFrontendSpec` now provides a separate, deterministic map
+from signed controller counts and a runtime bus voltage to that request. It clamps
+counts at an explicit full scale, applies an explicit command polarity, and reports
+ideal average voltage, averaged bridge loss and the post-loss voltage request.
+`DcMotorSpec` then independently applies the motor-terminal voltage/current limits
+and electrical failure mode. Thus an empirical RPM/PWM-count gain or time constant
+cannot silently become resistance, torque constant, back-EMF constant or inertia.
+
+The physical basis for keeping this boundary explicit is the TI
+[DRV8874 data sheet](https://www.ti.com/lit/ds/symlink/drv8874.pdf): its input can
+be static or PWM, and its PH/EN and PWM truth tables distinguish drive, brake,
+coast and high-impedance states. TI's
+[12–24 V brushed-DC reference design](https://www.ti.com/lit/ug/tiduaw3/tiduaw3.pdf)
+also treats the motor-side voltage/current as PWM waveforms when reporting delivered
+power. These sources do not qualify the OpenMCT capture's unmeasured bus voltage,
+switch drops or decay behavior.
+
+The implemented v1 map is intentionally only a switching-cycle average:
+`V_request = signed_duty * max(V_bus - V_bridge_drop, 0)`. Bridge loss is declared
+at an operating point and averaged over energized duty. PWM ripple, switching
+frequency, decay/recirculation mode, current regulation, battery sag, dead time and
+thermal dependence remain outside this contract. The frontend does not introduce
+a synthetic command deadband. Focused tests cover count saturation, polarity,
+loss greater than bus voltage, invalid evidence, and the handoff into the unchanged
+voltage-driven motor evaluator. Physical use still requires measured bus voltage
+and an identified bridge-loss model; the retained OpenMCT PWM/speed logs do not
+supply them.
+
 The [AutoDRIVE Nigel author repository](https://github.com/Tinker-Twins/AutoDRIVE-Nigel-Dataset)
 is a separate Ackermann candidate with timestamp, steering, tick-count and inertial
 columns. Its README declares approximately 1.50 GB for the camera-free dataset
