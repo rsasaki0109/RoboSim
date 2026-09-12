@@ -24,6 +24,10 @@ use rne_mobility_benchmark::suspension_identification::{
     decode_suspension_identification_dataset, identify_suspension_dataset,
     synthetic_suspension_identification_dataset, MAX_SUSPENSION_IDENTIFICATION_DATASET_BYTES,
 };
+use rne_mobility_benchmark::tire_identification::{
+    decode_tire_identification_dataset, identify_tire_dataset,
+    synthetic_tire_identification_dataset, MAX_TIRE_IDENTIFICATION_DATASET_BYTES,
+};
 use rne_physics_rapier::RapierBackend;
 use std::path::PathBuf;
 
@@ -403,6 +407,13 @@ fn main() -> Result<()> {
                 "suspension-identification-fixture",
             )
         }
+        "tire-identification-fixture" => {
+            let dataset = synthetic_tire_identification_dataset()?;
+            (
+                serde_json::to_string_pretty(&dataset)? + "\n",
+                "tire-identification-fixture",
+            )
+        }
         "suspension-uncertainty"
         | "suspension-uncertainty-verify"
         | "suspension-derived-errors"
@@ -701,6 +712,17 @@ fn main() -> Result<()> {
                 "suspension-identification",
             )
         }
+        "tire-identification" => {
+            let input = input
+                .as_deref()
+                .context("--backend tire-identification requires --input")?;
+            let dataset = read_tire_identification_dataset(input)?;
+            let evidence = identify_tire_dataset(&dataset)?;
+            (
+                serde_json::to_string_pretty(&evidence)? + "\n",
+                "tire-identification",
+            )
+        }
         "identified-road-compare" => {
             let input = input
                 .as_deref()
@@ -799,6 +821,7 @@ fn main() -> Result<()> {
         matches!(
             backend.as_str(),
             "suspension-identification"
+                | "tire-identification"
                 | "identified-road-compare"
                 | "suspension-acquisition-verify"
                 | "suspension-acquired"
@@ -971,6 +994,19 @@ fn read_suspension_identification_dataset(
     );
     let bytes = std::fs::read(input).with_context(|| format!("read {}", input.display()))?;
     decode_suspension_identification_dataset(&bytes)
+}
+
+fn read_tire_identification_dataset(
+    input: &std::path::Path,
+) -> Result<rne_mobility_benchmark::tire_identification::TireIdentificationDataset> {
+    let metadata =
+        std::fs::metadata(input).with_context(|| format!("inspect {}", input.display()))?;
+    ensure!(
+        metadata.is_file() && metadata.len() <= MAX_TIRE_IDENTIFICATION_DATASET_BYTES as u64,
+        "tire identification input is not a bounded regular file"
+    );
+    let bytes = std::fs::read(input).with_context(|| format!("read {}", input.display()))?;
+    decode_tire_identification_dataset(&bytes)
 }
 
 #[cfg(feature = "mujoco")]

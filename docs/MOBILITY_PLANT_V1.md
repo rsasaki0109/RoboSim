@@ -111,6 +111,21 @@ wear, or pressure. Those template values must retain separate provenance. Trajec
 IMU, odometry, or command logs without an independently justified tire-force
 reconstruction cannot enter this gate.
 
+The executable artifact boundary lives in `rne_mobility_benchmark::tire_identification`.
+Its bounded JSON dataset freezes complete training and holdout acquisitions, source class,
+template, units, clocks, and force-law identity. The result copies the honest physical versus
+synthetic provenance, binds the exact dataset and fit with SHA-256, and recomputes both during
+validation. The built-in fixture exercises the software contract only:
+
+```text
+cargo run -p rne_mobility_benchmark -- --backend tire-identification-fixture --output dataset.json
+cargo run -p rne_mobility_benchmark -- --backend tire-identification --input dataset.json --output evidence.json
+```
+
+Replacing the fixture's source label does not create physical evidence; physical qualification
+still requires independently traceable acquisition, calibration, synchronization, and raw-file
+hashes.
+
 ## Evidence and validity
 
 Pure deterministic tests cover locked rotor, voltage/current saturation, back-EMF,

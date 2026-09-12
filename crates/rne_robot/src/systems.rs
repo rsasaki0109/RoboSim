@@ -2491,6 +2491,39 @@ fn steady_tire_forces(
     (raw_longitudinal_n * scale, raw_lateral_n * scale)
 }
 
+/// Evaluates the steady-state force law used by combined-slip identification.
+///
+/// Slip coordinates are dimensionless, load and returned forces are newtons, and
+/// `road_friction_scale` is a positive dimensionless multiplier. This function
+/// excludes relaxation dynamics and therefore must not be used as transient evidence.
+pub fn evaluate_combined_slip_tire_steady_force(
+    spec: CombinedSlipTireSpec,
+    longitudinal_slip_ratio: f64,
+    lateral_slip_tangent: f64,
+    normal_load_n: f64,
+    road_friction_scale: f64,
+) -> Result<(f64, f64), MobilityPlantEvaluationError> {
+    if !spec.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    if !longitudinal_slip_ratio.is_finite()
+        || !lateral_slip_tangent.is_finite()
+        || !normal_load_n.is_finite()
+        || normal_load_n <= 0.0
+        || !road_friction_scale.is_finite()
+        || road_friction_scale <= 0.0
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    Ok(steady_tire_forces(
+        spec,
+        longitudinal_slip_ratio,
+        lateral_slip_tangent,
+        normal_load_n,
+        road_friction_scale,
+    ))
+}
+
 /// Evaluates one DC motor from terminal voltage and completed rotor velocity.
 ///
 /// With no inductance, current is the algebraic equivalent-circuit solution
@@ -5608,6 +5641,20 @@ mod tests {
                 .map(|condition| condition.condition_id)
                 .collect::<Vec<_>>(),
             [20, 30]
+        );
+    }
+
+    #[test]
+    fn steady_tire_force_api_matches_identification_law_and_rejects_invalid_input() {
+        let spec = identified_tire_template();
+        let expected = steady_tire_forces(spec, 0.2, -0.3, 900.0, 0.7);
+        assert_eq!(
+            evaluate_combined_slip_tire_steady_force(spec, 0.2, -0.3, 900.0, 0.7),
+            Ok(expected)
+        );
+        assert_eq!(
+            evaluate_combined_slip_tire_steady_force(spec, 0.2, -0.3, 0.0, 0.7),
+            Err(MobilityPlantEvaluationError::InvalidInput)
         );
     }
 
