@@ -1183,6 +1183,52 @@ and hard-r2 may support source screening and protocol design only. A future fina
 must be a separately pinned, unread complete run and its conversion/evaluation rules
 must be committed before response access.
 
+### Exposed control-path diagnostic
+
+`scripts/audit_f1tenth_controls.py` decodes only the two already exposed runs. It
+preserves bag timestamps, permits at most 5 ms for diagnostic nearest-neighbor
+pairing, rejects every unallowlisted run, and never applies or qualifies a fitted
+mapping. Both runs contain nonzero values only in `/cmd_vel` `linear.x` and
+`angular.z`; all other Twist components are identically zero.
+
+The two independent runs reproduce the same approximate software conversion:
+
+| Exposed run | `linear.x` to motor slope | offset | RMS residual | `angular.z` to servo slope | offset | RMS residual |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| hard-r1 | 9,955.102 | 23.403 | 828.680 ERPM | 0.348858 | 0.499399 | 0.016569 |
+| hard-r2 | 9,918.960 | 111.784 | 1,033.918 ERPM | 0.348924 | 0.499749 | 0.017844 |
+
+This is consistent with the F1TENTH driver's documented *form*—ERPM is an affine
+function of requested speed and normalized servo position is an affine function of
+requested steering angle—but it does not prove the capture's unpublished parameter
+file. The [official calibration guide](https://github.com/f1tenth/f1tenth_doc/blob/main/getting_started/driving/drive_calib_odom.rst)
+also says those gains must be tuned per car. The currently published
+[example configuration](https://github.com/f1tenth/f1tenth_system/blob/foxy-devel/f1tenth_stack/config/vesc.yaml)
+uses materially different numeric gains, so it must not be substituted for the
+observed capture mapping.
+
+The servo command-to-echo diagnostics are close to identity (slopes 0.993956 and
+0.996832), but `/sensors/servo_position_command` is still a command echo, not an
+independent steering-angle encoder. Large maximum residuals in all three mappings
+also show that fixed-window nearest pairing can cross transitions. No physical
+calibration, capture-clock synchronization, actuator lag, measured steering, or
+motor response is inferred. The retained pretty-JSON reports are:
+
+- hard-r1: 2,913 bytes, file SHA-256
+  `75b160281f9d439f8e81086b2157132f69d8169fe62bc64c47d333f7034d5d63`,
+  content digest
+  `806b32b8e0038ee58cbb195a48e5c703649fca029edff72826c8ef32c9c6be1e`;
+- hard-r2: 2,912 bytes, file SHA-256
+  `80533c4513ca4b7a156cbfad9f0638bdd853f5fd659f0600218e5fa0e5e8aefb`,
+  content digest
+  `4f379bb41d7f6e63a15b0d33a4d301de5b18edbd0b85934c504853f4ebd89218`.
+
+They remain external at `E:\RNE-build\m3c-sensor`; raw bag data and reports are
+not repository artifacts. The next admissible step is to characterize recorder-time
+ordering and header-to-recorder clock residuals on these exposed runs. Since
+`/cmd_vel` has no header, this can qualify a deterministic bag-time replay policy,
+not command capture time or physical input-to-motion delay.
+
 The existing [suspension identification gate](MOBILITY_SUSPENSION_IDENTIFICATION_V1.md)
 requires strut displacement, velocity and generalized force plus acquisition evidence.
 None of these candidate descriptions establishes that contract. Keep its physical
