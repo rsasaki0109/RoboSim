@@ -566,6 +566,33 @@ all physical/calibration/clock/identification qualification flags false; this is
 integrity evidence, not a motor fit or a claim that spreadsheet-derived channels are
 ground truth.
 
+`scripts/convert_pmdc_prbs9.py` performs the next lossless boundary step. Its CLI only
+accepts `training` or `development`; there is deliberately no final-partition selector.
+It stops before the first final annotation/header, validates each selected run annotation
+and exact 12-channel header, rejects formula or incomplete data rows, and writes every
+source cell as its original lexical string together with source row and stable run ID.
+It applies no timestamp adjustment, numeric parsing, interpolation, unit conversion or
+calibration. Exclusive output creation prevents accidental replacement:
+
+```powershell
+python -B scripts/convert_pmdc_prbs9.py `
+  E:\RoboSim-external-data\mobility-pmdc-2rkpsss6fd-v2\MotorsData_rev.xlsx `
+  --partition training `
+  --output E:\RoboSim-external-data\mobility-pmdc-2rkpsss6fd-v2\prbs9-motor-a-training-v1.jsonl
+```
+
+The retained training artifact contains eight runs of 2,009 samples (16,072 records),
+has file SHA-256 `37fe6d4bb5e2645aac171cc699e32bec64a3883f2a44a396049e005a1f2651b2`,
+and its canonical record stream hashes to
+`8de4971cbfc8bfd26e3244ead3357ad6950f56a8d57759a7ceab44f0feb12e5b`.
+The separately created development artifact contains one 2,009-sample run, has file
+SHA-256 `3a5a84afa45b49c5158287a222843cd66e3b338233b62f33d67db3ae7f23130f`,
+and record-stream SHA-256
+`a9e559ee901221a3663274c4f20939b202491426145580d8e1bd278aa0d04dec`.
+Both live beside the source on external storage. The initially encountered single-cell
+`Trial Description: PRBS9` rows are preserved as run annotations rather than silently
+dropped or misclassified as samples. The final two runs remain sealed.
+
 The [AutoDRIVE Nigel author repository](https://github.com/Tinker-Twins/AutoDRIVE-Nigel-Dataset)
 is a separate Ackermann candidate with timestamp, steering, tick-count and inertial
 columns. Its README declares approximately 1.50 GB for the camera-free dataset

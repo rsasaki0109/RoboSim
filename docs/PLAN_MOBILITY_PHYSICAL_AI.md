@@ -54,8 +54,11 @@ The real-log audit has acquired a bounded PMDC geared-motor candidate with simul
 recorded terminal voltage/current/speed and frozen complete-run splits. Its strict,
 read-only source auditor now verifies the published hash, bounded OOXML container, exact
 sheet relationships, trial boundaries and formula contamination and emits deterministic
-evidence to external storage. Channel-preserving conversion, calibration audit and
-physical parameter qualification remain active M5 work.
+evidence to external storage. A lossless pre-final converter now retains all 12 source
+channels, source rows, run annotations and complete-run identity for the frozen training
+and development partitions while making the final partition unavailable. Calibration
+audit, a predeclared model/metric protocol and physical parameter qualification remain
+active M5 work.
 
 M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus
