@@ -2,11 +2,15 @@
 
 #![deny(missing_docs)]
 
+pub mod allan;
+#[cfg(test)]
+mod allan_imu_validation;
 pub mod camera;
 pub mod components;
 pub mod imu;
 pub mod lidar;
 pub mod noise;
+pub mod resources;
 pub mod systems;
 pub mod wheel_encoder;
 
@@ -34,6 +38,7 @@ pub use lidar::{
     LidarSweep, RANGE_REFERENCE_M,
 };
 pub use noise::{NoiseModel, SensorNoiseKey};
+pub use resources::SensorGravity;
 pub use systems::{
     sample_imu_feedback_sensors, sample_incremental_encoder_sensors, sample_joint_feedback_sensors,
     sample_motor_electrical_feedback_sensors, sample_sensors, ImuFeedbackError,

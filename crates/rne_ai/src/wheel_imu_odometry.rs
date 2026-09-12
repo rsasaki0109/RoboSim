@@ -14,6 +14,8 @@ use thiserror::Error;
 
 /// Stable task identity for the sensor-only differential-drive baseline.
 pub const WHEEL_IMU_SENSOR_ONLY_TASK_ID: &str = "rne.mobility.wheel_imu_sensor_only.v1";
+/// Signed counter width used by four-wheel derived side streams.
+pub const FOUR_WHEEL_SIDE_FUSED_COUNTER_BITS: u8 = 63;
 
 /// DataBus streams consumed by [`WheelImuOdometry`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +26,316 @@ pub struct WheelImuOdometryStreams {
     pub right_encoder: StreamId,
     /// Raw IMU-feedback stream.
     pub imu: StreamId,
+}
+
+/// Four independently measured wheel-encoder streams on a skid-steer chassis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FourWheelEncoderStreams {
+    /// Front-left wheel encoder.
+    pub front_left: StreamId,
+    /// Rear-left wheel encoder.
+    pub rear_left: StreamId,
+    /// Front-right wheel encoder.
+    pub front_right: StreamId,
+    /// Rear-right wheel encoder.
+    pub rear_right: StreamId,
+}
+
+/// Derived left/right streams emitted by [`FourWheelSideEncoderFusion`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SideEncoderStreams {
+    /// Sum-of-two-counts stream for the left side.
+    pub left: StreamId,
+    /// Sum-of-two-counts stream for the right side.
+    pub right: StreamId,
+}
+
+/// Counter and synchronization contract for four-wheel side aggregation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FourWheelSideEncoderFusionConfig {
+    /// Counts per revolution of each physical encoder before side aggregation.
+    pub counts_per_revolution: u32,
+    /// Signed counter width of each physical encoder, from 2 through 63 bits.
+    pub counter_bits: u8,
+    /// Largest plausible count delta for any one wheel and accepted update.
+    pub max_abs_wheel_delta_counts: u64,
+    /// Maximum capture-time separation among the four source frames.
+    pub max_input_skew_ticks: u64,
+    /// Maximum source-frame age at the fusion decision.
+    pub max_frame_age_ticks: u64,
+}
+
+impl FourWheelSideEncoderFusionConfig {
+    /// Returns the counts per revolution of a sum-of-two-counts side stream.
+    pub fn side_counts_per_revolution(self) -> Result<u32, WheelImuOdometryError> {
+        self.validate()?;
+        self.counts_per_revolution
+            .checked_mul(2)
+            .ok_or(WheelImuOdometryError::InvalidConfig(
+                "side_counts_per_revolution",
+            ))
+    }
+
+    /// Validates counter and timing invariants.
+    pub fn validate(self) -> Result<(), WheelImuOdometryError> {
+        if self.counts_per_revolution == 0 {
+            return Err(WheelImuOdometryError::InvalidConfig(
+                "counts_per_revolution",
+            ));
+        }
+        if !(2..=63).contains(&self.counter_bits) {
+            return Err(WheelImuOdometryError::InvalidConfig("counter_bits"));
+        }
+        let half_range = 1_u64 << (self.counter_bits - 1);
+        if self.max_abs_wheel_delta_counts == 0 || self.max_abs_wheel_delta_counts >= half_range {
+            return Err(WheelImuOdometryError::InvalidConfig(
+                "max_abs_wheel_delta_counts",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FourWheelAcceptedInputs {
+    raw_counts: [i64; 4],
+    sequences: [u64; 4],
+    capture_ticks: u64,
+}
+
+/// Deterministic four-wheel encoder frontend that publishes two side-distance streams.
+///
+/// Each physical encoder remains independently observable on the input bus. The derived
+/// counter is the accumulated sum of the two modular wheel-count changes on a side, so an
+/// estimator configured with twice the physical counts per revolution observes the side's
+/// arithmetic-mean travel without losing half-count resolution. Source commands and simulator
+/// truth are not accepted by this boundary.
+#[derive(Clone, Debug)]
+pub struct FourWheelSideEncoderFusion {
+    config: FourWheelSideEncoderFusionConfig,
+    previous: Option<FourWheelAcceptedInputs>,
+    accumulated_side_counts: [i64; 2],
+    output_sequences: [u64; 2],
+}
+
+impl FourWheelSideEncoderFusion {
+    /// Creates a four-wheel side aggregator with zero accumulated distance.
+    pub fn new(config: FourWheelSideEncoderFusionConfig) -> Result<Self, WheelImuOdometryError> {
+        config.validate()?;
+        config.side_counts_per_revolution()?;
+        Ok(Self {
+            config,
+            previous: None,
+            accumulated_side_counts: [0; 2],
+            output_sequences: [0; 2],
+        })
+    }
+
+    /// Publishes one synchronized left/right pair when all four inputs have advanced.
+    ///
+    /// Returns `Ok(false)` when the newest available set has already been consumed. Capture
+    /// and availability timestamps are preserved conservatively as the newest source values;
+    /// sequence gaps in any physical channel advance the derived sequence by the total number
+    /// of skipped source frames so downstream health logic can observe the loss.
+    pub fn publish_latest(
+        &mut self,
+        bus: &mut impl DataBus,
+        inputs: FourWheelEncoderStreams,
+        outputs: SideEncoderStreams,
+        decision_time: SimTime,
+    ) -> Result<bool, WheelImuOdometryError> {
+        let frames = [
+            required::<IncrementalEncoderFeedback>(
+                bus,
+                inputs.front_left,
+                decision_time,
+                "front-left encoder",
+            )?,
+            required::<IncrementalEncoderFeedback>(
+                bus,
+                inputs.rear_left,
+                decision_time,
+                "rear-left encoder",
+            )?,
+            required::<IncrementalEncoderFeedback>(
+                bus,
+                inputs.front_right,
+                decision_time,
+                "front-right encoder",
+            )?,
+            required::<IncrementalEncoderFeedback>(
+                bus,
+                inputs.rear_right,
+                decision_time,
+                "rear-right encoder",
+            )?,
+        ];
+        for (frame, sensor) in
+            frames
+                .iter()
+                .zip(["front-left", "rear-left", "front-right", "rear-right"])
+        {
+            validate_encoder_status(frame.payload.status, sensor)?;
+            if !frame.payload.position_rad.is_finite() || !frame.payload.velocity_rad_s.is_finite()
+            {
+                return Err(WheelImuOdometryError::NonFiniteObservation {
+                    field: "four-wheel encoder",
+                });
+            }
+        }
+        if self.previous.is_some_and(|previous| {
+            frames
+                .iter()
+                .map(|frame| frame.sequence)
+                .zip(previous.sequences)
+                .any(|(current, prior)| current <= prior)
+        }) {
+            return Ok(false);
+        }
+        let oldest_capture_ticks = frames
+            .iter()
+            .map(|frame| frame.capture_time.ticks())
+            .min()
+            .expect("four frames");
+        let capture_ticks = frames
+            .iter()
+            .map(|frame| frame.capture_time.ticks())
+            .max()
+            .expect("four frames");
+        let skew_ticks = capture_ticks - oldest_capture_ticks;
+        if skew_ticks > self.config.max_input_skew_ticks {
+            return Err(WheelImuOdometryError::InputSkew {
+                observed_ticks: skew_ticks,
+                maximum_ticks: self.config.max_input_skew_ticks,
+            });
+        }
+        let age_ticks = decision_time.ticks().saturating_sub(oldest_capture_ticks);
+        if age_ticks > self.config.max_frame_age_ticks {
+            return Err(WheelImuOdometryError::StaleInput {
+                observed_ticks: age_ticks,
+                maximum_ticks: self.config.max_frame_age_ticks,
+            });
+        }
+        let accepted = FourWheelAcceptedInputs {
+            raw_counts: frames.each_ref().map(|frame| frame.payload.raw_count),
+            sequences: frames.each_ref().map(|frame| frame.sequence),
+            capture_ticks,
+        };
+        let (side_delta_counts, side_skipped_sequences) = if let Some(previous) = self.previous {
+            if accepted.capture_ticks <= previous.capture_ticks {
+                return Err(WheelImuOdometryError::NonAdvancingCaptureTime);
+            }
+            let mut deltas = [0_i64; 4];
+            for index in 0..4 {
+                deltas[index] = modular_counter_delta(
+                    previous.raw_counts[index],
+                    accepted.raw_counts[index],
+                    self.config.counter_bits,
+                );
+                validate_counter_delta(
+                    deltas[index],
+                    self.config.max_abs_wheel_delta_counts,
+                    ["front-left", "rear-left", "front-right", "rear-right"][index],
+                )?;
+            }
+            (
+                [
+                    deltas[0]
+                        .checked_add(deltas[1])
+                        .ok_or(WheelImuOdometryError::CounterAccumulationOverflow)?,
+                    deltas[2]
+                        .checked_add(deltas[3])
+                        .ok_or(WheelImuOdometryError::CounterAccumulationOverflow)?,
+                ],
+                [
+                    sequence_gap(previous.sequences[0], accepted.sequences[0])
+                        .checked_add(sequence_gap(previous.sequences[1], accepted.sequences[1]))
+                        .ok_or(WheelImuOdometryError::CounterAccumulationOverflow)?,
+                    sequence_gap(previous.sequences[2], accepted.sequences[2])
+                        .checked_add(sequence_gap(previous.sequences[3], accepted.sequences[3]))
+                        .ok_or(WheelImuOdometryError::CounterAccumulationOverflow)?,
+                ],
+            )
+        } else {
+            ([0, 0], [0, 0])
+        };
+        let mut derived_counter_wrapped = [false; 2];
+        for side in 0..2 {
+            (
+                self.accumulated_side_counts[side],
+                derived_counter_wrapped[side],
+            ) = wrapped_counter_add(
+                self.accumulated_side_counts[side],
+                side_delta_counts[side],
+                FOUR_WHEEL_SIDE_FUSED_COUNTER_BITS,
+            );
+            self.output_sequences[side] = self.output_sequences[side]
+                .checked_add(1)
+                .and_then(|value| value.checked_add(side_skipped_sequences[side]))
+                .ok_or(WheelImuOdometryError::CounterAccumulationOverflow)?;
+        }
+        let side_indices = [[0, 1], [2, 3]];
+        for (side, stream_id) in [outputs.left, outputs.right].into_iter().enumerate() {
+            let [first, second] = side_indices[side];
+            let status =
+                merged_encoder_status(frames[first].payload.status, frames[second].payload.status);
+            let scheduled_capture_ticks = frames[first]
+                .payload
+                .scheduled_capture_ticks
+                .max(frames[second].payload.scheduled_capture_ticks);
+            let payload = IncrementalEncoderFeedback {
+                schema_version: IncrementalEncoderFeedback::SCHEMA_VERSION,
+                scheduled_capture_ticks,
+                sample_phase_error_ticks: frames[first]
+                    .payload
+                    .sample_phase_error_ticks
+                    .max(frames[second].payload.sample_phase_error_ticks),
+                status,
+                raw_count: self.accumulated_side_counts[side],
+                delta_count: side_delta_counts[side],
+                position_rad: 0.5
+                    * (frames[first].payload.position_rad + frames[second].payload.position_rad),
+                velocity_rad_s: 0.5
+                    * (frames[first].payload.velocity_rad_s
+                        + frames[second].payload.velocity_rad_s),
+                counter_wrapped: derived_counter_wrapped[side]
+                    || frames[first].payload.counter_wrapped
+                    || frames[second].payload.counter_wrapped,
+                index_pulse: frames[first].payload.index_pulse
+                    || frames[second].payload.index_pulse,
+            };
+            let mut derived = Frame::new(
+                stream_id,
+                frames[first].entity,
+                self.output_sequences[side],
+                SimTime::from_ticks(capture_ticks),
+                payload,
+            );
+            derived.capture_time = SimTime::from_ticks(capture_ticks);
+            derived.available_time = frames
+                .iter()
+                .map(|frame| frame.available_time)
+                .max()
+                .expect("four frames");
+            derived.sim_time = derived.available_time;
+            bus.publish(derived);
+        }
+        self.previous = Some(accepted);
+        Ok(true)
+    }
+}
+
+fn merged_encoder_status(
+    current: IncrementalEncoderStatus,
+    next: IncrementalEncoderStatus,
+) -> IncrementalEncoderStatus {
+    use IncrementalEncoderStatus::{CounterSaturated, Initializing, Nominal, StuckValue};
+    match (current, next) {
+        (CounterSaturated, _) | (_, CounterSaturated) => CounterSaturated,
+        (StuckValue, _) | (_, StuckValue) => StuckValue,
+        (Initializing, _) | (_, Initializing) => Initializing,
+        (Nominal, Nominal) => Nominal,
+    }
 }
 
 /// Physical calibration and timing limits for sensor-only odometry.
@@ -409,6 +721,9 @@ pub enum WheelImuOdometryError {
         /// Configured absolute limit.
         maximum_counts: u64,
     },
+    /// A derived finite counter or sequence could not be represented exactly.
+    #[error("derived encoder counter or sequence overflow")]
+    CounterAccumulationOverflow,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -704,6 +1019,17 @@ fn modular_counter_delta(previous: i64, current: i64, bits: u8) -> i64 {
     delta as i64
 }
 
+fn wrapped_counter_add(previous: i64, delta: i64, bits: u8) -> (i64, bool) {
+    let modulus = 1_i128 << bits;
+    let half = modulus / 2;
+    let unwrapped = i128::from(previous) + i128::from(delta);
+    let mut wrapped = unwrapped.rem_euclid(modulus);
+    if wrapped >= half {
+        wrapped -= modulus;
+    }
+    (wrapped as i64, wrapped != unwrapped)
+}
+
 fn validate_counter_delta(
     delta_counts: i64,
     maximum_counts: u64,
@@ -791,6 +1117,16 @@ mod tests {
         right_encoder: StreamId(42),
         imu: StreamId(43),
     };
+    const FOUR_WHEEL_STREAMS: FourWheelEncoderStreams = FourWheelEncoderStreams {
+        front_left: StreamId(51),
+        rear_left: StreamId(52),
+        front_right: StreamId(53),
+        rear_right: StreamId(54),
+    };
+    const SIDE_STREAMS: SideEncoderStreams = SideEncoderStreams {
+        left: StreamId(55),
+        right: StreamId(56),
+    };
 
     fn config() -> WheelImuOdometryConfig {
         WheelImuOdometryConfig {
@@ -861,6 +1197,224 @@ mod tests {
                 },
             )
             .with_latency(SimDuration::from_ticks(latency_ticks)),
+        );
+    }
+
+    fn publish_four_wheel_set(
+        bus: &mut InMemoryDataBus,
+        sequence: u64,
+        capture_ticks: u64,
+        latency_ticks: u64,
+        counts: [i64; 4],
+    ) {
+        for (stream, count) in [
+            FOUR_WHEEL_STREAMS.front_left,
+            FOUR_WHEEL_STREAMS.rear_left,
+            FOUR_WHEEL_STREAMS.front_right,
+            FOUR_WHEEL_STREAMS.rear_right,
+        ]
+        .into_iter()
+        .zip(counts)
+        {
+            bus.publish(
+                Frame::new(
+                    stream,
+                    Entity::PLACEHOLDER,
+                    sequence,
+                    SimTime::from_ticks(capture_ticks),
+                    IncrementalEncoderFeedback {
+                        schema_version: IncrementalEncoderFeedback::SCHEMA_VERSION,
+                        scheduled_capture_ticks: capture_ticks,
+                        status: if sequence == 1 {
+                            IncrementalEncoderStatus::Initializing
+                        } else {
+                            IncrementalEncoderStatus::Nominal
+                        },
+                        raw_count: count,
+                        position_rad: count as f64 * TAU / 100.0,
+                        velocity_rad_s: count as f64,
+                        ..IncrementalEncoderFeedback::default()
+                    },
+                )
+                .with_latency(SimDuration::from_ticks(latency_ticks)),
+            );
+        }
+    }
+
+    fn four_wheel_fusion_config() -> FourWheelSideEncoderFusionConfig {
+        FourWheelSideEncoderFusionConfig {
+            counts_per_revolution: 100,
+            counter_bits: 8,
+            max_abs_wheel_delta_counts: 120,
+            max_input_skew_ticks: 0,
+            max_frame_age_ticks: 20_000_000,
+        }
+    }
+
+    #[test]
+    fn four_wheel_fusion_preserves_independent_sources_and_modular_side_distance() {
+        let mut bus = InMemoryDataBus::new();
+        let mut fusion = FourWheelSideEncoderFusion::new(four_wheel_fusion_config()).unwrap();
+        publish_four_wheel_set(&mut bus, 1, 0, 2, [125, 124, -20, -18]);
+        assert!(matches!(
+            fusion.publish_latest(
+                &mut bus,
+                FOUR_WHEEL_STREAMS,
+                SIDE_STREAMS,
+                SimTime::from_ticks(1),
+            ),
+            Err(WheelImuOdometryError::MissingAvailableFrame { .. })
+        ));
+        assert!(fusion
+            .publish_latest(
+                &mut bus,
+                FOUR_WHEEL_STREAMS,
+                SIDE_STREAMS,
+                SimTime::from_ticks(2),
+            )
+            .unwrap());
+        bus.publish(
+            Frame::new(
+                STREAMS.imu,
+                Entity::PLACEHOLDER,
+                1,
+                SimTime::ZERO,
+                ImuFeedback::default(),
+            )
+            .with_latency(SimDuration::from_ticks(2)),
+        );
+        let mut estimator_config = config();
+        estimator_config.left_counts_per_revolution = 200;
+        estimator_config.right_counts_per_revolution = 200;
+        estimator_config.left_counter_bits = 63;
+        estimator_config.right_counter_bits = 63;
+        estimator_config.max_abs_wheel_delta_counts = 240;
+        let side_odometry_streams = WheelImuOdometryStreams {
+            left_encoder: SIDE_STREAMS.left,
+            right_encoder: SIDE_STREAMS.right,
+            imu: STREAMS.imu,
+        };
+        let mut estimator = WheelImuOdometry::new(estimator_config, PoseSample::default()).unwrap();
+        assert_eq!(
+            estimator
+                .update(&bus, side_odometry_streams, SimTime::from_ticks(2))
+                .unwrap()
+                .health,
+            WheelImuOdometryHealth::Initializing
+        );
+        publish_four_wheel_set(&mut bus, 2, 10_000_000, 2, [-126, -127, -16, -12]);
+        assert!(fusion
+            .publish_latest(
+                &mut bus,
+                FOUR_WHEEL_STREAMS,
+                SIDE_STREAMS,
+                SimTime::from_ticks(10_000_002),
+            )
+            .unwrap());
+        bus.publish(
+            Frame::new(
+                STREAMS.imu,
+                Entity::PLACEHOLDER,
+                2,
+                SimTime::from_ticks(10_000_000),
+                ImuFeedback::default(),
+            )
+            .with_latency(SimDuration::from_ticks(2)),
+        );
+
+        let left = bus
+            .latest_available::<IncrementalEncoderFeedback>(
+                SIDE_STREAMS.left,
+                SimTime::from_ticks(10_000_002),
+            )
+            .unwrap();
+        let right = bus
+            .latest_available::<IncrementalEncoderFeedback>(
+                SIDE_STREAMS.right,
+                SimTime::from_ticks(10_000_002),
+            )
+            .unwrap();
+        assert_eq!(left.payload.raw_count, 10);
+        assert_eq!(left.payload.delta_count, 10);
+        assert_eq!(right.payload.raw_count, 10);
+        assert_eq!(right.payload.delta_count, 10);
+        assert_eq!(left.capture_time.ticks(), 10_000_000);
+        assert_eq!(left.available_time.ticks(), 10_000_002);
+        assert_eq!(
+            four_wheel_fusion_config().side_counts_per_revolution(),
+            Ok(200)
+        );
+        let estimate = estimator
+            .update(&bus, side_odometry_streams, SimTime::from_ticks(10_000_002))
+            .unwrap();
+        assert!((estimate.pose.position_m.x - 0.005 * TAU).abs() < 1.0e-12);
+        assert_eq!(estimate.health, WheelImuOdometryHealth::Nominal);
+        assert_eq!(
+            bus.latest_available::<IncrementalEncoderFeedback>(
+                FOUR_WHEEL_STREAMS.front_left,
+                SimTime::from_ticks(10_000_002),
+            )
+            .unwrap()
+            .payload
+            .raw_count,
+            -126
+        );
+        assert!(!fusion
+            .publish_latest(
+                &mut bus,
+                FOUR_WHEEL_STREAMS,
+                SIDE_STREAMS,
+                SimTime::from_ticks(100_000_000),
+            )
+            .unwrap());
+    }
+
+    #[test]
+    fn four_wheel_fusion_exposes_per_side_source_sequence_gaps() {
+        let mut bus = InMemoryDataBus::new();
+        let mut fusion = FourWheelSideEncoderFusion::new(four_wheel_fusion_config()).unwrap();
+        publish_four_wheel_set(&mut bus, 1, 0, 0, [0; 4]);
+        fusion
+            .publish_latest(&mut bus, FOUR_WHEEL_STREAMS, SIDE_STREAMS, SimTime::ZERO)
+            .unwrap();
+        publish_four_wheel_set(&mut bus, 4, 10_000_000, 0, [3; 4]);
+        fusion
+            .publish_latest(
+                &mut bus,
+                FOUR_WHEEL_STREAMS,
+                SIDE_STREAMS,
+                SimTime::from_ticks(10_000_000),
+            )
+            .unwrap();
+        let left = bus
+            .latest_available::<IncrementalEncoderFeedback>(
+                SIDE_STREAMS.left,
+                SimTime::from_ticks(10_000_000),
+            )
+            .unwrap();
+        let right = bus
+            .latest_available::<IncrementalEncoderFeedback>(
+                SIDE_STREAMS.right,
+                SimTime::from_ticks(10_000_000),
+            )
+            .unwrap();
+        assert_eq!(left.sequence, 6);
+        assert_eq!(right.sequence, 6);
+    }
+
+    #[test]
+    fn fused_side_counter_wraps_at_the_declared_signed_width() {
+        let positive_limit = (1_i64 << (FOUR_WHEEL_SIDE_FUSED_COUNTER_BITS - 1)) - 1;
+        let (wrapped, did_wrap) =
+            wrapped_counter_add(positive_limit - 1, 5, FOUR_WHEEL_SIDE_FUSED_COUNTER_BITS);
+        assert!(did_wrap);
+        assert_eq!(
+            modular_counter_delta(
+                positive_limit - 1,
+                wrapped,
+                FOUR_WHEEL_SIDE_FUSED_COUNTER_BITS,
+            ),
+            5
         );
     }
 

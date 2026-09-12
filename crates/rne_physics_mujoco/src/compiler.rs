@@ -3,9 +3,9 @@
 use rne_ecs::{Entity, Parent, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, FixedJointDesc, JointActuation, JointMotor, JointPassiveDynamics,
-    PhysicsCapability, PhysicsWorldDesc, PrismaticJointDesc, RevoluteJointDesc, RigidBody,
-    RigidBodyInertia, RigidBodyType,
+    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointActuation, JointMotor,
+    JointPassiveDynamics, PhysicsCapability, PhysicsWorldDesc, PrismaticJointDesc,
+    RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::fmt::Write as _;
@@ -85,6 +85,7 @@ pub(crate) struct BodyTopology {
     mass_kg: f64,
     inertia: Option<RigidBodyInertia>,
     collider: Option<Collider>,
+    collision_groups: CollisionGroups,
     structural_transform: Option<Transform3>,
     joint: Option<JointSpec>,
 }
@@ -112,6 +113,7 @@ struct BodyInput {
     rigid_body: RigidBody,
     inertia: Option<RigidBodyInertia>,
     collider: Option<Collider>,
+    collision_groups: CollisionGroups,
     local_transform: Transform3,
     transform: Transform3,
     ecs_parent: Option<Entity>,
@@ -221,6 +223,7 @@ pub(crate) fn compile_rigid_body_model(
         );
     }
     mjcf.push_str("  </worldbody>\n");
+    write_collision_exclusions(&mut mjcf, &bodies, &bindings);
     if !actuators.is_empty() {
         mjcf.push_str("  <actuator>\n");
         for actuator in actuators {
@@ -302,6 +305,10 @@ fn collect_bodies(world: &World) -> Result<Vec<BodyInput>, CompileError> {
                     rigid_body,
                     inertia,
                     collider,
+                    collision_groups: entity_ref
+                        .get::<CollisionGroups>()
+                        .copied()
+                        .unwrap_or_default(),
                     local_transform,
                     transform,
                     ecs_parent: entity_ref.get::<Parent>().map(|parent| parent.0),
@@ -561,6 +568,7 @@ fn write_body(
         mass_kg: body.rigid_body.mass_kg,
         inertia: body.inertia,
         collider: body.collider,
+        collision_groups: body.collision_groups,
         structural_transform: (body.rigid_body.body_type == RigidBodyType::Fixed
             || matches!(body.joint, Some(JointSpec::Fixed(_))))
         .then_some(structural_transform),
@@ -713,6 +721,48 @@ fn relative_transform(parent: Transform3, child: Transform3) -> Transform3 {
     )
 }
 
+fn write_collision_exclusions(output: &mut String, bodies: &[BodyInput], bindings: &[BodyBinding]) {
+    let colliders = bodies
+        .iter()
+        .filter(|body| body.collider.is_some_and(|collider| !collider.sensor))
+        .collect::<Vec<_>>();
+    let mut exclusions = Vec::new();
+    for (index, left) in colliders.iter().enumerate() {
+        for right in &colliders[index + 1..] {
+            let left_accepts_right =
+                left.collision_groups.filter & right.collision_groups.memberships != 0;
+            let right_accepts_left =
+                right.collision_groups.filter & left.collision_groups.memberships != 0;
+            if left_accepts_right && right_accepts_left {
+                continue;
+            }
+            let left_name = &bindings
+                .iter()
+                .find(|binding| binding.entity == left.entity)
+                .expect("every compiled body has a binding")
+                .body_name;
+            let right_name = &bindings
+                .iter()
+                .find(|binding| binding.entity == right.entity)
+                .expect("every compiled body has a binding")
+                .body_name;
+            exclusions.push((left_name, right_name));
+        }
+    }
+    if exclusions.is_empty() {
+        return;
+    }
+    output.push_str("  <contact>\n");
+    for (left_name, right_name) in exclusions {
+        writeln!(
+            output,
+            "    <exclude body1=\"{left_name}\" body2=\"{right_name}\"/>"
+        )
+        .expect("writing to String cannot fail");
+    }
+    output.push_str("  </contact>\n");
+}
+
 fn validate_body(
     entity: Entity,
     rigid_body: RigidBody,
@@ -835,6 +885,14 @@ fn write_geom(
     } else {
         ""
     };
+    let contact_dimension_attribute = if collider.material.friction == 0.0 {
+        // A zero-friction material has no tangential constraint directions.
+        // Keeping MuJoCo's default condim=3 creates degenerate zero-capacity
+        // friction rows that can inject energy under external tire wrenches.
+        " condim=\"1\""
+    } else {
+        ""
+    };
     let mass_attribute = if include_mass {
         format!(" mass=\"{:.17}\"", rigid_body.mass_kg)
     } else {
@@ -842,7 +900,7 @@ fn write_geom(
     };
     writeln!(
         output,
-        "{indent}<geom name=\"rne_geom_{index}\" type=\"{kind}\" size=\"{size}\" pos=\"{}\" quat=\"{}\"{mass_attribute} friction=\"{:.9}\"{sensor_attributes}/>",
+        "{indent}<geom name=\"rne_geom_{index}\" type=\"{kind}\" size=\"{size}\" pos=\"{}\" quat=\"{}\"{mass_attribute} friction=\"{:.9}\"{contact_dimension_attribute}{sensor_attributes}/>",
         vector(collider.local_offset.translation),
         quaternion(rotation),
         collider.material.friction,
@@ -1299,6 +1357,47 @@ mod tests {
             .mjcf
             .contains("<inertial pos=\"0 0 0\" mass=\"2.00000000000000000\""));
         assert!(!compiled.mjcf.contains("rne_geom_1"));
+    }
+
+    #[test]
+    fn collision_groups_compile_to_pairwise_exclusions() {
+        let mut world = World::new();
+        let left = body(&mut world, "left", RigidBodyType::Dynamic, Vec3::ZERO);
+        let right = body(&mut world, "right", RigidBodyType::Dynamic, Vec3::ZERO);
+        let groups = CollisionGroups::without_self_collision(1);
+        world.entity_mut(left).insert(groups);
+        world.entity_mut(right).insert(groups);
+
+        let compiled =
+            compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.001).unwrap();
+
+        assert!(compiled.mjcf.contains("<contact>"));
+        assert!(compiled
+            .mjcf
+            .contains("<exclude body1=\"rne_body_0\" body2=\"rne_body_1\"/>"));
+    }
+
+    #[test]
+    fn zero_friction_geom_uses_normal_only_contact_dimension() {
+        let mut world = World::new();
+        let entity = body(
+            &mut world,
+            "frictionless",
+            RigidBodyType::Dynamic,
+            Vec3::ZERO,
+        );
+        world
+            .get_mut::<Collider>(entity)
+            .expect("collider")
+            .material
+            .friction = 0.0;
+
+        let compiled =
+            compile_rigid_body_model(&world, PhysicsWorldDesc::default(), 0.001).unwrap();
+
+        assert!(compiled
+            .mjcf
+            .contains("friction=\"0.000000000\" condim=\"1\""));
     }
 
     #[test]

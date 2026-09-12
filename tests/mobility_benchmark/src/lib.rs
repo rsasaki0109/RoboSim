@@ -1,6 +1,35 @@
 //! Stable Mobility Physical AI longitudinal benchmark producer.
 
+pub mod ackermann_observed;
+pub mod ackermann_suspension;
 pub mod backend;
+pub mod diff_caster;
+pub mod diff_caster_control;
+pub mod diff_caster_observed;
+pub mod identified_suspension_road;
+pub mod mobility_randomization;
+pub mod observed;
+pub mod observed_batch;
+pub mod observed_capsule;
+pub mod observed_execution_capsule;
+pub mod observed_fixed_batch;
+pub mod per_wheel;
+pub mod per_wheel_observed;
+pub mod recorded_ddmr;
+pub mod recorded_ipin;
+pub mod recorded_nclt;
+pub mod recorded_openmct;
+pub mod recorded_pmdc;
+pub mod road_excitation;
+pub mod suspension_acquisition;
+pub mod suspension_affine_acquisition;
+pub mod suspension_derivative;
+pub mod suspension_identification;
+pub mod suspension_robust;
+pub mod suspension_runs;
+pub mod suspension_sampling;
+pub mod suspension_timestamp_acquisition;
+pub mod suspension_uncertainty;
 
 use anyhow::{ensure, Result};
 use rne_robot::{

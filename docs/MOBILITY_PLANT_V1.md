@@ -42,6 +42,30 @@ M1-A intentionally does not fake their transient response inside a rigid torque 
 Ratio and efficiency can be taken from the gearbox datasheet; backlash and compliance need
 direction-reversal and torque/deflection measurements.
 
+## Steering actuator
+
+`SteeringActuatorSpec` shapes a requested steering angle before it reaches a
+backend joint-position constraint. It uses an exact first-order zero-order-hold
+response, followed by explicit angular-rate and travel limits. A declared
+deadband holds position for small command errors, while `Stuck` holds the last
+completed position regardless of the next command.
+
+This is a command-to-angle actuator model, not steering ground truth and not a
+torque/current servo model. Identify its time constant, rate limit, deadband,
+travel, and failure response from synchronized command and direct steering-angle
+measurements. Backlash, compliance, load-dependent servo response, and linkage
+forces remain unavailable until represented by a separately validated tier.
+
+`identify_steering_actuator_first_order` provides the first evidence gate for the
+unsaturated lag tier. It requires a uniform monotonic capture clock and direct
+angle samples, fits only a declared leading training split, and evaluates frozen
+one-step residuals on a later holdout split. The discrete fit is
+`delta_angle = b * (command - angle)` with `tau = -dt / ln(1 - b)`.
+Command echoes, insufficient command-error excitation, unstable response ratios,
+out-of-travel samples, clock drift, nonphysical time constants, and excessive
+training or holdout residuals fail explicitly. Callers must prequalify and retain
+separate rate-saturated, deadband, backlash, and fault segments.
+
 ## Wheel assembly
 
 `WheelAssemblySpec` declares unloaded radius, width, axle inertia, rolling resistance, and
@@ -58,6 +82,7 @@ identified tire behavior or silently combined with the tire force element.
 
 Pure deterministic tests cover locked rotor, voltage/current saturation, back-EMF,
 inductive current state, open/short failures, directional transmission efficiency,
-reflected inertia, invalid inputs, and rolling-resistance sign. Future benchmark profiles
+reflected inertia, steering response/rate/travel/failure behavior, invalid inputs, and
+rolling-resistance sign. Future benchmark profiles
 must preserve the raw parameter source and run locked-rotor, free-spin, coast-down,
 acceleration/braking, and direction-reversal fixtures before claiming a calibrated plant.

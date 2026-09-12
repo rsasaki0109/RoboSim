@@ -25,6 +25,14 @@ changes preserve a lane's sequence.
 `RandomizationSpec` values. The contract contains no NumPy, Gymnasium, PyTorch,
 JAX, ROS 2, renderer, or physics-backend type.
 
+The required `observation` space is actor-visible. Optional
+`privileged_observation` and `diagnostic_observation` spaces separate simulator truth for
+a training critic from evaluation/debug data that no policy may consume. Their absence is
+omitted from JSON, preserving the original v1 golden bytes and all existing v1 artifacts;
+their addition is therefore the explicit additive v1 compatibility decision. Tensor names
+must be unique across the three observation authorities, and runtimes must not concatenate
+them implicitly.
+
 Observation and action spaces are ordered lists of named, fixed-shape tensors.
 Each tensor declares a scalar dtype, row-major layout, unit, and optional
 flattened numeric bounds. An empty shape is one scalar. Bounds contain either
@@ -62,9 +70,10 @@ remain the authoritative portable evidence.
 
 JSON artifacts carry `kind = "rne_task_spec"` and `schema_version = 1`.
 `release/contracts.toml` pins the compiled version and a committed golden JSON
-pins the v1 field shape. Within v1, unknown JSON fields and invalid values are
-rejected. A field addition, removal, rename, meaning change, dtype change, shape
-change, unit change, or ordered-list change requires a new task artifact or a
+pins the v1 field shape. Within v1, unknown JSON fields and invalid values are rejected
+except for the two optional authority fields covered by the additive compatibility
+decision above. Any other field addition, removal, rename, meaning change, dtype change,
+shape change, unit change, or ordered-list change requires a new task artifact or a
 schema-version compatibility decision. Rust schema types are non-exhaustive so
 downstream matches and construction do not accidentally freeze internal
 implementation details beyond the serialized contract.

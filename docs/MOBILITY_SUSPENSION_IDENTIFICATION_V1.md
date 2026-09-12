@@ -1,0 +1,1171 @@
+# Suspension identification v1
+
+Status: implemented additive M3-C/M5 identification-and-application contract; physical dataset pending
+
+This subgate adds a backend-neutral path from timestamped suspension measurements to
+the linear force law already consumed by the Rapier and MuJoCo Ackermann plants:
+
+```text
+F = k (x_eq - x) - c x_dot
+```
+
+Each input sample contains capture time, suspension position, suspension velocity, and
+generalized strut force with units in its field name. The identifier fits stiffness
+`k`, viscous damping `c`, and unloaded equilibrium position `x_eq`. It performs no
+wall-clock access or random resampling.
+
+## Identification and validation contract
+
+### Force-residual robust fit (numerical diagnostic only)
+
+The current v1 coefficient solver is centered ordinary least squares. A separate
+opt-in Huber diagnostic is implemented; the existing v1 solver and evidence remain
+unchanged. The [SciPy Huber reference](https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.huber.html)
+defines a quadratic loss for small residuals and a linear tail, with an explicit
+transition scale. For force residual `r_n`, declare `delta_n > 0` in newton:
+`loss = 0.5*r_n^2` when `abs(r_n) <= delta_n`, otherwise
+`delta_n*(abs(r_n)-0.5*delta_n)`. This reduces large force-residual influence;
+it does not address arbitrary position/velocity leverage, errors in variables,
+correlated acquisition bias, hysteresis or an incorrect force law.
+
+Implementation acceptance requirements:
+
+- Training-only iteratively reweighted least squares, retaining all samples and
+  acquisition IDs; weight `min(1, delta_n/abs(r_n))`, with weight one at zero.
+- Explicit finite iteration/work limits and convergence tolerance; retain the
+  final iterate and non-convergence status rather than presenting it as a fit.
+- Unconstrained coefficient iterations followed by the existing physical bounds
+  on the final result; a nonphysical OLS starting point must not prevent recovery.
+- Preserve unweighted training/holdout residual metrics and ordinary least-squares
+  comparison. Never downweight holdout, tune `delta_n` on it, or conceal a failed
+  original force-RMSE gate behind a smaller robust objective.
+- Verify clean-data recovery, force-outlier resistance, leverage limitations,
+  rank failure, nonfinite arithmetic, deterministic replay and holdout isolation.
+- Embed scale and iteration assumptions in independently replayable evidence
+  before exposing the estimator through acquisition CLI workflows.
+
+`suspension_robust::fit_suspension_huber_iterate` now supplies the bounded numerical
+IRLS path with explicit newton-valued prediction-change stopping tolerance, final
+unconstrained coefficients, final weights and unweighted RMSE. It takes training
+runs only, and does not apply physical acceptance or access holdout.
+`evaluate_suspension_huber` separately validates a whole-run request, retains the
+ordinary training-only fit (including its failure), checks final physical bounds
+and evaluates untouched holdout force RMSE and maximum residual. Its `passed`
+requires convergence and the unchanged physical/training/holdout gates. Failed
+gates retain the iterate and diagnostics rather than erasing the result. Both roles
+retain each acquisition's ID, count, unweighted RMSE and maximum absolute residual
+in input order; any per-run RMSE failure also fails the overall verdict even if
+the pooled RMSE passes. The maximum residual is diagnostic, not a new threshold.
+Tests also retain a negative leverage example: a grossly corrupted position/force
+pair drives the residual-robust solver to an incorrect coefficient. A separate
+negative-stiffness/damping fixture converges with small holdout residuals but
+fails physical bounds. Residual robustness is not predictor calibration. The
+three focused numerical tests and all-target Clippy passed before envelope work;
+acquisition-file and CLI integration are covered by the full CI checkpoint below.
+
+`SuspensionHuberEvidence` now binds the complete whole-run request, explicit robust
+specification and evaluation in independent `rne_suspension_huber_evidence` schema
+1. Compact encode and strict decode are bounded to 8 MiB and recompute the entire
+evaluation, including final weights, per-run residuals, OLS errors and failed
+verdicts. This numerical envelope is not acquisition-file verification, certificate
+authentication or physical qualification. Unsupported versions and altered stored
+results are rejected; numerical execution errors still reject evidence creation.
+
+`SuspensionAcquiredHuberEvidence` adds independent
+`rne_suspension_acquired_huber_evidence` schema 1. Evaluation verifies all declared
+training/holdout raw and calibration file bytes under the supplied external root
+before fitting. Bounded decoding (8 MiB) repeats file verification and the full
+numerical evaluation. Certificate authenticity, interpretation of the Huber scale,
+and execution of declared raw-to-sample processing procedures are not established
+by byte hashes. Test-only acquisition
+fixtures are not physical measurement evidence.
+
+CLI modes `--backend suspension-huber` and `--backend suspension-huber-verify`
+require `--input`, `--evidence-root` and `--output`. Generation takes a strict
+`SuspensionAcquiredHuberRequest` containing `acquisitions` and `robust_spec`;
+verification takes the acquired evidence above. Numerical conditions must be
+embedded in the input; unrelated seed/timing overrides are rejected before input
+processing. Both modes recheck retained files and emit compact verified evidence.
+Successful execution means processing succeeded, not that `evaluation.passed` is
+true. Existing evidence output is not overwritten.
+It must not yet be used as a qualified fitted vehicle profile.
+
+Full workspace validation of the Huber implementation completed with exit code 0
+using `cargo run -p xtask -- ci`, with tracked files fixed during execution.
+The mobility library passed 164 tests with zero failures and one ignored long
+training job; the acquisition CLI integration test also passed. Workspace
+lint/tests, headless checks, OSS parity, 361 fuzz cases across nine boundaries,
+and Behavior CI 10/10 seeds passed. The tested robust module Git blob is
+`7271566e2ca20f27f500a50d86afbbd96cb4ac99`. External log:
+`E:\RNE-build\m3c-sensor\suspension-huber-v1-ci.log`, SHA-256
+`0d1188dfc272be2ed1c0afaababeaa382b94e5c4e0d55ec711a31b3bd7f6fa5a`.
+Separate MuJoCo-enabled all-target Clippy passed with warnings denied. The mobility
+library passed 192 tests with zero failures and two ignored long training jobs
+(215.19 s); the whole-run acquisition CLI integration passed (2.62 s). This covers
+the Huber tests and existing two-backend sensor-only and road-input regressions,
+not every workspace crate with every optional feature enabled.
+The default-feature flagship workflow reported `cross_backend=false`, and
+mobile clutter CEM retained `placed=false`; neither is promoted to task success.
+These checks establish software regression evidence, not physical calibration,
+uncertainty coverage or actual HIL.
+
+The force equation is rewritten as a three-coefficient linear regression. Position,
+velocity, and force are centered before solving the two-variable normal equation,
+reducing intercept conditioning error. A near-singular position/velocity excitation
+matrix fails with `RankDeficient`; a constant or mutually dependent excitation is not
+accepted as evidence.
+
+Every fifth sample is reserved before fitting. The frozen v1 split therefore prevents
+the optimizer from seeing its holdout points. Acceptance independently requires:
+
+- strictly increasing finite capture times and finite SI measurements;
+- at least 80 training and 20 holdout samples;
+- 50–500 kN/m stiffness, 0.5–50 kN s/m damping, and -0.20–0.10 m equilibrium position;
+- finite training and holdout force RMSE no greater than 25 N;
+- complete dataset/result digest binding and deterministic recomputation.
+
+Finite input samples can still overflow during force prediction or residual
+squaring. Non-finite residual metrics fail with `ResidualExceeded`, including
+NaN cancellation between overflowing spring and damping terms. Regression tests
+exercise these cases using held-out samples so that the fitted coefficients
+remain unchanged; ordinary finite fits retain the existing arithmetic.
+
+The regression was first observed as an actual successful Rust result containing
+`holdout_rmse_n: NaN`. After rejection was added, all 53 `rne_robot` library tests
+and all 12 MuJoCo-enabled benchmark tests matching `suspension` passed, as did
+both crates' all-target Clippy checks with warnings denied. The benchmark test
+also seals and decodes the finite JSON dataset before requiring the typed
+`ResidualExceeded` error. These focused checks do not qualify a physical dataset.
+
+Full regression checkpoint: commit `c48c85e` subsequently completed
+`cargo run -p xtask -- ci` with exit code 0, including workspace lint/tests,
+smoke/RL, headless, OSS parity, 361 fuzz cases and Behavior CI 10/10 seeds.
+External log: `E:\RNE-build\m3c-sensor\suspension-finite-v1-ci.log`, SHA-256
+`459f8e6d76837652c2e944159c08f4a883bb266d3350336d76092061f15848ed`.
+This validates the software revision, not real-world suspension calibration.
+
+This design is consistent with an experimental quarter-car ARX study that uses
+accelerometers above and below the suspension and linear least-squares estimation on
+real vehicle test data: [A Quarter Car ARX Model Identification Based on Real Car Test
+Data](https://jtec.utem.edu.my/jtec/article/view/2413). The bounded regression and
+holdout contract also leaves a direct upgrade path to robust bounded nonlinear least
+squares; SciPy's [official `least_squares`
+documentation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html)
+defines bound constraints and robust losses such as `soft_l1` and Huber. RNE v1 uses
+ordinary least squares intentionally because the current strut law is linear and the
+baseline must remain dependency-free and exactly reproducible. Robust loss and
+uncertainty intervals remain follow-up work for physical logs.
+
+## Bounded external-data path
+
+The CLI accepts a regular JSON file no larger than 8 MiB, rejects unknown fields, and
+verifies the dataset digest before fitting. `source_kind` is one of
+`synthetic_fixture`, `recorded_bench`, or `recorded_vehicle`. The result derives
+`physical_measurement` from that enum, so the built-in generator cannot accidentally
+claim measurement status.
+
+The provenance label is still a declaration, not a signature, trusted timestamp, or
+independent attestation. A qualifying physical result must later bind the raw logger,
+instrument calibration, robot identity, acquisition procedure, and immutable source
+hash through the external-evidence path.
+
+The physical acquisition manifest now makes that boundary executable. A
+`recorded_bench` or `recorded_vehicle` dataset does not pass it unless all of the
+following are present and internally consistent:
+
+- exact vehicle/rig, strut, logger, logger-software, capture, and RNE commit identities;
+- synchronized position, velocity, and force channels in canonical SI units and sign;
+- sample rate, resolution, expanded uncertainty, and calibration/derivation class for
+  every channel;
+- a shared hardware, IEEE 1588 PTP, or GNSS-disciplined clock with no more than 1 ms
+  declared inter-channel timestamp uncertainty;
+- SHA-256 and exact byte length for the raw capture, acquisition procedure, and every
+  calibration or derivation artifact;
+- streamed rehashing of those files beneath an explicitly supplied external evidence
+  root, including canonical-path containment checks.
+
+This follows the data-integrity shape of [ASAM MDF](https://www.asam.net/standards/detail/mdf/),
+which retains raw values, conversion formulas, timestamps, and interpretation metadata.
+[NI's bridge guidance](https://www.ni.com/white-paper/11368/en/) identifies excitation,
+filtering, offset nulling, and shunt calibration as parts of a load-cell measurement
+chain, while [NIST GMP 13](https://www.nist.gov/document/gmp-13-ensuring-traceability-20190621pdf)
+requires the SI reference, traceability and uncertainty statements, results, and
+documented procedure. MCAP is also admitted as a raw container because its
+[official message contract](https://github.com/foxglove/mcap/blob/main/cpp/mcap/include/mcap/types.hpp)
+separates log and publish timestamps. Container choice alone never qualifies a capture.
+
+Given a populated manifest and its referenced files on the external SSD, verify the
+complete acquisition boundary before fitting:
+
+```powershell
+cargo run -p rne_mobility_benchmark -- `
+  --backend suspension-acquisition-verify `
+  --input E:\RNE-data\capture-001\suspension-dataset.json `
+  --acquisition-manifest E:\RNE-data\capture-001\acquisition-manifest.json `
+  --evidence-root E:\RNE-data\capture-001
+```
+
+Manifest validation and file hashing are qualifications performed by RNE, not an
+independent accreditation or a cryptographic signature from the instrument operator.
+
+Generate and fit the contract-only fixture on the external SSD:
+
+```powershell
+$env:CARGO_TARGET_DIR = 'E:\RNE-build\m3c-sensor'
+$env:TEMP = 'E:\RNE-build\tmp'
+$env:TMP = 'E:\RNE-build\tmp'
+cargo run -p rne_mobility_benchmark -- `
+  --backend suspension-identification-fixture `
+  --output E:\RNE-build\m3c-sensor\suspension-identification-synthetic-dataset-v1.json
+cargo run -p rne_mobility_benchmark -- `
+  --backend suspension-identification `
+  --input E:\RNE-build\m3c-sensor\suspension-identification-synthetic-dataset-v1.json `
+  --output E:\RNE-build\m3c-sensor\suspension-identification-synthetic-result-v1.json
+$env:MUJOCO_DYNAMIC_LINK_DIR = 'E:\RoboSim-mujoco\lib'
+$env:PATH = 'E:\RoboSim-mujoco\bin;' + $env:PATH
+cargo run -p rne_mobility_benchmark --features mujoco -- `
+  --backend identified-road-compare `
+  --input E:\RNE-build\m3c-sensor\suspension-identification-synthetic-dataset-v1.json `
+  --output E:\RNE-build\m3c-sensor\identified-suspension-road-comparison-v1.json
+```
+
+Verified fixture evidence:
+
+| field | value |
+| --- | ---: |
+| source | `synthetic_fixture` (not physical measurement) |
+| samples | 400 (320 train / 80 holdout) |
+| dataset digest | `fnv1a64:58aee35ac91cc8e0` |
+| result digest | `fnv1a64:baa4b1d2b14c163a` |
+| identified stiffness | 199999.728 N/m |
+| identified damping | 15000.051 N s/m |
+| identified equilibrium position | -0.061000042 m |
+| training force RMSE | 0.632 N |
+| holdout force RMSE | 0.636 N |
+| maximum absolute holdout residual | 1.010 N |
+
+## Identification-to-simulation application
+
+The `identified-road-compare` path closes the software handoff that previously ended at
+the fit result. It replaces only stiffness, damping, and equilibrium position in the
+portable `SuspensionStrutSpec`; travel, axis, force limit, and unsprung mass remain the
+declared road-benchmark geometry. That exact spec is then supplied to both Rapier and
+MuJoCo under one road `TaskSpec`. The resulting artifact embeds and binds the source
+dataset, recomputed identification evidence, applied strut, both full traces, comparison
+metrics, and aggregate verdict.
+
+Verified synthetic application evidence on the external SSD:
+
+| field | value |
+| --- | ---: |
+| artifact size | 581634 bytes |
+| artifact digest | `fnv1a64:24240c35ed465d9e` |
+| independent rerun SHA-256 | `B16B626083CF96D83B9312822AE3F1E0E7B9B868BEC51B7BB6B4535FDDDC82E7` (byte-identical) |
+| physical measurement | `false` |
+| Rapier trace digest | `fnv1a64:bb50c7f4f5810cc4` |
+| MuJoCo trace digest | `fnv1a64:fe49cf4096cdc704` |
+| forward displacement gap | 0.1682 m (limit 0.5 m) |
+| curb normal-impulse gap | 39.2579 N s (limit 50 N s) |
+| suspension-velocity gap | 0.2436 m/s (limit 1.0 m/s) |
+| vertical-acceleration RMS gap | 9.3157 m/s² (limit 10 m/s²) |
+| lift / recontact event gaps | 2 / 2 events (limits 20 / 20) |
+
+The FNV digests detect ordinary artifact drift; they are not cryptographic signatures.
+This run demonstrates deterministic parameter transport and backend application, not
+vehicle calibration or physical fidelity.
+
+## Remaining physical gate
+
+### Real-data candidate disposition (2026-09-08)
+
+The TU Dresden primary record for [3-component servo-hydraulic test bench
+measurements](https://opara.zih.tu-dresden.de/items/eec1959c-6ec6-4ee3-af05-5419f1d2adb6)
+(DOI `10.25532/OPARA-151`, 2021-12-17, CC BY 4.0) lists
+`Heindel2021_dataset.zip` (529.24 MB). It describes three inertia-compensated
+force channels and three displacement channels from an oil-filled hydro-mount
+rig, with nonlinear damping, stiffness, and cross-direction pendulum coupling.
+The archive has not been downloaded or its sample layout inspected here.
+
+Disposition: candidate for model-discrepancy/virtual-sensing research, **not**
+qualified linear-strut or RNE vehicle calibration. The landing-page description
+does not establish the synchronized SI velocity, sample clock, instrument
+uncertainty, or calibration artifacts required by the acquisition gate. Do not
+invent velocity timestamps or relabel this rig as the benchmark vehicle.
+Before retaining any archive on the external SSD, inspect available metadata
+for those requirements and budget both archive and extraction sizes; preserve
+raw-source hashes and distinguish derived velocity from measured velocity.
+
+### Derived-velocity acquisition review (2026-09-09)
+
+Liu and He's [damper dynamometer study](https://www.intechopen.com/chapters/80002)
+(2022, DOI `10.5772/intechopen.101510`) describes timestamped ADC measurements,
+force/displacement calibration and velocity obtained by differentiating
+displacement. It also reports disagreement with manufacturer curves and leaves
+calibration versus specimen differences unresolved. The inspected chapter did
+not supply a retained raw acquisition plus calibration package suitable for this
+gate. Its figures are not substituted for independent raw time series.
+
+Implementation consequence (RNE design inference): the existing `Derived` and
+`DerivedSignalProcedure` labels bind a document but do not execute that procedure.
+Independent additive velocity perturbations cannot stand in for the correlated
+velocity error created by differentiating noisy position. The next processing
+slice must explicitly bind the derivative/filter operator, boundary behavior and
+actual sample times; reconstruct the nominal derived channel; then rerun the same
+operator on each perturbed position/time realization before fitting. It must
+retain invalid clock realizations and forbid silent sample removal or treatment
+of filtered samples as independent. Tests must distinguish a common position
+offset (zero derivative change) from sample noise and clock scale error. No
+operator may be inferred from a graph or the nominal sampling rate alone.
+
+The offline `suspension_derivative::SuspensionDerivativeOperator` now provides
+`nonuniform_three_point_secant_ends_v1`: the interior derivative of a quadratic
+through three adjacent positions at their actual times, with adjacent secants at
+both endpoints. It returns exactly one velocity per input row, requires 3 to
+100000 finite samples with strictly increasing local timestamps, and rejects
+non-finite arithmetic instead of trimming rows. It performs no filtering,
+resampling or cross-acquisition differentiation. Interior samples require future
+data, so this is not a causal controller-visible sensor.
+
+Regression cases cover a nonuniform quadratic, explicit endpoint values, local
+clock translation, common offset cancellation, opposite-signed neighbour errors
+from one noisy position, inverse clock-scale response, malformed clocks and
+overflow rejection. `SuspensionDerivativeBinding` now binds the capture identity,
+exact derived-velocity procedure reference, explicit operator and caller-declared
+absolute tolerance (m/s). It reconstructs every nominal velocity, including both
+endpoints, and rejects any mismatch without replacing recorded values. Its
+`verify_files` path also checks all retained acquisition files. File identity is
+not authentication or proof that the declared operator correctly interprets a
+human-readable procedure. A fixture checks rehashed nominal drift, mismatched
+capture/procedure, measured-versus-derived identity, invalid tolerances and file
+tampering. The opt-in `propagate_acquired_derived_errors` API validates one binding
+per training capture and retained files for the complete split. It reconstructs
+nominal training velocity and repeats the operator after position perturbations
+in every draw, before the actual fit. Independent velocity error loadings are
+rejected; invalid derivative draws retain `InvalidSample` in their original slots.
+Holdout values are not differentiated or fitted. Timestamps remain fixed: clock
+errors, gain errors, filtering and physical qualification remain pending. The
+evidence envelope and CLI are described below. Existing v1 additive requests keep
+their previous semantics and never select a derivative implicitly.
+
+`SuspensionDerivedErrorRequest` adds a strict file-bound request around this path,
+including existing per-factor calibration bindings and the ordered derivative
+bindings. `rne_suspension_derived_error_evidence` schema 1 retains the exact
+request, baseline and all draw outcomes. Encoding verifies retained files and
+reruns propagation; decoding rejects inputs over 8 MiB, unknown fields and any
+recomputation mismatch. It emits no marginal-budget or probability-coverage
+verdict. Regression tests reject deleted outcomes, schema drift, unknown
+qualification fields and changed procedure bytes.
+
+CLI backends `suspension-derived-errors` and `suspension-derived-errors-verify`
+generate and replay this envelope using `--input`, `--evidence-root` and
+`--output`. They share the regular-file, 8 MiB bounded read and unrelated-option
+rejection of the existing uncertainty CLI. Assumptions are embedded in the
+request, not overridden by command-line seeds or tolerances. Process tests check
+generation, byte-identical replay and rejection of removed draw results without
+writing the requested output. Successful execution means computation/integrity,
+not successful fits or physical qualification. For example:
+
+```powershell
+cargo run -p rne_mobility_benchmark -- --backend suspension-derived-errors --input E:\data\derived-request.json --evidence-root E:\data --output E:\data\derived.json
+cargo run -p rne_mobility_benchmark -- --backend suspension-derived-errors-verify --input E:\data\derived.json --evidence-root E:\data --output E:\data\derived-replayed.json
+```
+
+CLI/envelope verification (2026-09-09): the acquired-run library regression
+including envelope recomputation passed; default all-target Clippy passed.
+The extended process-level CLI test passed with default features (1.14 s) and
+with MuJoCo (final test 1.34 s), including subsequent option-override and changed
+raw-source rejection. MuJoCo all-target Clippy passed (12.19 s). The default
+process run predates those final negative cases; the MuJoCo run includes them.
+The full-CI checkpoint immediately below is for the earlier operator commit,
+not this later CLI/envelope extension.
+
+Full CLI/envelope checkpoint (2026-09-09):
+`4e62b31c8fcc15c752bd0aa6812759682c6999a1` completed
+`cargo run -p xtask -- ci` with exit code 0, tracked files fixed throughout.
+Workspace formatting, dependency boundaries, Clippy/tests, smoke/RL, headless,
+OSS parity, 361 fuzz cases across nine boundaries and Behavior CI 10/10 seeds
+passed. Default Mobility Benchmark library: 151 passed, zero failed, one long
+training job ignored (167.01 s); the extended derivative CLI process test passed.
+External log: `E:\RNE-build\m3c-sensor\suspension-derived-cli-v1-ci.log`, SHA-256
+`8683b07290410d76449516fcb1ad6f235941182ddc636b47e00c09b500438c1d`.
+Negative evidence is retained: clutter PPO trained -1.37 versus random -1.19
+(worse); mobile clutter CEM grasped but did not place; heading CEM -10 equals
+baseline -10. Mobile clutter PPO was -1.61 versus random -2.27. Flagship capsule
+validation reported `cross_backend=false`. This is software regression evidence,
+not physical calibration, uncertainty coverage validation or actual HIL.
+
+Derivative slice verification (2026-09-09): default-feature suspension-related
+tests passed 29/29 (40.28 s), including the file-bound propagation API. The
+MuJoCo-enabled benchmark library passed 179 tests with zero failures and two
+explicitly ignored long training jobs (202.53 s). The existing process-level
+suspension CLI regression passed (1.28 s); default and MuJoCo all-target Clippy
+passed with warnings denied. That CLI regression covers the existing envelopes,
+not a new derivative CLI. The full workspace checkpoint below predates this
+derivative slice; these results do not establish physical qualification.
+
+Full derivative checkpoint (2026-09-09):
+`9bbb43f9f3526774b08889b140e3c2c2c72676c6` completed
+`cargo run -p xtask -- ci` with exit code 0 and tracked files unchanged throughout.
+Workspace formatting, dependency checks, Clippy/tests, smoke/RL and headless
+checks, OSS parity, 361 fuzz cases across nine boundaries, and Behavior CI
+10/10 seeds passed. Default Mobility Benchmark library: 151 passed, zero failed,
+one long training job ignored (168.99 s); existing suspension CLI passed.
+External log: `E:\RNE-build\m3c-sensor\suspension-derivative-v1-ci.log`, SHA-256
+`ced475a4dfc05dabb05f5db5189dd3d5584eccb5cca1c6a40e82a7aa7adfe878`.
+Limits remain visible: heading CEM score -10 equals baseline -10; mobile clutter
+CEM grasped but did not place. Clutter PPO reported random -1.59 versus trained
+-1.37, and mobile clutter PPO -2.46 versus -1.61. Hardware safety-condition
+tests are not actual physical HIL. This checkpoint does not qualify real
+measurements or complete the remaining derivative CLI/clock/gain work.
+
+### Uncertainty implementation boundary (2026-09-09)
+
+Clock/gain next-slice design: [NIST's calibration definition](https://www.nist.gov/pml/time-and-frequency-division/popular-links/time-frequency-z/time-and-frequency-z-c-ce)
+distinguishes time offset, frequency offset and measurement uncertainty. RNE
+must not reinterpret the existing inter-channel synchronization bound as either
+a timebase-scale distribution or independent per-sample jitter. These require
+separate calibration declarations and correlation assumptions.
+
+The planned deterministic realization uses explicit positive scale multipliers:
+`t' = t_ref + a_t*(t - t_ref) + b_t`, `x' = a_x*x + b_x`,
+`F' = a_F*F + b_F`. These are applied corrections, not automatically inverted
+instrument-error declarations; `a_t` is an elapsed-time multiplier, not an
+oscillator frequency-offset value. Recompute velocity from `(t', x')` with the
+bound operator before fitting. Common time translation must leave the derivative
+unchanged where representable; positive time scaling divides velocity by `a_t`.
+Position scaling multiplies it by `a_x`. In a linear force-law regression, the
+analytic transformed coefficients are `k' = a_F*k/a_x`,
+`c' = a_F*a_t*c/a_x`, `e' = a_x*e + b_x + b_F/k'`.
+These equations are RNE algebraic test oracles, not physical calibration results.
+Reject nonpositive scales, non-finite arithmetic and loss of strict timestamp
+ordering; do not clip or redraw invalid realizations. Distribution sampling,
+shared/cross-channel factors, retained clock calibration, jitter and filter
+propagation remain separate required work. The current v1 CLI must remain
+unchanged until a separately versioned extended request is implemented.
+
+`SuspensionAffineCorrection::apply` now executes one declared realization on a
+single acquisition, preserving the source and row count. It validates finite
+inputs and positive scales, transforms time/position/force, then reconstructs
+velocity with the explicit operator. Tests cover unequal sample spacing,
+time/position scale interaction, force scale/offset, ignored nominal velocity
+values, repeatability, invalid scales, overflow and finite timestamp collapse.
+An analytic regression also runs the actual training-only fitter on corrected
+nonuniform samples: identity, common time offset, time scale, and joint
+time/position/force scale and offset reproduce the coefficient transformations
+above. The six derivative-module tests and default all-target Clippy pass.
+The helper is connected to the numerical affine factor model below, but not yet
+to calibration-bound CLI requests. No default distribution or timebase
+calibration is inferred. These checks are synthetic algebraic evidence,
+not validation of a physical suspension or a calibrated clock.
+
+`SuspensionAffineCorrection::fit_training` connects per-acquisition corrections
+and derivative operators to the actual pooled training-only estimator. It caps
+the aggregate at 64 runs and 100,000 rows, retains acquisition identities, and
+does not consume holdout samples. Invalid corrections return `InvalidSample`;
+duplicate identities and nonphysical fit results retain their estimator errors.
+Callers must retain each result in realization order; this primitive does not
+sample, retry failed realizations, or certify calibration provenance.
+
+The separate `rne_suspension_affine_error_model` schema 1 now samples declared
+normal or rectangular unit-variance factors with an explicit WorldRandom seed.
+Signed loadings jointly perturb nominal elapsed-time, position and force scales
+and offsets. Factors are independent of each other; channels sharing a factor
+share its latent draw. Sharing is either all training runs or one acquisition
+(in request order), never per sample. Scale loadings are dimensionless, offset
+loadings use seconds/metres/newtons, and the reference time is fixed. These are
+additions to nominal correction parameters, not sequential correction products.
+The baseline uses the nominal corrections. Every draw reconstructs velocity and
+runs the actual estimator; invalid scales and nonphysical fits remain errors in
+their original slots. Draw prefixes are stable when only draw count increases.
+Limits are 4,096 draws, 16 ordered unique factors and 10 million row-factor-draw
+evaluations. This numerical API does not read calibration files and is not yet
+exposed as a calibration-bound CLI request. It does not cover sample jitter,
+filter uncertainty, model discrepancy or physical qualification; the existing
+additive/derived v1 evidence format remains unchanged.
+
+Focused verification (2026-09-09, working tree): all 34 default suspension
+library tests pass (47.92 s), including the Rapier deterministic Ackermann trace,
+and default all-target Clippy passes with `-D warnings`. Affine tests cover
+analytic damping scaling, seed replay, stable draw prefixes, holdout isolation,
+zero-loading equivalence, shared versus acquisition-specific realizations across
+two runs, serialization and retained invalid/nonphysical draws. This is not a
+workspace-wide or MuJoCo verification result for the affine changes.
+
+Additional focused verification: the three affine tests pass with the MuJoCo
+feature enabled, and MuJoCo all-target Clippy passes. Seeded joint signed scale
+and offset factors reproduce analytic stiffness, damping and equilibrium changes
+for both supported distributions. Nonfinite loadings, unknown model versions,
+excess draw counts and missing nominal corrections are rejected. This exercises
+the numerical identification path, not a MuJoCo physical suspension rollout.
+
+Standalone calibration references can use `SuspensionEvidenceFileRef::verify`
+for the existing root-confined, bounded streaming byte checks. This enables a
+separate retained timebase certificate without misusing the manifest's channel
+synchronization bound. A file reference alone still does not bind a certificate
+to an installed clock, justify a factor loading, or establish traceability;
+those declarations remain required in the forthcoming acquired affine request.
+
+`SuspensionAcquiredAffineRequest` now supplies that file-bound numerical entry
+point (kind `rne_suspension_acquired_affine_request`, schema 1). It requires
+nominal bindings for timebase, position and force, including identity corrections,
+followed by each factor's affected domains and training acquisitions in explicit
+order. Each binding retains acquisition/capture identity, instrument identity,
+exact calibration reference and a nonempty interpretation of scale/offset and
+sharing. Position/force identities and files must match the source manifest;
+clock factor references must match that acquisition's nominal clock declaration.
+The derivative binding must reproduce nominal velocities and match the model's
+operator. All acquisition files, including holdout sources, and standalone clock
+files are verified before propagation. Missing/extra/reordered bindings and
+instrument/capture mismatches are rejected. The installed clock identity and
+certificate interpretation are still caller assertions, not authenticated facts.
+The replayable `rne_suspension_affine_evidence` schema 1 retains the complete
+request and every baseline/draw outcome. Its strict 8 MiB decoder reopens the
+source and calibration files, reruns propagation and compares every field;
+encoding also verifies before writing. Neither this format nor its CLI grants
+physical qualification or uncertainty coverage.
+
+```powershell
+cargo run -p rne_mobility_benchmark -- --backend suspension-affine-errors --input E:/RNE-data/affine-request.json --evidence-root E:/RNE-data/retained --output E:/RNE-data/affine-evidence.json
+cargo run -p rne_mobility_benchmark -- --backend suspension-affine-errors-verify --input E:/RNE-data/affine-evidence.json --evidence-root E:/RNE-data/retained --output E:/RNE-data/affine-replayed.json
+```
+
+These example paths require a caller-supplied request and retained files. Both
+modes permit only backend, input, evidence root and output; seed and tolerance
+overrides are rejected because assumptions must remain embedded in the request.
+Input must be a regular file and is read with an 8 MiB bound. Failed verification
+does not write an output artifact. This affine model still excludes sample jitter,
+filters and model discrepancy, and is separate from additive-error evidence.
+
+Focused CLI verification (2026-09-09, working tree): the acquired binding library
+test passes (0.44 s), the complete diagnostic CLI integration test passes
+(1.94 s), and default all-target Clippy passes with `-D warnings`. Affine process
+checks include generate/reverify byte equality, retained failed fits, rejected
+draw deletion, rejected seed/tolerance overrides, and changed clock-file rejection
+without an output artifact. These results do not replace workspace CI or physical
+data validation.
+
+Full workspace checkpoint (2026-09-09): commit
+`1d51f8c16d74d27ede540c834fec826f69c4852b` completed
+`cargo run -p xtask -- ci` with exit code 0 and tracked files fixed throughout.
+Workspace formatting, boundaries, Clippy, tests, smoke/RL, headless, OSS parity,
+361 fuzz cases across nine boundaries and Behavior CI 10/10 passed. Mobility
+library: 154 passed, zero failed, one existing ignored test (187.13 s); the
+extended diagnostic CLI integration test passed. External log:
+`E:\RNE-build\m3c-sensor\suspension-affine-v1-ci.log`, SHA-256
+`a394f23315064184355cb9db2498206dbb6c1b35b9770865d3d0cd6c21aed8f6`.
+Negative performance evidence is retained: heading CEM -10 versus baseline -10;
+clutter PPO random -1.29 versus trained -1.37; mobile clutter CEM grasped but did
+not place; mobile clutter PPO random -1.93 versus trained -1.61. The flagship
+workflow explicitly reports `cross_backend=false`. Full CI is regression
+evidence, not physical calibration, complete learning performance or actual HIL.
+
+### Next timing slice: timestamp error versus sampling aperture
+
+[Analog Devices MT-007, pp. 2–4](https://www.analog.com/media/en/training-seminars/tutorials/MT-007.pdf)
+distinguishes fixed aperture delay from sample-to-sample aperture jitter and
+relates timing jitter to measurement-value error through the input signal slope.
+RNE design consequence: perturbing stored timestamp labels alone must not be
+described as simulating ADC aperture jitter. A timestamp-uncertainty realization
+may retain measured values and reconstruct velocity on uncertain times; a
+sampling-time realization must evaluate a declared continuous signal model at
+the displaced capture times, or explicitly declare its interpolation/error model.
+Transport latency remains a third, separate effect. Tests must expose different
+outcomes on a changing signal, retain invalid clock order and avoid counting the
+same acquisition timing uncertainty twice. No sampling aperture, interpolation,
+or independent-jitter distribution is inferred from a nominal sample rate or a
+synchronization bound. This extension is not implemented by the affine v1 API.
+
+The offline `suspension_sampling` primitives now distinguish these operations:
+`relabel_suspension_timestamps` preserves each measured position/force pair and
+reconstructs velocity with explicit replacement labels; `capture_suspension_signal`
+evaluates a caller-supplied deterministic signal at explicit physical times and
+reconstructs velocity only from reported times. Physical and reported clocks
+must both be finite, strictly increasing and bounded to 3..=100,000 rows; they
+are validated before signal evaluation. Signal-domain errors, nonfinite values
+and derivative failures reject the entire realization without trimming or repair.
+This is point sampling, not finite-aperture averaging, a causal physics sampler
+or implicit interpolation of real logs. Callback purity and signal validity are
+caller responsibilities. No random distribution, calibration certificate binding,
+transport delay or CLI evidence extension is introduced by these primitives.
+
+The estimator regression uses continuous quadratic motion and the physical
+linear spring/damper force law, retaining all rows including secant endpoints.
+Stretching timestamp labels by `a` while preserving measured values multiplies
+the fitted damping by `a`. Sampling at stretched physical times but reporting
+the original times divides damping by `a` relative to the same captures with
+correctly reported times. Stiffness is unchanged in each paired comparison.
+These are separate paired baselines: finite-difference endpoint errors are not
+silently removed or claimed to recover the continuous physical coefficients
+exactly. The test distinguishes changing force samples from relabeling fixed
+samples and checks the actual training-only estimator, not a substitute formula.
+
+`SuspensionTimingErrorModel::propagate_signal` now aggregates physical sampling
+realizations for explicitly supplied continuous signals. Each `SuspensionSignalRun`
+retains a unique acquisition ID, nominal physical/reported times and derivative
+operator. The callback receives the acquisition ID and realized physical time;
+the estimator receives sampled position/force and derivatives computed only from
+reported timestamps. A callback must be pure, deterministic and valid over its
+declared domain; no interpolation or extrapolation of retained logs is inferred.
+No holdout or live physics advancement occurs in this offline API.
+
+Bounds are 64 unique acquisitions, 100,000 combined rows, 4,096 draws and
+10 million row-factor-draw evaluations. Invalid nominal clocks or duplicate IDs
+reject the request before signal evaluation. Per-realization clock, signal-domain
+and derivative errors remain `InvalidSample`, including a failed nominal baseline;
+estimator errors retain their categories. No retries or successful-draw filtering
+are performed. Callback cost, signal authenticity, finite aperture averaging,
+calibration binding and portable replay of the signal model remain outside this
+API. Synthetic signal tests are not physical suspension validation.
+
+Focused validation: all six `suspension_sampling` library tests passed, including
+invalid-clock, draw-count and workload rejection before callback evaluation,
+seeded draw-prefix stability, failed-realization retention and actual estimator
+differences between physical sampling and timestamp relabeling. Benchmark
+all-target Clippy passed with warnings denied.
+
+Full workspace validation for the sampling-aggregation change completed with
+exit code 0 on 2026-09-09 (`cargo run -p xtask -- ci`), with tracked files fixed
+through execution. The tested sampling source Git blob is
+`8ed8d65ba6c78984418e3eece1d2e4f88f85f3a9`. Mobility library tests passed
+161/161 with one existing long training test ignored (179.91 s); the suspension
+CLI integration test also passed. Workspace lint/tests, smoke/Python checks,
+OSS parity, 361 fuzz cases across nine boundaries and Behavior CI 10/10 seeds
+completed. External log:
+`E:\RNE-build\m3c-sensor\suspension-sampled-propagation-v1-ci.log`, SHA-256
+`3444965d10aa28c60b5a0b666f6ab9a679c6fa727e62af4d73768926ed05432a`.
+This default-feature CI is regression evidence, not a new MuJoCo-enabled run,
+physical calibration qualification or actual HIL. Negative performance evidence
+is retained: heading CEM tied its baseline at -10; mobile clutter CEM grasped but
+did not place. Clutter PPO scored -1.50/-1.37 and mobile clutter PPO -2.16/-1.61
+(random/trained); these smoke scores do not establish policy generalization.
+The flagship workflow explicitly reported `cross_backend=false`.
+
+Additional verification of commit `55d6073` completed on 2026-09-09:
+`cargo test -p rne_mobility_benchmark --features mujoco --lib` passed 189 tests
+with zero failures and two existing long training jobs ignored (211.61 s).
+MuJoCo-enabled all-target Clippy also passed with warnings denied. This includes
+the actual two-backend road-excitation tolerance checks, Ackermann sensor-loop
+contracts and the six sampling tests. It does not convert synthetic identification
+fixtures into physical calibration evidence, nor establish actual HIL.
+
+`SuspensionTimingErrorModel` (`rne_suspension_timing_error_model`, schema 1)
+generates one explicitly indexed realization using WorldRandom. Independent
+factor sources carry signed physical/reported time loadings in seconds; the
+same latent value couples both clocks. A factor is constant within an acquisition
+or independent per row. Different acquisition IDs derive independent streams;
+cross-acquisition shared clock errors are not represented by this model.
+Limits per call are 100,000 rows, 16 ordered unique factors and draw indices
+0..4095. Calling draws in another order does not alter their values. Invalid
+realized clock order, overflow and nonfinite loadings are errors, never redrawn
+or sorted. A caller aggregating draws must keep these errors at their original
+indices. This generator has no retained calibration binding or CLI evidence yet,
+and does not infer a jitter distribution
+from an acquisition's synchronization bound. Its independent-sample option must
+not be assumed to model correlated oscillator phase noise without evidence.
+
+`SuspensionTimingErrorModel::propagate_labels` now executes a bounded aggregate
+of timestamp-label realizations on the whole-run training split. Each draw
+reconstructs velocity and uses the actual pooled estimator; holdout values do
+not enter sampling or fitting. Clock/derivative failures remain `InvalidSample`
+in their draw slots, while estimator errors retain their original categories.
+The nominal baseline also reconstructs velocity from the declared operators.
+Limits are 4,096 draws and 10 million row-factor-draw evaluations, in addition to
+the whole-run request bounds. Any nonzero physical-time loading is rejected:
+retained measured samples are not an implicit continuous signal and cannot
+support resampling without another declared model. File/calibration verification
+and replayable evidence are not yet provided by this numerical API.
+
+The separate `SuspensionTimestampRequest` now binds this numerical API to whole
+acquisition manifests, explicit nominal derivative procedures, and retained
+clock interpretations. It requires one nominal timebase binding per training
+acquisition, then one per nonzero timestamp factor/acquisition in declared order.
+Factor clock IDs and calibration references must match the nominal declaration;
+capture and acquisition identities must match the source manifest. All raw,
+channel/procedure and clock files are verified before fitting. Physical-time
+loadings are rejected rather than silently reduced to timestamp-label errors.
+Installed-clock identity and interpretation of certificate contents remain caller
+assertions, not authentication or proof of the error distribution.
+
+`rne_suspension_timestamp_evidence` schema 1 retains the complete request and all
+outcomes. Strict 8 MiB decode/encode verification reopens retained files and
+recomputes every draw; missing/reordered bindings, changed clock/capture IDs,
+deleted draws and changed certificate bytes are rejected. All-failed draws are
+still valid diagnostic evidence when faithfully recomputed, not a success verdict.
+The CLI modes below generate and reverify this evidence. It does not include physical
+sampling simulation, finite aperture, filter uncertainty or physical validation.
+
+```powershell
+cargo run -p rne_mobility_benchmark -- --backend suspension-timestamp-errors --input E:/RNE-data/timestamp-request.json --evidence-root E:/RNE-data/retained --output E:/RNE-data/timestamp-evidence.json
+cargo run -p rne_mobility_benchmark -- --backend suspension-timestamp-errors-verify --input E:/RNE-data/timestamp-evidence.json --evidence-root E:/RNE-data/retained --output E:/RNE-data/timestamp-replayed.json
+```
+
+These paths are examples, not supplied physical data. Both modes require a
+regular input file capped at 8 MiB and permit only backend/input/evidence-root/
+output options. Seed, interval-tolerance and other overrides are rejected; all
+assumptions must be embedded. Successful processing with all failed draws means
+those failures were preserved, not that the calibration or model was accepted.
+Verification failure writes no output artifact.
+
+Timing-slice regression (2026-09-09, working tree): the MuJoCo-enabled Mobility
+library completed with 187 passed, zero failed and two existing ignored long
+training tests (197.81 s). The extended CLI integration test passed (2.42 s),
+including all-failed timestamp draw preservation, byte-identical reverify output,
+deleted-draw rejection, clock-file tampering and forbidden option overrides.
+MuJoCo all-target Clippy passed with warnings denied. This covers Rapier/MuJoCo
+Mobility regressions but is not a full workspace CI result for this timing slice;
+the full-CI checkpoint above remains scoped to the earlier affine commit.
+
+Full workspace timing checkpoint (2026-09-09):
+`c6c6f0ed1ac45c6c80340db9f7c8375d9bf26028` completed
+`cargo run -p xtask -- ci` with exit code 0 and tracked files fixed throughout.
+Workspace formatting, boundary checks, Clippy, tests, smoke/RL, headless, OSS
+parity, 361 fuzz cases over nine boundaries and Behavior CI 10/10 passed.
+Default Mobility library: 159 passed, zero failed, one existing ignored test
+(169.02 s); the expanded diagnostic CLI test also passed. External log:
+`E:\RNE-build\m3c-sensor\suspension-timestamp-v1-ci.log`, SHA-256
+`ffab015de80af3582f961d31c4bad2b99140e86a22b699b7f3b20372fc9aa89c`.
+Performance limitations remain explicit: heading CEM -10 versus baseline -10;
+clutter PPO random -1.38 versus trained -1.37; mobile clutter CEM grasped but
+did not place; mobile clutter PPO random -2.34 versus trained -1.61. Flagship
+verification reports `cross_backend=false`. These checks establish regression
+integrity, not physical calibration, a complete timing-noise model, robust policy
+performance or an actual recorded/shadow/HIL comparison.
+
+Source review: [JCGM 101:2008, BIPM](https://www.bipm.org/en/doi/10.59161/jcgm101-2008)
+describes propagation of input probability distributions through a measurement
+model. [Cameron, Gelbach and Miller, NBER t0344](https://www.nber.org/papers/t0344)
+warn that conventional cluster-robust inference relies on many clusters and can
+over-reject with few clusters. The latter abstract was available in search;
+direct retrieval returned HTTP 403, so no full-paper implementation review is
+claimed here.
+
+Repository inspection: `SuspensionSignalEvidence` retains expanded uncertainty,
+but has no coverage factor, probability model or cross-channel covariance.
+Consequently it cannot by itself define standard deviations or Monte Carlo
+draws. Do not silently divide every expanded uncertainty by two, assume Gaussian
+errors or perturb each sample independently. Derived velocity can share position
+error, and a calibration offset can persist across an entire capture.
+
+The implementation separates two outputs:
+
+- Acquisition influence: omit each complete training acquisition, preserve all
+  other samples in their original order, refit, and report SI parameter changes
+  and every unsuccessful refit. Keep holdout data out of selection. This is a
+  sensitivity diagnostic, **not** a confidence interval or independence proof.
+- Measurement uncertainty: add a versioned declaration of distribution,
+  coverage-factor interpretation, shared versus sample-varying error and
+  cross-channel dependence, bound to retained calibration evidence. Propagate
+  through the actual estimator using explicit deterministic seeds and bounded
+  work; retain invalid/nonphysical draws rather than silently conditioning on
+  successes. Interval coverage remains unqualified until assumptions and
+  independent physical validation support it.
+
+Tests must include whole-run clock resets, insufficient remaining excitation,
+holdout changes leaving training diagnostics unchanged, common-mode calibration
+error not shrinking with repeated samples, and corrupted declaration rejection.
+Do not substitute the existing synthetic fixture for physical coverage evidence.
+
+The core `suspension_training_influence` API now implements whole-acquisition
+deletion diagnostics for 1–64 training runs. It returns baseline SI coefficients
+and one coefficient result per omitted acquisition, in input order, so callers
+can compare parameter changes directly. Failed baseline and deletion fits remain
+typed errors in the report; invalid capture data reject the entire request before
+any refit. Local clocks can restart between runs. The same centered least-squares
+solver as the ordinary identification path is used, with physical coefficient
+bounds but without residual acceptance gates. No holdout input is accepted.
+
+Unit coverage includes deterministic replay, local clock resets, single-run
+insufficiency, rank loss, nonphysical deleted-run fits, capture-wide force offsets,
+residual-gate independence, duplicate IDs, excessive run counts and malformed
+samples. These are synthetic regression tests, not calibration validation.
+The `suspension-influence` CLI accepts the existing whole-run request and emits
+`rne_suspension_influence_evidence` schema 1. It embeds the exact request, its
+typed JSON SHA-256 and the complete training diagnostic. The
+`suspension-influence-verify` CLI recomputes every fit and compares all fields;
+missing or rewritten failures, changed versions and unknown fields are rejected.
+Both use `--input` and `--output`; unlike timing diagnostics, no interval tolerance
+is needed. A successful command means processing succeeded, not that every fit
+was physical or the model qualified. Example (use an external SSD for both paths):
+
+```powershell
+cargo run -p rne_mobility_benchmark -- --backend suspension-influence --input E:\data\runs.json --output E:\data\influence.json
+cargo run -p rne_mobility_benchmark -- --backend suspension-influence-verify --input E:\data\influence.json --output E:\data\influence-replayed.json
+```
+
+The envelope bounds input to 64 combined training/holdout runs, 100,000 combined
+samples and 8 MiB JSON, and performs one baseline plus one refit per training run.
+Holdout data are validated and bound to the request hash, but never enter this
+diagnostic's fits or residual selection. The core borrowed-sample API itself only
+bounds run count; other callers must also bound sample counts.
+This envelope verifies embedded data and computation, not retained acquisition
+files or calibration authenticity. Integration with the acquired-run file-checking
+envelope and propagated measurement uncertainty remain future work.
+
+Influence regression checkpoint (2026-09-09): commit
+`2936f5384a89886d9ed9e89df7004932b7d882f3` completed `cargo run -p xtask -- ci`
+with exit code 0 and tracked files unchanged during the run. This covered
+formatting, dependency boundaries, workspace Clippy/tests, executable smokes,
+Python/RL, headless, OSS parity, 361 fuzz cases across 9 boundaries and behavior
+CI 10/10 seeds. Mobility Benchmark library results were 140 passed, 0 failed,
+1 ignored; influence core tests and the generate/reverify CLI regression passed.
+Retained log: `E:\RNE-build\m3c-sensor\suspension-influence-v1-ci.log`, SHA-256
+`63539f1057e427ac78fc1706adf53cfaf2f14eb7fe97ebb41eb370c3f3dd2e76`.
+Negative performance evidence remains: clutter PPO trained -1.37 versus random
+-1.35; mobile clutter CEM grasped but did not place; heading CEM matched its -10
+baseline. CI success is not a claim of improved learned control, calibrated
+physical parameter coverage or actual HIL completion.
+
+The additive `fit_suspension_training_runs` estimator exposes one training-only
+fit for repeated measurement-model evaluations, without computing all deletion
+fits. It shares the existing solver and run validation. Regression tests compare
+it to the influence baseline and check the analytic common-offset identity:
+adding `dx` to every position and `dF` to every force moves equilibrium by
+`dx + dF/k` while leaving stiffness and damping unchanged. Duplicating a capture
+under a different caller-supplied ID does not erase this shared calibration shift;
+this core test deliberately does not claim independent acquisitions. A full
+probability model, seeded propagation and physical coverage validation are still
+required before reporting measurement-uncertainty intervals.
+
+The benchmark `suspension_uncertainty::propagate_suspension_errors` now evaluates
+an explicit additive error-factor model through that estimator. Each independent
+zero-mean/unit-variance latent source has signed position/velocity/force loadings
+in SI units and a sharing scope (all training, one acquisition, or one sample).
+Sharing one source across channels represents correlation; multiple sources add
+their loading outer products. Normal and rectangular distributions are explicit;
+loadings use standard uncertainty, never an automatic conversion of retained
+expanded uncertainty. Corrections are added to measured inputs; timestamps and
+holdout inputs are unchanged. A WorldRandom root seed and versioned stream
+derivation make replay deterministic in the same numerical environment.
+
+All draw results, including invalid and nonphysical fits, are returned in order.
+No interval is silently conditioned on successful fits. Bounds are 4096 draws,
+16 factors and 10 million sample-factor evaluations, in addition to whole-run
+input limits. Tests cover seed replay, holdout independence, retained failures,
+shared error not disappearing with repeated measurements, and cancellation from
+oppositely signed correlated channel errors. This is an assumption-evaluation
+API, not physical qualification. Retained calibration binding is provided by
+the acquired envelopes below; gain and clock errors, derivative/filter propagation, model discrepancy and
+coverage/convergence assessment still require implementation and validation.
+
+Random streams are derived hierarchically (root seed, factor identity, then draw
+identity), not by a symmetric XOR of factor and draw hashes. A regression covers
+the swapped-key alias of the latter scheme. Increasing the draw count preserves
+the existing prefix for all three scopes. Additional tests reject unsupported
+schema/fields, duplicate factor identities, zero draws and excessive total work.
+These stream checks do not establish statistical independence of physical errors.
+
+`SuspensionAcquiredErrorRequest` binds those assumptions to the existing acquired
+run request. Every nonzero factor/channel loading requires an ordered reference
+to that channel's exact retained calibration artifact for every training capture,
+plus a bounded caller explanation of loading, distribution and sharing. Missing,
+extra or conflicting bindings are rejected. All raw, procedure and calibration
+files (including holdout provenance) are verified before propagation. Tests reject
+changed calibration bytes and replay identically after the original bytes return.
+This establishes retained-file linkage only: the explanation is not parsed as a
+certificate, expanded uncertainties are not automatically reconciled with factor
+loadings, and the synthetic fixture does not establish physical qualification.
+
+The separate `audit_budget` operation now compares every training channel's
+modeled marginal standard uncertainty with the manifest's `U/k`, using an
+explicit positive coverage factor and SI absolute tolerance per channel. This
+follows the definition of expanded uncertainty in [NIST's coverage-factor
+explanation](https://physics.nist.gov/cuu/Uncertainty/coverage.html); it does not
+assume that k=2 is universally applicable or guarantees 95% coverage. The modeled
+value is a stable hypot accumulation of independent factor loadings. Negative
+loadings still contribute variance; common errors are not divided by sample count.
+Missing/invalid interpretations reject the audit; numerical mismatches, including
+unmodeled channels, remain `matched=false` results. All acquisition files are
+verified before returning the report. A passing marginal comparison does not
+validate distributions, correlations, interpretation of certificate text, or
+output coverage.
+
+`SuspensionUncertaintyRequest::evaluate` combines that audit and propagation into
+`rne_suspension_uncertainty_evidence` schema 1. The envelope retains the exact
+acquisitions, calibration bindings, coverage interpretations, error model, seed,
+all budget comparisons and all draw outcomes. Encoding and decoding recompute
+the whole result after verifying retained files; neither stored pass flags nor
+successful draws are trusted. The 8 MiB input/output bound includes all embedded
+data, and decoding rejects unknown fields. Regression tests retain unsuccessful
+draws, reject dropped outcomes, forged budget flags, changed schema and calibration
+bytes, and round-trip the valid evidence. This is not an authenticated certificate
+or a physical coverage claim.
+
+CLI entry points are `suspension-uncertainty` and
+`suspension-uncertainty-verify`; both require `--input`, `--evidence-root` and
+an output destination for a retained artifact. Requests carry their own seed,
+draw count, distributions, sharing and coverage-factor interpretations; no
+interval-tolerance flag is needed.
+Unrelated switches (including `--seed` and `--interval-tolerance-s`) are rejected
+before reading input or running propagation; assumptions belong in the request.
+
+Example using external-SSD paths:
+
+```powershell
+cargo run -p rne_mobility_benchmark -- --backend suspension-uncertainty --input E:\data\uncertainty-request.json --evidence-root E:\data --output E:\data\uncertainty.json
+cargo run -p rne_mobility_benchmark -- --backend suspension-uncertainty-verify --input E:\data\uncertainty.json --evidence-root E:\data --output E:\data\uncertainty-replayed.json
+```
+
+Process tests exercise generation and byte-identical reverification, retained
+budget mismatches and failed draws, rejection of deleted draw outcomes, and
+rejection of changed source files without writing an output artifact. Successful
+exit means processing/verification succeeded, not that the budget matched or that
+every sampled fit was physical. No confidence interval is emitted.
+
+Pre-commit verification of this additive uncertainty implementation included 65
+`rne_robot` library tests and, with `mujoco` enabled, 173 Mobility Benchmark library
+tests passed, 0 failed and 2 ignored (188.73 s), followed by the process-level
+suspension CLI test and feature-enabled Clippy with warnings denied. These checks
+cover synthetic regression and cross-backend execution, not physical calibration
+or actual HIL.
+
+Full workspace checkpoint (2026-09-09):
+`6acf7c40e5a9e605e3f1f28f57f1ff5b81dbe5a6` completed
+`cargo run -p xtask -- ci` with exit code 0 and tracked files unchanged throughout.
+This included workspace formatting, dependency boundaries, Clippy/tests,
+smoke/RL checks, headless checks, OSS parity, 361 fuzz cases across nine
+boundaries, and Behavior CI 10/10 seeds. External log:
+`E:\RNE-build\m3c-sensor\suspension-uncertainty-v1-ci.log`, SHA-256
+`97ed4dbf109422a8c80b06f4ccf0e38e201e7ccc87b344d67ddd3b14e591bb9a`.
+The Python API compatibility check passed with 24 exports. Retain the limits:
+clutter PPO reported random -1.38 versus trained -1.37; mobile clutter PPO
+reported -2.43 versus -1.61; mobile clutter CEM grasped but did not place;
+heading CEM remained -10 versus baseline -10. The flagship capsule check
+explicitly reported `cross_backend=false`. These are regression results, not
+physical calibration, task-success generalization, or actual HIL evidence.
+
+### Identification validation upgrade
+
+`SuspensionAcquiredRunRequest` adds an acquisition intake around the
+unchanged whole-run request. Ordered manifests must bind every dataset, have
+distinct capture IDs and raw-capture SHA-256 hashes, and name the same vehicle
+and strut. `verify_files` checks retained files under an explicit root;
+`identify` performs this check before fitting. This rejects whole-container reuse,
+not overlapping/transformed captures, and does not authenticate calibration
+certificates. The returned `rne_suspension_acquired_run_evidence` schema 1
+retains ordered manifests and unchanged timing evidence. Its bounded strict
+decoder rechecks external files and reruns identification; the encoder does
+the same before writing compact JSON (8 MiB bound). There is no offline path
+that trusts a saved verification verdict. CLI `--backend suspension-acquired`
+requires `--input`, `--evidence-root` and an explicit `--interval-tolerance-s`;
+`suspension-acquired-verify` takes the saved evidence and external root and rejects
+a tolerance override. Both bound input reads to 8 MiB plus one rejection byte.
+No physical qualification is implied by this intake or by test-only recorded-source fixtures.
+
+Acquired-intake slice validation (2026-09-08): the MuJoCo-enabled benchmark
+library passed 167 tests with zero failures and two ignored long-training tests
+(230.68 s); all-target Clippy passed with warnings denied. A process-level CLI
+regression passed generation, verification and byte-identical output for the
+whole-run, excitation and timing envelopes. Acquired-intake positive and negative
+paths are covered at library level. The subsequently added process-level acquired
+test exposed a stack overflow in retained-file verification: the 1 MiB stack
+buffer was too large for the Windows CLI main thread. Verification now uses a
+64 KiB heap buffer, preserving exact byte bounds and streaming SHA-256 checks;
+the expanded process-level regression passed with MuJoCo enabled, along with
+six acquisition tests and all-target Clippy (2026-09-09). It checks generation,
+reverification, identical output bytes and rejection without output after raw
+file tampering. The default-feature CLI regression also passed, including the
+specific size-mismatch diagnostic and absence of output after tampering;
+default-feature all-target Clippy passed with warnings denied. These tests use
+synthetic/test-only fixtures, not real calibration
+or physical model-accuracy evidence.
+
+Stack-fix commit `d8e8b48f1b34f73089aa199d6e3a201dc4b1ac2c` completed
+`cargo run -p xtask -- ci` with exit 0 on 2026-09-09, with tracked files
+unchanged throughout. Log:
+`E:\RNE-build\m3c-sensor\suspension-acquired-cli-stack-v1-ci.log`, SHA-256
+`5796b9a18dbaf90e118df3e856a982bc0124c8819aac9b2ab175746c1e350a81`.
+This includes the acquired CLI regression in workspace tests, workspace lint,
+smoke/RL, headless, OSS parity, 361 fuzz cases and Behavior CI 10/10 seeds.
+The clutter PPO score remained worse than random (-1.37 versus -1.31), and
+mobile clutter CEM still did not place; passing execution checks do not erase
+those outcomes or establish physical calibration/HIL.
+
+Commit `6688d7fad18cd7ab80791ff283440bf47efb3e3d` completed
+`cargo run -p xtask -- ci` with exit 0 on 2026-09-09, with tracked files
+unchanged throughout. Log:
+`E:\RNE-build\m3c-sensor\suspension-acquired-intake-v1-ci.log`, SHA-256
+`38b53fbf241e8696a5e22cce1e5322e3cca46ae6ef5ae47357fc24a728c36ebd`.
+Workspace lint/tests, smoke/RL, headless, OSS parity, 361 fuzz cases across
+9 boundaries and Behavior CI 10/10 seeds completed. RL execution success is
+not universal task success: clutter PPO scored -1.37 versus random -1.27,
+and mobile clutter CEM grasped but did not place. No physical qualification
+or actual HIL completion is established by this CI run.
+
+Acquisition integrity commit `2b7f8dd5c53337ad87da671182a8cfa3486f87a2`
+completed `cargo run -p xtask -- ci` with exit 0 on 2026-09-08, with tracked
+files fixed throughout. Log:
+`E:\RNE-build\m3c-sensor\suspension-acquisition-integrity-v1-ci.log`, SHA-256
+`07d098e6bd95da8828b253d0698f43165b4640b257523357998e940afdab2e58`.
+Workspace lint/tests, smoke/RL workflows, headless checks, OSS parity,
+361 fuzz cases across 9 boundaries and Behavior CI 10/10 seeds completed.
+Separate MuJoCo-enabled benchmark library validation passed 166 tests with
+2 long-training tests ignored (218.31 s), plus all-target Clippy. These checks
+do not establish physical calibration, acquisition independence or actual HIL.
+
+Acquisition manifest validation rejects repeated file paths declaring different
+sizes or SHA-256 hashes, including references shared across raw capture,
+procedure and calibration roles. Identical references remain shareable and are
+read once. This check runs before file-read deduplication and also applies to
+the strict manifest decoder, even if the conflicting manifest has been resealed.
+Manifest CLI reads are capped at the schema limit plus one detection byte.
+Referenced evidence streams use metadata from the opened handle and read at
+most the declared size plus one byte, rejecting growth or truncation. These
+bounds do not provide an atomic filesystem snapshot or authenticate the source.
+
+Residual timing commit `357ea1fd4bcbefcea63ed21f51140a86798b75ea` completed
+`cargo run -p xtask -- ci` with exit 0 on 2026-09-08, with tracked files fixed
+throughout the run. Log: `E:\RNE-build\m3c-sensor\suspension-timing-v1-ci.log`,
+SHA-256 `aa21587037023c84ff11fc1dcc4cf04d910e0f2572011f2e42a71490b0eb5884`.
+This includes workspace formatting/Clippy/tests, smoke and learning workflows,
+headless checks, OSS parity, 361 fuzz cases across 9 boundaries and Behavior CI
+10/10 seeds. Separate MuJoCo-enabled suspension-run tests (5 passed) and
+all-target Clippy passed before this run. This is regression evidence, not
+physical calibration, uncertainty qualification or actual HIL evidence.
+
+`rne_robot::systems::suspension_residual_timing` evaluates a frozen fit on one
+acquisition without refitting or joining run boundaries. It retains interval
+min/max, caller-declared absolute interval tolerance, mean force residual and
+optional lag-one autocorrelation. Following [NIST's definition](https://www.itl.nist.gov/div898/handbook/eda/section3/eda35c.htm),
+the centered adjacent-product sum uses full-run centered energy as denominator.
+Only intervals matching the first within the declared tolerance admit this
+statistic; irregular timing and constant residuals return `None`, not zero.
+No interpolation, independence verdict, effective sample size or uncertainty
+interval is inferred.
+
+The benchmark library's separate `rne_suspension_timing_evidence` schema 1
+embeds the unchanged excitation/run evidence, a caller-declared interval
+tolerance, and ordered training/holdout timing diagnostics. Every acquisition
+is evaluated separately using the frozen training fit. The strict decoder and
+encoder rerun the embedded request and compare the complete envelope; both use
+the same 8 MiB bound. This is replay integrity, not source authentication or
+physical qualification. Each acquisition must contain at least three samples.
+The library API is available as `identify_suspension_timing`,
+`encode_suspension_timing`, and `decode_suspension_timing`. The CLI backend
+`suspension-timing` takes a whole-run request via `--input` and requires explicit
+`--interval-tolerance-s` justified by clock evidence. Backend
+`suspension-timing-verify` takes saved timing evidence via `--input` and rejects
+a tolerance override: it replays the embedded declaration. Existing artifact
+schemas and acceptance gates are unchanged.
+
+The additive `rne_robot::systems::suspension_training_excitation` diagnostic
+accepts training acquisitions only. It returns centered position/velocity RMS
+in SI units, correlation, and the L2 condition number of the centered design
+after normalizing each column to unit norm. For correlation `rho`, its Gram
+matrix has eigenvalues `1 +/- |rho|`, so the design condition is
+`sqrt((1+|rho|)/(1-|rho|))`, not the squared Gram condition. The norm convention
+follows [NumPy's official condition-number documentation](https://numpy.org/doc/stable/reference/generated/numpy.linalg.cond.html).
+Zero-energy columns or `1-|rho| <= 8*EPSILON` return no finite condition, rather
+than serializing infinity. Scaling before centering avoids direct SI squaring
+overflow. RMS magnitudes remain separate because unit normalization can hide
+insufficient excitation amplitude. Forces are validated but do not enter the
+calculation. It does not change residual acceptance gates and is not parameter
+uncertainty evidence.
+
+The separate `rne_suspension_excitation_evidence` v1 envelope embeds unchanged
+whole-run evidence plus these training-only diagnostics. CLI modes
+`suspension-excitation` (whole-run request input) and `suspension-excitation-verify`
+(envelope input) use the same bounded 8 MiB intake and compact output. Verification
+reexecutes both the fit and diagnostics and compares the complete envelope.
+Changing holdout forces cannot change the diagnostic; editing a stored diagnostic
+is rejected. Neither an acceptable condition number nor a residual verdict
+qualifies instrument calibration or independent physical trials.
+
+Excitation-slice checks (2026-09-08): all 59 `rne_robot` library tests and
+all-target Clippy passed. Tests include orthogonal/collinear/constant designs,
+an analytic near-collinear condition, force independence, extreme finite scales,
+and invalid inputs. The MuJoCo-enabled benchmark library passed 163 tests with
+zero failures and two ignored long training jobs (250.30 s); all-target Clippy
+passed after the envelope/CLI addition. The four run-artifact tests include
+diagnostic recomputation and tamper rejection. These are focused and benchmark
+regression checks. Subsequently, commit
+`6deb13e36acfb273f5cf79178c17308f68b2c440` completed the full
+`cargo run -p xtask -- ci` with exit code 0, with tracked files unchanged
+through execution. The run ended with OSS parity, 361 fuzz cases across nine
+boundaries and Behavior CI 10/10 seeds. External log:
+`E:\RNE-build\m3c-sensor\suspension-excitation-v1-ci.log`, SHA-256
+`8299f7b9ec95a499031c5e64faa22ffcd2f46b56eae9fedb4fb35fc5917208ae`.
+This does not qualify real measurements or supply parameter uncertainty/HIL evidence.
+
+Inspection of `identify_suspension_strut` confirms that v1 holds out every
+`holdout_stride`th point from a single ordered sequence. This prevents direct
+use of held-out samples in fitting, but does not establish independent trials:
+adjacent training points can share autocorrelated noise and operating conditions.
+The existing synthetic fixture and its deterministic hashes remain useful
+software regression evidence, not a generalization result for physical logs.
+
+Before claiming physical identification, add a separately versioned validation
+path with whole acquisition runs held out (or explicitly bounded contiguous
+time blocks when independent runs are unavailable). Freeze the split before
+fitting, report excitation/conditioning from training data only, and evaluate
+force residuals by held-out run and operating range. Any uncertainty estimate
+must state its assumptions about correlated samples and measured-input error;
+an IID least-squares interval alone must not certify this gate. Tests must prove
+that changing holdout forces cannot alter fitted parameters and that run IDs
+cannot occur in both training and validation.
+
+The additive `identify_suspension_strut_runs` API now accepts explicit complete
+training and holdout acquisitions. IDs must be unique across and within roles;
+empty runs, non-finite samples and non-increasing per-run clocks are rejected.
+Clocks may restart between runs. All supplied training samples enter the fit;
+all holdout samples are excluded. The shared arithmetic preserves v1 sample
+ordering and results when given equivalent partitions. `holdout_stride` remains
+a validated compatibility field in the reused spec, but does not choose points
+in the run API. Counts and RMSE are pooled/sample-weighted, not per-run gates.
+
+`identify_suspension_strut_runs_report` additionally retains each run's ID, sample
+count, force RMSE, maximum absolute residual and RMSE verdict in caller order.
+It uses the role's existing training/holdout RMSE bound for each run; any failing
+run sets the report verdict to false even when pooled residuals pass. Minimum
+sample counts still apply to pooled roles, and maximum absolute residual is a
+diagnostic, not a separate gate. Pooled fit failures still return an error.
+
+The benchmark now supplies separate v1 `rne_suspension_run_request` and
+`rne_suspension_run_evidence` kinds through `--backend suspension-run-identification`
+and `--backend suspension-run-verify`, respectively, with `--input` and `--output`.
+Requests embed `spec`, `training` and `holdout`; each run contains an
+`acquisition_id` and an existing v1 `dataset`. The bound is 8 MiB, 64 total runs
+and 100,000 combined samples. Numeric IDs, dataset IDs and exact serialized
+sample captures must be unique across the whole request. Changing a source label
+does not evade exact sample duplication checks; altered or overlapping captures
+are not detected by this check.
+
+Evidence embeds the request, its typed compact-JSON SHA-256, and the full report.
+The CLI emits revalidated compact JSON without a trailing newline, bounded by
+the same 8 MiB limit as the decoder; pretty-print expansion is not used here.
+The verifier actually reruns identification and compares the entire result;
+it does not trust a stored hash or verdict. A valid report may have `passed=false`:
+successful CLI execution establishes processing/integrity, not model acceptance.
+SHA-256 is integrity binding, not authentication. No acquisition-manifest checks
+are implied by this path, and recorded source labels remain unverified declarations.
+
+This is not physical qualification. Training-only conditioning and acquisition
+binding and declared additive error propagation are available through the
+envelopes above; physical uncertainty qualification remains incomplete.
+Distinct caller IDs alone
+do not detect duplicated raw captures or establish independent measurements.
+
+Whole-run slice validation (2026-09-08): `rne_robot --lib` passed 56 tests;
+its all-target Clippy passed with warnings denied. The MuJoCo-enabled mobility
+benchmark library passed 162 tests with zero failures and two explicitly ignored
+long training jobs (220.66 s); its all-target Clippy also passed. This includes
+v1 suspension regressions, whole-run split isolation, failed-run retention,
+rehashed split/report tampering rejection and compact evidence roundtrips.
+The two long training jobs were not rerun.
+
+Full workspace checkpoint: `fdecb2edb6d94cc9ce78d5133bb7239c52b968e9`
+completed `cargo run -p xtask -- ci` with exit code 0, with tracked files fixed
+through execution. This included workspace lint/tests, smoke/RL checks,
+headless, OSS parity, 361 fuzz cases across nine boundaries and Behavior CI
+10/10 seeds. External log:
+`E:\RNE-build\m3c-sensor\suspension-runs-v1-ci.log`, SHA-256
+`a891981ca2266ccdfc5391b04f698ecae18eda006727cf914821453ab4366155`.
+This is regression evidence, not physical dataset qualification or actual HIL.
+
+This fixture proves the schema, split, solver, residual calculation, provenance
+propagation, determinism, and tamper rejection. It does not pass the physical acquisition
+manifest because its source is synthetic, and it does not identify the RNE vehicle.
+M3-C/M5 remain open until a physical bench or vehicle log with calibrated force,
+position, velocity, and timing is retained externally; the resulting parameters must
+then pass this same two-backend application path and a separately captured road profile.
+Confidence/conditioning evidence, outlier-robust fitting, tire parameter
+identification, and recorded/shadow/HIL comparison are also still required.

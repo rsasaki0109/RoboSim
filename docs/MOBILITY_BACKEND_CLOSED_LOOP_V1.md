@@ -11,12 +11,18 @@ motor voltage -> DC motor -> transmission -> wheel inertia
 ```
 
 The actor-visible observation is only the task-owned `command_phase`; the action is a
-bounded motor terminal voltage. Chassis pose, velocity, contact load, tire force, motor
-current, and wheel speed are explicitly privileged evidence fields. They are not actor
-tensors. Both runs use seed `0`, a 1 ms fixed step, 300 settle steps, and 2,000 driven
-steps.
+bounded motor terminal voltage. Chassis pose, velocity, rotation, angular velocity, and
+wheel speed are declared as privileged critic tensors. Motor current, contact load, tire
+force, and friction utilization are diagnostic-only tensors. None are actor inputs. Both
+nominal runs use seed `0`, a 1 ms fixed step, 300 settle steps, and 2,000 driven steps.
 
 ## Contact and force convention
+
+For randomized grades, the fixture's world coordinates are road-aligned: X follows
+the road and Y is its normal. Gravity is `(-g sin(grade), -g cos(grade), 0)`.
+Thus positive grade produces downhill acceleration toward negative X, and the solver
+resolves the corresponding normal load. Reported world positions and tilt use this
+road-aligned frame. The nominal zero-grade fixture is unchanged.
 
 The backend reports a completed-step contact point, its carrier-point velocity, and normal
 load. `evaluate_longitudinal_drive_path` subtracts the wheel circumferential velocity once,
@@ -99,3 +105,21 @@ The next fidelity gate replaces the equivalent support path with per-wheel rigid
 steering, suspension/load-transfer state, anisotropic skid scrub, and named Ackermann and
 differential-drive fixtures. Its acceptance must add yaw-rate, lateral acceleration,
 wheel-load, steering, and lift/recontact evidence before any road-vehicle fidelity claim.
+
+The first additive M3-C subgate is documented in
+[`MOBILITY_SENSOR_OBSERVED_CLOSED_LOOP_V1.md`](MOBILITY_SENSOR_OBSERVED_CLOSED_LOOP_V1.md).
+It retains this equivalent support geometry but removes direct physics-state feedback from
+the controller: timestamped encoder, IMU, and electrical frontends feed a sensor-only
+estimator and PI loop through DataBus availability semantics on both backends.
+
+The next additive M3-C subgate is documented in
+[`MOBILITY_PER_WHEEL_SKID_V1.md`](MOBILITY_PER_WHEEL_SKID_V1.md). It replaces the equivalent
+support with four named rigid wheel stations and independent drive/tire state, then proves
+pivot yaw, lateral scrub, per-wheel raw/conditioned load, and contact participation across
+Rapier and MuJoCo. Ackermann steering, identified compliant suspension, and the combined
+sensor-only per-wheel loop remain open.
+
+The explicit differential-drive support subgate is documented in
+[`MOBILITY_DIFFERENTIAL_CASTER_V1.md`](MOBILITY_DIFFERENTIAL_CASTER_V1.md). It adds a
+multibody trailing caster with identified trail, mass, inertia, damping, swivel and rolling
+coordinates, plus three-point load-transfer evidence across the same two backends.

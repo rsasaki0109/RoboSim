@@ -1,6 +1,15 @@
 # Mobility Physical AI Foundation plan
 
-Status: active, M3-B implemented; M3-C and later milestones remain
+Status: active, M3-B implemented; M3-C sensor-observed, per-wheel skid, explicit
+differential-drive trailing-caster, four-wheel Ackermann suspension/split-friction,
+rough-road/lift, backend-neutral steering actuator, Ackermann open-loop v2, and
+Ackermann sensor-loop v2 subgates implemented; physical logs and later milestones remain
+
+Real-log acquisition is now scoped by the
+[source audit](MOBILITY_REAL_LOG_SOURCE_AUDIT.md): inspect bounded NCLT sensor data
+for replay first, qualify a separate Ackermann identification source, and keep
+odometry-derived references distinct from independent truth. No physical-validation
+gate is closed by that source screening.
 
 Implemented M0 evidence:
 
@@ -35,6 +44,66 @@ limits, back-EMF, optional inductance, explicit open/short failures, directional
 reflected inertia, and rolling resistance. The assumptions and identification requirements
 are frozen in [`MOBILITY_PLANT_V1.md`](MOBILITY_PLANT_V1.md); no contact-backend integration
 or tire-fidelity claim is included yet.
+
+The steering path now has a backend-neutral first-order command-to-angle state with
+explicit rate, travel, deadband and stuck-failure behavior. Both the open-loop and
+sensor-only Ackermann TaskSpecs run it at the 1 ms physics rate in Rapier and MuJoCo,
+retain raw controller command, completed actuator target and measured joint/encoder
+angles separately, and reject a target that cannot be reproduced by deterministic
+step replay. A training-only discrete-response fit plus frozen chronological holdout
+gate is implemented for synchronized direct-angle logs. Fixture values remain
+uncalibrated because the exposed F1TENTH logs contain command echo rather than direct
+steering angle, while the stronger IROS 2024 dataset candidate has no resolved
+distribution URL or license.
+
+The command boundary now also includes an averaged `PwmMotorCommandFrontendSpec`.
+It maps signed controller counts and runtime bus voltage into a terminal-voltage request
+without converting empirical PWM response into motor resistance, constants or inertia.
+Count saturation, polarity and declared bridge loss are explicit; switching ripple,
+decay mode, current regulation, battery sag and thermal effects remain outside this tier.
+The real-log audit has acquired a bounded PMDC geared-motor candidate with simultaneously
+recorded terminal voltage/current/speed and frozen complete-run splits. Its strict,
+read-only source auditor now verifies the published hash, bounded OOXML container, exact
+sheet relationships, trial boundaries and formula contamination and emits deterministic
+evidence to external storage. A lossless pre-final converter now retains all 12 source
+channels, source rows, run annotations and complete-run identity for the frozen training
+and development partitions while making the final partition unavailable. Calibration
+self-consistency audit now shows monotonic but nonuniform source timing, millivolt-scale
+voltage-column reconstruction residuals, a ten-reading aggregate `Current` channel that
+is not the conversion of adjacent `rawCurrent`, and a fixed-10-ms encoder-derived
+`Velocity` channel. [`MOBILITY_PMDC_IDENTIFICATION_V1.md`](MOBILITY_PMDC_IDENTIFICATION_V1.md)
+and its Rust representation now freeze actual-timestamp encoder reconstruction,
+whole-run cross-validation, two effective electrical candidates, a coupled mechanical
+coefficient model, solver/rank rules and one-shot development gates before development
+responses are inspected. Fitting and the one-shot development execution are complete;
+independent calibration and physical parameter qualification remain active M5 work.
+
+The bounded Rust decoder now verifies the Python-produced training record stream,
+preserves all complete runs and reconstructs SI output speed from source count/time pairs
+without reading development or final rows. Its headless real-data check agrees on all
+16,072 records. The deterministic QR fitter and predeclared run-wise model selection are
+also implemented. Real training CV selects the quasi-static effective current model over
+the dynamic Euler candidate (`0.1879` versus `0.5788` NRMSE), fits the physically signed
+mechanical coefficient model above the rank gate, and emits byte-repeatable content-bound
+evidence. Trial 9 then passed all four predeclared free-run development gates over 2,007
+steps. It is now permanently development-exposed and cannot be reused for tuning.
+Independent calibration remains open.
+
+The final PMDC contract was frozen while both response runs remained unread. It binds the
+selected training and exposed development evidence, forbids refit or threshold changes,
+and requires unchanged per-run, pooled and worst-run gates. A separately committed sealer
+then performed the sole final-partition read and losslessly retained both 2,009-sample runs
+on the external SSD. Its exact file and record-stream identities are now frozen in Rust;
+the separately precommitted evaluator then executed once and all twelve per-run, pooled,
+and worst-run gates passed. The exact 4,791-byte evaluation evidence and content identities
+are frozen in Rust. The contract also fails closed on common Failure Capsule
+packaging because that schema currently requires a fixed simulation clock; recorded
+nonuniform timestamps were not silently resampled. A subsequent `rne_log` slice now adds
+a separate `rne_recorded_failure_capsule` with explicit source timestamp units and
+uniform/nonuniform sampling while keeping legacy simulation capsule JSON unchanged.
+This closes effective-model generalization for this one published PMDC acquisition path,
+not calibration, transferable individual motor constants, tire/chassis identification,
+or whole-vehicle physical validation.
 
 M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus
@@ -225,6 +294,26 @@ the declared validity envelope; unexplained exact equality is not a fidelity tar
   evidence hashes.
 - Curriculum difficulty changes physical ranges and tasks, not hidden controller access.
 
+The first additive M4 subgate is implemented as the deterministic ordered CPU reference
+batch in [`MOBILITY_DOMAIN_RANDOMIZATION_V1.md`](MOBILITY_DOMAIN_RANDOMIZATION_V1.md).
+It freezes lane/episode seed derivation and typed motor, transmission, wheel, tire, road,
+mass, and suspension parameter sampling with replay-verified per-lane evidence. It does
+not yet close M4: that initial reference rollout is analytic and open loop, and its
+suspension parameters are retained but not excited. Subsequent longitudinal Rapier/
+MuJoCo environments now provide persistent 10 ms stepping over 1 ms physics/sensor
+ticks, sensor-only actor tensors, evaluator reward, partial resets, CPU-parallel
+lanes, and exact reset/action replay. The new SI-unit evaluator separately reports
+open-loop backend gaps and final-speed acceptance; full workspace CI and the
+MuJoCo-enabled mobility suite passed on 2026-09-07.
+The longitudinal reference path now includes fallible training, independent physical/
+sensor-noise roots and replay-verified learner-session recovery; see
+[`MOBILITY_FALLIBLE_LEARNING_BOUNDARY.md`](MOBILITY_FALLIBLE_LEARNING_BOUNDARY.md).
+Full CI passed for that implementation on 2026-09-08. This does not close broader
+per-wheel/Ackermann randomization, accelerated batching, or physical-log validation.
+`TaskSpec` now has optional, separately validated actor, privileged-critic, and
+diagnostic observation spaces; the sensor-only Ackermann task declares its estimator and
+measurement actor inputs separately from rigid-body truth and timing diagnostics.
+
 ### M5 — sim-to-real proof
 
 - Import recorded command/sensor/ground-truth logs through an adapter.
@@ -275,11 +364,105 @@ and cross-backend results.
     completed-contact feedback, next-step tire wrench application, complete time-series and
     capability evidence, unit-bearing comparison, diagnostic replay, and verified Failure
     Capsule.
-15. M3-C: replace the equivalent support path with per-wheel differential/skid and
-    Ackermann fixtures; add steering, suspension/load transfer, lateral scrub, split
-    friction, grade, curb, roughness, lift/recontact, and sensor-only closed-loop metrics.
-16. M4/M5: batched Physical AI observations/randomization, then real-log identification,
-    recorded/shadow/HIL validation.
+15. M3-C: in progress. The first additive subgate now runs the same TaskSpec, 2048-CPR
+    encoders, calibrated stochastic IMU, measured motor voltage/current, availability-time
+    DataBus reads, wheel/IMU estimator, and estimate-only PI controller through Rapier and
+    MuJoCo. It retains complete unit-bearing traces, privileged truth only for scoring,
+    deterministic dropout evidence, tracking bounds, and cross-backend estimator-error
+    bounds; see
+    [`MOBILITY_SENSOR_OBSERVED_CLOSED_LOOP_V1.md`](MOBILITY_SENSOR_OBSERVED_CLOSED_LOOP_V1.md).
+    The second additive subgate replaces the equivalent support with four named skid wheel
+    stations, independent motor/transmission/wheel/tire states, rigid per-wheel contact,
+    raw-versus-conditioned load evidence, lateral scrub, pivot yaw, and SI-unit Rapier/MuJoCo
+    tolerances; see [`MOBILITY_PER_WHEEL_SKID_V1.md`](MOBILITY_PER_WHEEL_SKID_V1.md).
+    The sensor path now also has a deterministic four-physical-encoder to two-side-stream
+    fusion boundary that preserves modular wrap, availability timing, independent raw streams,
+    and per-side source gaps and feeds the existing wheel/IMU estimator without truth access.
+    The third subgate connects that primitive to the four-wheel plant, four motor-current
+    frontends, mounted IMU, sensor-only odometry, and estimate-only yaw-rate PI control under
+    the exact same Rapier/MuJoCo TaskSpec; see
+    [`MOBILITY_PER_WHEEL_SENSOR_CLOSED_LOOP_V1.md`](MOBILITY_PER_WHEEL_SENSOR_CLOSED_LOOP_V1.md).
+    The same physical plant now covers recoverable encoder/motor/IMU drops, motor stuck,
+    IMU saturation, and fail-closed encoder stuck/counter saturation and IMU stuck behavior.
+    Every fatal input now emits a deterministic, self-verifying JSON Failure Capsule with the
+    frozen backend/TaskSpec/fault contract, rejection timing, all physical sequence/status
+    evidence, stable failure code, and mutation-detecting digest. The third additive
+    subgate is an explicit two-drive-wheel plus passive trailing-caster multibody fixture.
+    It proves caster trail, swivel/roll inertia and damping, three-point load transfer,
+    arc/straighten/reverse response, normal-only frictionless MuJoCo contact, and
+    Rapier/MuJoCo agreement; see
+    [`MOBILITY_DIFFERENTIAL_CASTER_V1.md`](MOBILITY_DIFFERENTIAL_CASTER_V1.md). The fourth
+    additive subgate is an explicit four-wheel Ackermann multibody fixture with independent
+    suspension and wheel-force states, inner/outer steering, settled-baseline load transfer,
+    split-friction braking, deterministic traces, and SI-unit Rapier/MuJoCo agreement; see
+    [`MOBILITY_ACKERMANN_SUSPENSION_V1.md`](MOBILITY_ACKERMANN_SUSPENSION_V1.md). The fifth
+    additive subgate now connects that same suspended Ackermann plant to four 2048-CPR wheel
+    encoders, two 14-bit steering encoders, four measured-current frontends, a mounted IMU,
+    availability-time reads, Ackermann wheel/steering/IMU odometry, and estimate-only speed
+    and yaw control through an identical Rapier/MuJoCo TaskSpec. It retains independent
+    physical sequences, recoverable wheel/steering/IMU/motor drops, unit-bearing traces, and
+    separately named scoring truth; see
+    [`MOBILITY_ACKERMANN_SENSOR_CLOSED_LOOP_V1.md`](MOBILITY_ACKERMANN_SENSOR_CLOSED_LOOP_V1.md).
+    The sixth additive subgate introduces a backend-neutral finite rigid-road profile and
+    drives the suspended Ackermann plant over grade, short-wave roughness, a 40 mm curb,
+    and a 40 mm drop. It records solved per-wheel contact/load, suspension and vertical
+    response, debounced lift/recontact events, and cross-backend curb impulse rather than
+    solver-sensitive peak-force parity; see
+    [`MOBILITY_ROAD_EXCITATION_V1.md`](MOBILITY_ROAD_EXCITATION_V1.md). M3-C remains open
+    until suspension/tire parameters are identified from physical logs. The caster
+    plant now joins a sensor-only encoder/IMU loop with measured motor feedback,
+    capture-age watchdog, nominal motor feedforward and PI feedback. Both backends
+    pass deterministic tracking/outage tests; v2 evidence checks timing and controller
+    replay. Full CI passed at `bd4afbf`; this is not physical-log validation.
+    A new identification-contract subgate now fits the
+    linear strut stiffness, damping, and equilibrium coordinate from bounded timestamped
+    force logs with deterministic train/holdout splitting, physical bounds, residual
+    gates, provenance propagation, and tamper detection. The fitted parameters now replace
+    the exact force-law terms in one portable strut and run unchanged through the shared
+    Rapier/MuJoCo rigid-road TaskSpec, with dataset, fit, applied values, traces, metrics,
+    verdict, and digests bound into one external-SSD artifact. A separate physical
+    acquisition manifest now requires source/rig/logger identities, synchronized SI
+    channels, uncertainty and calibration classes, raw/procedure/calibration SHA-256
+    references, and streamed external-root verification. The synthetic fixture proves
+    the software path but cannot pass this physical gate; see
+    [`MOBILITY_SUSPENSION_IDENTIFICATION_V1.md`](MOBILITY_SUSPENSION_IDENTIFICATION_V1.md).
+    Ackermann wheel/steering/IMU fatal faults now emit deterministic,
+    cross-backend, status- and digest-bound Failure Capsules.
+16. M4/M5: in progress. The first M4 subgate now provides width-independent seeded
+    Mobility parameter sampling, conservative physical-range validation, a bounded ordered
+    CPU reference batch, exact applied-profile evidence, and full lane replay/digest
+    verification; see
+    [`MOBILITY_DOMAIN_RANDOMIZATION_V1.md`](MOBILITY_DOMAIN_RANDOMIZATION_V1.md).
+    Joint physical/sensor resets now run on the longitudinal Rapier/MuJoCo fixture,
+    including applied grade gravity and fixed nominal estimator calibration. Sensor
+    latency/jitter, residual bias and a seeded encoder drop are reset parameters;
+    the WorldRandom noise seed remains fixed, not an independent lane noise stream.
+    A bounded CPU episode-parallel runner retains failed tasks and reproduces complete
+    serial/parallel artifacts on both backends. That episode runner is distinct from
+    the persistent synchronous vector step API described below; see
+    [`MOBILITY_SENSOR_EPISODE_BATCH_V1.md`](MOBILITY_SENSOR_EPISODE_BATCH_V1.md).
+    An external voltage-policy callback now receives only sensor-derived actor inputs.
+    Exact voltage replay binds completed physical-state hashes; the common Failure
+    Capsule additionally binds replay bytes and the verifying binary's build metadata.
+    These are replay/provenance checks, not proof of physical calibration or attested
+    policy identity. Persistent single-world state and a distinct 10 ms fixed-period
+    reset/step contract now share the existing 1 ms physics/sensor runtime without
+    changing saved event-driven voltage replays. The CPU batch supports explicit partial
+    reset, all-lane input preflight, per-lane execution failures and scheduling-independent
+    transitions. A fixed TaskSpec maps masked sensor-only tensors and integrates
+    evaluator tracking-error reward over all ten physics ticks, including stale-sensor
+    intervals. Bounded reset/action history replay binds backend, reset contracts,
+    observations, rewards and completed physical hashes; CLI-generated 331-operation
+    proofs are byte-identical across worker counts within each backend. A bounded
+    training adapter and replay-verified learning session are now implemented, with
+    42,240-update full-job replay and continuation checks on each backend; see
+    [`MOBILITY_FALLIBLE_LEARNING_BOUNDARY.md`](MOBILITY_FALLIBLE_LEARNING_BOUNDARY.md).
+    Common Capsule integration for partially completed execution remains pending;
+    replaying successful history does not prove that a new runtime fault reproduces.
+    The fixed-step contract is documented in
+    [`MOBILITY_SYNCHRONOUS_ENV_DESIGN.md`](MOBILITY_SYNCHRONOUS_ENV_DESIGN.md).
+    Broader per-wheel/Ackermann resets, physical-log acquisition, recorded/shadow/HIL
+    validation, and the final real-vehicle exit gate remain open.
 
 Every PR is independently headless-testable, documents new public contracts, runs format,
 Clippy, workspace tests, and `xtask ci-headless`, and removes its isolated build directory

@@ -4,6 +4,7 @@
 
 mod asset_path;
 
+pub mod ackermann_imu_odometry;
 pub mod action;
 pub mod agent;
 pub mod behavior;
@@ -34,6 +35,11 @@ pub mod transport;
 pub mod vectorized;
 pub mod wheel_imu_odometry;
 
+pub use ackermann_imu_odometry::{
+    AckermannEncoderStreams, AckermannImuOdometry, AckermannImuOdometryConfig,
+    AckermannImuOdometryError, AckermannImuOdometryEstimate, AckermannImuOdometryHealth,
+    AckermannImuOdometryProvenance,
+};
 pub use action::{DiffDriveAction, MobileManipulatorAction};
 pub use agent::{
     attach_diff_drive_policy, attach_goal_conditioned_policy, attach_shared_diff_drive_policy,
@@ -249,8 +255,9 @@ pub use vectorized::{
     VectorizedEpisodeConfig, VectorizedEpisodeStep, VECTORIZED_EPISODE_CHECKPOINT_VERSION,
 };
 pub use wheel_imu_odometry::{
-    wheel_imu_sensor_only_task_spec, WheelImuActorObservation, WheelImuOdometry,
-    WheelImuOdometryConfig, WheelImuOdometryError, WheelImuOdometryEstimate,
+    wheel_imu_sensor_only_task_spec, FourWheelEncoderStreams, FourWheelSideEncoderFusion,
+    FourWheelSideEncoderFusionConfig, SideEncoderStreams, WheelImuActorObservation,
+    WheelImuOdometry, WheelImuOdometryConfig, WheelImuOdometryError, WheelImuOdometryEstimate,
     WheelImuOdometryHealth, WheelImuOdometryProvenance, WheelImuOdometryStreams,
-    WHEEL_IMU_SENSOR_ONLY_TASK_ID,
+    FOUR_WHEEL_SIDE_FUSED_COUNTER_BITS, WHEEL_IMU_SENSOR_ONLY_TASK_ID,
 };

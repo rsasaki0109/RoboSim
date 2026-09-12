@@ -19,7 +19,7 @@ use rne_robot::{
     DcMotorSpec, LongitudinalDrivePathInput, LongitudinalDrivePathState,
     LongitudinalMobilityPlantSpec, TransmissionSpec, WheelAssemblySpec,
 };
-use rne_world::Transform3;
+use rne_world::{Transform3, WorldRandom};
 use serde::{Deserialize, Serialize};
 
 use crate::MobilityBenchmarkMetric;
@@ -126,6 +126,16 @@ pub struct BackendMobilityTrace {
 impl BackendMobilityTrace {
     /// Recomputes schema, task, time-series, verdict, and content integrity.
     pub fn validate(&self) -> Result<()> {
+        self.validate_execution()?;
+        ensure!(
+            self.task_spec == backend_mobility_task_spec(),
+            "exact TaskSpec mismatch"
+        );
+        ensure!(self.seed == WORLD_SEED, "world seed mismatch");
+        Ok(())
+    }
+
+    pub(crate) fn validate_execution(&self) -> Result<()> {
         ensure!(self.kind == BACKEND_MOBILITY_TRACE_KIND, "kind mismatch");
         ensure!(
             self.schema_version == BACKEND_MOBILITY_TRACE_SCHEMA_VERSION,
@@ -133,83 +143,91 @@ impl BackendMobilityTrace {
         );
         self.backend.validate().context("backend manifest")?;
         self.task_spec.validate().context("TaskSpec")?;
-        ensure!(
-            self.task_spec == backend_mobility_task_spec(),
-            "exact TaskSpec mismatch"
-        );
-        ensure!(
-            self.fixed_delta_ticks == BACKEND_MOBILITY_FIXED_DELTA_TICKS,
-            "fixed step mismatch"
-        );
-        ensure!(self.steps == TOTAL_STEPS, "step count mismatch");
-        ensure!(self.seed == WORLD_SEED, "world seed mismatch");
-        ensure!(!self.samples.is_empty(), "trace omitted samples");
-        ensure!(
-            self.samples
-                .windows(2)
-                .all(|pair| pair[0].step < pair[1].step),
-            "samples are not strictly ordered"
-        );
-        ensure!(
-            self.samples
-                .last()
-                .is_some_and(|sample| sample.step == self.steps),
-            "trace omitted final step"
-        );
-        for sample in &self.samples {
-            ensure!(sample.is_finite(), "sample {} is non-finite", sample.step);
-            ensure!(
-                sample.sim_time_ticks == sample.step * self.fixed_delta_ticks,
-                "sample {} timestamp mismatch",
-                sample.step
-            );
-            let expected_phase = if sample.step > SETTLE_STEPS { 1.0 } else { 0.0 };
-            ensure!(
-                sample.command_phase == expected_phase
-                    && sample.command_voltage_v == expected_phase * COMMAND_VOLTAGE_V,
-                "sample {} command schedule mismatch",
-                sample.step
-            );
-            ensure!(
-                (0.0..=1.0).contains(&sample.friction_utilization),
-                "sample {} utilization escaped bounds",
-                sample.step
-            );
-        }
-        ensure!(!self.metrics.is_empty(), "trace omitted metrics");
-        ensure!(
-            self.metrics.windows(2).all(|pair| pair[0].id < pair[1].id),
-            "metrics are not strictly sorted"
-        );
-        for metric in &self.metrics {
-            ensure!(
-                metric.value.is_finite(),
-                "metric {} is non-finite",
-                metric.id
-            );
-            ensure!(
-                metric.minimum.is_finite()
-                    && metric.maximum.is_finite()
-                    && metric.minimum <= metric.maximum,
-                "metric {} interval is invalid",
-                metric.id
-            );
-            ensure!(
-                metric.passed == (metric.value >= metric.minimum && metric.value <= metric.maximum),
-                "metric {} verdict mismatch",
-                metric.id
-            );
-        }
-        ensure!(
-            self.passed == self.metrics.iter().all(|metric| metric.passed),
-            "trace verdict mismatch"
-        );
+        validate_backend_execution(
+            self.fixed_delta_ticks,
+            self.steps,
+            &self.samples,
+            &self.metrics,
+            self.passed,
+        )?;
         ensure!(
             self.content_digest == trace_digest(self)?,
             "trace digest mismatch"
         );
         Ok(())
     }
+}
+
+pub(crate) fn validate_backend_execution(
+    fixed_delta_ticks: u64,
+    steps: u64,
+    samples: &[BackendMobilitySample],
+    metrics: &[MobilityBenchmarkMetric],
+    passed: bool,
+) -> Result<()> {
+    ensure!(
+        fixed_delta_ticks == BACKEND_MOBILITY_FIXED_DELTA_TICKS,
+        "fixed step mismatch"
+    );
+    ensure!(steps == TOTAL_STEPS, "step count mismatch");
+    ensure!(!samples.is_empty(), "trace omitted samples");
+    ensure!(
+        samples.windows(2).all(|pair| pair[0].step < pair[1].step),
+        "samples are not strictly ordered"
+    );
+    ensure!(
+        samples.last().is_some_and(|sample| sample.step == steps),
+        "trace omitted final step"
+    );
+    for sample in samples {
+        ensure!(sample.is_finite(), "sample {} is non-finite", sample.step);
+        ensure!(
+            sample.sim_time_ticks == sample.step * fixed_delta_ticks,
+            "sample {} timestamp mismatch",
+            sample.step
+        );
+        let expected_phase = if sample.step > SETTLE_STEPS { 1.0 } else { 0.0 };
+        ensure!(
+            sample.command_phase == expected_phase
+                && sample.command_voltage_v == expected_phase * COMMAND_VOLTAGE_V,
+            "sample {} command schedule mismatch",
+            sample.step
+        );
+        ensure!(
+            (0.0..=1.0).contains(&sample.friction_utilization),
+            "sample {} utilization escaped bounds",
+            sample.step
+        );
+    }
+    ensure!(!metrics.is_empty(), "trace omitted metrics");
+    ensure!(
+        metrics.windows(2).all(|pair| pair[0].id < pair[1].id),
+        "metrics are not strictly sorted"
+    );
+    for metric in metrics {
+        ensure!(
+            metric.value.is_finite(),
+            "metric {} is non-finite",
+            metric.id
+        );
+        ensure!(
+            metric.minimum.is_finite()
+                && metric.maximum.is_finite()
+                && metric.minimum <= metric.maximum,
+            "metric {} interval is invalid",
+            metric.id
+        );
+        ensure!(
+            metric.passed == (metric.value >= metric.minimum && metric.value <= metric.maximum),
+            "metric {} verdict mismatch",
+            metric.id
+        );
+    }
+    ensure!(
+        passed == metrics.iter().all(|metric| metric.passed),
+        "trace verdict mismatch"
+    );
+    Ok(())
 }
 
 /// Two self-verifying traces plus explicit SI-unit cross-backend tolerances.
@@ -446,14 +464,68 @@ pub fn backend_mobility_task_spec() -> TaskSpec {
         ),
         ResetSpec::splitmix64(false),
     )
+    .with_privileged_observation(ObservationSpec::new(vec![
+        TensorSpec::new(
+            "privileged_position_world_m",
+            TensorDType::F64,
+            vec![3],
+            "m",
+        ),
+        TensorSpec::new(
+            "privileged_velocity_world_m_s",
+            TensorDType::F64,
+            vec![3],
+            "m/s",
+        ),
+        TensorSpec::new("privileged_rotation_xyzw", TensorDType::F64, vec![4], "1"),
+        TensorSpec::new(
+            "privileged_angular_velocity_world_rad_s",
+            TensorDType::F64,
+            vec![3],
+            "rad/s",
+        ),
+        TensorSpec::new(
+            "privileged_wheel_velocity_rad_s",
+            TensorDType::F64,
+            vec![1],
+            "rad/s",
+        ),
+    ]))
+    .with_diagnostic_observation(ObservationSpec::new(vec![
+        TensorSpec::new("motor_current_a", TensorDType::F64, vec![1], "A"),
+        TensorSpec::new("contact_normal_load_n", TensorDType::F64, vec![1], "N"),
+        TensorSpec::new("tire_longitudinal_force_n", TensorDType::F64, vec![1], "N"),
+        TensorSpec::new("friction_utilization", TensorDType::F64, vec![1], "1")
+            .with_bounds(TensorBounds::broadcast(0.0, 1.0)),
+    ]))
 }
 
 /// Runs the shared contact-to-tire-to-wrench loop on one backend.
 pub fn run_backend_mobility_trace<B: PhysicsBackend>(
-    mut backend: B,
+    backend: B,
     manifest: PhysicsBackendManifest,
 ) -> Result<BackendMobilityTrace> {
+    let trace = run_backend_mobility_trace_configured(
+        backend,
+        manifest,
+        backend_mobility_task_spec(),
+        backend_plant_spec(),
+        WORLD_SEED,
+    )?;
+    trace.validate()?;
+    Ok(trace)
+}
+
+pub(crate) fn run_backend_mobility_trace_configured<B: PhysicsBackend>(
+    mut backend: B,
+    manifest: PhysicsBackendManifest,
+    task_spec: TaskSpec,
+    plant: LongitudinalMobilityPlantSpec,
+    seed: u64,
+) -> Result<BackendMobilityTrace> {
     manifest.validate().context("backend manifest")?;
+    task_spec.validate().context("TaskSpec")?;
+    ensure!(plant.is_valid(), "invalid Mobility plant profile");
     require_capabilities(
         backend.capabilities(),
         &[
@@ -467,15 +539,21 @@ pub fn run_backend_mobility_trace<B: PhysicsBackend>(
         manifest.capabilities == backend.capabilities(),
         "backend manifest capability drift"
     );
-    let task_spec = backend_mobility_task_spec();
-    task_spec.validate().context("TaskSpec")?;
     let fixed_delta = SimDuration::from_ticks(BACKEND_MOBILITY_FIXED_DELTA_TICKS);
     let dt_s = fixed_delta.as_seconds().value();
     let physics_world = backend.create_world(PhysicsWorldDesc {
-        gravity_m_s2: Vec3::new(0.0, -9.806_65, 0.0),
+        // The fixture world is road-aligned: positive X climbs a positive grade.
+        // Rotating gravity keeps support geometry and reported distances in that
+        // frame while the backend resolves both downhill force and normal load.
+        gravity_m_s2: Vec3::new(
+            -9.806_65 * plant.road_grade_rad.sin(),
+            -9.806_65 * plant.road_grade_rad.cos(),
+            0.0,
+        ),
         solver_iterations: 16,
     })?;
     let mut world = World::new();
+    world.insert_resource(WorldRandom::new(seed));
     let ground = spawn_named(&mut world, "mobility_benchmark_ground");
     world.entity_mut(ground).insert((
         RigidBody {
@@ -486,26 +564,26 @@ pub fn run_backend_mobility_trace<B: PhysicsBackend>(
         Transform3::from_translation_rotation(Vec3::new(0.0, -0.5, 0.0), Quat::IDENTITY),
     ));
     let vehicle = spawn_named(&mut world, "mobility_benchmark_vehicle");
+    let mass_scale = plant.vehicle_mass_kg / 100.0;
     world.entity_mut(vehicle).insert((
         RigidBody {
-            mass_kg: 100.0,
+            mass_kg: plant.vehicle_mass_kg,
             ..RigidBody::default()
         },
         RigidBodyInertia {
             center_of_mass_local_m: Vec3::ZERO,
-            ixx_kg_m2: 5.083_333_333_333_333,
+            ixx_kg_m2: 5.083_333_333_333_333 * mass_scale,
             ixy_kg_m2: 0.0,
             ixz_kg_m2: 0.0,
-            iyy_kg_m2: 11.333_333_333_333_334,
+            iyy_kg_m2: 11.333_333_333_333_334 * mass_scale,
             iyz_kg_m2: 0.0,
-            izz_kg_m2: 10.416_666_666_666_666,
+            izz_kg_m2: 10.416_666_666_666_666 * mass_scale,
         },
         frictionless_collider(Vec3::new(0.5, 0.25, 0.3)),
         Transform3::from_translation_rotation(Vec3::new(0.0, 0.251, 0.0), Quat::IDENTITY),
     ));
     backend.sync_from_ecs(&mut world, physics_world)?;
 
-    let plant = backend_plant_spec();
     let mut drive_state = LongitudinalDrivePathState::default();
     let mut pending_wrench = None;
     let mut samples = Vec::new();
@@ -679,7 +757,7 @@ pub fn run_backend_mobility_trace<B: PhysicsBackend>(
         backend: manifest,
         task_spec,
         fixed_delta_ticks: BACKEND_MOBILITY_FIXED_DELTA_TICKS,
-        seed: WORLD_SEED,
+        seed,
         steps: TOTAL_STEPS,
         samples,
         passed: metrics.iter().all(|metric| metric.passed),
@@ -687,11 +765,17 @@ pub fn run_backend_mobility_trace<B: PhysicsBackend>(
         content_digest: String::new(),
     };
     trace.content_digest = trace_digest(&trace)?;
-    trace.validate()?;
+    validate_backend_execution(
+        trace.fixed_delta_ticks,
+        trace.steps,
+        &trace.samples,
+        &trace.metrics,
+        trace.passed,
+    )?;
     Ok(trace)
 }
 
-fn backend_plant_spec() -> LongitudinalMobilityPlantSpec {
+pub(crate) fn backend_plant_spec() -> LongitudinalMobilityPlantSpec {
     let static_load_n = 100.0 * 9.806_65;
     LongitudinalMobilityPlantSpec {
         vehicle_mass_kg: 100.0,
@@ -742,7 +826,7 @@ fn trace_digest(trace: &BackendMobilityTrace) -> Result<String> {
     Ok(format!("fnv1a64:{digest:016x}"))
 }
 
-fn comparison_metrics(
+pub(crate) fn comparison_metrics(
     first: &BackendMobilityTrace,
     second: &BackendMobilityTrace,
 ) -> Result<Vec<MobilityBenchmarkMetric>> {
@@ -807,6 +891,31 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 mod tests {
     use super::*;
     use rne_physics_rapier::RapierBackend;
+
+    #[test]
+    fn road_grade_changes_backend_motion_with_the_physical_sign() {
+        let speed = |grade_rad| {
+            let mut plant = backend_plant_spec();
+            plant.road_grade_rad = grade_rad;
+            let trace = run_backend_mobility_trace_configured(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                backend_mobility_task_spec(),
+                plant,
+                WORLD_SEED,
+            )
+            .unwrap();
+            trace.samples.last().unwrap().privileged_velocity_world_m_s[0]
+        };
+        let uphill = speed(0.05);
+        let level = speed(0.0);
+        let downhill = speed(-0.05);
+        assert!(uphill < level - 0.01, "uphill={uphill}, level={level}");
+        assert!(
+            downhill > level + 0.01,
+            "downhill={downhill}, level={level}"
+        );
+    }
 
     #[test]
     fn rapier_runs_the_exact_task_and_emits_a_self_verifying_trace() {

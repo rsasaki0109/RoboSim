@@ -1252,6 +1252,20 @@ fn apply_generalized_effort(
     }
     let mut measured = None;
     for (target, sign) in [(entity, 1.0), (parent, -1.0)] {
+        let application_point_world_m = if revolute {
+            None
+        } else {
+            let desc = world.get::<PrismaticJointDesc>(entity).ok_or_else(|| {
+                invalid_actuation(entity, "prismatic effort requires a prismatic joint")
+            })?;
+            let anchor_local_m = if target == entity {
+                desc.anchor_child_m
+            } else {
+                desc.anchor_parent_m
+            };
+            let transform = world_transform_of(world, target);
+            Some(transform.translation + transform.rotation * (transform.scale * anchor_local_m))
+        };
         let Some(handle) = state.entity_to_body.get(&target).copied() else {
             continue;
         };
@@ -1268,7 +1282,11 @@ fn apply_generalized_effort(
             }
         } else {
             let before = body.user_force();
-            body.add_force(vector, true);
+            body.add_force_at_point(
+                vector,
+                vec3_to_point(application_point_world_m.expect("prismatic anchor")),
+                true,
+            );
             if target == entity {
                 measured = Some(f64::from((body.user_force() - before).dot(&axis)));
             }
@@ -2268,6 +2286,56 @@ mod tests {
         assert!(position.position_m().unwrap() > 0.05);
         assert!(velocity.position_m().unwrap() > 0.05);
         assert!(effort.position_m().unwrap().abs() > 0.01);
+    }
+
+    #[test]
+    fn off_center_prismatic_effort_has_zero_net_world_moment() {
+        let mut backend = RapierBackend::new();
+        let physics_world = backend
+            .create_world(PhysicsWorldDesc {
+                gravity_m_s2: Vec3::ZERO,
+                ..PhysicsWorldDesc::default()
+            })
+            .unwrap();
+        let mut world = World::new();
+        let parent = spawn_named(&mut world, "effort_parent");
+        world.entity_mut(parent).insert((
+            RigidBody::default(),
+            MultibodyLink,
+            Transform3::default(),
+        ));
+        let child = spawn_named(&mut world, "effort_child");
+        world.entity_mut(child).insert((
+            RigidBody::default(),
+            MultibodyLink,
+            Transform3::from_translation_rotation(Vec3::X, Quat::IDENTITY),
+            PrismaticJointDesc {
+                parent,
+                axis: Vec3::Y,
+                anchor_parent_m: Vec3::X,
+                anchor_child_m: Vec3::ZERO,
+                lower_m: None,
+                upper_m: None,
+            },
+        ));
+        backend.sync_from_ecs(&mut world, physics_world).unwrap();
+        backend.step(physics_world, fixed_step()).unwrap();
+        backend.sync_to_ecs(&mut world, physics_world).unwrap();
+
+        let state = backend.world_mut(physics_world).unwrap();
+        apply_generalized_effort(&world, state, child, parent, Vec3::Y, 10.0, false).unwrap();
+        let parent_handle = state.entity_to_body[&parent];
+        let child_handle = state.entity_to_body[&child];
+        let parent_body = &state.bodies[parent_handle];
+        let child_body = &state.bodies[child_handle];
+        let net_force = parent_body.user_force() + child_body.user_force();
+        let net_moment = parent_body.user_torque()
+            + parent_body.translation().cross(&parent_body.user_force())
+            + child_body.user_torque()
+            + child_body.translation().cross(&child_body.user_force());
+
+        assert_relative_eq!(net_force.norm(), 0.0, epsilon = 1.0e-6);
+        assert_relative_eq!(net_moment.norm(), 0.0, epsilon = 1.0e-5);
     }
 
     #[test]

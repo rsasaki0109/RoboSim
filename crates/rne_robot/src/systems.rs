@@ -6,7 +6,9 @@ use crate::components::{
     AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
     DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
     LongitudinalDrivePathState, LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState,
-    MultirotorFlight, TransmissionSpec, VehicleDynamics, WheelAssemblySpec,
+    MultirotorFlight, PwmMotorCommandFrontendSpec, PwmMotorCommandPolarity, RigidRoadPatchSpec,
+    RigidRoadProfileSpec, SteeringActuatorFailureMode, SteeringActuatorSpec, SteeringActuatorState,
+    SuspensionStrutSpec, TransmissionSpec, VehicleDynamics, WheelAssemblySpec, WheelStationSpec,
 };
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
@@ -18,6 +20,7 @@ use rne_physics::{
     RigidBody, RigidBodyType,
 };
 use rne_world::Transform3;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Invalid configuration or input supplied to a mobility-plant evaluator.
@@ -32,6 +35,876 @@ pub enum MobilityPlantEvaluationError {
     /// The fixed step was zero, negative, or non-finite.
     #[error("mobility plant timestep must be finite and positive")]
     InvalidTimeStep,
+}
+
+/// Failure returned by first-order steering-actuator identification.
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SteeringActuatorIdentificationError {
+    /// Bounds, split, timing tolerance, or residual gates are invalid.
+    #[error("invalid steering actuator identification specification")]
+    InvalidSpec,
+    /// A sample is non-finite, unordered, nonuniform, or outside declared travel.
+    #[error("invalid steering actuator identification sample")]
+    InvalidSample,
+    /// Training or holdout lacks enough command-error excitation.
+    #[error("insufficient steering actuator identification excitation")]
+    InsufficientExcitation,
+    /// The fitted discrete response is not a stable first-order lag.
+    #[error("steering actuator response is not an identifiable stable first-order lag")]
+    Unidentifiable,
+    /// The fitted time constant falls outside the declared physical bounds.
+    #[error("identified steering actuator time constant is outside declared bounds")]
+    NonPhysicalResult,
+    /// Training or holdout residual exceeds its declared bound.
+    #[error("steering actuator identification residual exceeds its declared bound")]
+    ResidualExceeded,
+}
+
+/// One synchronized command/direct-angle sample for steering identification.
+///
+/// `command_target_rad` is the target held from this capture until the next
+/// sample. `measured_position_rad` must be a direct steering-angle measurement,
+/// not a command echo or pose-derived proxy.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SteeringActuatorIdentificationSample {
+    /// Monotonic capture time in seconds within one acquisition.
+    pub capture_time_s: f64,
+    /// Steering target held over the following interval, in radians.
+    pub command_target_rad: f64,
+    /// Direct completed steering-angle measurement in radians.
+    pub measured_position_rad: f64,
+}
+
+/// Frozen split and acceptance gates for first-order steering identification.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SteeringActuatorIdentificationSpec {
+    /// Number of leading transitions used exclusively for fitting.
+    pub training_transition_count: usize,
+    /// Allowed absolute deviation from the first capture interval, in seconds.
+    pub interval_tolerance_s: f64,
+    /// Minimum absolute command error retained as an excited transition, in radians.
+    pub minimum_abs_command_error_rad: f64,
+    /// Minimum accepted time constant in seconds.
+    pub minimum_time_constant_s: f64,
+    /// Maximum accepted time constant in seconds.
+    pub maximum_time_constant_s: f64,
+    /// Maximum training one-step RMS angle residual in radians.
+    pub maximum_training_rms_rad: f64,
+    /// Maximum holdout one-step RMS angle residual in radians.
+    pub maximum_holdout_rms_rad: f64,
+    /// Minimum declared steering travel in radians.
+    pub minimum_position_rad: f64,
+    /// Maximum declared steering travel in radians.
+    pub maximum_position_rad: f64,
+}
+
+impl SteeringActuatorIdentificationSpec {
+    fn is_valid(&self) -> bool {
+        [
+            self.interval_tolerance_s,
+            self.minimum_abs_command_error_rad,
+            self.minimum_time_constant_s,
+            self.maximum_time_constant_s,
+            self.maximum_training_rms_rad,
+            self.maximum_holdout_rms_rad,
+            self.minimum_position_rad,
+            self.maximum_position_rad,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+            && self.training_transition_count >= 2
+            && self.interval_tolerance_s >= 0.0
+            && self.minimum_abs_command_error_rad > 0.0
+            && self.minimum_time_constant_s > 0.0
+            && self.minimum_time_constant_s < self.maximum_time_constant_s
+            && self.maximum_training_rms_rad >= 0.0
+            && self.maximum_holdout_rms_rad >= 0.0
+            && self.minimum_position_rad < self.maximum_position_rad
+            && self.minimum_abs_command_error_rad
+                < self.maximum_position_rad - self.minimum_position_rad
+    }
+}
+
+/// Accepted first-order steering fit and frozen holdout evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SteeringActuatorIdentificationResult {
+    /// Uniform capture interval used by the discrete fit, in seconds.
+    pub capture_interval_s: f64,
+    /// Fitted continuous-time first-order time constant in seconds.
+    pub time_constant_s: f64,
+    /// Fitted discrete response fraction `1 - exp(-dt / tau)`.
+    pub discrete_response_ratio: f64,
+    /// Excited training transitions used by the fit.
+    pub training_transition_count: usize,
+    /// Excited holdout transitions evaluated without refitting.
+    pub holdout_transition_count: usize,
+    /// Training one-step RMS angle residual in radians.
+    pub training_rms_rad: f64,
+    /// Holdout one-step RMS angle residual in radians.
+    pub holdout_rms_rad: f64,
+}
+
+/// Failure returned by deterministic suspension-force identification.
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SuspensionIdentificationError {
+    /// The split, parameter bounds, or residual bounds are invalid.
+    #[error("invalid suspension identification specification")]
+    InvalidSpec,
+    /// A sample is non-finite, unordered, or outside the declared force model.
+    #[error("invalid suspension identification sample")]
+    InvalidSample,
+    /// The input does not contain enough training and holdout samples.
+    #[error("insufficient suspension identification samples")]
+    InsufficientSamples,
+    /// Position and velocity excitation cannot identify all three coefficients.
+    #[error("suspension identification design matrix is rank deficient")]
+    RankDeficient,
+    /// The fitted stiffness, damping, or equilibrium position is outside physical bounds.
+    #[error("identified suspension parameters are outside declared physical bounds")]
+    NonPhysicalResult,
+    /// Training or holdout residuals are non-finite or exceed acceptance bounds.
+    #[error("suspension identification residual exceeds its declared bound")]
+    ResidualExceeded,
+    /// An acquisition ID appears more than once, including across split roles.
+    #[error("suspension acquisition IDs must be unique across training and holdout")]
+    DuplicateAcquisition,
+}
+
+/// One complete acquisition with its own strictly increasing capture clock.
+///
+/// Identity is caller-supplied, not an attestation of independent acquisition.
+#[derive(Clone, Copy, Debug)]
+pub struct SuspensionIdentificationRun<'a> {
+    /// Stable acquisition identity, unique across both split roles.
+    pub acquisition_id: u64,
+    /// SI samples in capture order; clocks may restart between acquisitions.
+    pub samples: &'a [SuspensionForceSample],
+}
+
+/// Physical coefficients from a training-only fit, without a residual verdict.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionTrainingCoefficients {
+    /// Spring stiffness in newtons per meter.
+    pub stiffness_n_per_m: f64,
+    /// Damping in newton-seconds per meter.
+    pub damping_n_s_per_m: f64,
+    /// Unloaded equilibrium coordinate in meters.
+    pub equilibrium_position_m: f64,
+}
+
+/// One whole-acquisition deletion, retaining unsuccessful coefficient fits.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionAcquisitionInfluence {
+    /// Training acquisition omitted from this refit.
+    pub omitted_acquisition_id: u64,
+    /// Remaining coefficients, or the exact fitting failure.
+    pub coefficients: Result<SuspensionTrainingCoefficients, SuspensionIdentificationError>,
+}
+
+/// Training-only deletion diagnostics; not a confidence interval or acceptance gate.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionTrainingInfluence {
+    /// Fit using every training acquisition; failures are retained.
+    pub baseline: Result<SuspensionTrainingCoefficients, SuspensionIdentificationError>,
+    /// Exactly one refit per input acquisition, in caller order.
+    pub deletions: Vec<SuspensionAcquisitionInfluence>,
+}
+
+/// Fits complete training acquisitions without inspecting holdout data or residual gates.
+///
+/// Uses the same centered least-squares solver and physical parameter bounds as
+/// ordinary identification. This is an estimator, not a model acceptance verdict.
+/// Input clocks are validated separately for every acquisition. Callers performing
+/// repeated uncertainty draws must retain failures and bound their total workload.
+pub fn fit_suspension_training_runs(
+    spec: SuspensionIdentificationSpec,
+    runs: &[SuspensionIdentificationRun<'_>],
+) -> Result<SuspensionTrainingCoefficients, SuspensionIdentificationError> {
+    validate_suspension_training_runs(spec, runs)?;
+    let (stiffness_n_per_m, damping_n_s_per_m, equilibrium_position_m) =
+        fit_suspension_training_coefficients(
+            spec,
+            runs.iter().flat_map(|run| run.samples.iter().copied()),
+        )?;
+    Ok(SuspensionTrainingCoefficients {
+        stiffness_n_per_m,
+        damping_n_s_per_m,
+        equilibrium_position_m,
+    })
+}
+
+fn validate_suspension_training_runs(
+    spec: SuspensionIdentificationSpec,
+    runs: &[SuspensionIdentificationRun<'_>],
+) -> Result<(), SuspensionIdentificationError> {
+    if !spec.is_valid() || runs.len() > 64 {
+        return Err(SuspensionIdentificationError::InvalidSpec);
+    }
+    if runs.is_empty() {
+        return Err(SuspensionIdentificationError::InsufficientSamples);
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    for run in runs {
+        if !ids.insert(run.acquisition_id) {
+            return Err(SuspensionIdentificationError::DuplicateAcquisition);
+        }
+        if run.samples.is_empty() {
+            return Err(SuspensionIdentificationError::InsufficientSamples);
+        }
+        validate_suspension_samples(run.samples)?;
+    }
+    Ok(())
+}
+
+/// Refits after deleting each complete training run, preserving sample/local-clock order.
+///
+/// Accepts 1 through 64 runs; a single run retains an insufficient-samples deletion.
+/// Validates all inputs before fitting. Uses coefficient and training-count bounds,
+/// but does not evaluate training/holdout residual gates. No holdout data are accepted.
+/// This diagnostic neither selects a model nor establishes uncertainty coverage.
+pub fn suspension_training_influence(
+    spec: SuspensionIdentificationSpec,
+    runs: &[SuspensionIdentificationRun<'_>],
+) -> Result<SuspensionTrainingInfluence, SuspensionIdentificationError> {
+    validate_suspension_training_runs(spec, runs)?;
+    let fit = |omit: Option<usize>| {
+        fit_suspension_training_coefficients(
+            spec,
+            runs.iter()
+                .enumerate()
+                .filter(move |(index, _)| Some(*index) != omit)
+                .flat_map(|(_, run)| run.samples.iter().copied()),
+        )
+        .map(
+            |(stiffness_n_per_m, damping_n_s_per_m, equilibrium_position_m)| {
+                SuspensionTrainingCoefficients {
+                    stiffness_n_per_m,
+                    damping_n_s_per_m,
+                    equilibrium_position_m,
+                }
+            },
+        )
+    };
+    Ok(SuspensionTrainingInfluence {
+        baseline: fit(None),
+        deletions: runs
+            .iter()
+            .enumerate()
+            .map(|(index, run)| SuspensionAcquisitionInfluence {
+                omitted_acquisition_id: run.acquisition_id,
+                coefficients: fit(Some(index)),
+            })
+            .collect(),
+    })
+}
+
+/// Within-acquisition residual timing and lag-one diagnostics.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionResidualTiming {
+    /// Caller-supplied acquisition identity.
+    pub acquisition_id: u64,
+    /// Number of evaluated samples.
+    pub sample_count: usize,
+    /// Smallest observed adjacent capture interval in seconds.
+    pub minimum_interval_s: f64,
+    /// Largest observed adjacent capture interval in seconds.
+    pub maximum_interval_s: f64,
+    /// Caller-declared absolute tolerance against the first interval.
+    pub interval_tolerance_s: f64,
+    /// Whether every interval matches the first within the declared tolerance.
+    pub uniform_within_tolerance: bool,
+    /// Mean predicted-minus-measured force in newtons.
+    pub mean_residual_n: f64,
+    /// Lag-one centered autocorrelation with full-run energy denominator.
+    /// Absent for nonuniform timing or constant residuals, never replaced by zero.
+    pub lag_one_autocorrelation: Option<f64>,
+}
+
+/// Evaluates frozen fit residuals without refitting or joining acquisition clocks.
+///
+/// Uses `sum((e[i]-mean)*(e[i+1]-mean))/sum((e[i]-mean)^2)` only on a
+/// uniform-within-tolerance grid. Unequal intervals are retained as diagnostics;
+/// no interpolation, effective sample size or confidence interval is invented.
+/// The caller must justify the tolerance from clock evidence. This function is
+/// a diagnostic and does not certify the provenance or acceptance of `fit`.
+pub fn suspension_residual_timing(
+    fit: SuspensionIdentificationResult,
+    run: SuspensionIdentificationRun<'_>,
+    interval_tolerance_s: f64,
+) -> Result<SuspensionResidualTiming, SuspensionIdentificationError> {
+    if !interval_tolerance_s.is_finite()
+        || interval_tolerance_s < 0.0
+        || !fit.stiffness_n_per_m.is_finite()
+        || fit.stiffness_n_per_m <= 0.0
+        || !fit.damping_n_s_per_m.is_finite()
+        || fit.damping_n_s_per_m < 0.0
+        || !fit.equilibrium_position_m.is_finite()
+    {
+        return Err(SuspensionIdentificationError::InvalidSpec);
+    }
+    validate_suspension_samples(run.samples)?;
+    if run.samples.len() < 3 {
+        return Err(SuspensionIdentificationError::InsufficientSamples);
+    }
+    let first_interval = run.samples[1].capture_time_s - run.samples[0].capture_time_s;
+    let mut minimum_interval_s = f64::INFINITY;
+    let mut maximum_interval_s = 0.0_f64;
+    let mut uniform_within_tolerance = true;
+    for pair in run.samples.windows(2) {
+        let interval = pair[1].capture_time_s - pair[0].capture_time_s;
+        if !interval.is_finite() {
+            return Err(SuspensionIdentificationError::InvalidSample);
+        }
+        minimum_interval_s = minimum_interval_s.min(interval);
+        maximum_interval_s = maximum_interval_s.max(interval);
+        uniform_within_tolerance &= (interval - first_interval).abs() <= interval_tolerance_s;
+    }
+    let residual = |s: &SuspensionForceSample| {
+        fit.stiffness_n_per_m * (fit.equilibrium_position_m - s.position_m)
+            - fit.damping_n_s_per_m * s.velocity_m_s
+            - s.force_n
+    };
+    let mut scale = 0.0_f64;
+    for s in run.samples {
+        let value = residual(s);
+        if !value.is_finite() {
+            return Err(SuspensionIdentificationError::ResidualExceeded);
+        }
+        scale = scale.max(value.abs());
+    }
+    let scale = if scale == 0.0 { 1.0 } else { scale };
+    let origin = residual(&run.samples[0]) / scale;
+    let offset = run
+        .samples
+        .iter()
+        .map(|s| (residual(s) / scale - origin) / run.samples.len() as f64)
+        .sum::<f64>();
+    let mean_residual_n = (origin + offset) * scale;
+    if !mean_residual_n.is_finite() {
+        return Err(SuspensionIdentificationError::ResidualExceeded);
+    }
+    let centered = |s: &SuspensionForceSample| (residual(s) / scale - origin) - offset;
+    let energy = run.samples.iter().map(|s| centered(s).powi(2)).sum::<f64>();
+    let lag_one_autocorrelation = if uniform_within_tolerance && energy > 0.0 {
+        Some(
+            run.samples
+                .windows(2)
+                .map(|p| centered(&p[0]) * centered(&p[1]))
+                .sum::<f64>()
+                / energy,
+        )
+    } else {
+        None
+    };
+    Ok(SuspensionResidualTiming {
+        acquisition_id: run.acquisition_id,
+        sample_count: run.samples.len(),
+        minimum_interval_s,
+        maximum_interval_s,
+        interval_tolerance_s,
+        uniform_within_tolerance,
+        mean_residual_n,
+        lag_one_autocorrelation,
+    })
+}
+
+/// Training-only excitation diagnostics for the centered two-column design.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionExcitationDiagnostics {
+    /// Number of training samples, pooled in caller order.
+    pub sample_count: usize,
+    /// Centered position RMS in meters (population normalization).
+    pub position_rms_m: f64,
+    /// Centered velocity RMS in meters per second (population normalization).
+    pub velocity_rms_m_s: f64,
+    /// Position/velocity correlation; absent when either column has zero energy.
+    pub position_velocity_correlation: Option<f64>,
+    /// L2 condition number of the centered, unit-column-norm design, not its Gram
+    /// matrix. Absent for zero energy or numerically singular correlation.
+    pub normalized_design_condition: Option<f64>,
+}
+
+/// Measures training excitation without accepting holdout data or using forces.
+///
+/// With normalized centered columns the Gram eigenvalues are `1 +/- |rho|`,
+/// so the design condition is `sqrt((1 + |rho|)/(1 - |rho|))`. This diagnoses
+/// collinearity only: retain the SI RMS values to inspect excitation magnitude.
+/// It is not a covariance estimate or a parameter-acceptance gate. Input samples
+/// still require valid finite force fields and ordered per-acquisition clocks.
+/// Scaling before centering avoids squaring large SI coordinates directly.
+pub fn suspension_training_excitation(
+    runs: &[SuspensionIdentificationRun<'_>],
+) -> Result<SuspensionExcitationDiagnostics, SuspensionIdentificationError> {
+    let mut ids = std::collections::BTreeSet::new();
+    for run in runs {
+        if !ids.insert(run.acquisition_id) {
+            return Err(SuspensionIdentificationError::DuplicateAcquisition);
+        }
+        if run.samples.is_empty() {
+            return Err(SuspensionIdentificationError::InsufficientSamples);
+        }
+        validate_suspension_samples(run.samples)?;
+    }
+    let samples = || runs.iter().flat_map(|run| run.samples.iter());
+    let sample_count = samples().count();
+    if sample_count < 3 {
+        return Err(SuspensionIdentificationError::InsufficientSamples);
+    }
+    let (x_scale, v_scale) = samples().fold((0.0_f64, 0.0_f64), |(x, v), s| {
+        (x.max(s.position_m.abs()), v.max(s.velocity_m_s.abs()))
+    });
+    let x_scale = if x_scale == 0.0 { 1.0 } else { x_scale };
+    let v_scale = if v_scale == 0.0 { 1.0 } else { v_scale };
+    let n = sample_count as f64;
+    let first = runs[0].samples[0];
+    let x_origin = first.position_m / x_scale;
+    let v_origin = first.velocity_m_s / v_scale;
+    let (x_offset, v_offset) = samples().fold((0.0, 0.0), |(x, v), s| {
+        (
+            x + (s.position_m / x_scale - x_origin) / n,
+            v + (s.velocity_m_s / v_scale - v_origin) / n,
+        )
+    });
+    let (xx, vv, xv) = samples().fold((0.0, 0.0, 0.0), |(xx, vv, xv), s| {
+        let x = (s.position_m / x_scale - x_origin) - x_offset;
+        let v = (s.velocity_m_s / v_scale - v_origin) - v_offset;
+        (xx + x * x, vv + v * v, xv + x * v)
+    });
+    let position_rms_m = (xx / n).sqrt() * x_scale;
+    let velocity_rms_m_s = (vv / n).sqrt() * v_scale;
+    if !position_rms_m.is_finite() || !velocity_rms_m_s.is_finite() {
+        return Err(SuspensionIdentificationError::InvalidSample);
+    }
+    let correlation = if xx > 0.0 && vv > 0.0 {
+        Some((xv / xx.sqrt() / vv.sqrt()).clamp(-1.0, 1.0))
+    } else {
+        None
+    };
+    let condition = correlation.and_then(|rho| {
+        let gap = 1.0 - rho.abs();
+        (gap > f64::EPSILON * 8.0).then(|| ((1.0 + rho.abs()) / gap).sqrt())
+    });
+    Ok(SuspensionExcitationDiagnostics {
+        sample_count,
+        position_rms_m,
+        velocity_rms_m_s,
+        position_velocity_correlation: correlation,
+        normalized_design_condition: condition,
+    })
+}
+
+/// Residual evidence for one acquisition, evaluated with frozen fitted parameters.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionRunResidual {
+    /// Caller-supplied acquisition identity.
+    pub acquisition_id: u64,
+    /// Number of samples in this run.
+    pub sample_count: usize,
+    /// Force root-mean-square error in newtons.
+    pub rmse_n: f64,
+    /// Largest absolute force error in newtons (diagnostic, not separately gated).
+    pub maximum_absolute_residual_n: f64,
+    /// Whether this run meets the RMSE bound for its training or holdout role.
+    pub passed: bool,
+}
+
+/// Pooled fit and individual acquisition checks; not physical qualification.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionRunIdentificationReport {
+    /// Fit accepted by the pooled v1 parameter and residual gates.
+    pub fit: SuspensionIdentificationResult,
+    /// Training-run metrics in caller-specified order.
+    pub training_runs: Vec<SuspensionRunResidual>,
+    /// Holdout-run metrics in caller-specified order.
+    pub holdout_runs: Vec<SuspensionRunResidual>,
+    /// True only when every individual run also meets its role's RMSE bound.
+    pub passed: bool,
+}
+
+/// Identifies a run split and checks that no individual run is hidden by pooling.
+///
+/// Pooled fit failures return an error. Individual RMSE failures remain in the
+/// returned report with `passed = false`, preserving diagnostics. The minimum
+/// sample counts apply to the pooled roles, not individual runs. No confidence
+/// interval, calibration attestation or independent-acquisition proof is implied.
+pub fn identify_suspension_strut_runs_report(
+    spec: SuspensionIdentificationSpec,
+    training_runs: &[SuspensionIdentificationRun<'_>],
+    holdout_runs: &[SuspensionIdentificationRun<'_>],
+) -> Result<SuspensionRunIdentificationReport, SuspensionIdentificationError> {
+    let fit = identify_suspension_strut_runs(spec, training_runs, holdout_runs)?;
+    let evaluate = |runs: &[SuspensionIdentificationRun<'_>], bound_n: f64| {
+        runs.iter()
+            .map(|run| {
+                let mut squared_error = 0.0;
+                let mut maximum_absolute_residual_n = 0.0_f64;
+                for sample in run.samples {
+                    let residual_n = fit.stiffness_n_per_m
+                        * (fit.equilibrium_position_m - sample.position_m)
+                        - fit.damping_n_s_per_m * sample.velocity_m_s
+                        - sample.force_n;
+                    squared_error += residual_n * residual_n;
+                    maximum_absolute_residual_n = maximum_absolute_residual_n.max(residual_n.abs());
+                }
+                let rmse_n = (squared_error / run.samples.len() as f64).sqrt();
+                if !rmse_n.is_finite() || !maximum_absolute_residual_n.is_finite() {
+                    return Err(SuspensionIdentificationError::ResidualExceeded);
+                }
+                Ok(SuspensionRunResidual {
+                    acquisition_id: run.acquisition_id,
+                    sample_count: run.samples.len(),
+                    rmse_n,
+                    maximum_absolute_residual_n,
+                    passed: rmse_n <= bound_n,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let training_runs = evaluate(training_runs, spec.maximum_training_rmse_n)?;
+    let holdout_runs = evaluate(holdout_runs, spec.maximum_holdout_rmse_n)?;
+    let passed = training_runs
+        .iter()
+        .chain(&holdout_runs)
+        .all(|run| run.passed);
+    Ok(SuspensionRunIdentificationReport {
+        fit,
+        training_runs,
+        holdout_runs,
+        passed,
+    })
+}
+
+/// Fits complete training acquisitions and evaluates complete held-out acquisitions.
+///
+/// No held-out force enters coefficient fitting. Run order and sample order are
+/// preserved for deterministic accumulation. Each run must be nonempty and have
+/// finite samples and a strictly increasing local clock. IDs must be unique even
+/// within one split role. Caller identities do not prove physical independence.
+///
+/// This additive API reuses v1 parameter, sample-count and pooled residual gates;
+/// `holdout_stride` must remain valid but does not select samples here. It returns
+/// pooled, sample-weighted residuals, not per-run uncertainty or qualification.
+pub fn identify_suspension_strut_runs(
+    spec: SuspensionIdentificationSpec,
+    training_runs: &[SuspensionIdentificationRun<'_>],
+    holdout_runs: &[SuspensionIdentificationRun<'_>],
+) -> Result<SuspensionIdentificationResult, SuspensionIdentificationError> {
+    if !spec.is_valid() {
+        return Err(SuspensionIdentificationError::InvalidSpec);
+    }
+    let mut identities = std::collections::BTreeSet::new();
+    for run in training_runs.iter().chain(holdout_runs) {
+        if !identities.insert(run.acquisition_id) {
+            return Err(SuspensionIdentificationError::DuplicateAcquisition);
+        }
+        if run.samples.is_empty() {
+            return Err(SuspensionIdentificationError::InsufficientSamples);
+        }
+        validate_suspension_samples(run.samples)?;
+    }
+    identify_suspension_split(
+        spec,
+        training_runs
+            .iter()
+            .flat_map(|run| run.samples.iter().copied()),
+        holdout_runs
+            .iter()
+            .flat_map(|run| run.samples.iter().copied()),
+    )
+}
+
+/// One timestamped force/position/velocity sample from a suspension log.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionForceSample {
+    /// Monotonic capture time in seconds.
+    pub capture_time_s: f64,
+    /// Measured suspension coordinate in meters.
+    pub position_m: f64,
+    /// Measured suspension-coordinate velocity in meters per second.
+    pub velocity_m_s: f64,
+    /// Measured generalized strut force in newtons.
+    pub force_n: f64,
+}
+
+/// Frozen split, physical bounds, and residual gates for suspension identification.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionIdentificationSpec {
+    /// Every `holdout_stride`th sample is reserved for holdout evaluation.
+    pub holdout_stride: usize,
+    /// Minimum number of samples used to fit the three coefficients.
+    pub minimum_training_samples: usize,
+    /// Minimum number of samples retained exclusively for holdout evaluation.
+    pub minimum_holdout_samples: usize,
+    /// Inclusive stiffness bound in newtons per meter.
+    pub stiffness_bounds_n_per_m: [f64; 2],
+    /// Inclusive damping bound in newton-seconds per meter.
+    pub damping_bounds_n_s_per_m: [f64; 2],
+    /// Inclusive unloaded equilibrium-coordinate bound in meters.
+    pub equilibrium_position_bounds_m: [f64; 2],
+    /// Maximum training root-mean-square force residual in newtons.
+    pub maximum_training_rmse_n: f64,
+    /// Maximum holdout root-mean-square force residual in newtons.
+    pub maximum_holdout_rmse_n: f64,
+}
+
+impl SuspensionIdentificationSpec {
+    /// Returns whether the split, physical bounds, and residual gates are usable.
+    pub fn is_valid(self) -> bool {
+        self.holdout_stride >= 2
+            && self.minimum_training_samples >= 3
+            && self.minimum_holdout_samples >= 1
+            && valid_positive_bounds(self.stiffness_bounds_n_per_m)
+            && valid_nonnegative_bounds(self.damping_bounds_n_s_per_m)
+            && valid_finite_bounds(self.equilibrium_position_bounds_m)
+            && self.maximum_training_rmse_n.is_finite()
+            && self.maximum_training_rmse_n >= 0.0
+            && self.maximum_holdout_rmse_n.is_finite()
+            && self.maximum_holdout_rmse_n >= 0.0
+    }
+}
+
+/// Identified linear strut parameters and independent split residuals.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SuspensionIdentificationResult {
+    /// Fitted spring stiffness in newtons per meter.
+    pub stiffness_n_per_m: f64,
+    /// Fitted viscous damping in newton-seconds per meter.
+    pub damping_n_s_per_m: f64,
+    /// Fitted unloaded equilibrium coordinate in meters.
+    pub equilibrium_position_m: f64,
+    /// Number of samples used by least squares.
+    pub training_sample_count: usize,
+    /// Number of samples excluded from fitting and used only for validation.
+    pub holdout_sample_count: usize,
+    /// Training root-mean-square force residual in newtons.
+    pub training_rmse_n: f64,
+    /// Holdout root-mean-square force residual in newtons.
+    pub holdout_rmse_n: f64,
+    /// Largest absolute holdout force residual in newtons.
+    pub maximum_absolute_holdout_residual_n: f64,
+}
+
+/// Identifies the unclamped linear strut law from timestamped force samples.
+///
+/// The fitted model is `F = k * (x_eq - x) - c * x_dot`. Samples whose
+/// zero-based index plus one is divisible by `holdout_stride` never enter the
+/// fit. The remaining samples are solved by centered ordinary least squares;
+/// holdout residuals are then evaluated with the frozen result. This routine is
+/// deterministic and performs no random resampling or wall-clock access.
+pub fn identify_suspension_strut(
+    spec: SuspensionIdentificationSpec,
+    samples: &[SuspensionForceSample],
+) -> Result<SuspensionIdentificationResult, SuspensionIdentificationError> {
+    if !spec.is_valid() {
+        return Err(SuspensionIdentificationError::InvalidSpec);
+    }
+    validate_suspension_samples(samples)?;
+    let is_holdout = |index: usize| (index + 1).is_multiple_of(spec.holdout_stride);
+    identify_suspension_split(
+        spec,
+        samples
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(index, _)| !is_holdout(*index))
+            .map(|(_, sample)| sample),
+        samples
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(index, _)| is_holdout(*index))
+            .map(|(_, sample)| sample),
+    )
+}
+
+fn validate_suspension_samples(
+    samples: &[SuspensionForceSample],
+) -> Result<(), SuspensionIdentificationError> {
+    if samples.iter().any(|sample| {
+        !sample.capture_time_s.is_finite()
+            || !sample.position_m.is_finite()
+            || !sample.velocity_m_s.is_finite()
+            || !sample.force_n.is_finite()
+    }) || samples
+        .windows(2)
+        .any(|pair| pair[0].capture_time_s >= pair[1].capture_time_s)
+    {
+        return Err(SuspensionIdentificationError::InvalidSample);
+    }
+    Ok(())
+}
+
+// Shared coefficient solver: deliberately has no held-out observations or gates.
+fn fit_suspension_training_coefficients(
+    spec: SuspensionIdentificationSpec,
+    training_samples: impl Iterator<Item = SuspensionForceSample> + Clone,
+) -> Result<(f64, f64, f64), SuspensionIdentificationError> {
+    let training_sample_count = training_samples.clone().count();
+    if training_sample_count < spec.minimum_training_samples {
+        return Err(SuspensionIdentificationError::InsufficientSamples);
+    }
+
+    let training = || training_samples.clone();
+    let count = training_sample_count as f64;
+    let (position_sum, velocity_sum, force_sum) = training().fold(
+        (0.0, 0.0, 0.0),
+        |(position_sum, velocity_sum, force_sum), sample| {
+            (
+                position_sum + sample.position_m,
+                velocity_sum + sample.velocity_m_s,
+                force_sum + sample.force_n,
+            )
+        },
+    );
+    let position_mean = position_sum / count;
+    let velocity_mean = velocity_sum / count;
+    let force_mean = force_sum / count;
+    let (position_energy, velocity_energy, cross_energy, position_force, velocity_force) =
+        training().fold((0.0, 0.0, 0.0, 0.0, 0.0), |sums, sample| {
+            let position = sample.position_m - position_mean;
+            let velocity = sample.velocity_m_s - velocity_mean;
+            let force = sample.force_n - force_mean;
+            (
+                sums.0 + position * position,
+                sums.1 + velocity * velocity,
+                sums.2 + position * velocity,
+                sums.3 + position * force,
+                sums.4 + velocity * force,
+            )
+        });
+    let determinant = position_energy * velocity_energy - cross_energy * cross_energy;
+    if position_energy <= 0.0
+        || velocity_energy <= 0.0
+        || determinant <= 1.0e-12 * position_energy * velocity_energy
+    {
+        return Err(SuspensionIdentificationError::RankDeficient);
+    }
+    let position_coefficient =
+        (position_force * velocity_energy - velocity_force * cross_energy) / determinant;
+    let velocity_coefficient =
+        (velocity_force * position_energy - position_force * cross_energy) / determinant;
+    let intercept =
+        force_mean - position_coefficient * position_mean - velocity_coefficient * velocity_mean;
+    let stiffness_n_per_m = -position_coefficient;
+    let damping_n_s_per_m = -velocity_coefficient;
+    let equilibrium_position_m = intercept / stiffness_n_per_m;
+    if !stiffness_n_per_m.is_finite()
+        || !damping_n_s_per_m.is_finite()
+        || !equilibrium_position_m.is_finite()
+        || !(spec.stiffness_bounds_n_per_m[0]..=spec.stiffness_bounds_n_per_m[1])
+            .contains(&stiffness_n_per_m)
+        || !(spec.damping_bounds_n_s_per_m[0]..=spec.damping_bounds_n_s_per_m[1])
+            .contains(&damping_n_s_per_m)
+        || !(spec.equilibrium_position_bounds_m[0]..=spec.equilibrium_position_bounds_m[1])
+            .contains(&equilibrium_position_m)
+    {
+        return Err(SuspensionIdentificationError::NonPhysicalResult);
+    }
+
+    Ok((stiffness_n_per_m, damping_n_s_per_m, equilibrium_position_m))
+}
+
+fn identify_suspension_split(
+    spec: SuspensionIdentificationSpec,
+    training_samples: impl Iterator<Item = SuspensionForceSample> + Clone,
+    holdout_samples: impl Iterator<Item = SuspensionForceSample> + Clone,
+) -> Result<SuspensionIdentificationResult, SuspensionIdentificationError> {
+    let training_sample_count = training_samples.clone().count();
+    let holdout_sample_count = holdout_samples.clone().count();
+    if training_sample_count < spec.minimum_training_samples
+        || holdout_sample_count < spec.minimum_holdout_samples
+    {
+        return Err(SuspensionIdentificationError::InsufficientSamples);
+    }
+    let (stiffness_n_per_m, damping_n_s_per_m, equilibrium_position_m) =
+        fit_suspension_training_coefficients(spec, training_samples.clone())?;
+    let training = || training_samples.clone();
+    let predict = |sample: SuspensionForceSample| {
+        stiffness_n_per_m * (equilibrium_position_m - sample.position_m)
+            - damping_n_s_per_m * sample.velocity_m_s
+    };
+    let training_squared_error = training()
+        .map(|sample| (predict(sample) - sample.force_n).powi(2))
+        .sum::<f64>();
+    let mut holdout_squared_error = 0.0;
+    let mut maximum_absolute_holdout_residual_n = 0.0_f64;
+    for sample in holdout_samples {
+        let residual_n = predict(sample) - sample.force_n;
+        holdout_squared_error += residual_n.powi(2);
+        maximum_absolute_holdout_residual_n =
+            maximum_absolute_holdout_residual_n.max(residual_n.abs());
+    }
+    let training_rmse_n = (training_squared_error / training_sample_count as f64).sqrt();
+    let holdout_rmse_n = (holdout_squared_error / holdout_sample_count as f64).sqrt();
+    if !training_rmse_n.is_finite()
+        || !holdout_rmse_n.is_finite()
+        || !maximum_absolute_holdout_residual_n.is_finite()
+        || training_rmse_n > spec.maximum_training_rmse_n
+        || holdout_rmse_n > spec.maximum_holdout_rmse_n
+    {
+        return Err(SuspensionIdentificationError::ResidualExceeded);
+    }
+    Ok(SuspensionIdentificationResult {
+        stiffness_n_per_m,
+        damping_n_s_per_m,
+        equilibrium_position_m,
+        training_sample_count,
+        holdout_sample_count,
+        training_rmse_n,
+        holdout_rmse_n,
+        maximum_absolute_holdout_residual_n,
+    })
+}
+
+fn valid_finite_bounds(bounds: [f64; 2]) -> bool {
+    bounds.into_iter().all(f64::is_finite) && bounds[0] <= bounds[1]
+}
+
+fn valid_positive_bounds(bounds: [f64; 2]) -> bool {
+    valid_finite_bounds(bounds) && bounds[0] > 0.0
+}
+
+fn valid_nonnegative_bounds(bounds: [f64; 2]) -> bool {
+    valid_finite_bounds(bounds) && bounds[0] >= 0.0
+}
+
+/// Evaluates one suspension strut as an explicit generalized spring-damper force.
+///
+/// The backend-neutral law is `k * (x_eq - x) - c * x_dot`, clamped to the
+/// declared force limit. Returning direct prismatic effort avoids interpreting
+/// physical spring units through a backend-native position-servo model. Travel
+/// stops remain part of the paired prismatic-joint description.
+pub fn evaluate_suspension_strut(
+    spec: SuspensionStrutSpec,
+    position_m: f64,
+    velocity_m_s: f64,
+) -> Result<JointActuation, MobilityPlantEvaluationError> {
+    if !spec.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    if !position_m.is_finite() || !velocity_m_s.is_finite() {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let force_n = (spec.stiffness_n_per_m * (spec.equilibrium_position_m - position_m)
+        - spec.damping_n_s_per_m * velocity_m_s)
+        .clamp(-spec.maximum_force_n, spec.maximum_force_n);
+    Ok(JointActuation::PrismaticEffort {
+        force_n,
+        max_force_n: spec.maximum_force_n,
+    })
 }
 
 /// Completed DC motor electrical and shaft-torque evaluation.
@@ -53,6 +926,42 @@ pub struct DcMotorEvaluation {
     pub voltage_saturated: bool,
     /// Whether the unconstrained armature current exceeded the current limit.
     pub current_saturated: bool,
+}
+
+/// Completed averaged mapping from a signed PWM command to a voltage request.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PwmMotorCommandEvaluation {
+    /// Command after saturation at the declared full-scale count.
+    pub clamped_command_count: f64,
+    /// Signed duty ratio after polarity mapping, bounded to `[-1, 1]`.
+    pub signed_duty_ratio: f64,
+    /// Ideal average terminal voltage before bridge on-state loss, in volts.
+    pub ideal_average_voltage_v: f64,
+    /// Average terminal-voltage request after bridge on-state loss, in volts.
+    pub terminal_voltage_request_v: f64,
+    /// Non-negative average voltage magnitude removed by bridge on-state loss, in volts.
+    pub average_bridge_loss_v: f64,
+    /// Whether the requested command exceeded the declared command-count range.
+    pub command_saturated: bool,
+}
+
+/// Completed first-order steering-actuator evaluation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SteeringActuatorEvaluation {
+    /// State to retain for the next completed step.
+    pub state: SteeringActuatorState,
+    /// Finite angle requested by the caller, in radians.
+    pub requested_target_rad: f64,
+    /// Target after steering-travel limits, in radians.
+    pub clamped_target_rad: f64,
+    /// Completed steering rate over this fixed step, in radians per second.
+    pub realized_rate_rad_s: f64,
+    /// Whether the requested target exceeded the declared travel limits.
+    pub command_saturated: bool,
+    /// Whether the unconstrained first-order response exceeded the rate limit.
+    pub rate_limited: bool,
+    /// Whether an explicit stuck failure held the completed position.
+    pub stuck: bool,
 }
 
 impl DcMotorEvaluation {
@@ -103,6 +1012,165 @@ pub struct WheelContactPatch {
     pub wheel_relative_to_road_world_m_s: Vec3,
     /// Total step-average normal load carried by the patch, in newtons.
     pub normal_load_n: f64,
+}
+
+/// Primitive collision geometry derived from one rigid-road patch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RigidRoadPatchGeometry {
+    /// World transform of the collision solid beneath the driving surface.
+    pub solid_transform: Transform3,
+    /// Local cuboid half extents in meters.
+    pub solid_half_extents_m: Vec3,
+    /// Unit tangent pointing uphill along the patch.
+    pub longitudinal_tangent_world: Vec3,
+    /// Unit normal pointing out of the driving surface.
+    pub normal_world: Vec3,
+}
+
+/// Metric road properties sampled from a finite rigid-road profile.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RigidRoadSurfaceSample {
+    /// Index of the selected canonical patch.
+    pub patch_index: usize,
+    /// Closest point on the finite driving surface, in world meters.
+    pub point_world_m: Vec3,
+    /// Unit surface normal in world coordinates.
+    pub normal_world: Vec3,
+    /// Unit longitudinal tangent in world coordinates.
+    pub longitudinal_tangent_world: Vec3,
+    /// Tire-road friction multiplier at this patch.
+    pub friction_scale: f64,
+}
+
+/// Maps one metric road patch to a backend-neutral cuboid pose and dimensions.
+pub fn rigid_road_patch_geometry(
+    patch: RigidRoadPatchSpec,
+) -> Result<RigidRoadPatchGeometry, MobilityPlantEvaluationError> {
+    if !patch.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    let rotation = Quat::from_rotation_z(patch.grade_rad);
+    let longitudinal_tangent_world = rotation * Vec3::X;
+    let normal_world = rotation * Vec3::Y;
+    Ok(RigidRoadPatchGeometry {
+        solid_transform: Transform3::from_translation_rotation(
+            patch.surface_center_world_m - normal_world * (0.5 * patch.thickness_m),
+            rotation,
+        ),
+        solid_half_extents_m: Vec3::new(
+            0.5 * patch.surface_length_m,
+            0.5 * patch.thickness_m,
+            patch.half_width_m,
+        ),
+        longitudinal_tangent_world,
+        normal_world,
+    })
+}
+
+/// Samples the closest finite planar road patch containing a world location.
+///
+/// Selection is deterministic for overlapping patches: the surface with the
+/// smallest absolute normal distance wins, followed by canonical patch index.
+/// `None` is returned for a profile gap or a location outside road width.
+pub fn sample_rigid_road_profile(
+    profile: &RigidRoadProfileSpec,
+    location_world_m: Vec3,
+) -> Result<Option<RigidRoadSurfaceSample>, MobilityPlantEvaluationError> {
+    if !profile.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    if !location_world_m.is_finite() {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    const BOUNDARY_TOLERANCE_M: f64 = 1.0e-9;
+    let mut selected: Option<(f64, RigidRoadSurfaceSample)> = None;
+    for (patch_index, patch) in profile.patches.iter().copied().enumerate() {
+        let geometry = rigid_road_patch_geometry(patch)?;
+        let relative = location_world_m - patch.surface_center_world_m;
+        let longitudinal_m = relative.dot(geometry.longitudinal_tangent_world);
+        let lateral_m = relative.z;
+        if longitudinal_m.abs() > 0.5 * patch.surface_length_m + BOUNDARY_TOLERANCE_M
+            || lateral_m.abs() > patch.half_width_m + BOUNDARY_TOLERANCE_M
+        {
+            continue;
+        }
+        let normal_distance_m = relative.dot(geometry.normal_world);
+        let sample = RigidRoadSurfaceSample {
+            patch_index,
+            point_world_m: patch.surface_center_world_m
+                + geometry.longitudinal_tangent_world * longitudinal_m
+                + Vec3::Z * lateral_m,
+            normal_world: geometry.normal_world,
+            longitudinal_tangent_world: geometry.longitudinal_tangent_world,
+            friction_scale: patch.friction_scale,
+        };
+        let distance = normal_distance_m.abs();
+        if selected
+            .as_ref()
+            .is_none_or(|(best_distance, _)| distance < *best_distance)
+        {
+            selected = Some((distance, sample));
+        }
+    }
+    Ok(selected.map(|(_, sample)| sample))
+}
+
+/// Completed world-frame geometry and rigid-carrier velocity for one wheel station.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WheelStationFrame {
+    /// Wheel-center position in world coordinates, in meters.
+    pub center_world_m: Vec3,
+    /// Positive free-rolling unit axis in world coordinates.
+    pub forward_world: Vec3,
+    /// Positive axle/lateral unit axis in world coordinates.
+    pub lateral_world: Vec3,
+    /// Carrier velocity at the wheel center before wheel spin, in meters per second.
+    pub carrier_velocity_world_m_s: Vec3,
+}
+
+/// Resolves one physical wheel station from completed rigid-body state.
+///
+/// Steering rotates the rolling and axle axes about the declared body-frame steering axis.
+/// The carrier velocity includes the body's angular contribution at the station lever arm;
+/// wheel circumference speed is intentionally excluded and is added exactly once by the
+/// tire/drive-path evaluator.
+pub fn resolve_wheel_station_frame(
+    spec: WheelStationSpec,
+    steering_rad: f64,
+    body_transform: Transform3,
+    body_linear_velocity_world_m_s: Vec3,
+    body_angular_velocity_world_rad_s: Vec3,
+) -> Result<WheelStationFrame, MobilityPlantEvaluationError> {
+    if !spec.is_valid()
+        || !steering_rad.is_finite()
+        || steering_rad.abs() > spec.maximum_steering_rad
+        || !body_transform.translation.is_finite()
+        || !body_transform.rotation.is_finite()
+        || !body_linear_velocity_world_m_s.is_finite()
+        || !body_angular_velocity_world_rad_s.is_finite()
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let rotation_length_squared = body_transform.rotation.length_squared();
+    if !rotation_length_squared.is_finite() || rotation_length_squared <= 1.0e-18 {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    // Physics backends commonly store unit quaternions in f32. Normalize after
+    // promotion to f64 so strict tire/contact axis validation does not interpret
+    // harmless solver roundoff as a non-unit wheel frame.
+    let body_rotation = body_transform.rotation.normalize();
+    let steering = Quat::from_axis_angle(spec.steering_axis_body, steering_rad);
+    let center_offset_world_m = body_rotation * spec.center_body_m;
+    let forward_world = body_rotation * (steering * spec.zero_steer_forward_body);
+    let lateral_world = body_rotation * (steering * spec.zero_steer_axle_body);
+    let carrier_velocity_world_m_s = body_linear_velocity_world_m_s
+        + body_angular_velocity_world_rad_s.cross(center_offset_world_m);
+    Ok(WheelStationFrame {
+        center_world_m: body_transform.translation + center_offset_world_m,
+        forward_world,
+        lateral_world,
+        carrier_velocity_world_m_s,
+    })
 }
 
 /// Completed force and state from one transient combined-slip tire step.
@@ -244,9 +1312,19 @@ pub fn evaluate_longitudinal_drive_path(
         state.wheel_velocity_rad_s,
     )?;
     let wheel_circumferential_speed_m_s = state.wheel_velocity_rad_s * spec.wheel.radius_m;
+    let (contact_forward_world, contact_lateral_world) =
+        input
+            .carrier_patch
+            .map_or(Ok((input.forward_world, input.lateral_world)), |patch| {
+                contact_tangent_axes(
+                    input.forward_world,
+                    input.lateral_world,
+                    patch.normal_road_to_wheel_world,
+                )
+            })?;
     let tire_patch = input.carrier_patch.map(|mut patch| {
         patch.wheel_relative_to_road_world_m_s -=
-            input.forward_world * wheel_circumferential_speed_m_s;
+            contact_forward_world * wheel_circumferential_speed_m_s;
         patch
     });
     let tire = evaluate_combined_slip_tire(
@@ -254,24 +1332,32 @@ pub fn evaluate_longitudinal_drive_path(
         state.tire_state,
         CombinedSlipTireInput {
             patch: tire_patch,
-            forward_world: input.forward_world,
-            lateral_world: input.lateral_world,
+            forward_world: contact_forward_world,
+            lateral_world: contact_lateral_world,
             wheel_circumferential_speed_m_s,
             road_friction_scale: spec.road_friction_scale,
         },
         dt_s,
     )?;
-    let normal_load_n = tire_patch.map_or(0.0, |patch| patch.normal_load_n);
-    let rolling_resistance_torque_nm =
-        wheel_rolling_resistance_torque_nm(spec.wheel, normal_load_n, state.wheel_velocity_rad_s)?;
     let total_wheel_inertia_kg_m2 =
         spec.wheel.inertia_kg_m2 + transmission.reflected_rotor_inertia_kg_m2;
     if total_wheel_inertia_kg_m2 <= 0.0 || !total_wheel_inertia_kg_m2.is_finite() {
         return Err(MobilityPlantEvaluationError::InvalidSpec);
     }
-    let wheel_acceleration_rad_s2 = (transmission.wheel_torque_nm + rolling_resistance_torque_nm
-        - tire.longitudinal_force_n * spec.wheel.radius_m)
-        / total_wheel_inertia_kg_m2;
+    let torque_before_rolling_nm =
+        transmission.wheel_torque_nm - tire.longitudinal_force_n * spec.wheel.radius_m;
+    let wheel_velocity_before_rolling_rad_s =
+        state.wheel_velocity_rad_s + torque_before_rolling_nm / total_wheel_inertia_kg_m2 * dt_s;
+    let normal_load_n = tire_patch.map_or(0.0, |patch| patch.normal_load_n);
+    let rolling_resistance_torque_nm = bounded_rolling_resistance_torque_nm(
+        spec.wheel,
+        normal_load_n,
+        wheel_velocity_before_rolling_rad_s,
+        total_wheel_inertia_kg_m2,
+        dt_s,
+    )?;
+    let wheel_acceleration_rad_s2 =
+        (torque_before_rolling_nm + rolling_resistance_torque_nm) / total_wheel_inertia_kg_m2;
     let wheel_velocity_rad_s = state.wheel_velocity_rad_s + wheel_acceleration_rad_s2 * dt_s;
     let next_state = LongitudinalDrivePathState {
         wheel_position_rad: state.wheel_position_rad + wheel_velocity_rad_s * dt_s,
@@ -284,7 +1370,7 @@ pub fn evaluate_longitudinal_drive_path(
     }
     let tire_wrench = tire_patch
         .map(|patch| {
-            combined_slip_tire_wrench(patch, tire, input.forward_world, input.lateral_world)
+            combined_slip_tire_wrench(patch, tire, contact_forward_world, contact_lateral_world)
         })
         .transpose()?;
 
@@ -413,14 +1499,19 @@ pub fn evaluate_combined_slip_tire(
         return Err(MobilityPlantEvaluationError::InvalidInput);
     }
 
+    let (contact_forward_world, contact_lateral_world) = contact_tangent_axes(
+        input.forward_world,
+        input.lateral_world,
+        patch.normal_road_to_wheel_world,
+    )?;
     let transport_speed_m_s =
         input.wheel_circumferential_speed_m_s.abs() + spec.low_speed_regularization_m_s;
     let longitudinal_surface_speed_m_s = patch
         .wheel_relative_to_road_world_m_s
-        .dot(input.forward_world);
+        .dot(contact_forward_world);
     let lateral_surface_speed_m_s = patch
         .wheel_relative_to_road_world_m_s
-        .dot(input.lateral_world);
+        .dot(contact_lateral_world);
     let target_longitudinal_slip_ratio = -longitudinal_surface_speed_m_s / transport_speed_m_s;
     let target_lateral_slip_tangent = -lateral_surface_speed_m_s / transport_speed_m_s;
     let next_longitudinal_slip = relax_slip(
@@ -594,17 +1685,51 @@ pub fn combined_slip_tire_wrench(
     {
         return Err(MobilityPlantEvaluationError::InvalidInput);
     }
+    let (contact_forward_world, contact_lateral_world) = contact_tangent_axes(
+        forward_world,
+        lateral_world,
+        patch.normal_road_to_wheel_world,
+    )?;
     let wrench = ExternalBodyWrench {
         entity: patch.wheel_entity,
         point_world_m: patch.point_world_m,
-        force_world_n: forward_world * evaluation.longitudinal_force_n
-            + lateral_world * evaluation.lateral_force_n,
+        force_world_n: contact_forward_world * evaluation.longitudinal_force_n
+            + contact_lateral_world * evaluation.lateral_force_n,
         torque_world_nm: Vec3::ZERO,
     };
     if !wrench.is_finite() {
         return Err(MobilityPlantEvaluationError::InvalidInput);
     }
     Ok(wrench)
+}
+
+fn contact_tangent_axes(
+    forward_world: Vec3,
+    lateral_world: Vec3,
+    normal_road_to_wheel_world: Vec3,
+) -> Result<(Vec3, Vec3), MobilityPlantEvaluationError> {
+    if !forward_world.is_finite()
+        || !lateral_world.is_finite()
+        || !normal_road_to_wheel_world.is_finite()
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let normal_length_squared = normal_road_to_wheel_world.length_squared();
+    if normal_length_squared <= 1.0e-18 {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let normal = normal_road_to_wheel_world / normal_length_squared.sqrt();
+    let projected_forward = forward_world - normal * forward_world.dot(normal);
+    let projected_forward_length_squared = projected_forward.length_squared();
+    if projected_forward_length_squared <= 1.0e-18 {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let contact_forward = projected_forward / projected_forward_length_squared.sqrt();
+    let mut contact_lateral = contact_forward.cross(normal);
+    if contact_lateral.dot(lateral_world) < 0.0 {
+        contact_lateral = -contact_lateral;
+    }
+    Ok((contact_forward, contact_lateral))
 }
 
 fn relax_slip(current: f64, target: f64, length_m: f64, speed_m_s: f64, dt_s: f64) -> f64 {
@@ -625,6 +1750,228 @@ fn zero_tire_evaluation() -> CombinedSlipTireEvaluation {
         lateral_peak_force_n: 0.0,
         friction_utilization: 0.0,
     }
+}
+
+/// Maps signed PWM command counts to an average motor-terminal voltage request.
+///
+/// The ideal switching-cycle average is `duty * bus_voltage`. The declared H-bridge
+/// on-state loss is present only during the energized fraction, so the returned request is
+/// `duty * max(bus_voltage - bridge_drop, 0)`. This deterministic control-oriented map does
+/// not choose coast versus brake recirculation and must not be used to infer motor electrical
+/// constants from command-count response data alone.
+pub fn evaluate_pwm_motor_command(
+    spec: PwmMotorCommandFrontendSpec,
+    command_count: f64,
+    bus_voltage_v: f64,
+) -> Result<PwmMotorCommandEvaluation, MobilityPlantEvaluationError> {
+    if !spec.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    if !command_count.is_finite() || !bus_voltage_v.is_finite() || bus_voltage_v < 0.0 {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+
+    let command_saturated = command_count.abs() > spec.full_scale_command_count;
+    let clamped_command_count = command_count.clamp(
+        -spec.full_scale_command_count,
+        spec.full_scale_command_count,
+    );
+    let polarity_sign = match spec.polarity {
+        PwmMotorCommandPolarity::Normal => 1.0,
+        PwmMotorCommandPolarity::Inverted => -1.0,
+    };
+    let signed_duty_ratio = polarity_sign * clamped_command_count / spec.full_scale_command_count;
+    let ideal_average_voltage_v = signed_duty_ratio * bus_voltage_v;
+    let available_on_state_voltage_v =
+        (bus_voltage_v - spec.bridge_on_state_voltage_drop_v).max(0.0);
+    let terminal_voltage_request_v = signed_duty_ratio * available_on_state_voltage_v;
+    let average_bridge_loss_v =
+        signed_duty_ratio.abs() * bus_voltage_v.min(spec.bridge_on_state_voltage_drop_v);
+
+    Ok(PwmMotorCommandEvaluation {
+        clamped_command_count,
+        signed_duty_ratio,
+        ideal_average_voltage_v,
+        terminal_voltage_request_v,
+        average_bridge_loss_v,
+        command_saturated,
+    })
+}
+
+/// Advances a backend-neutral first-order steering actuator by one fixed step.
+///
+/// The exact zero-order-hold first-order response is evaluated first, then
+/// bounded by the measured steering-rate and travel limits. A command inside
+/// the declared deadband holds the completed position. The returned position
+/// is suitable as the target for a backend joint-position constraint; it is
+/// not a measured steering angle or a torque-producing servo simulation.
+pub fn evaluate_steering_actuator(
+    spec: SteeringActuatorSpec,
+    state: SteeringActuatorState,
+    requested_target_rad: f64,
+    dt_s: f64,
+) -> Result<SteeringActuatorEvaluation, MobilityPlantEvaluationError> {
+    if !spec.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    if !state.position_rad.is_finite()
+        || state.position_rad < spec.minimum_position_rad
+        || state.position_rad > spec.maximum_position_rad
+        || !requested_target_rad.is_finite()
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    if !dt_s.is_finite() || dt_s <= 0.0 {
+        return Err(MobilityPlantEvaluationError::InvalidTimeStep);
+    }
+
+    let clamped_target_rad =
+        requested_target_rad.clamp(spec.minimum_position_rad, spec.maximum_position_rad);
+    let command_saturated = clamped_target_rad != requested_target_rad;
+    let stuck = spec.failure_mode == SteeringActuatorFailureMode::Stuck;
+    let error_rad = clamped_target_rad - state.position_rad;
+    let unconstrained_delta_rad = if stuck || error_rad.abs() <= spec.command_deadband_rad {
+        0.0
+    } else {
+        error_rad * (1.0 - (-dt_s / spec.time_constant_s).exp())
+    };
+    let maximum_delta_rad = spec.maximum_rate_rad_s * dt_s;
+    let delta_rad = unconstrained_delta_rad.clamp(-maximum_delta_rad, maximum_delta_rad);
+    let rate_limited = delta_rad != unconstrained_delta_rad;
+    let position_rad = (state.position_rad + delta_rad)
+        .clamp(spec.minimum_position_rad, spec.maximum_position_rad);
+
+    Ok(SteeringActuatorEvaluation {
+        state: SteeringActuatorState { position_rad },
+        requested_target_rad,
+        clamped_target_rad,
+        realized_rate_rad_s: (position_rad - state.position_rad) / dt_s,
+        command_saturated,
+        rate_limited,
+        stuck,
+    })
+}
+
+/// Identifies an unsaturated first-order command-to-steering-angle response.
+///
+/// The fit uses only the leading training transitions and evaluates a frozen
+/// coefficient on the remaining holdout transitions. For each excited interval,
+/// it solves `position[k+1] - position[k] = b * (command[k] - position[k])`,
+/// then reports `tau = -dt / ln(1 - b)`. Samples must share one uniform capture
+/// grid and remain inside declared travel. The caller must prequalify that the
+/// selected acquisition excludes rate saturation, deadband, backlash, and stuck
+/// faults; this function does not silently absorb those effects into `tau`.
+pub fn identify_steering_actuator_first_order(
+    spec: SteeringActuatorIdentificationSpec,
+    samples: &[SteeringActuatorIdentificationSample],
+) -> Result<SteeringActuatorIdentificationResult, SteeringActuatorIdentificationError> {
+    if !spec.is_valid() {
+        return Err(SteeringActuatorIdentificationError::InvalidSpec);
+    }
+    if samples.len() < 5 || spec.training_transition_count >= samples.len() - 1 {
+        return Err(SteeringActuatorIdentificationError::InsufficientExcitation);
+    }
+    if samples.iter().any(|sample| {
+        !sample.capture_time_s.is_finite()
+            || !sample.command_target_rad.is_finite()
+            || !sample.measured_position_rad.is_finite()
+            || !(spec.minimum_position_rad..=spec.maximum_position_rad)
+                .contains(&sample.command_target_rad)
+            || !(spec.minimum_position_rad..=spec.maximum_position_rad)
+                .contains(&sample.measured_position_rad)
+    }) {
+        return Err(SteeringActuatorIdentificationError::InvalidSample);
+    }
+    let capture_interval_s = samples[1].capture_time_s - samples[0].capture_time_s;
+    if !capture_interval_s.is_finite() || capture_interval_s <= 0.0 {
+        return Err(SteeringActuatorIdentificationError::InvalidSample);
+    }
+    for pair in samples.windows(2) {
+        let interval_s = pair[1].capture_time_s - pair[0].capture_time_s;
+        if !interval_s.is_finite()
+            || interval_s <= 0.0
+            || (interval_s - capture_interval_s).abs() > spec.interval_tolerance_s
+        {
+            return Err(SteeringActuatorIdentificationError::InvalidSample);
+        }
+    }
+
+    let mut training_error_delta_sum = 0.0;
+    let mut training_error_squared_sum = 0.0;
+    let mut training_transition_count = 0;
+    let mut holdout_transition_count = 0;
+    for (index, pair) in samples.windows(2).enumerate() {
+        let error_rad = pair[0].command_target_rad - pair[0].measured_position_rad;
+        if error_rad.abs() < spec.minimum_abs_command_error_rad {
+            continue;
+        }
+        if index < spec.training_transition_count {
+            let delta_rad = pair[1].measured_position_rad - pair[0].measured_position_rad;
+            training_error_delta_sum += error_rad * delta_rad;
+            training_error_squared_sum += error_rad * error_rad;
+            training_transition_count += 1;
+        } else {
+            holdout_transition_count += 1;
+        }
+    }
+    if training_transition_count < 2 || holdout_transition_count < 2 {
+        return Err(SteeringActuatorIdentificationError::InsufficientExcitation);
+    }
+    if !training_error_squared_sum.is_finite()
+        || training_error_squared_sum <= f64::EPSILON
+        || !training_error_delta_sum.is_finite()
+    {
+        return Err(SteeringActuatorIdentificationError::Unidentifiable);
+    }
+    let discrete_response_ratio = training_error_delta_sum / training_error_squared_sum;
+    if !discrete_response_ratio.is_finite()
+        || discrete_response_ratio <= 0.0
+        || discrete_response_ratio >= 1.0
+    {
+        return Err(SteeringActuatorIdentificationError::Unidentifiable);
+    }
+    let time_constant_s = -capture_interval_s / (-discrete_response_ratio).ln_1p();
+    if !time_constant_s.is_finite()
+        || !(spec.minimum_time_constant_s..=spec.maximum_time_constant_s).contains(&time_constant_s)
+    {
+        return Err(SteeringActuatorIdentificationError::NonPhysicalResult);
+    }
+
+    let residual_sum = |training: bool| {
+        samples
+            .windows(2)
+            .enumerate()
+            .filter_map(|(index, pair)| {
+                let error_rad = pair[0].command_target_rad - pair[0].measured_position_rad;
+                ((error_rad.abs() >= spec.minimum_abs_command_error_rad)
+                    && ((index < spec.training_transition_count) == training))
+                    .then(|| {
+                        let predicted_rad =
+                            pair[0].measured_position_rad + discrete_response_ratio * error_rad;
+                        (predicted_rad - pair[1].measured_position_rad).powi(2)
+                    })
+            })
+            .sum::<f64>()
+    };
+    let training_rms_rad = (residual_sum(true) / training_transition_count as f64).sqrt();
+    let holdout_rms_rad = (residual_sum(false) / holdout_transition_count as f64).sqrt();
+    if !training_rms_rad.is_finite()
+        || !holdout_rms_rad.is_finite()
+        || training_rms_rad > spec.maximum_training_rms_rad
+        || holdout_rms_rad > spec.maximum_holdout_rms_rad
+    {
+        return Err(SteeringActuatorIdentificationError::ResidualExceeded);
+    }
+
+    Ok(SteeringActuatorIdentificationResult {
+        capture_interval_s,
+        time_constant_s,
+        discrete_response_ratio,
+        training_transition_count,
+        holdout_transition_count,
+        training_rms_rad,
+        holdout_rms_rad,
+    })
 }
 
 /// Evaluates one DC motor from terminal voltage and completed rotor velocity.
@@ -754,6 +2101,31 @@ pub fn wheel_rolling_resistance_torque_nm(
             * normal_load_n
             * spec.radius_m
     })
+}
+
+/// Bounds Coulomb rolling resistance so one explicit step can stop, but not reverse, a wheel.
+fn bounded_rolling_resistance_torque_nm(
+    spec: WheelAssemblySpec,
+    normal_load_n: f64,
+    wheel_velocity_before_rolling_rad_s: f64,
+    total_wheel_inertia_kg_m2: f64,
+    dt_s: f64,
+) -> Result<f64, MobilityPlantEvaluationError> {
+    if !total_wheel_inertia_kg_m2.is_finite()
+        || total_wheel_inertia_kg_m2 <= 0.0
+        || !dt_s.is_finite()
+        || dt_s <= 0.0
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    let unconstrained = wheel_rolling_resistance_torque_nm(
+        spec,
+        normal_load_n,
+        wheel_velocity_before_rolling_rad_s,
+    )?;
+    let stopping_torque_nm =
+        wheel_velocity_before_rolling_rad_s.abs() * total_wheel_inertia_kg_m2 / dt_s;
+    Ok(unconstrained.signum() * unconstrained.abs().min(stopping_torque_nm))
 }
 
 /// Result of applying one actuator command.
@@ -1581,6 +2953,907 @@ mod tests {
     use rne_ecs::spawn_named;
     use rne_math::Seconds;
 
+    #[test]
+    fn suspension_influence_preserves_deleted_run_failures_and_local_clocks() {
+        let samples = suspension_identification_samples();
+        let run = SuspensionIdentificationRun {
+            acquisition_id: 7,
+            samples: &samples,
+        };
+        let spec = suspension_identification_spec();
+        let single = suspension_training_influence(spec, &[run]).unwrap();
+        assert!(single.baseline.is_ok());
+        assert_eq!(
+            single.deletions[0].coefficients,
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+        let other = SuspensionIdentificationRun {
+            acquisition_id: 9,
+            samples: &samples,
+        };
+        let report = suspension_training_influence(spec, &[run, other]).unwrap();
+        assert_eq!(report.deletions[0].omitted_acquisition_id, 7);
+        assert_eq!(report.deletions[1].omitted_acquisition_id, 9);
+        assert_eq!(report.deletions[0].coefficients, single.baseline);
+        assert_eq!(
+            report,
+            suspension_training_influence(spec, &[run, other]).unwrap()
+        );
+        assert_eq!(
+            suspension_training_influence(spec, &[run, run]),
+            Err(SuspensionIdentificationError::DuplicateAcquisition)
+        );
+        let mut constant = samples.clone();
+        for sample in &mut constant {
+            sample.position_m = 0.0;
+            sample.velocity_m_s = 0.0;
+        }
+        let rankless = SuspensionIdentificationRun {
+            acquisition_id: 11,
+            samples: &constant,
+        };
+        let report = suspension_training_influence(spec, &[run, rankless]).unwrap();
+        assert_eq!(
+            report.deletions[0].coefficients,
+            Err(SuspensionIdentificationError::RankDeficient)
+        );
+        assert_eq!(report.deletions[1].coefficients, single.baseline);
+    }
+
+    #[test]
+    fn suspension_training_estimator_matches_baseline_and_propagates_common_offset() {
+        let spec = suspension_identification_spec();
+        let samples = suspension_identification_samples();
+        let run = SuspensionIdentificationRun {
+            acquisition_id: 1,
+            samples: &samples,
+        };
+        let baseline = fit_suspension_training_runs(spec, &[run]).unwrap();
+        assert_eq!(
+            Ok(baseline),
+            suspension_training_influence(spec, &[run])
+                .unwrap()
+                .baseline
+        );
+        let mut shifted = samples.clone();
+        for sample in &mut shifted {
+            sample.position_m += 0.001;
+            sample.force_n += 100.0;
+        }
+        let shifted_run = SuspensionIdentificationRun {
+            acquisition_id: 2,
+            samples: &shifted,
+        };
+        let fit = fit_suspension_training_runs(spec, &[shifted_run]).unwrap();
+        assert!((fit.stiffness_n_per_m - baseline.stiffness_n_per_m).abs() < 1e-6);
+        assert!((fit.damping_n_s_per_m - baseline.damping_n_s_per_m).abs() < 1e-6);
+        assert!(
+            (fit.equilibrium_position_m
+                - baseline.equilibrium_position_m
+                - 0.001
+                - 100.0 / baseline.stiffness_n_per_m)
+                .abs()
+                < 1e-10
+        );
+        // Repeated samples from the same calibration do not erase its common offset.
+        let repeated = SuspensionIdentificationRun {
+            acquisition_id: 3,
+            samples: &shifted,
+        };
+        let doubled = fit_suspension_training_runs(spec, &[shifted_run, repeated]).unwrap();
+        assert!((doubled.equilibrium_position_m - fit.equilibrium_position_m).abs() < 1e-10);
+        assert_eq!(
+            fit_suspension_training_runs(spec, &[run, run]),
+            Err(SuspensionIdentificationError::DuplicateAcquisition)
+        );
+        assert_eq!(
+            fit_suspension_training_runs(spec, &[]),
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+    }
+
+    #[test]
+    fn suspension_influence_retains_nonphysical_refits_without_residual_selection() {
+        let samples = suspension_identification_samples();
+        let mut shifted = samples.clone();
+        // A capture-wide force offset changes equilibrium, not stiffness/damping.
+        for sample in &mut shifted {
+            sample.force_n += 10_000.0;
+        }
+        let runs = [
+            SuspensionIdentificationRun {
+                acquisition_id: 1,
+                samples: &samples,
+            },
+            SuspensionIdentificationRun {
+                acquisition_id: 2,
+                samples: &shifted,
+            },
+        ];
+        let mut spec = suspension_identification_spec();
+        let report = suspension_training_influence(spec, &runs).unwrap();
+        let baseline = report.baseline.unwrap();
+        let original = report.deletions[1].coefficients.unwrap();
+        assert!(
+            (baseline.equilibrium_position_m
+                - original.equilibrium_position_m
+                - 5_000.0 / original.stiffness_n_per_m)
+                .abs()
+                < 1e-10
+        );
+        assert_eq!(
+            report.deletions[0].coefficients,
+            Err(SuspensionIdentificationError::NonPhysicalResult)
+        );
+        // Residual limits cannot filter runs or change this training-only diagnostic.
+        spec.maximum_training_rmse_n = 0.0;
+        spec.maximum_holdout_rmse_n = 0.0;
+        assert_eq!(report, suspension_training_influence(spec, &runs).unwrap());
+        let failed = suspension_training_influence(spec, &runs[1..]).unwrap();
+        assert_eq!(
+            failed.baseline,
+            Err(SuspensionIdentificationError::NonPhysicalResult)
+        );
+        assert_eq!(failed.deletions.len(), 1);
+    }
+
+    #[test]
+    fn suspension_influence_validates_every_capture_before_refitting() {
+        let samples = suspension_identification_samples();
+        let spec = suspension_identification_spec();
+        let run = SuspensionIdentificationRun {
+            acquisition_id: 0,
+            samples: &samples,
+        };
+        assert_eq!(
+            suspension_training_influence(spec, &[]),
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+        let many: Vec<_> = (0..65)
+            .map(|acquisition_id| SuspensionIdentificationRun {
+                acquisition_id,
+                samples: &samples,
+            })
+            .collect();
+        assert_eq!(
+            suspension_training_influence(spec, &many),
+            Err(SuspensionIdentificationError::InvalidSpec)
+        );
+        let mut invalid = samples.clone();
+        invalid[1].capture_time_s = invalid[0].capture_time_s;
+        let bad = SuspensionIdentificationRun {
+            acquisition_id: 1,
+            samples: &invalid,
+        };
+        assert_eq!(
+            suspension_training_influence(spec, &[run, bad]),
+            Err(SuspensionIdentificationError::InvalidSample)
+        );
+        invalid[1].capture_time_s = samples[1].capture_time_s;
+        invalid[0].force_n = f64::NAN;
+        let bad = SuspensionIdentificationRun {
+            acquisition_id: 1,
+            samples: &invalid,
+        };
+        assert_eq!(
+            suspension_training_influence(spec, &[run, bad]),
+            Err(SuspensionIdentificationError::InvalidSample)
+        );
+    }
+
+    fn suspension_identification_spec() -> SuspensionIdentificationSpec {
+        SuspensionIdentificationSpec {
+            holdout_stride: 5,
+            minimum_training_samples: 40,
+            minimum_holdout_samples: 10,
+            stiffness_bounds_n_per_m: [100_000.0, 300_000.0],
+            damping_bounds_n_s_per_m: [5_000.0, 30_000.0],
+            equilibrium_position_bounds_m: [-0.10, -0.02],
+            maximum_training_rmse_n: 5.0,
+            maximum_holdout_rmse_n: 5.0,
+        }
+    }
+
+    fn suspension_identification_samples() -> Vec<SuspensionForceSample> {
+        let stiffness_n_per_m = 200_000.0;
+        let damping_n_s_per_m = 15_000.0;
+        let equilibrium_position_m = -0.061;
+        (0..200)
+            .map(|index| {
+                let time_s = index as f64 * 0.01;
+                let fast_phase = std::f64::consts::TAU * 1.2 * time_s;
+                let slow_phase = std::f64::consts::TAU * 0.37 * time_s;
+                let position_m = -0.055 + 0.010 * fast_phase.sin() + 0.004 * slow_phase.sin();
+                let velocity_m_s = 0.010 * std::f64::consts::TAU * 1.2 * fast_phase.cos()
+                    + 0.004 * std::f64::consts::TAU * 0.37 * slow_phase.cos();
+                let deterministic_noise_n = ((index * 17 % 11) as f64 - 5.0) * 0.2;
+                let force_n = stiffness_n_per_m * (equilibrium_position_m - position_m)
+                    - damping_n_s_per_m * velocity_m_s
+                    + deterministic_noise_n;
+                SuspensionForceSample {
+                    capture_time_s: time_s,
+                    position_m,
+                    velocity_m_s,
+                    force_n,
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn suspension_residual_timing_preserves_clock_and_constant_missingness() {
+        let fit = identify_suspension_strut(
+            suspension_identification_spec(),
+            &suspension_identification_samples(),
+        )
+        .unwrap();
+        let mut samples: Vec<_> = [1.0, -1.0, 1.0, -1.0]
+            .into_iter()
+            .enumerate()
+            .map(|(i, residual)| SuspensionForceSample {
+                capture_time_s: i as f64,
+                position_m: fit.equilibrium_position_m,
+                velocity_m_s: 0.0,
+                force_n: -residual,
+            })
+            .collect();
+        let diagnose = |samples: &[SuspensionForceSample], tolerance| {
+            suspension_residual_timing(
+                fit,
+                SuspensionIdentificationRun {
+                    acquisition_id: 42,
+                    samples,
+                },
+                tolerance,
+            )
+            .unwrap()
+        };
+        let regular = diagnose(&samples, 0.0);
+        assert_eq!(regular.lag_one_autocorrelation, Some(-0.75));
+        assert_eq!(regular.mean_residual_n, 0.0);
+        assert_eq!(regular.minimum_interval_s, 1.0);
+        assert_eq!(regular.acquisition_id, 42);
+        samples[3].capture_time_s = 4.0;
+        let irregular = diagnose(&samples, 0.0);
+        assert!(!irregular.uniform_within_tolerance);
+        assert_eq!(irregular.maximum_interval_s, 2.0);
+        assert_eq!(irregular.lag_one_autocorrelation, None);
+        samples[3].capture_time_s = 3.0;
+        for sample in &mut samples {
+            sample.force_n = -2.0;
+        }
+        let constant = diagnose(&samples, 0.0);
+        assert!(constant.uniform_within_tolerance);
+        assert_eq!(constant.mean_residual_n, 2.0);
+        assert_eq!(constant.lag_one_autocorrelation, None);
+    }
+
+    #[test]
+    fn suspension_residual_timing_rejects_invalid_arithmetic_and_respects_tolerance() {
+        let fit = identify_suspension_strut(
+            suspension_identification_spec(),
+            &suspension_identification_samples(),
+        )
+        .unwrap();
+        let mut samples: Vec<_> = [0.0, 1.0, 2.125]
+            .into_iter()
+            .enumerate()
+            .map(|(i, capture_time_s)| SuspensionForceSample {
+                capture_time_s,
+                position_m: fit.equilibrium_position_m,
+                velocity_m_s: 0.0,
+                force_n: i as f64 - 1.0,
+            })
+            .collect();
+        let diagnose = |samples: &[SuspensionForceSample], tolerance| {
+            suspension_residual_timing(
+                fit,
+                SuspensionIdentificationRun {
+                    acquisition_id: 7,
+                    samples,
+                },
+                tolerance,
+            )
+        };
+        let accepted = diagnose(&samples, 0.125).unwrap();
+        assert!(accepted.uniform_within_tolerance);
+        assert_eq!(accepted.lag_one_autocorrelation, Some(0.0));
+        assert_eq!(
+            diagnose(&samples, 0.0625).unwrap().lag_one_autocorrelation,
+            None
+        );
+        for sample in &mut samples {
+            sample.capture_time_s += 1024.0;
+        }
+        assert_eq!(diagnose(&samples, 0.125).unwrap(), accepted);
+        for tolerance in [-1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                diagnose(&samples, tolerance),
+                Err(SuspensionIdentificationError::InvalidSpec)
+            );
+        }
+        assert_eq!(
+            diagnose(&samples[..2], 0.0),
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+        samples[0].capture_time_s = -f64::MAX;
+        samples[1].capture_time_s = f64::MAX / 2.0;
+        samples[2].capture_time_s = f64::MAX;
+        assert_eq!(
+            diagnose(&samples, 0.0),
+            Err(SuspensionIdentificationError::InvalidSample)
+        );
+        for (i, sample) in samples.iter_mut().enumerate() {
+            sample.capture_time_s = i as f64;
+        }
+        samples[0].position_m = f64::MAX;
+        assert_eq!(
+            diagnose(&samples, 0.0),
+            Err(SuspensionIdentificationError::ResidualExceeded)
+        );
+    }
+
+    #[test]
+    fn suspension_excitation_extreme_scales_and_invalid_inputs_are_explicit() {
+        for scale in [f64::MIN_POSITIVE, 1.0, f64::MAX] {
+            let mut samples: Vec<_> = [(-1.0, -1.0), (-1.0, 1.0), (1.0, -1.0), (1.0, 1.0)]
+                .into_iter()
+                .enumerate()
+                .map(|(i, (x, v))| SuspensionForceSample {
+                    capture_time_s: i as f64,
+                    position_m: x * scale,
+                    velocity_m_s: v * scale,
+                    force_n: 0.0,
+                })
+                .collect();
+            let result = suspension_training_excitation(&[SuspensionIdentificationRun {
+                acquisition_id: 1,
+                samples: &samples,
+            }])
+            .unwrap();
+            assert_eq!(result.position_rms_m, scale);
+            assert_eq!(result.velocity_rms_m_s, scale);
+            assert_eq!(result.normalized_design_condition, Some(1.0));
+            for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                samples[0].force_n = invalid;
+                assert_eq!(
+                    suspension_training_excitation(&[SuspensionIdentificationRun {
+                        acquisition_id: 1,
+                        samples: &samples
+                    }]),
+                    Err(SuspensionIdentificationError::InvalidSample)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn suspension_excitation_near_collinearity_and_force_independence() {
+        // Orthogonal x/z columns with equal norm; v = x + epsilon*z.
+        // The normalized design condition is (sqrt(1+epsilon^2)+1)/epsilon.
+        let epsilon = 0.01;
+        let mut samples: Vec<_> = [(-1.0, -1.0), (-1.0, 1.0), (1.0, -1.0), (1.0, 1.0)]
+            .into_iter()
+            .enumerate()
+            .map(|(i, (x, z))| SuspensionForceSample {
+                capture_time_s: i as f64,
+                position_m: x,
+                velocity_m_s: x + epsilon * z,
+                force_n: 0.0,
+            })
+            .collect();
+        let diagnose = |samples: &[SuspensionForceSample]| {
+            suspension_training_excitation(&[SuspensionIdentificationRun {
+                acquisition_id: 1,
+                samples,
+            }])
+            .unwrap()
+        };
+        let baseline = diagnose(&samples);
+        let expected = ((1.0 + epsilon * epsilon).sqrt() + 1.0) / epsilon;
+        let actual = baseline.normalized_design_condition.unwrap();
+        assert!((actual - expected).abs() < expected * 1.0e-10);
+        assert!(actual > 200.0);
+        for (i, sample) in samples.iter_mut().enumerate() {
+            sample.force_n = 1.0e100 * (i as f64 - 2.0);
+        }
+        assert_eq!(diagnose(&samples), baseline);
+        let run = SuspensionIdentificationRun {
+            acquisition_id: 1,
+            samples: &samples,
+        };
+        assert_eq!(
+            suspension_training_excitation(&[run, run]),
+            Err(SuspensionIdentificationError::DuplicateAcquisition)
+        );
+        assert_eq!(
+            suspension_training_excitation(&[]),
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+        samples[1].capture_time_s = samples[0].capture_time_s;
+        assert_eq!(
+            suspension_training_excitation(&[SuspensionIdentificationRun {
+                acquisition_id: 1,
+                samples: &samples
+            }]),
+            Err(SuspensionIdentificationError::InvalidSample)
+        );
+    }
+
+    #[test]
+    fn suspension_excitation_orthogonal_collinear_and_constant_designs() {
+        let mut samples: Vec<_> = [(-1.0, -1.0), (-1.0, 1.0), (1.0, -1.0), (1.0, 1.0)]
+            .into_iter()
+            .enumerate()
+            .map(|(i, (x, v))| SuspensionForceSample {
+                capture_time_s: i as f64,
+                position_m: x,
+                velocity_m_s: v,
+                force_n: 0.0,
+            })
+            .collect();
+        let diagnose = |samples: &[SuspensionForceSample]| {
+            suspension_training_excitation(&[SuspensionIdentificationRun {
+                acquisition_id: 1,
+                samples,
+            }])
+            .unwrap()
+        };
+        let result = diagnose(&samples);
+        assert_eq!(result.normalized_design_condition, Some(1.0));
+        assert_eq!(result.position_rms_m, 1.0);
+        for sample in &mut samples {
+            sample.position_m *= 1.0e150;
+            sample.velocity_m_s *= 1.0e-150;
+            sample.force_n = 999.0;
+        }
+        let scaled = diagnose(&samples);
+        assert_eq!(scaled.normalized_design_condition, Some(1.0));
+        assert_eq!(scaled.position_rms_m, 1.0e150);
+        assert_eq!(scaled.velocity_rms_m_s, 1.0e-150);
+        for sample in &mut samples {
+            sample.velocity_m_s = -sample.position_m;
+        }
+        let singular = diagnose(&samples);
+        assert_eq!(singular.position_velocity_correlation, Some(-1.0));
+        assert_eq!(singular.normalized_design_condition, None);
+        for sample in &mut samples {
+            sample.position_m = 0.123;
+        }
+        let constant = diagnose(&samples);
+        assert_eq!(constant.position_rms_m, 0.0);
+        assert_eq!(constant.position_velocity_correlation, None);
+        assert_eq!(constant.normalized_design_condition, None);
+    }
+
+    #[test]
+    fn suspension_run_report_exposes_small_failed_run_hidden_by_pooled_rmse() {
+        let samples = suspension_identification_samples();
+        let spec = suspension_identification_spec();
+        let training = [SuspensionIdentificationRun {
+            acquisition_id: 1,
+            samples: &samples,
+        }];
+        let mut bad = samples[..10].to_vec();
+        for sample in &mut bad {
+            sample.force_n += 10.0;
+        }
+        let holdout = [
+            SuspensionIdentificationRun {
+                acquisition_id: 2,
+                samples: &samples,
+            },
+            SuspensionIdentificationRun {
+                acquisition_id: 3,
+                samples: &bad,
+            },
+        ];
+        let report = identify_suspension_strut_runs_report(spec, &training, &holdout).unwrap();
+        assert!(report.fit.holdout_rmse_n < spec.maximum_holdout_rmse_n);
+        assert!(!report.passed);
+        assert!(report.training_runs[0].passed);
+        assert!(report.holdout_runs[0].passed);
+        assert!(!report.holdout_runs[1].passed);
+        assert_eq!(report.holdout_runs[1].acquisition_id, 3);
+        assert_eq!(report.holdout_runs[1].sample_count, 10);
+        assert!(report.holdout_runs[1].rmse_n > 9.0);
+        assert_eq!(
+            report,
+            identify_suspension_strut_runs_report(spec, &training, &holdout).unwrap()
+        );
+        let healthy =
+            identify_suspension_strut_runs_report(spec, &training, &holdout[..1]).unwrap();
+        assert!(healthy.passed);
+        assert_eq!(
+            healthy.fit.stiffness_n_per_m.to_bits(),
+            report.fit.stiffness_n_per_m.to_bits()
+        );
+        assert_eq!(
+            healthy.fit.damping_n_s_per_m.to_bits(),
+            report.fit.damping_n_s_per_m.to_bits()
+        );
+    }
+
+    #[test]
+    fn suspension_run_split_excludes_holdout_from_fit_and_preserves_v1_arithmetic() {
+        let samples = suspension_identification_samples();
+        let spec = suspension_identification_spec();
+        let train: Vec<_> = samples
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(i, _)| !(i + 1).is_multiple_of(spec.holdout_stride))
+            .map(|(_, sample)| sample)
+            .collect();
+        let mut holdout: Vec<_> = samples
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(i, _)| (i + 1).is_multiple_of(spec.holdout_stride))
+            .map(|(_, sample)| sample)
+            .collect();
+        let training_runs = [SuspensionIdentificationRun {
+            acquisition_id: 1,
+            samples: &train,
+        }];
+        let fit = |validation: &[SuspensionForceSample]| {
+            identify_suspension_strut_runs(
+                spec,
+                &training_runs,
+                &[SuspensionIdentificationRun {
+                    acquisition_id: 2,
+                    samples: validation,
+                }],
+            )
+            .unwrap()
+        };
+        let baseline = fit(&holdout);
+        // Exactly the same ordered inputs reach the shared solver, preserving v1 bytes.
+        assert_eq!(baseline, identify_suspension_strut(spec, &samples).unwrap());
+        for sample in &mut holdout {
+            sample.force_n += 2.0;
+            // Independent acquisitions may restart their capture clocks.
+            sample.capture_time_s -= 0.04;
+        }
+        let changed = fit(&holdout);
+        assert_eq!(
+            baseline.stiffness_n_per_m.to_bits(),
+            changed.stiffness_n_per_m.to_bits()
+        );
+        assert_eq!(
+            baseline.damping_n_s_per_m.to_bits(),
+            changed.damping_n_s_per_m.to_bits()
+        );
+        assert_eq!(
+            baseline.equilibrium_position_m.to_bits(),
+            changed.equilibrium_position_m.to_bits()
+        );
+        assert_eq!(
+            baseline.training_rmse_n.to_bits(),
+            changed.training_rmse_n.to_bits()
+        );
+        assert!(changed.holdout_rmse_n > baseline.holdout_rmse_n);
+        assert_eq!(changed, fit(&holdout));
+    }
+
+    #[test]
+    fn suspension_run_split_rejects_identity_overlap_empty_runs_and_local_time_drift() {
+        let samples = suspension_identification_samples();
+        let spec = suspension_identification_spec();
+        let run = SuspensionIdentificationRun {
+            acquisition_id: 10,
+            samples: &samples,
+        };
+        let other = SuspensionIdentificationRun {
+            acquisition_id: 11,
+            samples: &samples,
+        };
+        assert_eq!(
+            identify_suspension_strut_runs(spec, &[run], &[run]),
+            Err(SuspensionIdentificationError::DuplicateAcquisition)
+        );
+        assert_eq!(
+            identify_suspension_strut_runs(spec, &[run, run], &[other]),
+            Err(SuspensionIdentificationError::DuplicateAcquisition)
+        );
+        assert_eq!(
+            identify_suspension_strut_runs(spec, &[run], &[other, other]),
+            Err(SuspensionIdentificationError::DuplicateAcquisition)
+        );
+        assert_eq!(
+            identify_suspension_strut_runs(spec, &[], &[other]),
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+        assert_eq!(
+            identify_suspension_strut_runs(spec, &[run], &[]),
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+        let empty = SuspensionIdentificationRun {
+            acquisition_id: 12,
+            samples: &[],
+        };
+        assert_eq!(
+            identify_suspension_strut_runs(spec, &[run], &[empty]),
+            Err(SuspensionIdentificationError::InsufficientSamples)
+        );
+        let mut invalid = samples.clone();
+        invalid[10].capture_time_s = invalid[9].capture_time_s;
+        let invalid_run = SuspensionIdentificationRun {
+            acquisition_id: 12,
+            samples: &invalid,
+        };
+        for (training, holdout) in [([run], [invalid_run]), ([invalid_run], [run])] {
+            assert_eq!(
+                identify_suspension_strut_runs(spec, &training, &holdout),
+                Err(SuspensionIdentificationError::InvalidSample)
+            );
+        }
+        // Distinct run IDs and restarted clocks are legal; not proof of real independence.
+        let result = identify_suspension_strut_runs(
+            spec,
+            &[run, other],
+            &[SuspensionIdentificationRun {
+                acquisition_id: 12,
+                samples: &samples,
+            }],
+        )
+        .unwrap();
+        assert_eq!(result.training_sample_count, 400);
+        assert_eq!(result.holdout_sample_count, 200);
+    }
+
+    #[test]
+    fn suspension_identification_recovers_parameters_and_holdout_residuals() {
+        let result = identify_suspension_strut(
+            suspension_identification_spec(),
+            &suspension_identification_samples(),
+        )
+        .unwrap();
+
+        assert!((result.stiffness_n_per_m - 200_000.0).abs() < 20.0);
+        assert!((result.damping_n_s_per_m - 15_000.0).abs() < 2.0);
+        assert!((result.equilibrium_position_m + 0.061).abs() < 1.0e-5);
+        assert_eq!(result.training_sample_count, 160);
+        assert_eq!(result.holdout_sample_count, 40);
+        assert!(result.training_rmse_n < 1.0);
+        assert!(result.holdout_rmse_n < 1.0);
+        assert!(result.maximum_absolute_holdout_residual_n < 2.0);
+    }
+
+    #[test]
+    fn suspension_identification_rejects_nonfinite_holdout_arithmetic() {
+        for (position_m, velocity_m_s) in [(1.0e308, -1.0e308), (1.0e308, 0.0), (1.0e160, 0.0)] {
+            let mut samples = suspension_identification_samples();
+            // Only a held-out sample changes: fitted coefficients remain ordinary.
+            samples[199].position_m = position_m;
+            samples[199].velocity_m_s = velocity_m_s;
+            assert_eq!(
+                identify_suspension_strut(suspension_identification_spec(), &samples),
+                Err(SuspensionIdentificationError::ResidualExceeded),
+                "finite inputs must not admit non-finite residual arithmetic: {position_m}, {velocity_m_s}"
+            );
+        }
+    }
+
+    #[test]
+    fn suspension_identification_rejects_rank_loss_time_drift_and_holdout_failure() {
+        let spec = suspension_identification_spec();
+        let mut rank_deficient = suspension_identification_samples();
+        for sample in &mut rank_deficient {
+            sample.velocity_m_s = 0.0;
+        }
+        assert_eq!(
+            identify_suspension_strut(spec, &rank_deficient),
+            Err(SuspensionIdentificationError::RankDeficient)
+        );
+
+        let mut unordered = suspension_identification_samples();
+        unordered[10].capture_time_s = unordered[9].capture_time_s;
+        assert_eq!(
+            identify_suspension_strut(spec, &unordered),
+            Err(SuspensionIdentificationError::InvalidSample)
+        );
+
+        let mut corrupted_holdout = suspension_identification_samples();
+        for (index, sample) in corrupted_holdout.iter_mut().enumerate() {
+            if (index + 1).is_multiple_of(spec.holdout_stride) {
+                sample.force_n += 50.0;
+            }
+        }
+        assert_eq!(
+            identify_suspension_strut(spec, &corrupted_holdout),
+            Err(SuspensionIdentificationError::ResidualExceeded)
+        );
+    }
+
+    #[test]
+    fn rigid_road_geometry_places_the_declared_surface_center_exactly() {
+        let patch = RigidRoadPatchSpec {
+            surface_center_world_m: Vec3::new(3.0, 0.4, 0.0),
+            surface_length_m: 4.0,
+            half_width_m: 1.5,
+            thickness_m: 0.2,
+            grade_rad: 0.1,
+            friction_scale: 0.8,
+        };
+        let geometry = rigid_road_patch_geometry(patch).unwrap();
+        let reconstructed_surface_center = geometry.solid_transform.translation
+            + geometry.normal_world * (0.5 * patch.thickness_m);
+
+        assert!((reconstructed_surface_center - patch.surface_center_world_m).length() < 1.0e-12);
+        assert!((geometry.normal_world.length() - 1.0).abs() < 1.0e-12);
+        assert!(geometry.longitudinal_tangent_world.y > 0.0);
+        assert_eq!(geometry.solid_half_extents_m, Vec3::new(2.0, 0.1, 1.5));
+    }
+
+    #[test]
+    fn rigid_road_sampling_exposes_grade_friction_and_gaps_deterministically() {
+        let profile = RigidRoadProfileSpec {
+            patches: vec![
+                RigidRoadPatchSpec {
+                    surface_center_world_m: Vec3::new(0.0, 0.0, 0.0),
+                    surface_length_m: 2.0,
+                    half_width_m: 1.0,
+                    thickness_m: 0.2,
+                    grade_rad: 0.0,
+                    friction_scale: 1.0,
+                },
+                RigidRoadPatchSpec {
+                    surface_center_world_m: Vec3::new(3.0, 0.2, 0.0),
+                    surface_length_m: 2.0,
+                    half_width_m: 1.0,
+                    thickness_m: 0.2,
+                    grade_rad: 0.1,
+                    friction_scale: 0.6,
+                },
+            ],
+        };
+        assert!(profile.is_valid());
+        let flat = sample_rigid_road_profile(&profile, Vec3::new(0.5, 1.0, 0.2))
+            .unwrap()
+            .unwrap();
+        assert_eq!(flat.patch_index, 0);
+        assert_eq!(flat.friction_scale, 1.0);
+        assert_eq!(flat.point_world_m, Vec3::new(0.5, 0.0, 0.2));
+        assert!(
+            sample_rigid_road_profile(&profile, Vec3::new(1.5, 0.0, 0.0))
+                .unwrap()
+                .is_none()
+        );
+
+        let slope = sample_rigid_road_profile(&profile, Vec3::new(3.4, 1.0, -0.3))
+            .unwrap()
+            .unwrap();
+        assert_eq!(slope.patch_index, 1);
+        assert_eq!(slope.friction_scale, 0.6);
+        assert!(slope.normal_world.x < 0.0);
+        assert!(slope.longitudinal_tangent_world.y > 0.0);
+
+        let mut invalid = profile.clone();
+        invalid.patches.swap(0, 1);
+        assert!(!invalid.is_valid());
+        assert_eq!(
+            sample_rigid_road_profile(&invalid, Vec3::ZERO),
+            Err(MobilityPlantEvaluationError::InvalidSpec)
+        );
+    }
+
+    #[test]
+    fn suspension_strut_maps_exact_si_force_law() {
+        let spec = SuspensionStrutSpec {
+            axis_body: Vec3::Y,
+            equilibrium_position_m: -0.02,
+            minimum_position_m: -0.10,
+            maximum_position_m: 0.06,
+            stiffness_n_per_m: 24_000.0,
+            damping_n_s_per_m: 1_800.0,
+            maximum_force_n: 8_000.0,
+            unsprung_mass_kg: 18.0,
+        };
+
+        assert_eq!(
+            evaluate_suspension_strut(spec, 0.01, -0.2).unwrap(),
+            JointActuation::PrismaticEffort {
+                force_n: -360.0,
+                max_force_n: 8_000.0,
+            }
+        );
+    }
+
+    #[test]
+    fn suspension_strut_rejects_inverted_travel_and_non_unit_axis() {
+        let inverted = SuspensionStrutSpec {
+            minimum_position_m: 0.1,
+            maximum_position_m: -0.1,
+            ..SuspensionStrutSpec::default()
+        };
+        assert_eq!(
+            evaluate_suspension_strut(inverted, 0.0, 0.0),
+            Err(MobilityPlantEvaluationError::InvalidSpec)
+        );
+        let non_unit = SuspensionStrutSpec {
+            axis_body: Vec3::new(0.0, 2.0, 0.0),
+            ..SuspensionStrutSpec::default()
+        };
+        assert_eq!(
+            evaluate_suspension_strut(non_unit, 0.0, 0.0),
+            Err(MobilityPlantEvaluationError::InvalidSpec)
+        );
+        assert_eq!(
+            evaluate_suspension_strut(SuspensionStrutSpec::default(), f64::NAN, 0.0),
+            Err(MobilityPlantEvaluationError::InvalidInput)
+        );
+        let preloaded_at_droop = SuspensionStrutSpec {
+            equilibrium_position_m: -0.12,
+            minimum_position_m: -0.08,
+            ..SuspensionStrutSpec::default()
+        };
+        assert!(preloaded_at_droop.is_valid());
+        assert!(matches!(
+            evaluate_suspension_strut(preloaded_at_droop, -0.08, 0.0),
+            Ok(JointActuation::PrismaticEffort { force_n, .. }) if force_n < 0.0
+        ));
+    }
+
+    #[test]
+    fn wheel_station_frame_includes_steering_and_rigid_lever_velocity() {
+        let spec = WheelStationSpec {
+            center_body_m: Vec3::new(1.0, -0.2, 0.5),
+            maximum_steering_rad: std::f64::consts::FRAC_PI_4,
+            ..WheelStationSpec::default()
+        };
+        let frame = resolve_wheel_station_frame(
+            spec,
+            std::f64::consts::FRAC_PI_6,
+            Transform3::from_translation_rotation(Vec3::new(2.0, 1.0, -3.0), Quat::IDENTITY),
+            Vec3::new(4.0, 0.0, 1.0),
+            Vec3::new(0.0, 2.0, 0.0),
+        )
+        .unwrap();
+
+        assert!((frame.center_world_m - Vec3::new(3.0, 0.8, -2.5)).length() < 1.0e-12);
+        assert!(
+            (frame.forward_world - Vec3::new(3.0_f64.sqrt() / 2.0, 0.0, -0.5)).length() < 1.0e-12
+        );
+        assert!(
+            (frame.lateral_world - Vec3::new(0.5, 0.0, 3.0_f64.sqrt() / 2.0)).length() < 1.0e-12
+        );
+        assert!((frame.carrier_velocity_world_m_s - Vec3::new(5.0, 0.0, -1.0)).length() < 1.0e-12);
+    }
+
+    #[test]
+    fn wheel_station_frame_rejects_steering_beyond_declared_limit() {
+        let error = resolve_wheel_station_frame(
+            WheelStationSpec::default(),
+            0.01,
+            Transform3::IDENTITY,
+            Vec3::ZERO,
+            Vec3::ZERO,
+        )
+        .unwrap_err();
+        assert_eq!(error, MobilityPlantEvaluationError::InvalidInput);
+    }
+
+    #[test]
+    fn wheel_station_frame_normalizes_backend_quaternion_roundoff() {
+        let transform = Transform3::from_translation_rotation(
+            Vec3::ZERO,
+            Quat::from_xyzw(0.0, 0.001, 0.0, 1.0),
+        );
+        let frame = resolve_wheel_station_frame(
+            WheelStationSpec::default(),
+            0.0,
+            transform,
+            Vec3::ZERO,
+            Vec3::ZERO,
+        )
+        .unwrap();
+
+        assert!((frame.forward_world.length() - 1.0).abs() < 1.0e-12);
+        assert!((frame.lateral_world.length() - 1.0).abs() < 1.0e-12);
+        assert!(frame.forward_world.dot(frame.lateral_world).abs() < 1.0e-12);
+    }
+
     fn setup_robot_with_joint() -> (World, Entity, Entity, Entity) {
         let mut world = World::new();
         let robot_entity = spawn_named(&mut world, "robot");
@@ -1647,6 +3920,272 @@ mod tests {
         assert_eq!(evaluation.shaft_torque_nm, 1.59);
         assert!(evaluation.voltage_saturated);
         assert!(evaluation.current_saturated);
+    }
+
+    #[test]
+    fn pwm_motor_frontend_preserves_the_command_voltage_plant_boundary() {
+        let frontend = PwmMotorCommandFrontendSpec {
+            full_scale_command_count: 100.0,
+            bridge_on_state_voltage_drop_v: 2.0,
+            polarity: PwmMotorCommandPolarity::Normal,
+        };
+        let mapped = evaluate_pwm_motor_command(frontend, 25.0, 12.0).unwrap();
+        assert_eq!(mapped.clamped_command_count, 25.0);
+        assert_eq!(mapped.signed_duty_ratio, 0.25);
+        assert_eq!(mapped.ideal_average_voltage_v, 3.0);
+        assert_eq!(mapped.terminal_voltage_request_v, 2.5);
+        assert_eq!(mapped.average_bridge_loss_v, 0.5);
+        assert!(!mapped.command_saturated);
+
+        let motor = evaluate_dc_motor(
+            DcMotorSpec {
+                supply_voltage_v: 12.0,
+                ..DcMotorSpec::default()
+            },
+            DcMotorState::default(),
+            mapped.terminal_voltage_request_v,
+            0.0,
+            0.001,
+        )
+        .unwrap();
+        assert_eq!(motor.terminal_voltage_v, 2.5);
+    }
+
+    #[test]
+    fn pwm_motor_frontend_clamps_counts_and_reports_polarity_and_losses() {
+        let frontend = PwmMotorCommandFrontendSpec {
+            full_scale_command_count: 100.0,
+            bridge_on_state_voltage_drop_v: 20.0,
+            polarity: PwmMotorCommandPolarity::Inverted,
+        };
+        let mapped = evaluate_pwm_motor_command(frontend, 125.0, 12.0).unwrap();
+        assert_eq!(mapped.clamped_command_count, 100.0);
+        assert_eq!(mapped.signed_duty_ratio, -1.0);
+        assert_eq!(mapped.ideal_average_voltage_v, -12.0);
+        assert_eq!(mapped.terminal_voltage_request_v, 0.0);
+        assert_eq!(mapped.average_bridge_loss_v, 12.0);
+        assert!(mapped.command_saturated);
+    }
+
+    #[test]
+    fn pwm_motor_frontend_rejects_invalid_electrical_evidence() {
+        let invalid_spec = PwmMotorCommandFrontendSpec {
+            full_scale_command_count: 0.0,
+            ..PwmMotorCommandFrontendSpec::default()
+        };
+        assert_eq!(
+            evaluate_pwm_motor_command(invalid_spec, 0.0, 12.0),
+            Err(MobilityPlantEvaluationError::InvalidSpec)
+        );
+        assert_eq!(
+            evaluate_pwm_motor_command(PwmMotorCommandFrontendSpec::default(), f64::NAN, 12.0,),
+            Err(MobilityPlantEvaluationError::InvalidInput)
+        );
+        assert_eq!(
+            evaluate_pwm_motor_command(PwmMotorCommandFrontendSpec::default(), 1.0, -12.0),
+            Err(MobilityPlantEvaluationError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn steering_actuator_uses_exact_first_order_response() {
+        let spec = SteeringActuatorSpec {
+            time_constant_s: 0.2,
+            maximum_rate_rad_s: 100.0,
+            minimum_position_rad: -1.0,
+            maximum_position_rad: 1.0,
+            ..SteeringActuatorSpec::default()
+        };
+        let evaluation =
+            evaluate_steering_actuator(spec, SteeringActuatorState::default(), 0.5, 0.1).unwrap();
+        let expected_position_rad = 0.5 * (1.0 - (-0.5_f64).exp());
+
+        assert!((evaluation.state.position_rad - expected_position_rad).abs() < 1.0e-12);
+        assert!((evaluation.realized_rate_rad_s - expected_position_rad / 0.1).abs() < 1.0e-12);
+        assert_eq!(evaluation.clamped_target_rad, 0.5);
+        assert!(!evaluation.command_saturated);
+        assert!(!evaluation.rate_limited);
+        assert!(!evaluation.stuck);
+        assert_eq!(
+            evaluation,
+            evaluate_steering_actuator(spec, SteeringActuatorState::default(), 0.5, 0.1,).unwrap()
+        );
+    }
+
+    #[test]
+    fn steering_actuator_reports_rate_and_travel_saturation() {
+        let spec = SteeringActuatorSpec {
+            time_constant_s: 0.1,
+            maximum_rate_rad_s: 1.0,
+            minimum_position_rad: -0.5,
+            maximum_position_rad: 0.5,
+            ..SteeringActuatorSpec::default()
+        };
+        let evaluation =
+            evaluate_steering_actuator(spec, SteeringActuatorState::default(), 2.0, 0.1).unwrap();
+
+        assert_eq!(evaluation.clamped_target_rad, 0.5);
+        assert_eq!(evaluation.state.position_rad, 0.1);
+        assert_eq!(evaluation.realized_rate_rad_s, 1.0);
+        assert!(evaluation.command_saturated);
+        assert!(evaluation.rate_limited);
+    }
+
+    #[test]
+    fn steering_actuator_deadband_and_stuck_failure_hold_completed_state() {
+        let state = SteeringActuatorState { position_rad: 0.1 };
+        let deadband = evaluate_steering_actuator(
+            SteeringActuatorSpec {
+                command_deadband_rad: 0.02,
+                ..SteeringActuatorSpec::default()
+            },
+            state,
+            0.11,
+            0.01,
+        )
+        .unwrap();
+        assert_eq!(deadband.state, state);
+        assert_eq!(deadband.realized_rate_rad_s, 0.0);
+        assert!(!deadband.stuck);
+
+        let stuck = evaluate_steering_actuator(
+            SteeringActuatorSpec {
+                failure_mode: SteeringActuatorFailureMode::Stuck,
+                ..SteeringActuatorSpec::default()
+            },
+            state,
+            -0.4,
+            0.01,
+        )
+        .unwrap();
+        assert_eq!(stuck.state, state);
+        assert_eq!(stuck.realized_rate_rad_s, 0.0);
+        assert!(stuck.stuck);
+    }
+
+    #[test]
+    fn steering_actuator_rejects_invalid_spec_state_command_and_step() {
+        assert_eq!(
+            evaluate_steering_actuator(
+                SteeringActuatorSpec {
+                    time_constant_s: 0.0,
+                    ..SteeringActuatorSpec::default()
+                },
+                SteeringActuatorState::default(),
+                0.0,
+                0.01,
+            ),
+            Err(MobilityPlantEvaluationError::InvalidSpec)
+        );
+        assert_eq!(
+            evaluate_steering_actuator(
+                SteeringActuatorSpec::default(),
+                SteeringActuatorState { position_rad: 1.0 },
+                0.0,
+                0.01,
+            ),
+            Err(MobilityPlantEvaluationError::InvalidInput)
+        );
+        assert_eq!(
+            evaluate_steering_actuator(
+                SteeringActuatorSpec::default(),
+                SteeringActuatorState::default(),
+                f64::NAN,
+                0.01,
+            ),
+            Err(MobilityPlantEvaluationError::InvalidInput)
+        );
+        assert_eq!(
+            evaluate_steering_actuator(
+                SteeringActuatorSpec::default(),
+                SteeringActuatorState::default(),
+                0.0,
+                0.0,
+            ),
+            Err(MobilityPlantEvaluationError::InvalidTimeStep)
+        );
+    }
+
+    fn steering_identification_spec() -> SteeringActuatorIdentificationSpec {
+        SteeringActuatorIdentificationSpec {
+            training_transition_count: 6,
+            interval_tolerance_s: 1.0e-12,
+            minimum_abs_command_error_rad: 0.01,
+            minimum_time_constant_s: 0.01,
+            maximum_time_constant_s: 0.5,
+            maximum_training_rms_rad: 1.0e-12,
+            maximum_holdout_rms_rad: 1.0e-12,
+            minimum_position_rad: -0.5,
+            maximum_position_rad: 0.5,
+        }
+    }
+
+    fn steering_identification_samples() -> Vec<SteeringActuatorIdentificationSample> {
+        let dt_s = 0.01;
+        let response = 1.0 - (-dt_s / 0.08_f64).exp();
+        let mut position_rad = 0.0;
+        (0..=12)
+            .map(|index| {
+                let command_target_rad = match index {
+                    0..=3 => 0.4,
+                    4..=7 => -0.3,
+                    _ => 0.2,
+                };
+                let sample = SteeringActuatorIdentificationSample {
+                    capture_time_s: index as f64 * dt_s,
+                    command_target_rad,
+                    measured_position_rad: position_rad,
+                };
+                position_rad += response * (command_target_rad - position_rad);
+                sample
+            })
+            .collect()
+    }
+
+    #[test]
+    fn steering_identification_recovers_time_constant_without_holdout_refit() {
+        let result = identify_steering_actuator_first_order(
+            steering_identification_spec(),
+            &steering_identification_samples(),
+        )
+        .unwrap();
+
+        assert!((result.capture_interval_s - 0.01).abs() < 1.0e-15);
+        assert!((result.time_constant_s - 0.08).abs() < 1.0e-12);
+        assert_eq!(result.training_transition_count, 6);
+        assert_eq!(result.holdout_transition_count, 6);
+        assert!(result.training_rms_rad < 1.0e-15);
+        assert!(result.holdout_rms_rad < 1.0e-15);
+    }
+
+    #[test]
+    fn steering_identification_rejects_clock_drift_echo_and_holdout_error() {
+        let spec = steering_identification_spec();
+        let mut nonuniform = steering_identification_samples();
+        nonuniform[3].capture_time_s += 0.001;
+        assert_eq!(
+            identify_steering_actuator_first_order(spec, &nonuniform),
+            Err(SteeringActuatorIdentificationError::InvalidSample)
+        );
+
+        let command_echo = (0..=12)
+            .map(|index| SteeringActuatorIdentificationSample {
+                capture_time_s: index as f64 * 0.01,
+                command_target_rad: 0.2,
+                measured_position_rad: 0.2,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            identify_steering_actuator_first_order(spec, &command_echo),
+            Err(SteeringActuatorIdentificationError::InsufficientExcitation)
+        );
+
+        let mut corrupted_holdout = steering_identification_samples();
+        corrupted_holdout[10].measured_position_rad += 0.01;
+        assert_eq!(
+            identify_steering_actuator_first_order(spec, &corrupted_holdout),
+            Err(SteeringActuatorIdentificationError::ResidualExceeded)
+        );
     }
 
     #[test]
@@ -1737,6 +4276,25 @@ mod tests {
         let reverse = wheel_rolling_resistance_torque_nm(spec, 100.0, -2.0).unwrap();
         assert!((forward + 0.15).abs() < 1.0e-12);
         assert!((reverse - 0.15).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn step_bounded_rolling_resistance_cannot_reverse_a_slow_wheel() {
+        let spec = WheelAssemblySpec::default();
+        let inertia_kg_m2 = 0.5;
+        let dt_s = 0.001;
+        let velocity_rad_s = 1.0e-6;
+        let torque_nm = bounded_rolling_resistance_torque_nm(
+            spec,
+            100_000_000.0,
+            velocity_rad_s,
+            inertia_kg_m2,
+            dt_s,
+        )
+        .unwrap();
+        assert!((torque_nm + 0.0005).abs() < 1.0e-12);
+        let completed_velocity_rad_s = velocity_rad_s + torque_nm / inertia_kg_m2 * dt_s;
+        assert!(completed_velocity_rad_s.abs() < 1.0e-15);
     }
 
     #[test]
@@ -2466,6 +5024,27 @@ mod tests {
         assert_eq!(wrench.entity, wheel);
         assert_eq!(wrench.point_world_m, patch.point_world_m);
         assert_eq!(wrench.force_world_n, Vec3::new(20.0, 0.0, -5.0));
+    }
+
+    #[test]
+    fn tire_wrench_is_tangent_to_tilted_contact_plane() {
+        let mut world = World::new();
+        let wheel = world.spawn_empty().id();
+        let normal = Vec3::new(0.2, 0.97, 0.1).normalize();
+        let patch = WheelContactPatch {
+            normal_road_to_wheel_world: normal,
+            ..test_patch(wheel, Vec3::ZERO, 100.0)
+        };
+        let evaluation = CombinedSlipTireEvaluation {
+            longitudinal_force_n: 20.0,
+            lateral_force_n: -5.0,
+            ..zero_tire_evaluation()
+        };
+
+        let wrench = combined_slip_tire_wrench(patch, evaluation, Vec3::X, Vec3::Z).unwrap();
+
+        assert!(wrench.force_world_n.dot(normal).abs() < 1.0e-12);
+        assert!((wrench.force_world_n.length() - 20.0_f64.hypot(5.0)).abs() < 1.0e-12);
     }
 
     fn longitudinal_plant_spec(road_friction_scale: f64) -> LongitudinalMobilityPlantSpec {

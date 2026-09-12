@@ -118,6 +118,80 @@ pub struct Actuator {
     pub limits: crate::actuator::ActuatorLimits,
 }
 
+/// Failure applied to the backend-neutral steering-actuator response.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SteeringActuatorFailureMode {
+    /// Normal command-following operation.
+    #[default]
+    Nominal,
+    /// Hold the completed steering position regardless of new commands.
+    Stuck,
+}
+
+/// First-order steering-actuator response before a joint-position request.
+///
+/// This model captures measured command-to-angle bandwidth, rate saturation,
+/// travel limits, deadband, and an explicit stuck failure without exposing a
+/// physics-backend servo type. It does not model motor current, backlash,
+/// compliance, or steering-linkage torque; those require separate evidence and
+/// a higher-fidelity actuator model.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SteeringActuatorSpec {
+    /// Command-to-angle first-order time constant in seconds.
+    pub time_constant_s: f64,
+    /// Maximum absolute completed steering rate in radians per second.
+    pub maximum_rate_rad_s: f64,
+    /// Minimum completed steering position in radians.
+    pub minimum_position_rad: f64,
+    /// Maximum completed steering position in radians.
+    pub maximum_position_rad: f64,
+    /// Command-error magnitude ignored by the actuator, in radians.
+    pub command_deadband_rad: f64,
+    /// Explicit actuator failure behavior.
+    pub failure_mode: SteeringActuatorFailureMode,
+}
+
+impl Default for SteeringActuatorSpec {
+    fn default() -> Self {
+        Self {
+            time_constant_s: 0.08,
+            maximum_rate_rad_s: 4.0,
+            minimum_position_rad: -0.5,
+            maximum_position_rad: 0.5,
+            command_deadband_rad: 0.0,
+            failure_mode: SteeringActuatorFailureMode::Nominal,
+        }
+    }
+}
+
+impl SteeringActuatorSpec {
+    /// Returns whether all parameters are finite and physically valid.
+    pub fn is_valid(&self) -> bool {
+        [
+            self.time_constant_s,
+            self.maximum_rate_rad_s,
+            self.minimum_position_rad,
+            self.maximum_position_rad,
+            self.command_deadband_rad,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+            && self.time_constant_s > 0.0
+            && self.maximum_rate_rad_s > 0.0
+            && self.minimum_position_rad < self.maximum_position_rad
+            && self.command_deadband_rad >= 0.0
+            && self.command_deadband_rad < self.maximum_position_rad - self.minimum_position_rad
+    }
+}
+
+/// Completed state retained by the first-order steering actuator.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SteeringActuatorState {
+    /// Completed steering position in radians.
+    pub position_rad: f64,
+}
+
 /// Electrical failure applied to a DC motor model.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DcMotorFailureMode {
@@ -206,6 +280,54 @@ impl DcMotorSpec {
             && self
                 .inductance_h
                 .is_none_or(|inductance_h| inductance_h.is_finite() && inductance_h > 0.0)
+    }
+}
+
+/// Sign convention applied by an averaged PWM motor-command frontend.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PwmMotorCommandPolarity {
+    /// Positive command counts request positive motor-terminal voltage.
+    #[default]
+    Normal,
+    /// Positive command counts request negative motor-terminal voltage.
+    Inverted,
+}
+
+/// Backend-neutral mapping from signed PWM command counts to average terminal voltage.
+///
+/// This frontend deliberately ends at a voltage request. [`DcMotorSpec`] remains the
+/// physical plant and applies its own terminal-voltage and current limits. The mapping is
+/// a switching-cycle average, not a model of PWM ripple, decay mode, current regulation,
+/// battery sag, dead time, or semiconductor temperature. Those effects require explicit
+/// evidence and a higher-fidelity drive model rather than changes to motor constants.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PwmMotorCommandFrontendSpec {
+    /// Absolute command count corresponding to 100 percent duty cycle.
+    pub full_scale_command_count: f64,
+    /// Total H-bridge on-state voltage loss at the declared operating point, in volts.
+    pub bridge_on_state_voltage_drop_v: f64,
+    /// Electrical sign convention between command and motor terminals.
+    pub polarity: PwmMotorCommandPolarity,
+}
+
+impl Default for PwmMotorCommandFrontendSpec {
+    fn default() -> Self {
+        Self {
+            full_scale_command_count: 255.0,
+            bridge_on_state_voltage_drop_v: 0.0,
+            polarity: PwmMotorCommandPolarity::Normal,
+        }
+    }
+}
+
+impl PwmMotorCommandFrontendSpec {
+    /// Returns whether the scaling and on-state loss are finite and physically valid.
+    pub fn is_valid(self) -> bool {
+        self.full_scale_command_count.is_finite()
+            && self.full_scale_command_count > 0.0
+            && self.bridge_on_state_voltage_drop_v.is_finite()
+            && self.bridge_on_state_voltage_drop_v >= 0.0
     }
 }
 
@@ -356,6 +478,290 @@ impl WheelAssemblySpec {
     }
 }
 
+/// Backend-neutral mounting and steering geometry for one physical wheel station.
+///
+/// The body frame is `+X` forward and `+Y` up by convention, but explicit axes make
+/// imported robots and vehicles unambiguous. The station belongs on the wheel entity;
+/// motor, transmission, wheel-assembly, tire, and dynamic states remain separate
+/// components so fidelity tiers can be composed without backend handles.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WheelStationSpec {
+    /// Wheel-center position in the owning rigid body's local frame, in meters.
+    pub center_body_m: Vec3,
+    /// Zero-steer rolling direction in the owning rigid body's local frame.
+    pub zero_steer_forward_body: Vec3,
+    /// Positive axle direction at zero steer in the owning rigid body's local frame.
+    pub zero_steer_axle_body: Vec3,
+    /// Positive steering axis in the owning rigid body's local frame.
+    pub steering_axis_body: Vec3,
+    /// Whether motor/transmission torque is applied at this station.
+    pub driven: bool,
+    /// Maximum absolute steering angle in radians; zero declares a fixed station.
+    pub maximum_steering_rad: f64,
+}
+
+impl Default for WheelStationSpec {
+    fn default() -> Self {
+        Self {
+            center_body_m: Vec3::ZERO,
+            zero_steer_forward_body: Vec3::X,
+            zero_steer_axle_body: Vec3::Z,
+            steering_axis_body: Vec3::Y,
+            driven: true,
+            maximum_steering_rad: 0.0,
+        }
+    }
+}
+
+impl WheelStationSpec {
+    /// Returns whether the station geometry and steering bound are physically usable.
+    pub fn is_valid(&self) -> bool {
+        const AXIS_TOLERANCE: f64 = 1.0e-6;
+        self.center_body_m.is_finite()
+            && self.zero_steer_forward_body.is_finite()
+            && self.zero_steer_axle_body.is_finite()
+            && self.steering_axis_body.is_finite()
+            && (self.zero_steer_forward_body.length() - 1.0).abs() <= AXIS_TOLERANCE
+            && (self.zero_steer_axle_body.length() - 1.0).abs() <= AXIS_TOLERANCE
+            && (self.steering_axis_body.length() - 1.0).abs() <= AXIS_TOLERANCE
+            && self
+                .zero_steer_forward_body
+                .dot(self.zero_steer_axle_body)
+                .abs()
+                <= AXIS_TOLERANCE
+            && self
+                .steering_axis_body
+                .dot(self.zero_steer_forward_body)
+                .abs()
+                <= AXIS_TOLERANCE
+            && self.steering_axis_body.dot(self.zero_steer_axle_body).abs() <= AXIS_TOLERANCE
+            && self.maximum_steering_rad.is_finite()
+            && ((0.0..std::f64::consts::FRAC_PI_2).contains(&self.maximum_steering_rad)
+                || self.maximum_steering_rad == 0.0)
+    }
+}
+
+/// Backend-neutral linear spring-damper contract for one suspension strut.
+///
+/// The suspension coordinate is positive along [`Self::axis_body`]. The
+/// equilibrium coordinate, travel stops, stiffness, damping, and force limit are
+/// explicit so a physics backend can realize the same force-based position law
+/// without exposing a backend-native joint or constraint type.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SuspensionStrutSpec {
+    /// Unit travel axis expressed in the chassis body frame.
+    pub axis_body: Vec3,
+    /// Unloaded spring equilibrium coordinate in meters.
+    ///
+    /// This may lie outside mechanical travel: a spring longer than full droop
+    /// retains preload against the droop stop, as on a preloaded vehicle strut.
+    pub equilibrium_position_m: f64,
+    /// Minimum permitted suspension coordinate in meters.
+    pub minimum_position_m: f64,
+    /// Maximum permitted suspension coordinate in meters.
+    pub maximum_position_m: f64,
+    /// Linear spring stiffness in newtons per meter.
+    pub stiffness_n_per_m: f64,
+    /// Linear viscous damping in newton-seconds per meter.
+    pub damping_n_s_per_m: f64,
+    /// Symmetric strut-force limit in newtons.
+    pub maximum_force_n: f64,
+    /// Unsprung mass carried by this station in kilograms.
+    pub unsprung_mass_kg: f64,
+}
+
+impl Default for SuspensionStrutSpec {
+    fn default() -> Self {
+        Self {
+            axis_body: Vec3::Y,
+            equilibrium_position_m: 0.0,
+            minimum_position_m: -0.08,
+            maximum_position_m: 0.08,
+            stiffness_n_per_m: 20_000.0,
+            damping_n_s_per_m: 2_000.0,
+            maximum_force_n: 10_000.0,
+            unsprung_mass_kg: 20.0,
+        }
+    }
+}
+
+impl SuspensionStrutSpec {
+    /// Returns whether geometry, travel, force law, and unsprung mass are usable.
+    pub fn is_valid(self) -> bool {
+        const AXIS_TOLERANCE: f64 = 1.0e-6;
+        self.axis_body.is_finite()
+            && (self.axis_body.length() - 1.0).abs() <= AXIS_TOLERANCE
+            && self.equilibrium_position_m.is_finite()
+            && self.minimum_position_m.is_finite()
+            && self.maximum_position_m.is_finite()
+            && self.minimum_position_m < self.maximum_position_m
+            && self.stiffness_n_per_m.is_finite()
+            && self.stiffness_n_per_m > 0.0
+            && self.damping_n_s_per_m.is_finite()
+            && self.damping_n_s_per_m >= 0.0
+            && self.maximum_force_n.is_finite()
+            && self.maximum_force_n > 0.0
+            && self.unsprung_mass_kg.is_finite()
+            && self.unsprung_mass_kg > 0.0
+    }
+}
+
+/// One finite planar patch in a backend-neutral rigid-road profile.
+///
+/// `surface_center_world_m` names the center of the driving surface, not the
+/// center of its collision solid. Positive grade rises along world `+X`, world
+/// `+Y` is up, and the patch spans world `Z` laterally. This deliberately small
+/// contract maps exactly to primitive rigid terrain in multiple physics backends
+/// while retaining metric elevation, normal, and friction provenance.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RigidRoadPatchSpec {
+    /// Center of the top driving surface in world coordinates, in meters.
+    pub surface_center_world_m: Vec3,
+    /// Length of the driving surface along its grade tangent, in meters.
+    pub surface_length_m: f64,
+    /// Half width of the driving surface along world `Z`, in meters.
+    pub half_width_m: f64,
+    /// Collision-solid thickness measured along the surface normal, in meters.
+    pub thickness_m: f64,
+    /// Longitudinal road grade, positive uphill along world `+X`, in radians.
+    pub grade_rad: f64,
+    /// Non-negative multiplier applied to the identified tire-road friction.
+    pub friction_scale: f64,
+}
+
+impl RigidRoadPatchSpec {
+    /// Returns whether geometry, grade, and friction are finite and physical.
+    pub fn is_valid(self) -> bool {
+        self.surface_center_world_m.is_finite()
+            && self.surface_length_m.is_finite()
+            && self.surface_length_m > 0.0
+            && self.half_width_m.is_finite()
+            && self.half_width_m > 0.0
+            && self.thickness_m.is_finite()
+            && self.thickness_m > 0.0
+            && self.grade_rad.is_finite()
+            && self.grade_rad.abs() < std::f64::consts::FRAC_PI_2
+            && self.friction_scale.is_finite()
+            && self.friction_scale >= 0.0
+    }
+}
+
+/// Canonically ordered finite rigid-road patches.
+///
+/// Patches are ordered by driving-surface center `x`. Gaps and elevation steps
+/// are intentional: a gap can produce wheel lift and adjacent patches with
+/// different elevations form a curb face through their finite collision solids.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RigidRoadProfileSpec {
+    /// Ordered planar road patches.
+    pub patches: Vec<RigidRoadPatchSpec>,
+}
+
+impl RigidRoadProfileSpec {
+    /// Returns whether the profile is bounded, canonical, and physically usable.
+    pub fn is_valid(&self) -> bool {
+        !self.patches.is_empty()
+            && self.patches.len() <= 4_096
+            && self
+                .patches
+                .iter()
+                .copied()
+                .all(RigidRoadPatchSpec::is_valid)
+            && self
+                .patches
+                .windows(2)
+                .all(|pair| pair[0].surface_center_world_m.x < pair[1].surface_center_world_m.x)
+    }
+}
+
+/// Backend-neutral geometry and inertial contract for one passive trailing caster.
+///
+/// The caster is represented by a vertical swivel bracket followed by a free rolling
+/// wheel. Physics backends own both revolute coordinates; the tire force element owns
+/// only transient slip. Keeping the swivel and rolling bodies explicit preserves the
+/// posture-dependent inertia and bore torque that a point support cannot reproduce.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PassiveCasterSpec {
+    /// Swivel-axis location in the chassis body frame, in meters.
+    pub mount_body_m: Vec3,
+    /// Positive distance from swivel axis to wheel axle behind it, in meters.
+    pub trail_m: f64,
+    /// Wheel rolling radius in meters.
+    pub wheel_radius_m: f64,
+    /// Swivel bracket mass in kilograms.
+    pub bracket_mass_kg: f64,
+    /// Wheel mass in kilograms.
+    pub wheel_mass_kg: f64,
+    /// Bracket inertia about the vertical swivel axis, in kilogram-square meters.
+    pub swivel_inertia_kg_m2: f64,
+    /// Wheel inertia about its rolling axle, in kilogram-square meters.
+    pub wheel_axle_inertia_kg_m2: f64,
+    /// Viscous damping about the swivel axis, in newton-meter-seconds per radian.
+    pub swivel_damping_nm_s_per_rad: f64,
+    /// Viscous damping about the rolling axle, in newton-meter-seconds per radian.
+    pub rolling_damping_nm_s_per_rad: f64,
+    /// Initial swivel coordinate relative to chassis forward, in radians.
+    pub initial_swivel_rad: f64,
+    /// Identifiable transient combined-slip tire profile for the caster contact.
+    pub tire: CombinedSlipTireSpec,
+}
+
+impl Default for PassiveCasterSpec {
+    fn default() -> Self {
+        Self {
+            mount_body_m: Vec3::new(0.35, -0.25, 0.0),
+            trail_m: 0.08,
+            wheel_radius_m: 0.12,
+            bracket_mass_kg: 2.0,
+            wheel_mass_kg: 3.0,
+            swivel_inertia_kg_m2: 0.02,
+            wheel_axle_inertia_kg_m2: 0.015,
+            swivel_damping_nm_s_per_rad: 0.05,
+            rolling_damping_nm_s_per_rad: 0.01,
+            initial_swivel_rad: 0.0,
+            tire: CombinedSlipTireSpec::default(),
+        }
+    }
+}
+
+impl PassiveCasterSpec {
+    /// Returns whether geometry, inertias, damping, and tire parameters are usable.
+    pub fn is_valid(self) -> bool {
+        self.mount_body_m.is_finite()
+            && self.trail_m.is_finite()
+            && self.trail_m > 0.0
+            && self.wheel_radius_m.is_finite()
+            && self.wheel_radius_m > 0.0
+            && self.bracket_mass_kg.is_finite()
+            && self.bracket_mass_kg > 0.0
+            && self.wheel_mass_kg.is_finite()
+            && self.wheel_mass_kg > 0.0
+            && self.swivel_inertia_kg_m2.is_finite()
+            && self.swivel_inertia_kg_m2 > 0.0
+            && self.wheel_axle_inertia_kg_m2.is_finite()
+            && self.wheel_axle_inertia_kg_m2 > 0.0
+            && self.swivel_damping_nm_s_per_rad.is_finite()
+            && self.swivel_damping_nm_s_per_rad >= 0.0
+            && self.rolling_damping_nm_s_per_rad.is_finite()
+            && self.rolling_damping_nm_s_per_rad >= 0.0
+            && self.initial_swivel_rad.is_finite()
+            && self.tire.is_valid()
+    }
+}
+
+/// Completed steering coordinate for one wheel station.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WheelSteeringState {
+    /// Signed steering angle about the station steering axis, in radians.
+    pub position_rad: f64,
+    /// Signed steering rate, in radians per second.
+    pub velocity_rad_s: f64,
+}
+
 /// Identifiable low-order combined-slip tire parameters.
 ///
 /// This is a force-element model, not a generic collider material. Longitudinal
@@ -458,7 +864,7 @@ pub struct CombinedSlipTireState {
 /// motor, transmission, inertia, load, and tire state therefore represent one
 /// path shared by identical driven wheels. This is a control-oriented
 /// straight-line model, not an Ackermann or suspension replacement.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LongitudinalMobilityPlantSpec {
     /// Total translating vehicle mass in kilograms.
     pub vehicle_mass_kg: f64,

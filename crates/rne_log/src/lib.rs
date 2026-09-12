@@ -4,7 +4,10 @@
 
 pub mod artifact;
 pub mod capsule;
+pub mod execution;
+pub mod execution_capsule;
 pub mod record;
+pub mod recorded_capsule;
 pub mod replay;
 
 pub use artifact::{
@@ -19,9 +22,16 @@ pub use capsule::{
     FAILURE_CAPSULE_KIND, FAILURE_CAPSULE_SCHEMA_VERSION, FAILURE_CAPSULE_VERSION,
 };
 
+pub use execution::{ExecutionProgress, ExecutionStage};
 pub use record::{
     frame_header, LogRecord, ReplayCompatibility, ReplayCompatibilityError, ReplayHeader,
     ReplayRandomSnapshot, ReplayRandomSnapshotError, ReplayRngState, SimulationLog,
     REPLAY_LOG_FORMAT_VERSION, REPLAY_RANDOM_SNAPSHOT_VERSION,
+};
+pub use recorded_capsule::{
+    RecordedClockMetadata, RecordedClockSampling, RecordedEvaluatorMetadata,
+    RecordedFailureCapsule, RecordedFailureCapsuleError, RecordedFailureMetadata,
+    RecordedRunMetadata, RecordedTimeUnit, RECORDED_FAILURE_CAPSULE_KIND,
+    RECORDED_FAILURE_CAPSULE_SCHEMA_VERSION,
 };
 pub use replay::{replay_commands, replay_commands_checked};
