@@ -87,7 +87,9 @@ the separately precommitted evaluator then executed once and all twelve per-run,
 and worst-run gates passed. The exact 4,791-byte evaluation evidence and content identities
 are frozen in Rust. The contract also fails closed on common Failure Capsule
 packaging because that schema currently requires a fixed simulation clock; recorded
-nonuniform timestamp support must be added rather than silently resampling data.
+nonuniform timestamps were not silently resampled. A subsequent `rne_log` slice now adds
+a separate `rne_recorded_failure_capsule` with explicit source timestamp units and
+uniform/nonuniform sampling while keeping legacy simulation capsule JSON unchanged.
 This closes effective-model generalization for this one published PMDC acquisition path,
 not calibration, transferable individual motor constants, tire/chassis identification,
 or whole-vehicle physical validation.

@@ -6,6 +6,23 @@ to replay/evidence files. It does not duplicate replay actions and does not
 embed archive bytes, so the same `capsule.json` can later be transported as a
 directory, archive, or remote bundle.
 
+The original `rne_failure_capsule` schema remains a fixed-step simulation
+capsule: it requires an exact simulation timestamp and nonzero fixed timestep.
+`rne_recorded_failure_capsule` is the separate common envelope for timestamped
+physical logs. It records a source timestamp channel and unit, declares uniform
+or nonuniform sampling explicitly, and identifies the first failure by record
+index plus a canonical controller-visible observation digest. It contains no
+`sim_time_ticks` or `fixed_delta_ticks` field.
+
+A recorded capsule requires sorted, content-addressed artifact roles for
+`recorded_input`, `protocol`, and `evaluation`. Its validator checks source-clock
+deltas, evaluated-record bounds, build/evaluator protocol digests, canonical
+paths, hashes, and mandatory roles without opening files. A domain adapter must
+still re-read those exact artifacts and reproduce the evaluator before making a
+replay claim; metadata validation alone is not execution. The two schemas are
+separate so existing simulation capsule JSON and golden compatibility remain
+byte-stable.
+
 The installed `rne-asset` CLI creates and verifies capsules without an RNE
 source checkout. Run it from the extracted release root, which retains the
 release `Cargo.lock`; a locked Rust project may instead run it from its own

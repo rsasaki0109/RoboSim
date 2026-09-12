@@ -28,8 +28,9 @@ simulation timestamp. These physical records have an explicitly nonuniform sourc
 resampling is forbidden. Protocol v1 therefore refuses to mislabel the recorded evaluation
 as a fixed-step simulation capsule. A failed final result must retain its content-bound
 evaluation evidence, but common Failure Capsule packaging remains fail-closed until RNE
-supports a variable-source-timestamp recorded replay clock. That infrastructure gap is
-part of the active Mobility Physical AI goal, not a reason to weaken this contract.
+supports a variable-source-timestamp recorded replay clock. This was the capability state
+when the protocol and one-shot evaluation were frozen, so their
+`common_failure_capsule_created=false` claim remains immutable.
 
 The executable contract and drift tests are in `recorded_pmdc::final_protocol`. The
 `pmdc_final_protocol` example prints its canonical SHA-256 without accessing final data.
@@ -66,3 +67,8 @@ metric. Its verified zero-byte reservation is retained as
 `pmdc-final-evaluation-v1.failed-preflight-empty` rather than erased. The corrected sole
 evaluation did not refit, reselect, change thresholds, resample timestamps, qualify
 individual physical constants, or create a misleading fixed-clock Failure Capsule.
+
+After the result was retained, `rne_log::RecordedFailureCapsule` added a distinct common
+schema for future failed recorded evaluations. It can represent this dataset's nonuniform
+microsecond source clock without changing legacy simulation capsules. This PMDC evaluation
+passed, so manufacturing a failure capsule after the fact would still be incorrect.
