@@ -30,6 +30,7 @@ pub mod suspension_runs;
 pub mod suspension_sampling;
 pub mod suspension_timestamp_acquisition;
 pub mod suspension_uncertainty;
+pub mod tire_identification;
 
 use anyhow::{ensure, Result};
 use rne_robot::{

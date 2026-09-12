@@ -426,6 +426,16 @@ and cross-backend results.
     references, and streamed external-root verification. The synthetic fixture proves
     the software path but cannot pass this physical gate; see
     [`MOBILITY_SUSPENSION_IDENTIFICATION_V1.md`](MOBILITY_SUSPENSION_IDENTIFICATION_V1.md).
+    The tire path now has a complementary steady-force identification contract: bounded,
+    deterministic pure-longitudinal/pure-lateral fitting identifies small-slip stiffness
+    and peak friction, while independently acquired combined-slip runs are reserved for
+    pooled and worst-condition validation. Every holdout condition must meet its own sample
+    floor, acquisition identities cannot cross the split, and load/slip/clock envelopes are
+    rejected explicitly. This closes the synthetic software gate for the current low-order
+    force law. A bounded CLI dataset/result path now freezes the split and template, labels the
+    synthetic fixture honestly, SHA-256-binds both artifacts, and replays the fit during
+    validation. Relaxation length, load sensitivity, road scale, and physical-log validity
+    remain open and retain separate provenance. See [`MOBILITY_PLANT_V1.md`](MOBILITY_PLANT_V1.md).
     Ackermann wheel/steering/IMU fatal faults now emit deterministic,
     cross-backend, status- and digest-bound Failure Capsules.
 16. M4/M5: in progress. The first M4 subgate now provides width-independent seeded
