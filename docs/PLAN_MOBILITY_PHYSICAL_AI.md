@@ -2,8 +2,8 @@
 
 Status: active, M3-B implemented; M3-C sensor-observed, per-wheel skid, explicit
 differential-drive trailing-caster, four-wheel Ackermann suspension/split-friction,
-rough-road/lift, and Ackermann sensor-loop subgates implemented; physical logs and later
-milestones remain
+rough-road/lift, backend-neutral steering actuator, Ackermann open-loop v2, and
+Ackermann sensor-loop v2 subgates implemented; physical logs and later milestones remain
 
 Real-log acquisition is now scoped by the
 [source audit](MOBILITY_REAL_LOG_SOURCE_AUDIT.md): inspect bounded NCLT sensor data
@@ -44,6 +44,17 @@ limits, back-EMF, optional inductance, explicit open/short failures, directional
 reflected inertia, and rolling resistance. The assumptions and identification requirements
 are frozen in [`MOBILITY_PLANT_V1.md`](MOBILITY_PLANT_V1.md); no contact-backend integration
 or tire-fidelity claim is included yet.
+
+The steering path now has a backend-neutral first-order command-to-angle state with
+explicit rate, travel, deadband and stuck-failure behavior. Both the open-loop and
+sensor-only Ackermann TaskSpecs run it at the 1 ms physics rate in Rapier and MuJoCo,
+retain raw controller command, completed actuator target and measured joint/encoder
+angles separately, and reject a target that cannot be reproduced by deterministic
+step replay. A training-only discrete-response fit plus frozen chronological holdout
+gate is implemented for synchronized direct-angle logs. Fixture values remain
+uncalibrated because the exposed F1TENTH logs contain command echo rather than direct
+steering angle, while the stronger IROS 2024 dataset candidate has no resolved
+distribution URL or license.
 
 The command boundary now also includes an averaged `PwmMotorCommandFrontendSpec`.
 It maps signed controller counts and runtime bus voltage into a terminal-voltage request

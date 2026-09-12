@@ -1275,6 +1275,41 @@ requires strut displacement, velocity and generalized force plus acquisition evi
 None of these candidate descriptions establishes that contract. Keep its physical
 dataset status pending; do not relax it to accept generic driving trajectories.
 
+### Direct-steering aggressive-racing candidate
+
+[Wegrzynowski et al., IROS 2024](https://arxiv.org/abs/2408.15610) describe a
+52-minute aggressive-driving dataset from a 1/8-scale four-wheel-drive XRAY
+GTXE'22. The paper reports 400 Hz IMU, 100 Hz motor RPM, motor q-axis current and
+direct steering angle, plus 100 Hz OptiTrack pose/orientation. Four tire conditions
+span reported friction coefficients of approximately 0.43 through 0.65, with rear
+axle sideslip exceeding 40 degrees at the 99th percentile. It also states that two
+computers were synchronized with Chrony and that the retained channels were
+interpolated to 100 Hz. These semantics are substantially closer to RNE's tire,
+drive, steering, sensor and friction-identification requirements than the exposed
+Zenodo command/VICON bags.
+
+The authors call the dataset publicly available, but inspection on 2026-09-13 did
+not resolve a distribution URL or dataset license from the arXiv abstract, HTML,
+downloaded source archive, author/title searches, or the related
+[IROS 2025 project page](https://grzegorzczput.github.io/rl-racing/). The source
+archive is retained only for text inspection at
+`E:\RNE-build\research\arxiv-2408.15610\source.tar.gz`: 1,554,952 bytes, SHA-256
+`5696540e122f940cde25ae18bfb2f3dbcd761a5d84e6346448808472a4eb9c8c`.
+This is paper-source integrity, not dataset provenance or redistribution authority.
+No data download, parser, parameter fit, or physical-validation claim is admitted
+until an immutable distribution, exact file manifest, license and clock semantics
+are verified.
+
+The core now provides `identify_steering_actuator_first_order` for a narrower
+future admission path. It requires synchronized command and direct-angle samples
+on one uniform capture grid, uses an exclusive leading training split, and scores
+a frozen later holdout split. Command echoes, clock drift, insufficient excitation,
+unstable or out-of-bound time constants and excess residuals fail closed. Rate-
+saturated, deadband, backlash and failure segments must remain separate instead of
+being absorbed into the first-order time constant. The existing F1TENTH bags cannot
+enter this gate because their servo channel is a command echo and their command
+capture clock is unknown.
+
 ## Bounded execution plan
 
 1. Inspect NCLT's official format-reading scripts as text, without running them.
