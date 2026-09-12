@@ -9,6 +9,7 @@ use std::io::Read;
 
 pub mod calibration;
 pub mod evaluation;
+pub mod identification;
 pub mod response;
 
 /// Maximum original log size, including metadata and line endings.

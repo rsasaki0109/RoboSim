@@ -320,6 +320,117 @@ a further capture before tuning; record training-only preprocessing and frozen
 coefficients. These are remaining requirements, not implemented diagnostics or
 an assertion that independent physical validation has been achieved.
 
+### Reserved OpenMCT speed-response test capture
+
+Before any new RNE speed-model fitting, reserve the dataset-v1 continuous-PI
+20 ms capture as the next untouched raw-response test (2026-09-09). The official
+[file listing](https://data.mendeley.com/public-api/datasets/5xvg43r9r8/files?folder_id=2456a5ce-aa48-4e77-bb9d-58257f896078&version=1)
+identifies `raw_data_20ms.txt`, file ID
+`4b6053d0-e7e7-4294-be7d-a8b7f11af401`, 56,531 bytes, publisher SHA-256
+`40de82b4d4e18099add91af937c5223b09d0140ff3f94bdb31ebec44ac27b356`.
+The bytes have not yet been downloaded or analyzed; this is a publisher digest,
+not a locally verified acquisition hash. Do not inspect its response or replace
+this capture based on model performance before freezing the next model.
+
+Only its [README](https://data.mendeley.com/public-files/datasets/5xvg43r9r8/files/aab0f579-fc57-48a6-aae9-a7ccec37d1fc/file_downloaded)
+and metadata were inspected: declared acquisition 2026-05-05 19:29:59,
+980 rows, duration 19.580 s, 20 ms PI control, reference 0–230 RPM.
+The README exposes author model/tuning information, so this is not a fully
+blinded experiment. Those coefficients must not enter RNE fitting or selection.
+Different control rate/controller introduce a distribution shift, not proof of
+independent hardware, timing accuracy or unbiased closed-loop identification.
+
+The next fixed procedure is to fit only `identification-10ms-raw.txt`, using
+the explicit preceding-row PWM convention, and report the already-inspected
+10 ms PI log as development evaluation. Freeze coefficients, preprocessing,
+model-selection rules and continuous-time propagation before opening the
+reserved 20 ms raw log. Preserve every scored transition and baseline; report
+errors in RPM and lag durations in seconds. Do not treat a discrete 10 ms pole
+as a 20 ms pole. Structural changes after the reserved evaluation consume that
+test and require a new untouched capture for a subsequent final test. This
+reservation sets no physical-qualification threshold and authorizes no claim
+that a fitted PWM model identifies motor electrical or tire parameters.
+
+The initial implementation in `recorded_openmct::identification` fixes a
+zero-offset two-regressor OLS model before inspecting reserved raw responses.
+It uses every adjacent training transition with exactly uniform declared DT,
+without centering or fitting a delay. The report retains the unmodified pole,
+input gain and normalized determinant. Only poles strictly between zero and one
+can be converted to the existing continuous first-order evaluator; other fitted
+poles remain evidence rather than being clamped. Synthetic tests cover known
+coefficient recovery, deterministic repetition, an unstable fit, clock mismatch
+and absent excitation; the focused synthetic test passed. The
+`openmct_speed_identification` example accepts only a training path and prints
+the fitted coefficients, source hash and continuous-model conversion outcome.
+An unrealizable pole remains in its JSON with a conversion error, not a silently
+substituted model. The first real training-log run and reserved-log evaluation
+described below have now completed.
+
+The first training-only run completed after all-target Clippy passed. On the
+3,088 transitions of source SHA-256
+`198770b1bb27f13617531b0fbbc6ade83b69e3032562f19dc33c8bb7f19e3f24`,
+the zero-offset OLS fit returned pole `0.7305068777047915`, discrete PWM gain
+`0.3059294116463335` RPM/count and normalized determinant
+`0.03751919709285456`. At declared interval 0.01 s, conversion gives gain
+`1.1352030398431168` RPM/count and time constant `0.031845446885272785` s.
+Freeze these coefficients for the development PI evaluation; do not replace
+them with the author's GUI coefficients. This fit is empirical and potentially
+biased by measured-speed noise; the result does not qualify motor constants.
+
+Development PI evaluation with those unchanged coefficients returned free-run
+RMSE 3.18574072389137 RPM, one-step RMSE 3.51293598321567 RPM and persistence
+RMSE 5.9545405405025 RPM. Persistence uses the preceding measurement, so its
+observation budget matches one-step prediction, not the uncorrected free run.
+All 13 OpenMCT tests and all-target crate Clippy passed after the boundary-test
+expansion (2026-09-09).
+
+Freeze for the reserved 20 ms capture: identification source Git blob
+`afc671769e05d9b4ef89016f3737c5f01ac08a4e`, evaluator blob
+`95cc2aa7d04c1553ea9bfb82d4d54aae7f686e61`, and the coefficients above. There
+is one model candidate, no fitted offset/delay or preprocessing, no selection
+using reserved errors, and no acceptance threshold optimized against that log.
+Initialize the free run only from its first measurement, use each preceding
+declared DT for exact continuous-model propagation, and retain all transitions.
+Report all three RPM errors without calling this a physical-validation pass.
+
+The reserved raw capture was subsequently acquired under a 60,000-byte streaming
+cap to `E:\RoboSim-external-data\mobility-openmct-5xvg43r9r8-v1\pi-reserved-20ms-raw.txt`.
+Its 56,531 bytes match the publisher SHA-256 above. Both frozen source blobs
+were rechecked before evaluation. The first reserved evaluation completed with
+979 transitions, all declared intervals 0.02 s, no dropped transitions and no
+coefficient change: free-run RMSE 3.82074878375445 RPM, one-step RMSE
+3.92807772783069 RPM, persistence RMSE 10.0218352010364 RPM. These values describe
+this capture, not confidence bounds or an independently calibrated accuracy
+guarantee. This capture is now consumed for this frozen model; subsequent tuning
+cannot claim it as an untouched test. A tested Rust residual-lag API remains
+outstanding. The physical-qualification flag remains false.
+
+A post-evaluation read-only PowerShell diagnostic (not yet a tested Rust API)
+centered all 979 one-step residuals and preceding-row PWM inputs by their
+respective full-record means. At transition-index lag one, the residual
+autocorrelation is -0.230733112785153 and residual/past-input correlation is
+0.202307041918555. The input is 0.04 s before the target measurement: each
+transition already carries a one-row-old input. Numerators use the 978
+overlapping pairs; denominators use full-record centered energies (their
+geometric mean for cross-correlation). These are descriptive correlations, not
+whiteness-test p-values or confidence-qualified rejection thresholds. They
+motivate tested lag diagnostics rather than treating low RMSE as model adequacy.
+No model was changed after seeing these reserved-capture diagnostics.
+
+Identification CI evidence: workspace Clippy passed; the Mobility library
+completed with 177 passed, zero failed and one ignored (201.94 s), followed by
+the fixed CLI (1.82 s), three NCLT audit tests and suspension CLI (2.60 s).
+The saved run continued through doc-tests, all smoke/headless checks, OSS parity,
+fuzz-smoke (361 cases across nine boundaries) and the final Behavior CI (10/10
+seeds). No cargo/xtask process remains after reconnecting to the task. Evidence
+log `E:\RNE-build\m3c-sensor\openmct-speed-identification-v1-ci.log` is 246,235
+bytes with SHA-256
+`0e20c76764b5440beb06f9517f6f7987928bd6e1df95608ba792984a972fc311`.
+The original interactive session's exit-code record was not retained across the
+reconnection; the log itself reaches the CI script's final successful stage and
+contains no subsequent failure. This was the default configuration, not a new
+MuJoCo-feature or cross-backend qualification run.
+
 Next acquisition gate: obtain an explicit file listing and bounded individual raw
 logs on external storage; inspect units, measured versus commanded voltage, motor
 and load identity, clock construction, current-reference synchronization and
