@@ -593,6 +593,28 @@ Both live beside the source on external storage. The initially encountered singl
 `Trial Description: PRBS9` rows are preserved as run annotations rather than silently
 dropped or misclassified as samples. The final two runs remain sealed.
 
+`scripts/audit_pmdc_channels.py` verifies the training JSONL record count and digest
+before numeric inspection, then audits only source-internal timing and conversion
+consistency. The first training audit is 4,060 bytes, has file SHA-256
+`a2446c73a849fd7db66f5db25510eb7c5cd8e887e8ae8da5a7b09edbe65df860`,
+and report audit SHA-256
+`49a3ede7af3b6dd9f02efa33355d9dfd86327661c487ea462fd27eed745377be`.
+All eight run clocks are strictly increasing. Their interval median is 10,004 us,
+the global observed interval range is 8,888--10,040 us, and 1,767--1,779 of the
+2,008 intervals per run are not exactly 10,000 us. The source therefore supports a
+nominal 100 Hz acquisition statement but not an assumption of an exact 10 ms grid.
+
+Across the training rows, ordinary least-squares reconstruction of the source-derived
+voltage columns from their raw ADC columns has 2.764 mV RMS residual for A1 and
+2.751 mV RMS for B1. `MotorVoltage - (VoltageB1 - VoltageA1)` has 4.669 mV RMS and
+10 mV maximum absolute residual, consistent with finite displayed precision but not an
+independent voltage calibration. The analogous raw-current to `Current` affine fit has
+0.187 A RMS and 2.016 A maximum absolute residual, which is material and forbids treating
+the displayed current as a single exact affine transform without further source-method
+audit. These are self-consistency diagnostics only: ADC reference accuracy, divider and
+sensor tolerances, sampling phase, anti-alias response and external instruments remain
+unqualified, and every physical-accuracy flag stays false.
+
 The [AutoDRIVE Nigel author repository](https://github.com/Tinker-Twins/AutoDRIVE-Nigel-Dataset)
 is a separate Ackermann candidate with timestamp, steering, tick-count and inertial
 columns. Its README declares approximately 1.50 GB for the camera-free dataset

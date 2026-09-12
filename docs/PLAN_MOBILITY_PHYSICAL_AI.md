@@ -57,8 +57,10 @@ sheet relationships, trial boundaries and formula contamination and emits determ
 evidence to external storage. A lossless pre-final converter now retains all 12 source
 channels, source rows, run annotations and complete-run identity for the frozen training
 and development partitions while making the final partition unavailable. Calibration
-audit, a predeclared model/metric protocol and physical parameter qualification remain
-active M5 work.
+self-consistency audit now shows monotonic but nonuniform source timing, millivolt-scale
+voltage-column reconstruction residuals, and a materially non-affine displayed-current
+mapping. Independent calibration, a predeclared model/metric protocol and physical
+parameter qualification remain active M5 work.
 
 M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus
