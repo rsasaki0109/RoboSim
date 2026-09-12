@@ -15,10 +15,10 @@ use rne_physics::{
     RigidBody, RigidBodyInertia, RigidBodyType,
 };
 use rne_robot::{
-    aggregate_wheel_contact_patch, evaluate_longitudinal_drive_path, evaluate_suspension_strut,
-    DcMotorSpec, LongitudinalDrivePathInput, LongitudinalDrivePathState,
-    LongitudinalMobilityPlantSpec, SuspensionStrutSpec, TransmissionSpec, WheelAssemblySpec,
-    WheelStationSpec,
+    aggregate_wheel_contact_patch, evaluate_longitudinal_drive_path, evaluate_steering_actuator,
+    evaluate_suspension_strut, DcMotorSpec, LongitudinalDrivePathInput, LongitudinalDrivePathState,
+    LongitudinalMobilityPlantSpec, SteeringActuatorSpec, SteeringActuatorState,
+    SuspensionStrutSpec, TransmissionSpec, WheelAssemblySpec, WheelStationSpec,
 };
 use rne_world::Transform3;
 use serde::{Deserialize, Serialize};
@@ -31,9 +31,9 @@ pub const ACKERMANN_SUSPENSION_TRACE_KIND: &str = "rne_mobility_ackermann_suspen
 pub const ACKERMANN_SUSPENSION_COMPARISON_KIND: &str =
     "rne_mobility_ackermann_suspension_comparison";
 /// Schema version for the trace and comparison.
-pub const ACKERMANN_SUSPENSION_SCHEMA_VERSION: u32 = 1;
+pub const ACKERMANN_SUSPENSION_SCHEMA_VERSION: u32 = 2;
 /// Stable task identity shared by both backends.
-pub const ACKERMANN_SUSPENSION_TASK_ID: &str = "mobility_ackermann_suspension_split_mu_v1";
+pub const ACKERMANN_SUSPENSION_TASK_ID: &str = "mobility_ackermann_suspension_split_mu_v2";
 /// One-millisecond fixed physics step in simulation ticks.
 pub const ACKERMANN_SUSPENSION_FIXED_DELTA_TICKS: u64 = 1_000_000;
 
@@ -65,6 +65,8 @@ pub struct AckermannSuspensionSample {
     pub phase: u8,
     /// Requested center steering coordinate in radians.
     pub steering_command_rad: f64,
+    /// Completed center steering-actuator target sent through Ackermann geometry, in radians.
+    pub steering_actuator_target_rad: f64,
     /// Actual front-left/front-right steering coordinates in radians.
     pub front_steering_rad: [f64; 2],
     /// Commanded terminal voltage for each wheel in FL, RL, FR, RR order.
@@ -102,6 +104,11 @@ impl AckermannSuspensionSample {
         ensure!(
             self.steering_command_rad == command_for_step(self.step).0,
             "steering command drift"
+        );
+        ensure!(
+            self.steering_actuator_target_rad.abs()
+                <= steering_actuator_spec().maximum_position_rad,
+            "steering actuator target outside travel"
         );
         ensure!(
             self.command_voltage_v == command_for_step(self.step).1,
@@ -155,6 +162,8 @@ pub struct AckermannSuspensionTrace {
     pub wheel_station_specs: [WheelStationSpec; 4],
     /// Shared linear suspension force-element contract.
     pub suspension_spec: SuspensionStrutSpec,
+    /// Shared center-steering actuator response contract.
+    pub steering_actuator_spec: SteeringActuatorSpec,
     /// Wheelbase in meters.
     pub wheelbase_m: f64,
     /// Track width in meters.
@@ -197,6 +206,10 @@ impl AckermannSuspensionTrace {
             self.suspension_spec == suspension_spec(),
             "suspension drift"
         );
+        ensure!(
+            self.steering_actuator_spec == steering_actuator_spec(),
+            "steering actuator drift"
+        );
         ensure!(self.wheelbase_m == WHEELBASE_M, "wheelbase drift");
         ensure!(self.track_width_m == TRACK_WIDTH_M, "track drift");
         ensure!(
@@ -232,6 +245,29 @@ impl AckermannSuspensionTrace {
                 );
             }
         }
+        let dt_s = SimDuration::from_ticks(self.fixed_delta_ticks)
+            .as_seconds()
+            .value();
+        let mut steering_state = SteeringActuatorState::default();
+        let mut sample_index = 1;
+        for step in 1..=self.steps {
+            steering_state = evaluate_steering_actuator(
+                self.steering_actuator_spec,
+                steering_state,
+                command_for_step(step).0,
+                dt_s,
+            )?
+            .state;
+            if sample_index < self.samples.len() && self.samples[sample_index].step == step {
+                ensure!(
+                    self.samples[sample_index].steering_actuator_target_rad
+                        == steering_state.position_rad,
+                    "steering actuator replay drift"
+                );
+                sample_index += 1;
+            }
+        }
+        ensure!(sample_index == self.samples.len(), "unreplayed samples");
         validate_metrics(&self.metrics, self.passed)?;
         ensure!(
             self.content_digest == trace_digest(self)?,
@@ -374,7 +410,12 @@ pub fn run_ackermann_suspension_trace<B: PhysicsBackend>(
     task_spec.validate()?;
     let plant = wheel_plant_spec();
     let suspension = suspension_spec();
+    let steering_actuator = steering_actuator_spec();
     ensure!(suspension.is_valid(), "invalid suspension fixture");
+    ensure!(
+        steering_actuator.is_valid(),
+        "invalid steering actuator fixture"
+    );
     let fixed_delta = SimDuration::from_ticks(ACKERMANN_SUSPENSION_FIXED_DELTA_TICKS);
     let dt_s = fixed_delta.as_seconds().value();
     let physics_world = backend.create_world(PhysicsWorldDesc {
@@ -425,6 +466,7 @@ pub fn run_ackermann_suspension_trace<B: PhysicsBackend>(
         .get::<Transform3>(chassis)
         .context("initial chassis")?;
     let mut drive_states = [LongitudinalDrivePathState::default(); 4];
+    let mut steering_actuator_state = SteeringActuatorState::default();
     let mut conditioned_load_n = [0.0; 4];
     let mut pending_wrenches: Vec<ExternalBodyWrench> = Vec::new();
     let mut contact_steps = [0_u64; 4];
@@ -442,7 +484,14 @@ pub fn run_ackermann_suspension_trace<B: PhysicsBackend>(
     for zero_based_step in 0..TOTAL_STEPS {
         let step = zero_based_step + 1;
         let (center_steering, command_voltage_v) = command_for_step(step);
-        let steering_targets = front_steering_targets(center_steering);
+        steering_actuator_state = evaluate_steering_actuator(
+            steering_actuator,
+            steering_actuator_state,
+            center_steering,
+            dt_s,
+        )?
+        .state;
+        let steering_targets = front_steering_targets(steering_actuator_state.position_rad);
         for (index, station) in stations.iter().enumerate() {
             if station.front {
                 let target = if index == 0 {
@@ -595,6 +644,7 @@ pub fn run_ackermann_suspension_trace<B: PhysicsBackend>(
             samples.push(make_sample(
                 step,
                 center_steering,
+                steering_actuator_state.position_rad,
                 steering_rad,
                 command_voltage_v,
                 transform,
@@ -693,6 +743,7 @@ pub fn run_ackermann_suspension_trace<B: PhysicsBackend>(
         wheel_plant_spec: plant,
         wheel_station_specs: stations.map(|station| station.spec),
         suspension_spec: suspension,
+        steering_actuator_spec: steering_actuator,
         wheelbase_m: WHEELBASE_M,
         track_width_m: TRACK_WIDTH_M,
         fixed_delta_ticks: ACKERMANN_SUSPENSION_FIXED_DELTA_TICKS,
@@ -833,6 +884,17 @@ pub(crate) fn suspension_spec() -> SuspensionStrutSpec {
     }
 }
 
+pub(crate) fn steering_actuator_spec() -> SteeringActuatorSpec {
+    SteeringActuatorSpec {
+        time_constant_s: 0.08,
+        maximum_rate_rad_s: 2.5,
+        minimum_position_rad: -0.5,
+        maximum_position_rad: 0.5,
+        command_deadband_rad: 0.001,
+        ..SteeringActuatorSpec::default()
+    }
+}
+
 pub(crate) fn wheel_plant_spec() -> LongitudinalMobilityPlantSpec {
     let reference_load_n =
         (CHASSIS_MASS_KG + 4.0 * suspension_spec().unsprung_mass_kg) * 9.806_65 / 4.0;
@@ -925,6 +987,7 @@ pub(crate) fn front_steering_targets(center_rad: f64) -> [f64; 2] {
 fn make_sample(
     step: u64,
     steering_command_rad: f64,
+    steering_actuator_target_rad: f64,
     front_steering_rad: [f64; 2],
     command_voltage_v: [f64; 4],
     transform: Transform3,
@@ -942,6 +1005,7 @@ fn make_sample(
         sim_time_ticks: SimTime::from_ticks(step * ACKERMANN_SUSPENSION_FIXED_DELTA_TICKS).ticks(),
         phase: phase_for_step(step),
         steering_command_rad,
+        steering_actuator_target_rad,
         front_steering_rad,
         command_voltage_v,
         privileged_position_world_m: transform.translation.to_array().map(f64::from),
@@ -963,6 +1027,7 @@ fn make_sample(
 fn sample_zero(transform: Transform3) -> AckermannSuspensionSample {
     make_sample(
         0,
+        0.0,
         0.0,
         [0.0; 2],
         [0.0; 4],
@@ -1167,6 +1232,22 @@ mod tests {
             run_ackermann_suspension_trace(RapierBackend::new(), RapierBackend::manifest())
                 .unwrap();
         trace.samples[1].suspension_position_m[0] += 0.001;
+        assert!(trace.validate().is_err());
+    }
+
+    #[test]
+    fn steering_actuator_target_must_match_deterministic_replay() {
+        let mut trace =
+            run_ackermann_suspension_trace(RapierBackend::new(), RapierBackend::manifest())
+                .unwrap();
+        let turn_sample = trace
+            .samples
+            .iter_mut()
+            .find(|sample| sample.phase == 2)
+            .unwrap();
+        turn_sample.steering_actuator_target_rad += 0.001;
+        trace.content_digest = trace_digest(&trace).unwrap();
+
         assert!(trace.validate().is_err());
     }
 

@@ -7,8 +7,8 @@ use crate::components::{
     DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
     LongitudinalDrivePathState, LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState,
     MultirotorFlight, PwmMotorCommandFrontendSpec, PwmMotorCommandPolarity, RigidRoadPatchSpec,
-    RigidRoadProfileSpec, SuspensionStrutSpec, TransmissionSpec, VehicleDynamics,
-    WheelAssemblySpec, WheelStationSpec,
+    RigidRoadProfileSpec, SteeringActuatorFailureMode, SteeringActuatorSpec, SteeringActuatorState,
+    SuspensionStrutSpec, TransmissionSpec, VehicleDynamics, WheelAssemblySpec, WheelStationSpec,
 };
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
@@ -833,6 +833,25 @@ pub struct PwmMotorCommandEvaluation {
     pub average_bridge_loss_v: f64,
     /// Whether the requested command exceeded the declared command-count range.
     pub command_saturated: bool,
+}
+
+/// Completed first-order steering-actuator evaluation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SteeringActuatorEvaluation {
+    /// State to retain for the next completed step.
+    pub state: SteeringActuatorState,
+    /// Finite angle requested by the caller, in radians.
+    pub requested_target_rad: f64,
+    /// Target after steering-travel limits, in radians.
+    pub clamped_target_rad: f64,
+    /// Completed steering rate over this fixed step, in radians per second.
+    pub realized_rate_rad_s: f64,
+    /// Whether the requested target exceeded the declared travel limits.
+    pub command_saturated: bool,
+    /// Whether the unconstrained first-order response exceeded the rate limit.
+    pub rate_limited: bool,
+    /// Whether an explicit stuck failure held the completed position.
+    pub stuck: bool,
 }
 
 impl DcMotorEvaluation {
@@ -1666,6 +1685,60 @@ pub fn evaluate_pwm_motor_command(
         terminal_voltage_request_v,
         average_bridge_loss_v,
         command_saturated,
+    })
+}
+
+/// Advances a backend-neutral first-order steering actuator by one fixed step.
+///
+/// The exact zero-order-hold first-order response is evaluated first, then
+/// bounded by the measured steering-rate and travel limits. A command inside
+/// the declared deadband holds the completed position. The returned position
+/// is suitable as the target for a backend joint-position constraint; it is
+/// not a measured steering angle or a torque-producing servo simulation.
+pub fn evaluate_steering_actuator(
+    spec: SteeringActuatorSpec,
+    state: SteeringActuatorState,
+    requested_target_rad: f64,
+    dt_s: f64,
+) -> Result<SteeringActuatorEvaluation, MobilityPlantEvaluationError> {
+    if !spec.is_valid() {
+        return Err(MobilityPlantEvaluationError::InvalidSpec);
+    }
+    if !state.position_rad.is_finite()
+        || state.position_rad < spec.minimum_position_rad
+        || state.position_rad > spec.maximum_position_rad
+        || !requested_target_rad.is_finite()
+    {
+        return Err(MobilityPlantEvaluationError::InvalidInput);
+    }
+    if !dt_s.is_finite() || dt_s <= 0.0 {
+        return Err(MobilityPlantEvaluationError::InvalidTimeStep);
+    }
+
+    let clamped_target_rad =
+        requested_target_rad.clamp(spec.minimum_position_rad, spec.maximum_position_rad);
+    let command_saturated = clamped_target_rad != requested_target_rad;
+    let stuck = spec.failure_mode == SteeringActuatorFailureMode::Stuck;
+    let error_rad = clamped_target_rad - state.position_rad;
+    let unconstrained_delta_rad = if stuck || error_rad.abs() <= spec.command_deadband_rad {
+        0.0
+    } else {
+        error_rad * (1.0 - (-dt_s / spec.time_constant_s).exp())
+    };
+    let maximum_delta_rad = spec.maximum_rate_rad_s * dt_s;
+    let delta_rad = unconstrained_delta_rad.clamp(-maximum_delta_rad, maximum_delta_rad);
+    let rate_limited = delta_rad != unconstrained_delta_rad;
+    let position_rad = (state.position_rad + delta_rad)
+        .clamp(spec.minimum_position_rad, spec.maximum_position_rad);
+
+    Ok(SteeringActuatorEvaluation {
+        state: SteeringActuatorState { position_rad },
+        requested_target_rad,
+        clamped_target_rad,
+        realized_rate_rad_s: (position_rad - state.position_rad) / dt_s,
+        command_saturated,
+        rate_limited,
+        stuck,
     })
 }
 
@@ -3679,6 +3752,125 @@ mod tests {
         assert_eq!(
             evaluate_pwm_motor_command(PwmMotorCommandFrontendSpec::default(), 1.0, -12.0),
             Err(MobilityPlantEvaluationError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn steering_actuator_uses_exact_first_order_response() {
+        let spec = SteeringActuatorSpec {
+            time_constant_s: 0.2,
+            maximum_rate_rad_s: 100.0,
+            minimum_position_rad: -1.0,
+            maximum_position_rad: 1.0,
+            ..SteeringActuatorSpec::default()
+        };
+        let evaluation =
+            evaluate_steering_actuator(spec, SteeringActuatorState::default(), 0.5, 0.1).unwrap();
+        let expected_position_rad = 0.5 * (1.0 - (-0.5_f64).exp());
+
+        assert!((evaluation.state.position_rad - expected_position_rad).abs() < 1.0e-12);
+        assert!((evaluation.realized_rate_rad_s - expected_position_rad / 0.1).abs() < 1.0e-12);
+        assert_eq!(evaluation.clamped_target_rad, 0.5);
+        assert!(!evaluation.command_saturated);
+        assert!(!evaluation.rate_limited);
+        assert!(!evaluation.stuck);
+        assert_eq!(
+            evaluation,
+            evaluate_steering_actuator(spec, SteeringActuatorState::default(), 0.5, 0.1,).unwrap()
+        );
+    }
+
+    #[test]
+    fn steering_actuator_reports_rate_and_travel_saturation() {
+        let spec = SteeringActuatorSpec {
+            time_constant_s: 0.1,
+            maximum_rate_rad_s: 1.0,
+            minimum_position_rad: -0.5,
+            maximum_position_rad: 0.5,
+            ..SteeringActuatorSpec::default()
+        };
+        let evaluation =
+            evaluate_steering_actuator(spec, SteeringActuatorState::default(), 2.0, 0.1).unwrap();
+
+        assert_eq!(evaluation.clamped_target_rad, 0.5);
+        assert_eq!(evaluation.state.position_rad, 0.1);
+        assert_eq!(evaluation.realized_rate_rad_s, 1.0);
+        assert!(evaluation.command_saturated);
+        assert!(evaluation.rate_limited);
+    }
+
+    #[test]
+    fn steering_actuator_deadband_and_stuck_failure_hold_completed_state() {
+        let state = SteeringActuatorState { position_rad: 0.1 };
+        let deadband = evaluate_steering_actuator(
+            SteeringActuatorSpec {
+                command_deadband_rad: 0.02,
+                ..SteeringActuatorSpec::default()
+            },
+            state,
+            0.11,
+            0.01,
+        )
+        .unwrap();
+        assert_eq!(deadband.state, state);
+        assert_eq!(deadband.realized_rate_rad_s, 0.0);
+        assert!(!deadband.stuck);
+
+        let stuck = evaluate_steering_actuator(
+            SteeringActuatorSpec {
+                failure_mode: SteeringActuatorFailureMode::Stuck,
+                ..SteeringActuatorSpec::default()
+            },
+            state,
+            -0.4,
+            0.01,
+        )
+        .unwrap();
+        assert_eq!(stuck.state, state);
+        assert_eq!(stuck.realized_rate_rad_s, 0.0);
+        assert!(stuck.stuck);
+    }
+
+    #[test]
+    fn steering_actuator_rejects_invalid_spec_state_command_and_step() {
+        assert_eq!(
+            evaluate_steering_actuator(
+                SteeringActuatorSpec {
+                    time_constant_s: 0.0,
+                    ..SteeringActuatorSpec::default()
+                },
+                SteeringActuatorState::default(),
+                0.0,
+                0.01,
+            ),
+            Err(MobilityPlantEvaluationError::InvalidSpec)
+        );
+        assert_eq!(
+            evaluate_steering_actuator(
+                SteeringActuatorSpec::default(),
+                SteeringActuatorState { position_rad: 1.0 },
+                0.0,
+                0.01,
+            ),
+            Err(MobilityPlantEvaluationError::InvalidInput)
+        );
+        assert_eq!(
+            evaluate_steering_actuator(
+                SteeringActuatorSpec::default(),
+                SteeringActuatorState::default(),
+                f64::NAN,
+                0.01,
+            ),
+            Err(MobilityPlantEvaluationError::InvalidInput)
+        );
+        assert_eq!(
+            evaluate_steering_actuator(
+                SteeringActuatorSpec::default(),
+                SteeringActuatorState::default(),
+                0.0,
+                0.0,
+            ),
+            Err(MobilityPlantEvaluationError::InvalidTimeStep)
         );
     }
 

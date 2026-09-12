@@ -1,10 +1,10 @@
-# Ackermann suspension benchmark v1
+# Ackermann suspension benchmark v1/v2
 
 Status: implemented additive M3-C dynamics subgate
 
 This fixture replaces a planar bicycle or equivalent support point with an explicit
 four-station multibody vehicle. The same
-`mobility_ackermann_suspension_split_mu_v1` TaskSpec, seed, 1 ms clock, force laws,
+`mobility_ackermann_suspension_split_mu_v2` TaskSpec, seed, 1 ms clock, force laws,
 sampling, and verdict code run through Rapier and MuJoCo.
 
 ## Physical contract
@@ -17,6 +17,14 @@ rear steering axes are physically present but constrained to zero. Tire forces a
 computed from solved load and contact-point velocity, then applied through the
 backend-neutral one-step wrench contract. Generic collider friction is not relabelled as
 a vehicle tire.
+
+The commanded center angle passes through the same backend-neutral steering
+actuator before Ackermann inner/outer geometry is applied. The fixture freezes an
+80 ms first-order time constant, 2.5 rad/s rate limit, +/-0.5 rad travel, and
+1 mrad deadband. Both the raw command and completed actuator target are retained,
+so backend joint motion cannot be mistaken for instantaneous command following.
+These values exercise the contract but remain uncalibrated; a direct steering-angle
+log is required before claiming real-vehicle servo fidelity.
 
 The suspension force uses one unit-explicit law for every backend:
 
@@ -68,30 +76,33 @@ Generate the external-SSD evidence with:
 
 ```powershell
 cargo run -p rne_mobility_benchmark --features mujoco -- `
-  --backend ackermann-suspension-rapier --output ackermann-suspension-rapier-v1.json
+  --backend ackermann-suspension-rapier --output ackermann-suspension-rapier-v2.json
 cargo run -p rne_mobility_benchmark --features mujoco -- `
-  --backend ackermann-suspension-mujoco --output ackermann-suspension-mujoco-v1.json
+  --backend ackermann-suspension-mujoco --output ackermann-suspension-mujoco-v2.json
 cargo run -p rne_mobility_benchmark --features mujoco -- `
-  --backend ackermann-suspension-compare --output ackermann-suspension-comparison-v1.json
+  --backend ackermann-suspension-compare --output ackermann-suspension-comparison-v2.json
 ```
 
 The repository tests require exact same-runtime Rapier repeatability, passing individual
 Rapier/MuJoCo traces, passing unit-bearing comparison bounds, Ackermann inner/outer
 geometry, valid suspension-force evaluation, and trace-tamper rejection.
 
-The verified comparison artifact is stored outside the repository at
-`E:\RNE-build\m3c-sensor\ackermann-suspension-comparison-v1.json` with digest
-`fnv1a64:681b40b5910206a4`:
+The verified v2 comparison artifact is stored outside the repository at
+`E:\RNE-build\m3d-steering-actuator\ackermann-suspension-comparison-v2.json`.
+It is 313,430 bytes, has SHA-256
+`7f3523c1b4358db0948de2c7575d1ac0c8896071bde2518807db508a42ee9d86`,
+content digest `fnv1a64:e5b073c0408b8bbd`, and passes every trace and
+cross-backend bound:
 
 | metric | Rapier | MuJoCo | absolute gap |
 | --- | ---: | ---: | ---: |
-| forward displacement | 0.881665 m | 0.884145 m | 0.002480 m |
-| lateral displacement | 0.142206 m | 0.142809 m | 0.000603 m |
-| maximum yaw rate | 0.064793 rad/s | 0.064903 rad/s | 0.000110 rad/s |
-| front/rear load shift from settled baseline | 126.197 N | 141.615 N | 15.418 N |
-| left/right load change from settled baseline | 62.824 N | 71.237 N | 8.413 N |
-| split-friction utilization gap | 0.118561 | 0.119906 | — |
-| driven-phase suspension range | 0.240922 mm | 0.276690 mm | 0.035768 mm |
+| forward displacement | 0.881943 m | 0.884564 m | 0.002620 m |
+| lateral displacement | 0.138842 m | 0.139442 m | 0.000600 m |
+| maximum yaw rate | 0.064581 rad/s | 0.064779 rad/s | 0.000197 rad/s |
+| front/rear load shift from settled baseline | 128.561 N | 144.294 N | 15.733 N |
+| left/right load change from settled baseline | 49.900 N | 56.664 N | 6.764 N |
+| split-friction utilization gap | 0.118281 | 0.119543 | — |
+| driven-phase suspension range | 0.236511 mm | 0.271456 mm | 0.034945 mm |
 | minimum wheel contact fraction | 1.000 | 1.000 | — |
 
 ## Explicit limits

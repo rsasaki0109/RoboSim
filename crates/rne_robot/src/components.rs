@@ -118,6 +118,80 @@ pub struct Actuator {
     pub limits: crate::actuator::ActuatorLimits,
 }
 
+/// Failure applied to the backend-neutral steering-actuator response.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SteeringActuatorFailureMode {
+    /// Normal command-following operation.
+    #[default]
+    Nominal,
+    /// Hold the completed steering position regardless of new commands.
+    Stuck,
+}
+
+/// First-order steering-actuator response before a joint-position request.
+///
+/// This model captures measured command-to-angle bandwidth, rate saturation,
+/// travel limits, deadband, and an explicit stuck failure without exposing a
+/// physics-backend servo type. It does not model motor current, backlash,
+/// compliance, or steering-linkage torque; those require separate evidence and
+/// a higher-fidelity actuator model.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SteeringActuatorSpec {
+    /// Command-to-angle first-order time constant in seconds.
+    pub time_constant_s: f64,
+    /// Maximum absolute completed steering rate in radians per second.
+    pub maximum_rate_rad_s: f64,
+    /// Minimum completed steering position in radians.
+    pub minimum_position_rad: f64,
+    /// Maximum completed steering position in radians.
+    pub maximum_position_rad: f64,
+    /// Command-error magnitude ignored by the actuator, in radians.
+    pub command_deadband_rad: f64,
+    /// Explicit actuator failure behavior.
+    pub failure_mode: SteeringActuatorFailureMode,
+}
+
+impl Default for SteeringActuatorSpec {
+    fn default() -> Self {
+        Self {
+            time_constant_s: 0.08,
+            maximum_rate_rad_s: 4.0,
+            minimum_position_rad: -0.5,
+            maximum_position_rad: 0.5,
+            command_deadband_rad: 0.0,
+            failure_mode: SteeringActuatorFailureMode::Nominal,
+        }
+    }
+}
+
+impl SteeringActuatorSpec {
+    /// Returns whether all parameters are finite and physically valid.
+    pub fn is_valid(&self) -> bool {
+        [
+            self.time_constant_s,
+            self.maximum_rate_rad_s,
+            self.minimum_position_rad,
+            self.maximum_position_rad,
+            self.command_deadband_rad,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+            && self.time_constant_s > 0.0
+            && self.maximum_rate_rad_s > 0.0
+            && self.minimum_position_rad < self.maximum_position_rad
+            && self.command_deadband_rad >= 0.0
+            && self.command_deadband_rad < self.maximum_position_rad - self.minimum_position_rad
+    }
+}
+
+/// Completed state retained by the first-order steering actuator.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SteeringActuatorState {
+    /// Completed steering position in radians.
+    pub position_rad: f64,
+}
+
 /// Electrical failure applied to a DC motor model.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DcMotorFailureMode {
