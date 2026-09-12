@@ -147,6 +147,180 @@ pub struct SteeringActuatorIdentificationResult {
     pub holdout_rms_rad: f64,
 }
 
+/// Failure returned by steady combined-slip tire identification.
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TireIdentificationError {
+    /// Bounds, excitation thresholds, search budget, or residual gates are invalid.
+    #[error("invalid tire identification specification")]
+    InvalidSpec,
+    /// A run or sample is non-finite, unordered, duplicated, or outside the model envelope.
+    #[error("invalid tire identification sample")]
+    InvalidSample,
+    /// Pure-slip training or combined-slip holdout excitation is insufficient.
+    #[error("insufficient tire identification excitation")]
+    InsufficientExcitation,
+    /// The deterministic search produced a non-finite or out-of-bounds profile.
+    #[error("tire identification produced a nonphysical result")]
+    NonPhysicalResult,
+    /// Training, pooled holdout, or worst-condition residual exceeds its declared gate.
+    #[error("tire identification residual exceeds its declared bound")]
+    ResidualExceeded,
+    /// An acquisition identity is duplicated across training and holdout.
+    #[error("tire acquisition IDs must be unique across split roles")]
+    DuplicateAcquisition,
+}
+
+/// One synchronized steady tire-force observation.
+///
+/// Slip coordinates must use the same signs and relaxed coordinates as
+/// [`CombinedSlipTireState`]. Forces must be independently measured or derived
+/// from a declared force-measurement system; trajectory agreement alone is not
+/// accepted as tire-force evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TireForceIdentificationSample {
+    /// Monotonic capture time in seconds within one acquisition.
+    pub capture_time_s: f64,
+    /// Relaxed longitudinal slip ratio.
+    pub longitudinal_slip_ratio: f64,
+    /// Relaxed tangent of lateral slip angle.
+    pub lateral_slip_tangent: f64,
+    /// Independently measured normal load in newtons.
+    pub normal_load_n: f64,
+    /// Independently measured longitudinal tire force in newtons.
+    pub longitudinal_force_n: f64,
+    /// Independently measured lateral tire force in newtons.
+    pub lateral_force_n: f64,
+}
+
+/// One complete tire-force acquisition with a declared road condition.
+///
+/// Acquisition identity is caller-supplied and is not proof of independent
+/// collection. `road_friction_scale` must come from the acquisition contract,
+/// not be tuned on holdout residuals.
+#[derive(Clone, Copy, Debug)]
+pub struct TireIdentificationRun<'a> {
+    /// Stable identity unique across both split roles.
+    pub acquisition_id: u64,
+    /// Stable road/tire condition identity used for worst-condition reporting.
+    pub condition_id: u64,
+    /// Independently declared road-friction scale applied to this run.
+    pub road_friction_scale: f64,
+    /// Samples in strict capture order.
+    pub samples: &'a [TireForceIdentificationSample],
+}
+
+/// Frozen search, excitation, and residual contract for tire identification.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TireIdentificationSpec {
+    /// Inclusive longitudinal stiffness bounds in newtons.
+    pub longitudinal_stiffness_bounds_n: [f64; 2],
+    /// Inclusive lateral stiffness bounds in newtons.
+    pub lateral_stiffness_bounds_n: [f64; 2],
+    /// Inclusive longitudinal peak-friction bounds.
+    pub longitudinal_peak_friction_bounds: [f64; 2],
+    /// Inclusive lateral peak-friction bounds.
+    pub lateral_peak_friction_bounds: [f64; 2],
+    /// Maximum absolute cross-axis slip for a pure-slip training sample.
+    pub pure_slip_tolerance: f64,
+    /// Minimum absolute primary-axis slip retained for fitting.
+    pub minimum_excited_slip: f64,
+    /// Maximum absolute slip counted as small-slip excitation.
+    pub maximum_linear_slip: f64,
+    /// Minimum absolute slip counted as peak-region excitation.
+    pub minimum_peak_slip: f64,
+    /// Maximum absolute slip coordinate admitted by this identification envelope.
+    pub maximum_abs_slip: f64,
+    /// Minimum retained pure-slip training samples per axis.
+    pub minimum_training_samples_per_axis: usize,
+    /// Minimum combined-slip holdout samples over all runs.
+    pub minimum_combined_holdout_samples: usize,
+    /// Minimum retained combined-slip samples in every holdout condition.
+    pub minimum_holdout_samples_per_condition: usize,
+    /// Grid points on each parameter axis per refinement pass.
+    pub grid_points_per_axis: usize,
+    /// Deterministic coarse-to-fine refinement passes.
+    pub refinement_passes: usize,
+    /// Maximum pure-slip training force RMS in newtons.
+    pub maximum_training_rms_n: f64,
+    /// Maximum pooled combined-slip holdout vector-force RMS in newtons.
+    pub maximum_holdout_rms_n: f64,
+    /// Maximum combined-slip RMS for any declared holdout condition, in newtons.
+    pub maximum_worst_condition_rms_n: f64,
+}
+
+impl TireIdentificationSpec {
+    fn is_valid(&self) -> bool {
+        let bounds_valid = |bounds: [f64; 2]| {
+            bounds.iter().all(|value| value.is_finite()) && bounds[0] > 0.0 && bounds[0] < bounds[1]
+        };
+        bounds_valid(self.longitudinal_stiffness_bounds_n)
+            && bounds_valid(self.lateral_stiffness_bounds_n)
+            && bounds_valid(self.longitudinal_peak_friction_bounds)
+            && bounds_valid(self.lateral_peak_friction_bounds)
+            && [
+                self.pure_slip_tolerance,
+                self.minimum_excited_slip,
+                self.maximum_linear_slip,
+                self.minimum_peak_slip,
+                self.maximum_abs_slip,
+                self.maximum_training_rms_n,
+                self.maximum_holdout_rms_n,
+                self.maximum_worst_condition_rms_n,
+            ]
+            .iter()
+            .all(|value| value.is_finite())
+            && self.pure_slip_tolerance >= 0.0
+            && self.minimum_excited_slip > 0.0
+            && self.minimum_excited_slip <= self.maximum_linear_slip
+            && self.maximum_linear_slip < self.minimum_peak_slip
+            && self.minimum_peak_slip < self.maximum_abs_slip
+            && self.pure_slip_tolerance < self.minimum_excited_slip
+            && self.minimum_training_samples_per_axis >= 4
+            && self.minimum_combined_holdout_samples >= 2
+            && self.minimum_holdout_samples_per_condition >= 2
+            && self.minimum_combined_holdout_samples / 2
+                >= self.minimum_holdout_samples_per_condition
+            && (5..=33).contains(&self.grid_points_per_axis)
+            && self.grid_points_per_axis % 2 == 1
+            && (1..=8).contains(&self.refinement_passes)
+            && self.maximum_training_rms_n >= 0.0
+            && self.maximum_holdout_rms_n >= 0.0
+            && self.maximum_worst_condition_rms_n >= 0.0
+    }
+}
+
+/// Combined-slip holdout residual for one declared road/tire condition.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TireConditionResidual {
+    /// Stable condition identity from the input runs.
+    pub condition_id: u64,
+    /// Retained combined-slip sample count.
+    pub sample_count: usize,
+    /// Vector-force RMS `sqrt(mean(ex^2 + ey^2))` in newtons.
+    pub vector_force_rms_n: f64,
+}
+
+/// Identified tire profile with frozen pure/combined split evidence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CombinedSlipTireIdentificationResult {
+    /// Template with the four identified steady-force parameters replaced.
+    pub tire_spec: CombinedSlipTireSpec,
+    /// Retained pure-longitudinal training sample count.
+    pub longitudinal_training_sample_count: usize,
+    /// Retained pure-lateral training sample count.
+    pub lateral_training_sample_count: usize,
+    /// Pure-slip force RMS pooled across both fitted axes, in newtons.
+    pub training_rms_n: f64,
+    /// Combined-slip holdout vector-force RMS pooled across conditions, in newtons.
+    pub holdout_rms_n: f64,
+    /// Per-condition combined-slip residuals in ascending condition-ID order.
+    pub condition_residuals: Vec<TireConditionResidual>,
+}
+
 /// Failure returned by deterministic suspension-force identification.
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SuspensionIdentificationError {
@@ -1972,6 +2146,349 @@ pub fn identify_steering_actuator_first_order(
         training_rms_rad,
         holdout_rms_rad,
     })
+}
+
+#[derive(Clone, Copy)]
+enum TireFitAxis {
+    Longitudinal,
+    Lateral,
+}
+
+/// Identifies steady tire stiffness and peak friction from pure-slip training runs.
+///
+/// Complete acquisitions are assigned by the caller to training or holdout and
+/// may not share identities. Only pure-longitudinal and pure-lateral training
+/// samples enter the deterministic bounded search. The fitted profile is then
+/// frozen and evaluated on combined-slip holdout samples, both pooled and by
+/// declared condition. Load sensitivity, road scale, low-speed regularization,
+/// and relaxation lengths come from `template` and are never tuned on holdout.
+pub fn identify_combined_slip_tire_steady(
+    identification: TireIdentificationSpec,
+    template: CombinedSlipTireSpec,
+    training_runs: &[TireIdentificationRun<'_>],
+    holdout_runs: &[TireIdentificationRun<'_>],
+) -> Result<CombinedSlipTireIdentificationResult, TireIdentificationError> {
+    if !identification.is_valid() || !template.is_valid() {
+        return Err(TireIdentificationError::InvalidSpec);
+    }
+    validate_tire_identification_runs(identification, template, training_runs, holdout_runs)?;
+
+    let mut longitudinal = Vec::new();
+    let mut lateral = Vec::new();
+    for run in training_runs {
+        for sample in run.samples {
+            if sample.lateral_slip_tangent.abs() <= identification.pure_slip_tolerance
+                && sample.longitudinal_slip_ratio.abs() >= identification.minimum_excited_slip
+            {
+                longitudinal.push((
+                    sample.longitudinal_slip_ratio,
+                    sample.normal_load_n,
+                    run.road_friction_scale,
+                    sample.longitudinal_force_n,
+                ));
+            }
+            if sample.longitudinal_slip_ratio.abs() <= identification.pure_slip_tolerance
+                && sample.lateral_slip_tangent.abs() >= identification.minimum_excited_slip
+            {
+                lateral.push((
+                    sample.lateral_slip_tangent,
+                    sample.normal_load_n,
+                    run.road_friction_scale,
+                    sample.lateral_force_n,
+                ));
+            }
+        }
+    }
+    let excited = |samples: &[(f64, f64, f64, f64)]| {
+        samples.len() >= identification.minimum_training_samples_per_axis
+            && samples
+                .iter()
+                .any(|sample| sample.0.abs() <= identification.maximum_linear_slip)
+            && samples
+                .iter()
+                .any(|sample| sample.0.abs() >= identification.minimum_peak_slip)
+    };
+    if !excited(&longitudinal) || !excited(&lateral) {
+        return Err(TireIdentificationError::InsufficientExcitation);
+    }
+    let work = (longitudinal.len() + lateral.len())
+        .saturating_mul(identification.grid_points_per_axis)
+        .saturating_mul(identification.grid_points_per_axis)
+        .saturating_mul(identification.refinement_passes);
+    if work > 10_000_000 {
+        return Err(TireIdentificationError::InvalidSpec);
+    }
+
+    let (longitudinal_stiffness_n, longitudinal_peak_friction) = fit_tire_axis(
+        identification,
+        template,
+        TireFitAxis::Longitudinal,
+        &longitudinal,
+    )?;
+    let (lateral_stiffness_n, lateral_peak_friction) =
+        fit_tire_axis(identification, template, TireFitAxis::Lateral, &lateral)?;
+    let tire_spec = CombinedSlipTireSpec {
+        longitudinal_stiffness_n,
+        lateral_stiffness_n,
+        longitudinal_peak_friction,
+        lateral_peak_friction,
+        ..template
+    };
+    if !tire_spec.is_valid() {
+        return Err(TireIdentificationError::NonPhysicalResult);
+    }
+
+    let longitudinal_squared_error = axis_squared_error(
+        template,
+        TireFitAxis::Longitudinal,
+        longitudinal_stiffness_n,
+        longitudinal_peak_friction,
+        &longitudinal,
+    );
+    let lateral_squared_error = axis_squared_error(
+        template,
+        TireFitAxis::Lateral,
+        lateral_stiffness_n,
+        lateral_peak_friction,
+        &lateral,
+    );
+    let training_rms_n = ((longitudinal_squared_error + lateral_squared_error)
+        / (longitudinal.len() + lateral.len()) as f64)
+        .sqrt();
+
+    let mut conditions = std::collections::BTreeMap::<u64, (usize, f64)>::new();
+    let mut holdout_count = 0_usize;
+    let mut holdout_squared_error = 0.0;
+    for run in holdout_runs {
+        for sample in run.samples {
+            if sample.longitudinal_slip_ratio.abs() < identification.minimum_excited_slip
+                || sample.lateral_slip_tangent.abs() < identification.minimum_excited_slip
+            {
+                continue;
+            }
+            let (predicted_longitudinal_n, predicted_lateral_n) = steady_tire_forces(
+                tire_spec,
+                sample.longitudinal_slip_ratio,
+                sample.lateral_slip_tangent,
+                sample.normal_load_n,
+                run.road_friction_scale,
+            );
+            let squared_error = (predicted_longitudinal_n - sample.longitudinal_force_n).powi(2)
+                + (predicted_lateral_n - sample.lateral_force_n).powi(2);
+            if !squared_error.is_finite() {
+                return Err(TireIdentificationError::NonPhysicalResult);
+            }
+            holdout_count += 1;
+            holdout_squared_error += squared_error;
+            let condition = conditions.entry(run.condition_id).or_default();
+            condition.0 += 1;
+            condition.1 += squared_error;
+        }
+    }
+    if holdout_count < identification.minimum_combined_holdout_samples
+        || conditions.len() < 2
+        || conditions.values().any(|(sample_count, _)| {
+            *sample_count < identification.minimum_holdout_samples_per_condition
+        })
+    {
+        return Err(TireIdentificationError::InsufficientExcitation);
+    }
+    let holdout_rms_n = (holdout_squared_error / holdout_count as f64).sqrt();
+    let condition_residuals = conditions
+        .into_iter()
+        .map(
+            |(condition_id, (sample_count, squared_error))| TireConditionResidual {
+                condition_id,
+                sample_count,
+                vector_force_rms_n: (squared_error / sample_count as f64).sqrt(),
+            },
+        )
+        .collect::<Vec<_>>();
+    let worst_condition_rms_n = condition_residuals
+        .iter()
+        .map(|condition| condition.vector_force_rms_n)
+        .fold(0.0_f64, f64::max);
+    if !training_rms_n.is_finite()
+        || !holdout_rms_n.is_finite()
+        || training_rms_n > identification.maximum_training_rms_n
+        || holdout_rms_n > identification.maximum_holdout_rms_n
+        || worst_condition_rms_n > identification.maximum_worst_condition_rms_n
+    {
+        return Err(TireIdentificationError::ResidualExceeded);
+    }
+
+    Ok(CombinedSlipTireIdentificationResult {
+        tire_spec,
+        longitudinal_training_sample_count: longitudinal.len(),
+        lateral_training_sample_count: lateral.len(),
+        training_rms_n,
+        holdout_rms_n,
+        condition_residuals,
+    })
+}
+
+fn validate_tire_identification_runs(
+    identification: TireIdentificationSpec,
+    template: CombinedSlipTireSpec,
+    training_runs: &[TireIdentificationRun<'_>],
+    holdout_runs: &[TireIdentificationRun<'_>],
+) -> Result<(), TireIdentificationError> {
+    if training_runs.is_empty() || holdout_runs.is_empty() {
+        return Err(TireIdentificationError::InsufficientExcitation);
+    }
+    let mut acquisition_ids = std::collections::BTreeSet::new();
+    let mut total_samples = 0_usize;
+    for run in training_runs.iter().chain(holdout_runs) {
+        if !acquisition_ids.insert(run.acquisition_id) {
+            return Err(TireIdentificationError::DuplicateAcquisition);
+        }
+        if run.samples.is_empty()
+            || !run.road_friction_scale.is_finite()
+            || run.road_friction_scale <= 0.0
+        {
+            return Err(TireIdentificationError::InvalidSample);
+        }
+        total_samples = total_samples.saturating_add(run.samples.len());
+        if total_samples > 100_000 {
+            return Err(TireIdentificationError::InvalidSpec);
+        }
+        let mut previous_time_s = None;
+        for sample in run.samples {
+            if [
+                sample.capture_time_s,
+                sample.longitudinal_slip_ratio,
+                sample.lateral_slip_tangent,
+                sample.normal_load_n,
+                sample.longitudinal_force_n,
+                sample.lateral_force_n,
+            ]
+            .iter()
+            .any(|value| !value.is_finite())
+                || sample.longitudinal_slip_ratio.abs() > identification.maximum_abs_slip
+                || sample.lateral_slip_tangent.abs() > identification.maximum_abs_slip
+                || sample.normal_load_n <= 0.0
+                || sample.normal_load_n > template.reference_load_n * template.maximum_load_ratio
+                || previous_time_s.is_some_and(|previous| sample.capture_time_s <= previous)
+            {
+                return Err(TireIdentificationError::InvalidSample);
+            }
+            previous_time_s = Some(sample.capture_time_s);
+        }
+    }
+    Ok(())
+}
+
+fn fit_tire_axis(
+    identification: TireIdentificationSpec,
+    template: CombinedSlipTireSpec,
+    axis: TireFitAxis,
+    samples: &[(f64, f64, f64, f64)],
+) -> Result<(f64, f64), TireIdentificationError> {
+    let mut stiffness_bounds = match axis {
+        TireFitAxis::Longitudinal => identification.longitudinal_stiffness_bounds_n,
+        TireFitAxis::Lateral => identification.lateral_stiffness_bounds_n,
+    };
+    let original_stiffness_bounds = stiffness_bounds;
+    let mut friction_bounds = match axis {
+        TireFitAxis::Longitudinal => identification.longitudinal_peak_friction_bounds,
+        TireFitAxis::Lateral => identification.lateral_peak_friction_bounds,
+    };
+    let original_friction_bounds = friction_bounds;
+    let divisions = (identification.grid_points_per_axis - 1) as f64;
+    let mut best = (stiffness_bounds[0], friction_bounds[0], f64::INFINITY);
+    for _ in 0..identification.refinement_passes {
+        let stiffness_step = (stiffness_bounds[1] - stiffness_bounds[0]) / divisions;
+        let friction_step = (friction_bounds[1] - friction_bounds[0]) / divisions;
+        for stiffness_index in 0..identification.grid_points_per_axis {
+            let stiffness_n = stiffness_bounds[0] + stiffness_step * stiffness_index as f64;
+            for friction_index in 0..identification.grid_points_per_axis {
+                let peak_friction = friction_bounds[0] + friction_step * friction_index as f64;
+                let squared_error =
+                    axis_squared_error(template, axis, stiffness_n, peak_friction, samples);
+                if squared_error < best.2 {
+                    best = (stiffness_n, peak_friction, squared_error);
+                }
+            }
+        }
+        if !best.2.is_finite() {
+            return Err(TireIdentificationError::NonPhysicalResult);
+        }
+        stiffness_bounds = [
+            (best.0 - stiffness_step).max(original_stiffness_bounds[0]),
+            (best.0 + stiffness_step).min(original_stiffness_bounds[1]),
+        ];
+        friction_bounds = [
+            (best.1 - friction_step).max(original_friction_bounds[0]),
+            (best.1 + friction_step).min(original_friction_bounds[1]),
+        ];
+    }
+    Ok((best.0, best.1))
+}
+
+fn axis_squared_error(
+    template: CombinedSlipTireSpec,
+    axis: TireFitAxis,
+    stiffness_n: f64,
+    peak_friction: f64,
+    samples: &[(f64, f64, f64, f64)],
+) -> f64 {
+    samples
+        .iter()
+        .map(|(slip, normal_load_n, road_scale, measured_force_n)| {
+            let (longitudinal_slip, lateral_slip) = match axis {
+                TireFitAxis::Longitudinal => (*slip, 0.0),
+                TireFitAxis::Lateral => (0.0, *slip),
+            };
+            let mut candidate = template;
+            match axis {
+                TireFitAxis::Longitudinal => {
+                    candidate.longitudinal_stiffness_n = stiffness_n;
+                    candidate.longitudinal_peak_friction = peak_friction;
+                }
+                TireFitAxis::Lateral => {
+                    candidate.lateral_stiffness_n = stiffness_n;
+                    candidate.lateral_peak_friction = peak_friction;
+                }
+            }
+            let predicted = steady_tire_forces(
+                candidate,
+                longitudinal_slip,
+                lateral_slip,
+                *normal_load_n,
+                *road_scale,
+            );
+            let predicted_force_n = match axis {
+                TireFitAxis::Longitudinal => predicted.0,
+                TireFitAxis::Lateral => predicted.1,
+            };
+            (predicted_force_n - measured_force_n).powi(2)
+        })
+        .sum()
+}
+
+fn steady_tire_forces(
+    spec: CombinedSlipTireSpec,
+    longitudinal_slip_ratio: f64,
+    lateral_slip_tangent: f64,
+    normal_load_n: f64,
+    road_friction_scale: f64,
+) -> (f64, f64) {
+    let load_ratio = (normal_load_n / spec.reference_load_n).min(spec.maximum_load_ratio);
+    let friction_ratio = (1.0 - spec.load_sensitivity_per_load_ratio * (load_ratio - 1.0))
+        .max(spec.minimum_friction_ratio);
+    let longitudinal_peak_n =
+        spec.longitudinal_peak_friction * friction_ratio * normal_load_n * road_friction_scale;
+    let lateral_peak_n =
+        spec.lateral_peak_friction * friction_ratio * normal_load_n * road_friction_scale;
+    let raw_longitudinal_n = spec.longitudinal_stiffness_n * load_ratio * longitudinal_slip_ratio;
+    let raw_lateral_n = spec.lateral_stiffness_n * load_ratio * lateral_slip_tangent;
+    let demand = (raw_longitudinal_n / longitudinal_peak_n).hypot(raw_lateral_n / lateral_peak_n);
+    let scale = if demand > 1.0e-12 {
+        demand.tanh() / demand
+    } else {
+        1.0
+    };
+    (raw_longitudinal_n * scale, raw_lateral_n * scale)
 }
 
 /// Evaluates one DC motor from terminal voltage and completed rotor velocity.
@@ -4933,6 +5450,251 @@ mod tests {
         )
         .unwrap();
         assert_eq!(evaluation, repeat);
+    }
+
+    fn tire_identification_spec() -> TireIdentificationSpec {
+        TireIdentificationSpec {
+            longitudinal_stiffness_bounds_n: [6_000.0, 10_000.0],
+            lateral_stiffness_bounds_n: [5_000.0, 9_000.0],
+            longitudinal_peak_friction_bounds: [0.5, 1.3],
+            lateral_peak_friction_bounds: [0.4, 1.2],
+            pure_slip_tolerance: 0.001,
+            minimum_excited_slip: 0.02,
+            maximum_linear_slip: 0.06,
+            minimum_peak_slip: 0.4,
+            maximum_abs_slip: 1.0,
+            minimum_training_samples_per_axis: 6,
+            minimum_combined_holdout_samples: 6,
+            minimum_holdout_samples_per_condition: 3,
+            grid_points_per_axis: 9,
+            refinement_passes: 3,
+            maximum_training_rms_n: 1.0e-8,
+            maximum_holdout_rms_n: 1.0e-8,
+            maximum_worst_condition_rms_n: 1.0e-8,
+        }
+    }
+
+    fn identified_tire_template() -> CombinedSlipTireSpec {
+        CombinedSlipTireSpec {
+            longitudinal_stiffness_n: 8_000.0,
+            lateral_stiffness_n: 7_000.0,
+            longitudinal_peak_friction: 0.9,
+            lateral_peak_friction: 0.8,
+            ..CombinedSlipTireSpec::default()
+        }
+    }
+
+    fn tire_sample(
+        time_index: usize,
+        longitudinal_slip_ratio: f64,
+        lateral_slip_tangent: f64,
+        normal_load_n: f64,
+        road_friction_scale: f64,
+    ) -> TireForceIdentificationSample {
+        let (longitudinal_force_n, lateral_force_n) = steady_tire_forces(
+            identified_tire_template(),
+            longitudinal_slip_ratio,
+            lateral_slip_tangent,
+            normal_load_n,
+            road_friction_scale,
+        );
+        TireForceIdentificationSample {
+            capture_time_s: time_index as f64 * 0.01,
+            longitudinal_slip_ratio,
+            lateral_slip_tangent,
+            normal_load_n,
+            longitudinal_force_n,
+            lateral_force_n,
+        }
+    }
+
+    fn pure_tire_training_samples() -> Vec<TireForceIdentificationSample> {
+        let slips = [-0.6, -0.2, -0.05, 0.05, 0.2, 0.6];
+        slips
+            .into_iter()
+            .map(|slip| (slip, 0.0))
+            .chain(slips.into_iter().map(|slip| (0.0, slip)))
+            .enumerate()
+            .map(|(index, (longitudinal, lateral))| {
+                tire_sample(index, longitudinal, lateral, 1_000.0, 1.0)
+            })
+            .collect()
+    }
+
+    fn combined_tire_holdout_samples(
+        road_friction_scale: f64,
+    ) -> Vec<TireForceIdentificationSample> {
+        [(-0.35, 0.20), (0.25, 0.30), (0.45, -0.25)]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (longitudinal, lateral))| {
+                tire_sample(
+                    index,
+                    longitudinal,
+                    lateral,
+                    800.0 + index as f64 * 200.0,
+                    road_friction_scale,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn tire_identification_fits_pure_slip_and_holds_out_combined_conditions() {
+        let training = pure_tire_training_samples();
+        let dry = combined_tire_holdout_samples(1.0);
+        let low_friction = combined_tire_holdout_samples(0.6);
+        let result = identify_combined_slip_tire_steady(
+            tire_identification_spec(),
+            CombinedSlipTireSpec::default(),
+            &[TireIdentificationRun {
+                acquisition_id: 1,
+                condition_id: 10,
+                road_friction_scale: 1.0,
+                samples: &training,
+            }],
+            &[
+                TireIdentificationRun {
+                    acquisition_id: 2,
+                    condition_id: 20,
+                    road_friction_scale: 1.0,
+                    samples: &dry,
+                },
+                TireIdentificationRun {
+                    acquisition_id: 3,
+                    condition_id: 30,
+                    road_friction_scale: 0.6,
+                    samples: &low_friction,
+                },
+            ],
+        )
+        .unwrap();
+        let repeat = identify_combined_slip_tire_steady(
+            tire_identification_spec(),
+            CombinedSlipTireSpec::default(),
+            &[TireIdentificationRun {
+                acquisition_id: 1,
+                condition_id: 10,
+                road_friction_scale: 1.0,
+                samples: &training,
+            }],
+            &[
+                TireIdentificationRun {
+                    acquisition_id: 2,
+                    condition_id: 20,
+                    road_friction_scale: 1.0,
+                    samples: &dry,
+                },
+                TireIdentificationRun {
+                    acquisition_id: 3,
+                    condition_id: 30,
+                    road_friction_scale: 0.6,
+                    samples: &low_friction,
+                },
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(result.tire_spec, identified_tire_template());
+        assert_eq!(result, repeat);
+        assert_eq!(result.longitudinal_training_sample_count, 6);
+        assert_eq!(result.lateral_training_sample_count, 6);
+        assert!(result.training_rms_n < 1.0e-10);
+        assert!(result.holdout_rms_n < 1.0e-10);
+        assert_eq!(
+            result
+                .condition_residuals
+                .iter()
+                .map(|condition| condition.condition_id)
+                .collect::<Vec<_>>(),
+            [20, 30]
+        );
+    }
+
+    #[test]
+    fn tire_identification_rejects_split_overlap_and_holdout_degradation() {
+        let training = pure_tire_training_samples();
+        let dry = combined_tire_holdout_samples(1.0);
+        let low_friction = combined_tire_holdout_samples(0.6);
+        let training_run = TireIdentificationRun {
+            acquisition_id: 1,
+            condition_id: 10,
+            road_friction_scale: 1.0,
+            samples: &training,
+        };
+        let duplicate = TireIdentificationRun {
+            acquisition_id: 1,
+            condition_id: 20,
+            road_friction_scale: 1.0,
+            samples: &dry,
+        };
+        assert_eq!(
+            identify_combined_slip_tire_steady(
+                tire_identification_spec(),
+                CombinedSlipTireSpec::default(),
+                &[training_run],
+                &[duplicate],
+            ),
+            Err(TireIdentificationError::DuplicateAcquisition)
+        );
+
+        let mut corrupted = low_friction;
+        corrupted[1].lateral_force_n += 100.0;
+        let error = identify_combined_slip_tire_steady(
+            tire_identification_spec(),
+            CombinedSlipTireSpec::default(),
+            &[training_run],
+            &[
+                TireIdentificationRun {
+                    acquisition_id: 2,
+                    condition_id: 20,
+                    road_friction_scale: 1.0,
+                    samples: &dry,
+                },
+                TireIdentificationRun {
+                    acquisition_id: 3,
+                    condition_id: 30,
+                    road_friction_scale: 0.6,
+                    samples: &corrupted,
+                },
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(error, TireIdentificationError::ResidualExceeded);
+    }
+
+    #[test]
+    fn tire_identification_rejects_underpopulated_holdout_condition() {
+        let training = pure_tire_training_samples();
+        let dry = combined_tire_holdout_samples(1.0);
+        let low_friction = combined_tire_holdout_samples(0.6);
+        let error = identify_combined_slip_tire_steady(
+            tire_identification_spec(),
+            CombinedSlipTireSpec::default(),
+            &[TireIdentificationRun {
+                acquisition_id: 1,
+                condition_id: 10,
+                road_friction_scale: 1.0,
+                samples: &training,
+            }],
+            &[
+                TireIdentificationRun {
+                    acquisition_id: 2,
+                    condition_id: 20,
+                    road_friction_scale: 1.0,
+                    samples: &dry,
+                },
+                TireIdentificationRun {
+                    acquisition_id: 3,
+                    condition_id: 30,
+                    road_friction_scale: 0.6,
+                    samples: &low_friction[..2],
+                },
+            ],
+        )
+        .unwrap_err();
+
+        assert_eq!(error, TireIdentificationError::InsufficientExcitation);
     }
 
     #[test]
