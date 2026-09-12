@@ -1,9 +1,10 @@
-# Ackermann sensor-only closed loop v1
+# Ackermann sensor-only closed loop v1/v2
 
 Status: implemented additive M3-C sensor/control subgate
 
 This benchmark runs the same suspended four-wheel Ackermann plant, TaskSpec, sensor
 contract, estimator, controller, seed, and 1 ms physics clock through Rapier and MuJoCo.
+The current contract identity is `mobility_ackermann_sensor_closed_loop_v2`.
 Unlike the open-loop dynamics fixture, the controller receives no chassis pose, velocity,
 joint state, physics handle, contact, or command echo. Its only vehicle-state input is the
 newest frame available on typed DataBus streams.
@@ -61,6 +62,11 @@ The actor observation contains estimate, covariance-relevant health/provenance, 
 steering/current, and target speed/yaw rate. Its action is four bounded motor voltages plus
 a bounded center steering target. A PI speed controller and steering controller combining
 kinematic feedforward with measured yaw-rate error use only the estimate and target.
+In v2, that controller output passes through the shared 80 ms first-order steering
+actuator with explicit 2.5 rad/s rate, travel, deadband, and stuck-failure semantics
+before becoming the Ackermann joint target. The trace keeps the controller output,
+completed actuator target, and measured steering encoder values separate and validates
+the actuator target by deterministic step replay.
 The TaskSpec declares privileged chassis distance, speed, and yaw rate in a separate
 privileged-critic observation space. Decision/capture ticks are declared diagnostic-only.
 Neither space is concatenated into the actor observation, and the privileged values are
@@ -71,30 +77,32 @@ used only for scoring in this benchmark.
 Keep Cargo and output paths on an external drive when local capacity is constrained:
 
 ```powershell
-$env:CARGO_TARGET_DIR = 'E:\RNE-build\m3c-sensor'
+$env:CARGO_TARGET_DIR = 'E:\RNE-build\m3d-steering-actuator\target'
 $env:MUJOCO_DYNAMIC_LINK_DIR = 'E:\RoboSim-mujoco\lib'
 $env:PATH = 'E:\RoboSim-mujoco\bin;' + $env:PATH
 cargo run -p rne_mobility_benchmark --features mujoco -- `
-  --backend ackermann-sensor-rapier --output E:\RNE-build\m3c-sensor\ackermann-sensor-rapier-v1.json
+  --backend ackermann-sensor-rapier --output E:\RNE-build\m3d-steering-actuator\ackermann-sensor-rapier-v2.json
 cargo run -p rne_mobility_benchmark --features mujoco -- `
-  --backend ackermann-sensor-mujoco --output E:\RNE-build\m3c-sensor\ackermann-sensor-mujoco-v1.json
+  --backend ackermann-sensor-mujoco --output E:\RNE-build\m3d-steering-actuator\ackermann-sensor-mujoco-v2.json
 cargo run -p rne_mobility_benchmark --features mujoco -- `
-  --backend ackermann-sensor-compare --output E:\RNE-build\m3c-sensor\ackermann-sensor-comparison-v1.json
+  --backend ackermann-sensor-compare --output E:\RNE-build\m3d-steering-actuator\ackermann-sensor-comparison-v2.json
 ```
 
-The verified comparison artifact is
-`E:\RNE-build\m3c-sensor\ackermann-sensor-comparison-v1.json`, digest
-`fnv1a64:e8f2fe2738a55711`:
+The verified v2 comparison artifact is
+`E:\RNE-build\m3d-steering-actuator\ackermann-sensor-comparison-v2.json`.
+It is 2,396,192 bytes, has SHA-256
+`6f488b583e0c00e7542edd726d747f04dfd559fd98cfb7da683e198ee24fad99`,
+content digest `fnv1a64:6240923b09da7ef1`, and passes every bound:
 
 | metric | Rapier | MuJoCo | absolute gap |
 | --- | ---: | ---: | ---: |
-| final forward distance | 2.111777 m | 2.114389 m | 0.002612 m |
-| final estimated speed | 0.753573 m/s | 0.750678 m/s | 0.002895 m/s |
-| final estimated yaw rate | 0.118696 rad/s | 0.119607 rad/s | 0.000911 rad/s |
-| RMS speed estimation error | 0.034167 m/s | 0.033748 m/s | 0.000419 m/s |
-| RMS yaw-rate estimation error | 0.001650 rad/s | 0.001842 rad/s | 0.000192 rad/s |
-| RMS speed tracking error | 0.569508 m/s | 0.568975 m/s | — |
-| RMS yaw-rate tracking error | 0.019922 rad/s | 0.020200 rad/s | — |
+| final forward distance | 2.116989 m | 2.120304 m | 0.003314 m |
+| final estimated speed | 0.772789 m/s | 0.772850 m/s | 0.000062 m/s |
+| final estimated yaw rate | 0.120209 rad/s | 0.119848 rad/s | 0.000361 rad/s |
+| RMS speed estimation error | 0.033547 m/s | 0.033704 m/s | 0.000157 m/s |
+| RMS yaw-rate estimation error | 0.001598 rad/s | 0.001599 rad/s | 0.000001 rad/s |
+| RMS speed tracking error | 0.568626 m/s | 0.568067 m/s | — |
+| RMS yaw-rate tracking error | 0.024815 rad/s | 0.024803 rad/s | — |
 
 Repository tests require exact same-runtime Rapier repeatability, actor-schema truth
 exclusion, recoverable wheel/steering/IMU dropout visibility and recovery, motor-drop
@@ -104,27 +112,27 @@ Fatal motion-input faults use a separate fail-closed path. Wheel encoder stuck a
 counter saturation, steering encoder stuck, and IMU stuck stop estimate-driven control and
 emit a self-verifying capsule containing the exact TaskSpec, frontend/fault contract,
 backend manifest, failure step, decision timestamp, every latest sensor sequence/status,
-and a content digest. Generate any one of the eight backend/fault artifacts with:
+and a content digest. Generate any one of the eight v2 backend/fault artifacts with:
 
 ```powershell
 cargo run -p rne_mobility_benchmark --features mujoco -- `
   --backend ackermann-sensor-failure-rapier --fault wheel-stuck `
-  --output E:\RNE-build\m3c-sensor\ackermann-rapier-wheel-stuck-failure-v1.json
+  --output E:\RNE-build\m3d-steering-actuator\ackermann-rapier-wheel-stuck-failure-v2.json
 ```
 
 Replace the backend suffix with `mujoco`, and select `wheel-stuck`, `wheel-saturated`,
-`steering-stuck`, or `imu-stuck`. The retained external-SSD evidence is:
+`steering-stuck`, or `imu-stuck`. The retained external-SSD v2 evidence is:
 
 | backend | failure | failed step | digest |
 | --- | --- | ---: | --- |
-| Rapier | wheel encoder stuck | 1992 | `fnv1a64:b748adb981cd5a60` |
-| MuJoCo | wheel encoder stuck | 1992 | `fnv1a64:17024140f9fad056` |
-| Rapier | wheel encoder saturated | 1712 | `fnv1a64:af4bac7e4ab80261` |
-| MuJoCo | wheel encoder saturated | 1712 | `fnv1a64:5e8badd23b6e3633` |
-| Rapier | steering encoder stuck | 1992 | `fnv1a64:00b7dcd73363cbc7` |
-| MuJoCo | steering encoder stuck | 1992 | `fnv1a64:d3ad4ec749daa63d` |
-| Rapier | IMU stuck | 1992 | `fnv1a64:10ee63fee621e617` |
-| MuJoCo | IMU stuck | 1992 | `fnv1a64:a8a65487687ed621` |
+| Rapier | wheel encoder stuck | 1992 | `fnv1a64:bceb36c0c4d71176` |
+| MuJoCo | wheel encoder stuck | 1992 | `fnv1a64:148f8ed8c1d34030` |
+| Rapier | wheel encoder saturated | 1712 | `fnv1a64:e688ffe74cb0e313` |
+| MuJoCo | wheel encoder saturated | 1712 | `fnv1a64:0610c94ee2c6cbf1` |
+| Rapier | steering encoder stuck | 1992 | `fnv1a64:78d4d45ee3f1e45d` |
+| MuJoCo | steering encoder stuck | 1992 | `fnv1a64:09f33e4c9dcaf997` |
+| Rapier | IMU stuck | 1992 | `fnv1a64:d10ce20e5eb51281` |
+| MuJoCo | IMU stuck | 1992 | `fnv1a64:8dd77bb8ac5c2d67` |
 
 ## Explicit limits
 
