@@ -542,6 +542,30 @@ to identify torque constant, friction, gearbox efficiency or inertia. The initia
 must retain raw and converted channels, motor state, every sample clock and complete-run
 identity, and must report formula cells and malformed blocks without repairing them.
 
+`scripts/audit_pmdc_source.py` now makes that source boundary reproducible without
+extracting or modifying the workbook. It verifies the published byte count and SHA-256
+before XML parsing, rejects unsafe/duplicate/encrypted ZIP members, bounds the archive at
+64 members, 64 MiB per expanded member and 256 MiB total expansion, requires the exact
+23-sheet local-relationship layout, and preserves every detected trial header and formula
+with its cached value. Synthetic contract tests cover traversal, expansion, external
+relationships, incomplete channel headers, formula retention and same-size hash
+substitution. Run it with bytecode disabled and place its output on external storage:
+
+```powershell
+python -B scripts/audit_pmdc_source.py `
+  E:\RoboSim-external-data\mobility-pmdc-2rkpsss6fd-v2\MotorsData_rev.xlsx `
+  --output E:\RoboSim-external-data\mobility-pmdc-2rkpsss6fd-v2\rne-pmdc-source-audit-v1.json
+```
+
+The first real-source run reports 37 members, 176,571,375 expanded bytes and audit
+SHA-256 `a9c89c4f684510f69673b8da1e30422afeb66069297a9a591df1656249eeb63f`.
+Its frozen PRBS9 Motor A header identities are `A2` through `A14079` for training,
+`A16090` for development, and `A18101` plus `A20112` for untouched final evaluation.
+It independently redetects only `StepNoLoad-MotorA!C256` as a formula. The report keeps
+all physical/calibration/clock/identification qualification flags false; this is source
+integrity evidence, not a motor fit or a claim that spreadsheet-derived channels are
+ground truth.
+
 The [AutoDRIVE Nigel author repository](https://github.com/Tinker-Twins/AutoDRIVE-Nigel-Dataset)
 is a separate Ackermann candidate with timestamp, steering, tick-count and inertial
 columns. Its README declares approximately 1.50 GB for the camera-free dataset

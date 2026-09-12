@@ -51,8 +51,11 @@ without converting empirical PWM response into motor resistance, constants or in
 Count saturation, polarity and declared bridge loss are explicit; switching ripple,
 decay mode, current regulation, battery sag and thermal effects remain outside this tier.
 The real-log audit has acquired a bounded PMDC geared-motor candidate with simultaneously
-recorded terminal voltage/current/speed and frozen complete-run splits; its strict importer,
-calibration audit and physical parameter qualification remain active M5 work.
+recorded terminal voltage/current/speed and frozen complete-run splits. Its strict,
+read-only source auditor now verifies the published hash, bounded OOXML container, exact
+sheet relationships, trial boundaries and formula contamination and emits deterministic
+evidence to external storage. Channel-preserving conversion, calibration audit and
+physical parameter qualification remain active M5 work.
 
 M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus
