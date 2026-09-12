@@ -6,10 +6,14 @@ use sha2::{Digest, Sha256};
 
 pub mod data;
 pub mod evaluation;
+pub mod final_protocol;
 pub mod identification;
 
 /// Stable artifact kind for the predeclared PMDC identification protocol.
 pub const PMDC_PROTOCOL_KIND: &str = "rne_pmdc_identification_protocol";
+/// Frozen deterministic JSON digest of protocol v1.
+pub const PMDC_PROTOCOL_SHA256: &str =
+    "36f24bd335546e1d72d4008258095cb7d0bd6fb9ddac5d86d1dd62520dafb874";
 /// Exact source workbook digest admitted by protocol v1.
 pub const PMDC_SOURCE_SHA256: &str =
     "85203c4b3ad6fbdd05221e1be7fd41ce733376c0f316d7fd5542b604a6854605";
@@ -209,6 +213,7 @@ mod tests {
         first.validate().unwrap();
         assert_eq!(first, second);
         assert_eq!(first.sha256().unwrap(), second.sha256().unwrap());
+        assert_eq!(first.sha256().unwrap(), PMDC_PROTOCOL_SHA256);
         assert_eq!(first.training_trials, (1..=8).collect::<Vec<_>>());
         assert_eq!(first.development_trials, [9]);
         assert_eq!(first.sealed_final_header_cells, ["A18101", "A20112"]);

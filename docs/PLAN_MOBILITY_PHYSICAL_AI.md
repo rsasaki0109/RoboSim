@@ -79,6 +79,12 @@ steps. It is now permanently development-exposed and cannot be reused for tuning
 final runs remain sealed while a separate final-evaluation contract is frozen; independent
 calibration also remains open.
 
+The final PMDC contract is now frozen while both response runs remain unread. It binds the
+selected training and exposed development evidence, forbids refit or threshold changes,
+and requires unchanged per-run, pooled and worst-run gates. It also fails closed on common
+Failure Capsule packaging because that schema currently requires a fixed simulation clock;
+recorded nonuniform timestamp support must be added rather than silently resampling data.
+
 M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus
 free-moment boundary. Rapier implements it and conformance checks force response, lever-arm

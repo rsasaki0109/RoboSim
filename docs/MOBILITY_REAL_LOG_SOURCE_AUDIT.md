@@ -661,6 +661,11 @@ Trial 9 is now development-exposed and will not be rerun or used for tuning. Fin
 10--11 were not read and remain sealed. Passing this effective-model gate still does not
 qualify individual motor constants, sensor calibration or vehicle-level dynamics.
 
+Before final conversion, the separate PMDC final contract was frozen at SHA-256
+`c8ed0ce2f34fa90fd1797b42dee02f2aa721760f504d9590c1e3b659220fca53`.
+It fixes trials 10--11, 2,009 samples each, unchanged model/thresholds and per-run,
+pooled and worst-run aggregation. At this checkpoint neither final response has been read.
+
 The [AutoDRIVE Nigel author repository](https://github.com/Tinker-Twins/AutoDRIVE-Nigel-Dataset)
 is a separate Ackermann candidate with timestamp, steering, tick-count and inertial
 columns. Its README declares approximately 1.50 GB for the camera-free dataset
