@@ -627,6 +627,13 @@ contract. These are self-consistency diagnostics only: ADC reference accuracy, d
 and sensor tolerances, sampling phase, anti-alias response and external instruments
 remain unqualified, and every physical-accuracy flag stays false.
 
+The next-stage model and metric choices are now frozen in
+[`MOBILITY_PMDC_IDENTIFICATION_V1.md`](MOBILITY_PMDC_IDENTIFICATION_V1.md) and the matching
+`recorded_pmdc` Rust protocol. The contract uses actual-timestamp encoder reconstruction,
+whole-run leave-one-out training selection and effective coefficient ratios only. It
+predeclares a one-shot development gate while keeping both final runs unavailable. No
+development response metric has been calculated at this point.
+
 The [AutoDRIVE Nigel author repository](https://github.com/Tinker-Twins/AutoDRIVE-Nigel-Dataset)
 is a separate Ackermann candidate with timestamp, steering, tick-count and inertial
 columns. Its README declares approximately 1.50 GB for the camera-free dataset

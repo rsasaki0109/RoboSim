@@ -60,8 +60,12 @@ and development partitions while making the final partition unavailable. Calibra
 self-consistency audit now shows monotonic but nonuniform source timing, millivolt-scale
 voltage-column reconstruction residuals, a ten-reading aggregate `Current` channel that
 is not the conversion of adjacent `rawCurrent`, and a fixed-10-ms encoder-derived
-`Velocity` channel. Independent calibration, a predeclared derivative/model/metric
-protocol and physical parameter qualification remain active M5 work.
+`Velocity` channel. [`MOBILITY_PMDC_IDENTIFICATION_V1.md`](MOBILITY_PMDC_IDENTIFICATION_V1.md)
+and its Rust representation now freeze actual-timestamp encoder reconstruction,
+whole-run cross-validation, two effective electrical candidates, a coupled mechanical
+coefficient model, solver/rank rules and one-shot development gates before development
+responses are inspected. Fitting, development execution, independent calibration and
+physical parameter qualification remain active M5 work.
 
 M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus
