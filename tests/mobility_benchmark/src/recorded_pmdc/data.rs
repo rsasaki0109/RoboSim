@@ -1,6 +1,10 @@
 //! Content-bound decoder and SI observation reconstruction for retained PMDC training data.
 
 use super::{
+    final_protocol::{
+        pmdc_final_evaluation_protocol, PMDC_FINAL_ARTIFACT_BYTES, PMDC_FINAL_ARTIFACT_SHA256,
+        PMDC_FINAL_RECORDS_SHA256,
+    },
     pmdc_identification_protocol, PMDC_DEVELOPMENT_RECORDS_SHA256, PMDC_SOURCE_SHA256,
     PMDC_TRAINING_RECORDS_SHA256,
 };
@@ -13,6 +17,8 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const MAX_PMDC_TRAINING_BYTES: usize = 8 * 1024 * 1024;
 /// Maximum accepted lossless development artifact size.
 pub const MAX_PMDC_DEVELOPMENT_BYTES: usize = 1024 * 1024;
+/// Maximum accepted lossless final artifact size.
+pub const MAX_PMDC_FINAL_BYTES: usize = 2 * 1024 * 1024;
 // The pinned 2,223-byte manifest is the longest source line; data rows are <=361 bytes.
 const MAX_LINE_BYTES: usize = 4096;
 const CHANNELS: [&str; 12] = [
@@ -80,6 +86,19 @@ pub struct PmdcDevelopmentSet {
     pub run: PmdcRun,
 }
 
+/// Exact two-run final input, distinct from training and development by type.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PmdcFinalSet {
+    /// Published source workbook digest.
+    pub source_sha256: String,
+    /// Frozen final-evaluation protocol digest recorded by the sealer.
+    pub final_protocol_sha256: String,
+    /// Digest over the canonical final JSONL record lines.
+    pub records_sha256: String,
+    /// Complete final trials 10 and 11 in frozen order.
+    pub runs: Vec<PmdcRun>,
+}
+
 /// SI observation reconstructed at the later endpoint of an encoder interval.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PmdcObservation {
@@ -104,6 +123,10 @@ struct Manifest {
     source_sha256: String,
     sample_counts: BTreeMap<String, usize>,
     final_partition_read: bool,
+    #[serde(default)]
+    final_protocol_sha256: Option<String>,
+    #[serde(default)]
+    final_responses_evaluated: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -122,11 +145,18 @@ struct Trailer {
 }
 
 struct DecodeContract<'a> {
+    manifest_kind: &'a str,
+    trailer_kind: &'a str,
     partition: &'a str,
     source_sha256: &'a str,
     records_sha256: &'a str,
     trials: &'a [u8],
     samples_per_trial: usize,
+    final_partition_read: bool,
+    final_protocol_sha256: Option<&'a str>,
+    final_responses_evaluated: Option<bool>,
+    artifact_sha256: Option<&'a str>,
+    maximum_bytes: usize,
 }
 
 fn parse_finite(values: &BTreeMap<String, String>, channel: &str, row: u32) -> Result<f64> {
@@ -144,9 +174,15 @@ fn parse_finite(values: &BTreeMap<String, String>, channel: &str, row: u32) -> R
 
 fn decode_with_contract(bytes: &[u8], contract: DecodeContract<'_>) -> Result<PmdcTrainingSet> {
     ensure!(
-        !bytes.is_empty() && bytes.len() <= MAX_PMDC_TRAINING_BYTES,
-        "PMDC training artifact exceeds bounded input"
+        !bytes.is_empty() && bytes.len() <= contract.maximum_bytes,
+        "PMDC artifact exceeds bounded input"
     );
+    if let Some(expected) = contract.artifact_sha256 {
+        ensure!(
+            format!("{:x}", Sha256::digest(bytes)) == expected,
+            "PMDC artifact digest drift"
+        );
+    }
     let text = std::str::from_utf8(bytes).context("PMDC training artifact is not UTF-8")?;
     ensure!(
         text.ends_with('\n') && !text.contains('\r'),
@@ -164,7 +200,7 @@ fn decode_with_contract(bytes: &[u8], contract: DecodeContract<'_>) -> Result<Pm
     );
     let manifest: Manifest = serde_json::from_str(lines[0]).context("decode PMDC manifest")?;
     ensure!(
-        manifest.kind == "rne_pmdc_prbs9_partition",
+        manifest.kind == contract.manifest_kind,
         "PMDC manifest kind drift"
     );
     ensure!(
@@ -172,8 +208,16 @@ fn decode_with_contract(bytes: &[u8], contract: DecodeContract<'_>) -> Result<Pm
         "PMDC artifact partition drift"
     );
     ensure!(
-        !manifest.final_partition_read,
-        "PMDC artifact reports final access"
+        manifest.final_partition_read == contract.final_partition_read,
+        "PMDC final-access state drift"
+    );
+    ensure!(
+        manifest.final_protocol_sha256.as_deref() == contract.final_protocol_sha256,
+        "PMDC final protocol binding drift"
+    );
+    ensure!(
+        manifest.final_responses_evaluated == contract.final_responses_evaluated,
+        "PMDC final evaluation-state drift"
     );
     ensure!(
         manifest.source_sha256 == contract.source_sha256,
@@ -182,7 +226,7 @@ fn decode_with_contract(bytes: &[u8], contract: DecodeContract<'_>) -> Result<Pm
     let trailer: Trailer =
         serde_json::from_str(lines.last().unwrap()).context("decode PMDC trailer")?;
     ensure!(
-        trailer.kind == "rne_pmdc_prbs9_partition_end",
+        trailer.kind == contract.trailer_kind,
         "PMDC trailer kind drift"
     );
     ensure!(
@@ -294,11 +338,18 @@ pub fn decode_pmdc_training(bytes: &[u8]) -> Result<PmdcTrainingSet> {
     decode_with_contract(
         bytes,
         DecodeContract {
+            manifest_kind: "rne_pmdc_prbs9_partition",
+            trailer_kind: "rne_pmdc_prbs9_partition_end",
             partition: "training",
             source_sha256: PMDC_SOURCE_SHA256,
             records_sha256: PMDC_TRAINING_RECORDS_SHA256,
             trials: &pmdc_identification_protocol().training_trials,
             samples_per_trial: 2009,
+            final_partition_read: false,
+            final_protocol_sha256: None,
+            final_responses_evaluated: None,
+            artifact_sha256: None,
+            maximum_bytes: MAX_PMDC_TRAINING_BYTES,
         },
     )
 }
@@ -312,11 +363,18 @@ pub fn decode_pmdc_development(bytes: &[u8]) -> Result<PmdcDevelopmentSet> {
     let decoded = decode_with_contract(
         bytes,
         DecodeContract {
+            manifest_kind: "rne_pmdc_prbs9_partition",
+            trailer_kind: "rne_pmdc_prbs9_partition_end",
             partition: "development",
             source_sha256: PMDC_SOURCE_SHA256,
             records_sha256: PMDC_DEVELOPMENT_RECORDS_SHA256,
             trials: &pmdc_identification_protocol().development_trials,
             samples_per_trial: 2009,
+            final_partition_read: false,
+            final_protocol_sha256: None,
+            final_responses_evaluated: None,
+            artifact_sha256: None,
+            maximum_bytes: MAX_PMDC_DEVELOPMENT_BYTES,
         },
     )?;
     let mut runs = decoded.runs;
@@ -325,6 +383,39 @@ pub fn decode_pmdc_development(bytes: &[u8]) -> Result<PmdcDevelopmentSet> {
         source_sha256: decoded.source_sha256,
         records_sha256: decoded.records_sha256,
         run: runs.remove(0),
+    })
+}
+
+/// Decode only the exact two-run final artifact admitted by final protocol v1.
+pub fn decode_pmdc_final(bytes: &[u8]) -> Result<PmdcFinalSet> {
+    ensure!(
+        bytes.len() == PMDC_FINAL_ARTIFACT_BYTES,
+        "PMDC final artifact byte length drift"
+    );
+    let protocol = pmdc_final_evaluation_protocol();
+    let protocol_sha256 = protocol.sha256()?;
+    let decoded = decode_with_contract(
+        bytes,
+        DecodeContract {
+            manifest_kind: "rne_pmdc_prbs9_final_partition",
+            trailer_kind: "rne_pmdc_prbs9_final_partition_end",
+            partition: "final",
+            source_sha256: PMDC_SOURCE_SHA256,
+            records_sha256: PMDC_FINAL_RECORDS_SHA256,
+            trials: &protocol.final_trials,
+            samples_per_trial: protocol.samples_per_run,
+            final_partition_read: true,
+            final_protocol_sha256: Some(&protocol_sha256),
+            final_responses_evaluated: Some(false),
+            artifact_sha256: Some(PMDC_FINAL_ARTIFACT_SHA256),
+            maximum_bytes: MAX_PMDC_FINAL_BYTES,
+        },
+    )?;
+    Ok(PmdcFinalSet {
+        source_sha256: decoded.source_sha256,
+        final_protocol_sha256: protocol_sha256,
+        records_sha256: decoded.records_sha256,
+        runs: decoded.runs,
     })
 }
 
@@ -435,11 +526,18 @@ mod tests {
         let decoded = decode_with_contract(
             &bytes,
             DecodeContract {
+                manifest_kind: "rne_pmdc_prbs9_partition",
+                trailer_kind: "rne_pmdc_prbs9_partition_end",
                 partition: "training",
                 source_sha256: "fixture-source",
                 records_sha256: &digest,
                 trials: &trials,
                 samples_per_trial: 3,
+                final_partition_read: false,
+                final_protocol_sha256: None,
+                final_responses_evaluated: None,
+                artifact_sha256: None,
+                maximum_bytes: MAX_PMDC_TRAINING_BYTES,
             },
         )
         .unwrap();
@@ -459,11 +557,18 @@ mod tests {
             decode_with_contract(
                 input,
                 DecodeContract {
+                    manifest_kind: "rne_pmdc_prbs9_partition",
+                    trailer_kind: "rne_pmdc_prbs9_partition_end",
                     partition: "training",
                     source_sha256: "fixture-source",
                     records_sha256: expected,
                     trials: &trials,
                     samples_per_trial: 3,
+                    final_partition_read: false,
+                    final_protocol_sha256: None,
+                    final_responses_evaluated: None,
+                    artifact_sha256: None,
+                    maximum_bytes: MAX_PMDC_TRAINING_BYTES,
                 },
             )
         };
@@ -478,5 +583,11 @@ mod tests {
         );
         assert!(decode(final_read.as_bytes(), &digest).is_err());
         assert!(decode(&vec![b'x'; MAX_PMDC_TRAINING_BYTES + 1], &digest).is_err());
+    }
+
+    #[test]
+    fn final_decoder_rejects_any_unpinned_artifact_before_parsing() {
+        assert!(decode_pmdc_final(b"not-the-pinned-final-artifact").is_err());
+        assert!(decode_pmdc_final(&vec![b'x'; MAX_PMDC_FINAL_BYTES + 1]).is_err());
     }
 }
