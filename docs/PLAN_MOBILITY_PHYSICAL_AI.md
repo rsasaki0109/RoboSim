@@ -58,9 +58,10 @@ evidence to external storage. A lossless pre-final converter now retains all 12 
 channels, source rows, run annotations and complete-run identity for the frozen training
 and development partitions while making the final partition unavailable. Calibration
 self-consistency audit now shows monotonic but nonuniform source timing, millivolt-scale
-voltage-column reconstruction residuals, and a materially non-affine displayed-current
-mapping. Independent calibration, a predeclared model/metric protocol and physical
-parameter qualification remain active M5 work.
+voltage-column reconstruction residuals, a ten-reading aggregate `Current` channel that
+is not the conversion of adjacent `rawCurrent`, and a fixed-10-ms encoder-derived
+`Velocity` channel. Independent calibration, a predeclared derivative/model/metric
+protocol and physical parameter qualification remain active M5 work.
 
 M1-B/M1-C are implemented. `ExternalBodyWrench` and the
 `ExternalBodyWrench` physics capability define a one-step, world-frame force-at-point plus

@@ -64,7 +64,11 @@ class ChannelAuditTests(unittest.TestCase):
         self.assertAlmostEqual(current["intercept"], 1.0)
         self.assertAlmostEqual(current["residual_rmse"], 0.0)
         self.assertAlmostEqual(report["motor_voltage_minus_b1_minus_a1"]["residual_rmse_v"], 0.0)
+        self.assertAlmostEqual(
+            report["source_velocity_minus_encoder_fixed_10ms"]["residual_rmse_rpm"], 0.0
+        )
         self.assertEqual(report["timing"]["prbs9_motor_a_trial_01"]["non_10000us_delta_count"], 0)
+        self.assertFalse(report["raw_current_and_current_are_same_sample"])
         self.assertFalse(report["physical_accuracy_validated"])
 
     def test_record_digest_mismatch_is_rejected(self):

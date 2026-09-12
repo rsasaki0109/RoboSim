@@ -595,10 +595,10 @@ dropped or misclassified as samples. The final two runs remain sealed.
 
 `scripts/audit_pmdc_channels.py` verifies the training JSONL record count and digest
 before numeric inspection, then audits only source-internal timing and conversion
-consistency. The first training audit is 4,060 bytes, has file SHA-256
-`a2446c73a849fd7db66f5db25510eb7c5cd8e887e8ae8da5a7b09edbe65df860`,
+consistency. The v2 training audit is 4,715 bytes, has file SHA-256
+`6b53c9e7f50a1e951f5cd9d4dd9a7acb8ac050f30b1b178c1735b3062bbf63d8`,
 and report audit SHA-256
-`49a3ede7af3b6dd9f02efa33355d9dfd86327661c487ea462fd27eed745377be`.
+`a10f98afa3eecfe7543b2a9b8b89d066e7d92ee797c6260c9420822a6bcf2bdc`.
 All eight run clocks are strictly increasing. Their interval median is 10,004 us,
 the global observed interval range is 8,888--10,040 us, and 1,767--1,779 of the
 2,008 intervals per run are not exactly 10,000 us. The source therefore supports a
@@ -610,10 +610,22 @@ voltage columns from their raw ADC columns has 2.764 mV RMS residual for A1 and
 10 mV maximum absolute residual, consistent with finite displayed precision but not an
 independent voltage calibration. The analogous raw-current to `Current` affine fit has
 0.187 A RMS and 2.016 A maximum absolute residual, which is material and forbids treating
-the displayed current as a single exact affine transform without further source-method
-audit. These are self-consistency diagnostics only: ADC reference accuracy, divider and
-sensor tolerances, sampling phase, anti-alias response and external instruments remain
-unqualified, and every physical-accuracy flag stays false.
+the displayed current as a transform of the adjacent raw sample. The article resolves
+the semantic reason: `rawCurrent` is one ADC reading, while `Current` is calculated from
+an accumulator of ten consecutive readings. They are related acquisition products, not
+the same sample represented twice.
+
+The article also states that `Velocity` is computed from encoder-count difference using
+1,800 pulses/revolution, 1/17 gearbox reduction and a fixed 0.01 s interval. The audit
+reproduces that path at 0.526 RPM residual RMS and 1.0 RPM maximum absolute residual,
+consistent with the displayed integer velocity. Replacing the fixed interval with the
+recorded timestamp interval increases residual RMS to 0.654 RPM and maximum absolute
+residual to 2.458 RPM. Consequently, `Velocity` is a source-derived fixed-grid channel,
+not an independent speed measurement on the recorded nonuniform clock. Identification
+must retain encoder count and source time and explicitly choose its derivative/filtering
+contract. These are self-consistency diagnostics only: ADC reference accuracy, divider
+and sensor tolerances, sampling phase, anti-alias response and external instruments
+remain unqualified, and every physical-accuracy flag stays false.
 
 The [AutoDRIVE Nigel author repository](https://github.com/Tinker-Twins/AutoDRIVE-Nigel-Dataset)
 is a separate Ackermann candidate with timestamp, steering, tick-count and inertial

@@ -84,11 +84,25 @@ def _affine_fit(xs, ys):
     }
 
 
+def _residual_report(values, unit_suffix):
+    return {
+        f"residual_mean_{unit_suffix}": statistics.fmean(values),
+        f"residual_rmse_{unit_suffix}": math.sqrt(
+            statistics.fmean(value * value for value in values)
+        ),
+        f"residual_max_abs_{unit_suffix}": max(abs(value) for value in values),
+        "sample_count": len(values),
+    }
+
+
 def audit_channels(manifest, records):
     """Quantify source self-consistency while leaving all qualification flags false."""
     numeric = {channel: [] for channel in CHANNELS}
     timestamps = defaultdict(list)
     last_row = {}
+    last_encoder_sample = {}
+    fixed_grid_velocity_residuals = []
+    source_time_velocity_residuals = []
     for record in records:
         run_id = record.get("run_id")
         source_row = record.get("source_row")
@@ -98,12 +112,28 @@ def audit_channels(manifest, records):
         last_row[run_id] = source_row
         if not isinstance(values, dict) or set(values) != set(CHANNELS):
             raise ValueError(f"channel set differs at source row {source_row}")
+        parsed = {}
         for channel in CHANNELS:
-            numeric[channel].append(_finite(values[channel], channel, source_row))
+            parsed[channel] = _finite(values[channel], channel, source_row)
+            numeric[channel].append(parsed[channel])
         time_text = values["time"]
         if not isinstance(time_text, str) or not time_text.isdigit():
             raise ValueError(f"time is not an unsigned source-microsecond integer at row {source_row}")
-        timestamps[run_id].append(int(time_text))
+        time_us = int(time_text)
+        timestamps[run_id].append(time_us)
+        if run_id in last_encoder_sample:
+            prior_time_us, prior_count = last_encoder_sample[run_id]
+            count_delta = parsed["encoderCount"] - prior_count
+            fixed_velocity_rpm = -count_delta * 60.0 / (17.0 * 1800.0 * 0.01)
+            fixed_grid_velocity_residuals.append(parsed["Velocity"] - fixed_velocity_rpm)
+            delta_s = (time_us - prior_time_us) * 1e-6
+            if delta_s <= 0.0:
+                raise ValueError("cannot derive velocity from a nonpositive source interval")
+            source_time_velocity_rpm = -count_delta * 60.0 / (17.0 * 1800.0 * delta_s)
+            source_time_velocity_residuals.append(
+                parsed["Velocity"] - source_time_velocity_rpm
+            )
+        last_encoder_sample[run_id] = (time_us, parsed["encoderCount"])
 
     timing = {}
     for run_id in sorted(timestamps):
@@ -138,7 +168,7 @@ def audit_channels(manifest, records):
         )
     ]
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "rne_pmdc_training_channel_audit",
         "source_sha256": manifest["source_sha256"],
         "partition_records_sha256": manifest.get("records_sha256"),
@@ -152,6 +182,17 @@ def audit_channels(manifest, records):
             ),
             "residual_max_abs_v": max(abs(value) for value in motor_voltage_residuals),
         },
+        "source_velocity_minus_encoder_fixed_10ms": _residual_report(
+            fixed_grid_velocity_residuals, "rpm"
+        ),
+        "source_velocity_minus_encoder_source_time": _residual_report(
+            source_time_velocity_residuals, "rpm"
+        ),
+        "declared_encoder_pulses_per_revolution": 1800,
+        "declared_gear_reduction": "1/17",
+        "source_velocity_uses_fixed_delta_s": 0.01,
+        "raw_current_and_current_are_same_sample": False,
+        "declared_current_aggregation_read_count": 10,
         "timestamp_adjustments_applied": False,
         "values_repaired": False,
         "physical_accuracy_validated": False,
