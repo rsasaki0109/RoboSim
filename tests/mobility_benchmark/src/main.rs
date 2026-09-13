@@ -24,6 +24,9 @@ use rne_mobility_benchmark::suspension_identification::{
     decode_suspension_identification_dataset, identify_suspension_dataset,
     synthetic_suspension_identification_dataset, MAX_SUSPENSION_IDENTIFICATION_DATASET_BYTES,
 };
+use rne_mobility_benchmark::tire_acquisition::{
+    decode_tire_acquisition_manifest, qualify_tire_dataset, MAX_TIRE_ACQUISITION_MANIFEST_BYTES,
+};
 use rne_mobility_benchmark::tire_identification::{
     decode_tire_identification_dataset, identify_tire_dataset,
     synthetic_tire_identification_dataset, MAX_TIRE_IDENTIFICATION_DATASET_BYTES,
@@ -762,6 +765,38 @@ fn main() -> Result<()> {
                 "suspension-acquisition-verified",
             )
         }
+        "tire-acquisition-verify" => {
+            let input = input
+                .as_deref()
+                .context("--backend tire-acquisition-verify requires --input")?;
+            let manifest_path = acquisition_manifest
+                .as_deref()
+                .context("--backend tire-acquisition-verify requires --acquisition-manifest")?;
+            let evidence_root = evidence_root
+                .as_deref()
+                .context("--backend tire-acquisition-verify requires --evidence-root")?;
+            let dataset = read_tire_identification_dataset(input)?;
+            use std::io::Read;
+            let file = std::fs::File::open(manifest_path)
+                .with_context(|| format!("open {}", manifest_path.display()))?;
+            let metadata = file
+                .metadata()
+                .with_context(|| format!("inspect {}", manifest_path.display()))?;
+            ensure!(
+                metadata.is_file() && metadata.len() <= MAX_TIRE_ACQUISITION_MANIFEST_BYTES as u64,
+                "tire acquisition manifest is not a bounded regular file"
+            );
+            let mut bytes = Vec::new();
+            file.take(MAX_TIRE_ACQUISITION_MANIFEST_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)
+                .with_context(|| format!("read {}", manifest_path.display()))?;
+            let manifest = decode_tire_acquisition_manifest(&bytes, &dataset)?;
+            let qualification = qualify_tire_dataset(&dataset, &manifest, evidence_root)?;
+            (
+                serde_json::to_string_pretty(&qualification)? + "\n",
+                "tire-acquisition-verified",
+            )
+        }
         "mobility-randomized-batch" => {
             let report = run_mobility_randomized_batch(
                 root_seed.context("--backend mobility-randomized-batch requires --seed")?,
@@ -822,6 +857,7 @@ fn main() -> Result<()> {
             backend.as_str(),
             "suspension-identification"
                 | "tire-identification"
+                | "tire-acquisition-verify"
                 | "identified-road-compare"
                 | "suspension-acquisition-verify"
                 | "suspension-acquired"
@@ -850,13 +886,17 @@ fn main() -> Result<()> {
         "--input requires an identification or sensor-replay backend"
     );
     ensure!(
-        backend == "suspension-acquisition-verify" || acquisition_manifest.is_none(),
-        "--acquisition-manifest is valid only with suspension-acquisition-verify"
+        matches!(
+            backend.as_str(),
+            "suspension-acquisition-verify" | "tire-acquisition-verify"
+        ) || acquisition_manifest.is_none(),
+        "--acquisition-manifest requires an acquisition verification backend"
     );
     ensure!(
         matches!(
             backend.as_str(),
             "suspension-acquisition-verify"
+                | "tire-acquisition-verify"
                 | "suspension-acquired"
                 | "suspension-acquired-verify"
                 | "suspension-uncertainty"

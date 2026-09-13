@@ -113,9 +113,10 @@ reconstruction cannot enter this gate.
 
 The executable artifact boundary lives in `rne_mobility_benchmark::tire_identification`.
 Its bounded JSON dataset freezes complete training and holdout acquisitions, source class,
-template, units, clocks, and force-law identity. The result copies the honest physical versus
-synthetic provenance, binds the exact dataset and fit with SHA-256, and recomputes both during
-validation. The built-in fixture exercises the software contract only:
+template, units, clocks, and force-law identity. The result preserves a recorded-versus-synthetic
+source claim, binds the exact dataset and fit with SHA-256, and recomputes both during validation.
+It deliberately does not assert physical qualification. The built-in fixture exercises the
+software contract only:
 
 ```text
 cargo run -p rne_mobility_benchmark -- --backend tire-identification-fixture --output dataset.json
@@ -125,6 +126,10 @@ cargo run -p rne_mobility_benchmark -- --backend tire-identification --input dat
 Replacing the fixture's source label does not create physical evidence; physical qualification
 still requires independently traceable acquisition, calibration, synchronization, and raw-file
 hashes.
+
+The required per-run physical manifest, channel conventions, mixed-rate conversion boundary,
+and external-file verifier are specified in
+[`MOBILITY_TIRE_IDENTIFICATION_V1.md`](MOBILITY_TIRE_IDENTIFICATION_V1.md).
 
 ## Evidence and validity
 
