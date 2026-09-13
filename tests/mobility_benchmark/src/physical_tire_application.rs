@@ -93,6 +93,35 @@ impl PhysicalTireApplicationRequest {
     }
 }
 
+/// Binds one identified profile to its steady and two axis-specific acquisition manifests.
+///
+/// This is the only supported construction path for CLI-produced application requests. It
+/// validates every artifact relationship before sealing the request, but deliberately does not
+/// open retained evidence files; [`qualify_physical_tire_profile`] performs that separate step.
+pub fn build_physical_tire_application_request(
+    profile: IdentifiedTireProfileEvidence,
+    steady_acquisition: TirePhysicalAcquisitionManifest,
+    longitudinal_acquisition: TireRelaxationAcquisitionManifest,
+    lateral_acquisition: TireRelaxationAcquisitionManifest,
+) -> Result<PhysicalTireApplicationRequest> {
+    profile.validate()?;
+    steady_acquisition.validate(&profile.longitudinal_dataset.steady_dataset)?;
+    longitudinal_acquisition.validate(&profile.longitudinal_dataset)?;
+    lateral_acquisition.validate(&profile.lateral_dataset)?;
+    let mut request = PhysicalTireApplicationRequest {
+        kind: PHYSICAL_TIRE_APPLICATION_REQUEST_KIND.into(),
+        schema_version: PHYSICAL_TIRE_APPLICATION_SCHEMA_VERSION,
+        profile,
+        steady_acquisition,
+        longitudinal_acquisition,
+        lateral_acquisition,
+        content_sha256: String::new(),
+    };
+    request.seal()?;
+    request.validate()?;
+    Ok(request)
+}
+
 /// Joined, file-verified qualification for steady and both transient tire axes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -512,17 +541,26 @@ mod tests {
             transient_manifest(&profile.longitudinal_dataset, "test.longitudinal.capture");
         let lateral_acquisition =
             transient_manifest(&profile.lateral_dataset, "test.lateral.capture");
-        let mut request = PhysicalTireApplicationRequest {
-            kind: PHYSICAL_TIRE_APPLICATION_REQUEST_KIND.into(),
-            schema_version: PHYSICAL_TIRE_APPLICATION_SCHEMA_VERSION,
+        build_physical_tire_application_request(
             profile,
             steady_acquisition,
             longitudinal_acquisition,
             lateral_acquisition,
-            content_sha256: String::new(),
-        };
-        request.seal().unwrap();
-        request
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn builder_rejects_axis_manifest_substitution_before_sealing() {
+        let root = tempfile::tempdir().unwrap();
+        let request = request_fixture(root.path());
+        assert!(build_physical_tire_application_request(
+            request.profile,
+            request.steady_acquisition,
+            request.lateral_acquisition.clone(),
+            request.lateral_acquisition,
+        )
+        .is_err());
     }
 
     #[test]

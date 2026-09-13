@@ -6,6 +6,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Add a typed CLI construction path for physical tire application requests. It binds an exact
+  identified profile to the steady, longitudinal-relaxation, and lateral-relaxation manifests,
+  validates their identities, and computes the request digest without manual hash transcription.
+
 - Require file-verified steady-force, longitudinal-relaxation, and lateral-relaxation
   acquisition closures before an identified tire profile can claim physical application.
   The physical CLI revalidates all retained files before running the exact profile and plant on

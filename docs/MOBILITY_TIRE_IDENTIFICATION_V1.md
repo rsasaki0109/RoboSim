@@ -178,11 +178,20 @@ cargo run -p rne_mobility_benchmark -- \
   --output verified-transient-acquisition.json
 ```
 
-After producing both axis manifests, assemble them with the shared steady manifest and exact
-identified profile in a sealed physical-application request. The same request is used for the
-standalone file gate and the cross-backend execution gate:
+After producing both axis manifests, the CLI validates and binds them with the shared steady
+manifest and exact identified profile. It writes the sealed physical-application request, so an
+operator never has to calculate or transcribe its self-hash. The same request is then used for
+the standalone file gate and the cross-backend execution gate:
 
 ```text
+cargo run -p rne_mobility_benchmark -- \
+  --backend physical-tire-request \
+  --input tire-profile.json \
+  --steady-acquisition-manifest steady-acquisition.json \
+  --longitudinal-acquisition-manifest longitudinal-acquisition.json \
+  --lateral-acquisition-manifest lateral-acquisition.json \
+  --output physical-tire-request.json
+
 cargo run -p rne_mobility_benchmark -- \
   --backend physical-tire-qualify \
   --input physical-tire-request.json \
@@ -199,7 +208,9 @@ cargo run -p rne_mobility_benchmark --features mujoco -- \
 `physical-tire-compare` re-runs the complete file qualification immediately before simulation,
 then applies the qualified profile to the same retained plant and TaskSpec on Rapier and MuJoCo.
 The emitted comparison contains the joined qualification and both backend traces rather than
-trusting a previously serialized boolean.
+trusting a previously serialized boolean. `physical-tire-request` validates exact dataset digests,
+axis identities, source kinds, and manifest self-hashes before it writes anything; it does not
+read the referenced captures or assert physical qualification.
 
 The verifier bounds manifest and artifact sizes, rejects unknown fields and incomplete or
 unordered runs/channels, confines canonicalized paths to the supplied root, streams hashes
