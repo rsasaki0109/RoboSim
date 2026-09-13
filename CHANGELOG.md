@@ -77,6 +77,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add a backend-neutral staged tire load-sensitivity identifier. It freezes the previously
+  identified steady law, requires combined-slip training loads to bracket the reference load,
+  fits only the load-dependent peak-friction slope, and enforces pooled and per-condition
+  holdout residuals without tuning road friction or the minimum-friction clamp.
+
 - Add a fail-closed `external-project-check` intake path that binds a clean
   independent Git revision, official release archive, TaskSpec, complete
   Failure Capsule, reproduction logs, and maintainer report before either

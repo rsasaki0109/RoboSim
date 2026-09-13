@@ -321,6 +321,99 @@ pub struct CombinedSlipTireIdentificationResult {
     pub condition_residuals: Vec<TireConditionResidual>,
 }
 
+/// Frozen search and acceptance contract for the tire load-sensitivity stage.
+///
+/// The preceding steady fit supplies stiffness and reference-load peak friction. This stage
+/// changes only [`CombinedSlipTireSpec::load_sensitivity_per_load_ratio`] using combined-slip
+/// samples that bracket the reference load; road friction remains an independently supplied
+/// run input.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TireLoadSensitivityIdentificationSpec {
+    /// Inclusive bounds for fractional friction loss per unit load ratio.
+    pub load_sensitivity_bounds_per_load_ratio: [f64; 2],
+    /// Minimum absolute slip required on each axis for a retained combined-slip sample.
+    pub minimum_combined_axis_slip: f64,
+    /// Maximum absolute slip admitted on either axis.
+    pub maximum_abs_slip: f64,
+    /// Minimum span of retained training `normal_load / reference_load` values.
+    pub minimum_training_load_ratio_span: f64,
+    /// Minimum retained training samples.
+    pub minimum_training_samples: usize,
+    /// Minimum retained pooled holdout samples.
+    pub minimum_holdout_samples: usize,
+    /// Minimum retained holdout samples in every condition.
+    pub minimum_holdout_samples_per_condition: usize,
+    /// Odd grid width for each deterministic refinement pass.
+    pub grid_points: usize,
+    /// Number of deterministic coarse-to-fine refinement passes.
+    pub refinement_passes: usize,
+    /// Maximum vector-force RMS on training samples, in newtons.
+    pub maximum_training_rms_n: f64,
+    /// Maximum pooled vector-force RMS on holdout samples, in newtons.
+    pub maximum_holdout_rms_n: f64,
+    /// Maximum vector-force RMS in any holdout condition, in newtons.
+    pub maximum_worst_condition_rms_n: f64,
+}
+
+impl TireLoadSensitivityIdentificationSpec {
+    fn is_valid(self) -> bool {
+        self.load_sensitivity_bounds_per_load_ratio
+            .iter()
+            .all(|value| value.is_finite())
+            && self.load_sensitivity_bounds_per_load_ratio[0] >= 0.0
+            && self.load_sensitivity_bounds_per_load_ratio[0]
+                < self.load_sensitivity_bounds_per_load_ratio[1]
+            && self.load_sensitivity_bounds_per_load_ratio[1] < 1.0
+            && [
+                self.minimum_combined_axis_slip,
+                self.maximum_abs_slip,
+                self.minimum_training_load_ratio_span,
+                self.maximum_training_rms_n,
+                self.maximum_holdout_rms_n,
+                self.maximum_worst_condition_rms_n,
+            ]
+            .iter()
+            .all(|value| value.is_finite())
+            && self.minimum_combined_axis_slip > 0.0
+            && self.minimum_combined_axis_slip < self.maximum_abs_slip
+            && self.minimum_training_load_ratio_span > 0.0
+            && self.minimum_training_samples >= 4
+            && self.minimum_holdout_samples_per_condition >= 2
+            && self.minimum_holdout_samples / 2 >= self.minimum_holdout_samples_per_condition
+            && (5..=101).contains(&self.grid_points)
+            && self.grid_points % 2 == 1
+            && (1..=10).contains(&self.refinement_passes)
+            && self.maximum_training_rms_n >= 0.0
+            && self.maximum_holdout_rms_n >= 0.0
+            && self.maximum_worst_condition_rms_n >= 0.0
+    }
+}
+
+/// Frozen load-sensitivity fit and train/holdout residual evidence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TireLoadSensitivityIdentificationResult {
+    /// Input tire with only the load-sensitivity coefficient replaced.
+    pub tire_spec: CombinedSlipTireSpec,
+    /// Identified fractional friction loss per unit load ratio.
+    pub load_sensitivity_per_load_ratio: f64,
+    /// Minimum retained training load ratio.
+    pub minimum_training_load_ratio: f64,
+    /// Maximum retained training load ratio.
+    pub maximum_training_load_ratio: f64,
+    /// Retained training sample count.
+    pub training_sample_count: usize,
+    /// Retained holdout sample count.
+    pub holdout_sample_count: usize,
+    /// Training vector-force RMS in newtons.
+    pub training_rms_n: f64,
+    /// Pooled holdout vector-force RMS in newtons.
+    pub holdout_rms_n: f64,
+    /// Deterministically ordered per-condition holdout residuals.
+    pub condition_residuals: Vec<TireConditionResidual>,
+}
+
 /// Failure returned by transient tire relaxation-length identification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
 pub enum TireRelaxationIdentificationError {
@@ -2485,6 +2578,264 @@ pub fn identify_combined_slip_tire_steady(
         holdout_rms_n,
         condition_residuals,
     })
+}
+
+type TireLoadSensitivityObservation = (f64, f64, f64, f64, f64, f64, u64);
+
+/// Identifies the load-dependent peak-friction slope after the steady tire fit is frozen.
+///
+/// Only combined-slip training samples whose normal loads bracket the reference load enter the
+/// deterministic one-parameter search. Complete acquisitions remain assigned to one split,
+/// and the returned coefficient is evaluated without refitting on pooled and per-condition
+/// holdout samples. The function never estimates road friction, stiffness, reference-load peak
+/// friction, the minimum-friction clamp, or relaxation length.
+pub fn identify_tire_load_sensitivity(
+    spec: TireLoadSensitivityIdentificationSpec,
+    frozen_tire: CombinedSlipTireSpec,
+    training_runs: &[TireIdentificationRun<'_>],
+    holdout_runs: &[TireIdentificationRun<'_>],
+) -> Result<TireLoadSensitivityIdentificationResult, TireIdentificationError> {
+    if !spec.is_valid() || !frozen_tire.is_valid() {
+        return Err(TireIdentificationError::InvalidSpec);
+    }
+    let (training, holdout) =
+        load_sensitivity_observations(spec, frozen_tire, training_runs, holdout_runs)?;
+    if training.len() < spec.minimum_training_samples
+        || holdout.len() < spec.minimum_holdout_samples
+    {
+        return Err(TireIdentificationError::InsufficientExcitation);
+    }
+    let minimum_training_load_ratio = training
+        .iter()
+        .map(|sample| sample.2 / frozen_tire.reference_load_n)
+        .fold(f64::INFINITY, f64::min);
+    let maximum_training_load_ratio = training
+        .iter()
+        .map(|sample| sample.2 / frozen_tire.reference_load_n)
+        .fold(f64::NEG_INFINITY, f64::max);
+    if minimum_training_load_ratio >= 1.0
+        || maximum_training_load_ratio <= 1.0
+        || maximum_training_load_ratio - minimum_training_load_ratio
+            < spec.minimum_training_load_ratio_span
+    {
+        return Err(TireIdentificationError::InsufficientExcitation);
+    }
+    let maximum_observed_load_ratio = training
+        .iter()
+        .chain(&holdout)
+        .map(|sample| sample.2 / frozen_tire.reference_load_n)
+        .fold(0.0_f64, f64::max);
+    let maximum_candidate = spec.load_sensitivity_bounds_per_load_ratio[1];
+    if 1.0 - maximum_candidate * (maximum_observed_load_ratio - 1.0)
+        <= frozen_tire.minimum_friction_ratio
+    {
+        return Err(TireIdentificationError::InvalidSpec);
+    }
+    let work = training
+        .len()
+        .saturating_mul(spec.grid_points)
+        .saturating_mul(spec.refinement_passes);
+    if work > 10_000_000 {
+        return Err(TireIdentificationError::InvalidSpec);
+    }
+
+    let load_sensitivity_per_load_ratio = fit_load_sensitivity(spec, frozen_tire, &training)?;
+    let tire_spec = CombinedSlipTireSpec {
+        load_sensitivity_per_load_ratio,
+        ..frozen_tire
+    };
+    if !tire_spec.is_valid() {
+        return Err(TireIdentificationError::NonPhysicalResult);
+    }
+    let training_squared_error = load_sensitivity_squared_error(tire_spec, &training);
+    let holdout_squared_error = load_sensitivity_squared_error(tire_spec, &holdout);
+    if !training_squared_error.is_finite() || !holdout_squared_error.is_finite() {
+        return Err(TireIdentificationError::NonPhysicalResult);
+    }
+    let training_rms_n = (training_squared_error / training.len() as f64).sqrt();
+    let holdout_rms_n = (holdout_squared_error / holdout.len() as f64).sqrt();
+    let mut conditions = std::collections::BTreeMap::<u64, (usize, f64)>::new();
+    for sample in &holdout {
+        let squared_error = load_sensitivity_sample_squared_error(tire_spec, *sample);
+        let condition = conditions.entry(sample.6).or_default();
+        condition.0 += 1;
+        condition.1 += squared_error;
+    }
+    if conditions.len() < 2
+        || conditions
+            .values()
+            .any(|(count, _)| *count < spec.minimum_holdout_samples_per_condition)
+    {
+        return Err(TireIdentificationError::InsufficientExcitation);
+    }
+    let condition_residuals = conditions
+        .into_iter()
+        .map(
+            |(condition_id, (sample_count, squared_error))| TireConditionResidual {
+                condition_id,
+                sample_count,
+                vector_force_rms_n: (squared_error / sample_count as f64).sqrt(),
+            },
+        )
+        .collect::<Vec<_>>();
+    let worst_condition_rms_n = condition_residuals
+        .iter()
+        .map(|condition| condition.vector_force_rms_n)
+        .fold(0.0_f64, f64::max);
+    if !training_rms_n.is_finite()
+        || !holdout_rms_n.is_finite()
+        || !worst_condition_rms_n.is_finite()
+    {
+        return Err(TireIdentificationError::NonPhysicalResult);
+    }
+    if training_rms_n > spec.maximum_training_rms_n
+        || holdout_rms_n > spec.maximum_holdout_rms_n
+        || worst_condition_rms_n > spec.maximum_worst_condition_rms_n
+    {
+        return Err(TireIdentificationError::ResidualExceeded);
+    }
+
+    Ok(TireLoadSensitivityIdentificationResult {
+        tire_spec,
+        load_sensitivity_per_load_ratio,
+        minimum_training_load_ratio,
+        maximum_training_load_ratio,
+        training_sample_count: training.len(),
+        holdout_sample_count: holdout.len(),
+        training_rms_n,
+        holdout_rms_n,
+        condition_residuals,
+    })
+}
+
+fn load_sensitivity_observations(
+    spec: TireLoadSensitivityIdentificationSpec,
+    tire: CombinedSlipTireSpec,
+    training_runs: &[TireIdentificationRun<'_>],
+    holdout_runs: &[TireIdentificationRun<'_>],
+) -> Result<
+    (
+        Vec<TireLoadSensitivityObservation>,
+        Vec<TireLoadSensitivityObservation>,
+    ),
+    TireIdentificationError,
+> {
+    if training_runs.is_empty() || holdout_runs.is_empty() {
+        return Err(TireIdentificationError::InsufficientExcitation);
+    }
+    let mut acquisition_ids = std::collections::BTreeSet::new();
+    let mut total_samples = 0_usize;
+    let collect = |runs: &[TireIdentificationRun<'_>],
+                   acquisition_ids: &mut std::collections::BTreeSet<u64>,
+                   total_samples: &mut usize|
+     -> Result<Vec<TireLoadSensitivityObservation>, TireIdentificationError> {
+        let mut observations = Vec::new();
+        for run in runs {
+            if !acquisition_ids.insert(run.acquisition_id) {
+                return Err(TireIdentificationError::DuplicateAcquisition);
+            }
+            if run.samples.is_empty()
+                || !run.road_friction_scale.is_finite()
+                || run.road_friction_scale <= 0.0
+            {
+                return Err(TireIdentificationError::InvalidSample);
+            }
+            *total_samples = (*total_samples).saturating_add(run.samples.len());
+            if *total_samples > 100_000 {
+                return Err(TireIdentificationError::InvalidSpec);
+            }
+            let mut previous_time_s = None;
+            for sample in run.samples {
+                if [
+                    sample.capture_time_s,
+                    sample.longitudinal_slip_ratio,
+                    sample.lateral_slip_tangent,
+                    sample.normal_load_n,
+                    sample.longitudinal_force_n,
+                    sample.lateral_force_n,
+                ]
+                .iter()
+                .any(|value| !value.is_finite())
+                    || sample.normal_load_n <= 0.0
+                    || sample.normal_load_n > tire.reference_load_n * tire.maximum_load_ratio
+                    || sample.longitudinal_slip_ratio.abs() > spec.maximum_abs_slip
+                    || sample.lateral_slip_tangent.abs() > spec.maximum_abs_slip
+                    || previous_time_s.is_some_and(|time| sample.capture_time_s <= time)
+                {
+                    return Err(TireIdentificationError::InvalidSample);
+                }
+                previous_time_s = Some(sample.capture_time_s);
+                if sample.longitudinal_slip_ratio.abs() >= spec.minimum_combined_axis_slip
+                    && sample.lateral_slip_tangent.abs() >= spec.minimum_combined_axis_slip
+                {
+                    observations.push((
+                        sample.longitudinal_slip_ratio,
+                        sample.lateral_slip_tangent,
+                        sample.normal_load_n,
+                        run.road_friction_scale,
+                        sample.longitudinal_force_n,
+                        sample.lateral_force_n,
+                        run.condition_id,
+                    ));
+                }
+            }
+        }
+        Ok(observations)
+    };
+    let training = collect(training_runs, &mut acquisition_ids, &mut total_samples)?;
+    let holdout = collect(holdout_runs, &mut acquisition_ids, &mut total_samples)?;
+    Ok((training, holdout))
+}
+
+fn fit_load_sensitivity(
+    spec: TireLoadSensitivityIdentificationSpec,
+    frozen_tire: CombinedSlipTireSpec,
+    training: &[TireLoadSensitivityObservation],
+) -> Result<f64, TireIdentificationError> {
+    let original = spec.load_sensitivity_bounds_per_load_ratio;
+    let mut bounds = original;
+    let divisions = (spec.grid_points - 1) as f64;
+    let mut best = (bounds[0], f64::INFINITY);
+    for _ in 0..spec.refinement_passes {
+        let step = (bounds[1] - bounds[0]) / divisions;
+        for index in 0..spec.grid_points {
+            let candidate = bounds[0] + step * index as f64;
+            let tire = CombinedSlipTireSpec {
+                load_sensitivity_per_load_ratio: candidate,
+                ..frozen_tire
+            };
+            let squared_error = load_sensitivity_squared_error(tire, training);
+            if squared_error < best.1 {
+                best = (candidate, squared_error);
+            }
+        }
+        if !best.1.is_finite() {
+            return Err(TireIdentificationError::NonPhysicalResult);
+        }
+        bounds = [
+            (best.0 - step).max(original[0]),
+            (best.0 + step).min(original[1]),
+        ];
+    }
+    Ok(best.0)
+}
+
+fn load_sensitivity_squared_error(
+    tire: CombinedSlipTireSpec,
+    observations: &[TireLoadSensitivityObservation],
+) -> f64 {
+    observations
+        .iter()
+        .map(|sample| load_sensitivity_sample_squared_error(tire, *sample))
+        .sum()
+}
+
+fn load_sensitivity_sample_squared_error(
+    tire: CombinedSlipTireSpec,
+    sample: TireLoadSensitivityObservation,
+) -> f64 {
+    let predicted = steady_tire_forces(tire, sample.0, sample.1, sample.2, sample.3);
+    (predicted.0 - sample.4).powi(2) + (predicted.1 - sample.5).powi(2)
 }
 
 type TireRelaxationTransition = (f64, f64, f64, f64, f64, u64);
@@ -6109,6 +6460,177 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error, TireIdentificationError::ResidualExceeded);
+    }
+
+    fn tire_load_sensitivity_spec() -> TireLoadSensitivityIdentificationSpec {
+        TireLoadSensitivityIdentificationSpec {
+            load_sensitivity_bounds_per_load_ratio: [0.0, 0.4],
+            minimum_combined_axis_slip: 0.15,
+            maximum_abs_slip: 1.0,
+            minimum_training_load_ratio_span: 0.8,
+            minimum_training_samples: 9,
+            minimum_holdout_samples: 6,
+            minimum_holdout_samples_per_condition: 3,
+            grid_points: 17,
+            refinement_passes: 4,
+            maximum_training_rms_n: 1.0e-8,
+            maximum_holdout_rms_n: 1.0e-8,
+            maximum_worst_condition_rms_n: 1.0e-8,
+        }
+    }
+
+    fn load_sensitivity_samples(
+        loads_n: &[f64],
+        road_friction_scale: f64,
+    ) -> Vec<TireForceIdentificationSample> {
+        let true_tire = CombinedSlipTireSpec {
+            load_sensitivity_per_load_ratio: 0.2,
+            ..identified_tire_template()
+        };
+        loads_n
+            .iter()
+            .flat_map(|load_n| {
+                [(0.50, 0.25), (-0.45, 0.30), (0.35, -0.40)]
+                    .into_iter()
+                    .map(move |slip| (*load_n, slip))
+            })
+            .enumerate()
+            .map(|(index, (load_n, (longitudinal, lateral)))| {
+                let (longitudinal_force_n, lateral_force_n) = steady_tire_forces(
+                    true_tire,
+                    longitudinal,
+                    lateral,
+                    load_n,
+                    road_friction_scale,
+                );
+                TireForceIdentificationSample {
+                    capture_time_s: index as f64 * 0.01,
+                    longitudinal_slip_ratio: longitudinal,
+                    lateral_slip_tangent: lateral,
+                    normal_load_n: load_n,
+                    longitudinal_force_n,
+                    lateral_force_n,
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn tire_load_sensitivity_fit_brackets_reference_load_and_holds_out_conditions() {
+        let training = load_sensitivity_samples(&[600.0, 1_000.0, 1_600.0], 1.0);
+        let dry_holdout = load_sensitivity_samples(&[800.0], 1.0);
+        let wet_holdout = load_sensitivity_samples(&[1_400.0], 0.7);
+        let frozen = identified_tire_template();
+        let result = identify_tire_load_sensitivity(
+            tire_load_sensitivity_spec(),
+            frozen,
+            &[TireIdentificationRun {
+                acquisition_id: 40,
+                condition_id: 400,
+                road_friction_scale: 1.0,
+                samples: &training,
+            }],
+            &[
+                TireIdentificationRun {
+                    acquisition_id: 41,
+                    condition_id: 410,
+                    road_friction_scale: 1.0,
+                    samples: &dry_holdout,
+                },
+                TireIdentificationRun {
+                    acquisition_id: 42,
+                    condition_id: 420,
+                    road_friction_scale: 0.7,
+                    samples: &wet_holdout,
+                },
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(result.load_sensitivity_per_load_ratio, 0.2);
+        assert_eq!(
+            result.tire_spec,
+            CombinedSlipTireSpec {
+                load_sensitivity_per_load_ratio: 0.2,
+                ..frozen
+            }
+        );
+        assert_eq!(result.training_sample_count, 9);
+        assert_eq!(result.holdout_sample_count, 6);
+        assert_eq!(result.minimum_training_load_ratio, 0.6);
+        assert_eq!(result.maximum_training_load_ratio, 1.6);
+        assert!(result.training_rms_n < 1.0e-10);
+        assert!(result.holdout_rms_n < 1.0e-10);
+        assert_eq!(
+            result
+                .condition_residuals
+                .iter()
+                .map(|residual| residual.condition_id)
+                .collect::<Vec<_>>(),
+            [410, 420]
+        );
+    }
+
+    #[test]
+    fn tire_load_sensitivity_rejects_unbracketed_training_and_degraded_holdout() {
+        let unbracketed = load_sensitivity_samples(&[1_200.0, 1_400.0, 1_600.0], 1.0);
+        let dry_holdout = load_sensitivity_samples(&[800.0], 1.0);
+        let wet_holdout = load_sensitivity_samples(&[1_400.0], 0.7);
+        let frozen = identified_tire_template();
+        let run = |samples| TireIdentificationRun {
+            acquisition_id: 50,
+            condition_id: 500,
+            road_friction_scale: 1.0,
+            samples,
+        };
+        assert_eq!(
+            identify_tire_load_sensitivity(
+                tire_load_sensitivity_spec(),
+                frozen,
+                &[run(&unbracketed)],
+                &[
+                    TireIdentificationRun {
+                        acquisition_id: 51,
+                        condition_id: 510,
+                        road_friction_scale: 1.0,
+                        samples: &dry_holdout,
+                    },
+                    TireIdentificationRun {
+                        acquisition_id: 52,
+                        condition_id: 520,
+                        road_friction_scale: 0.7,
+                        samples: &wet_holdout,
+                    },
+                ],
+            ),
+            Err(TireIdentificationError::InsufficientExcitation)
+        );
+
+        let training = load_sensitivity_samples(&[600.0, 1_000.0, 1_600.0], 1.0);
+        let mut degraded = wet_holdout;
+        degraded[1].lateral_force_n += 50.0;
+        assert_eq!(
+            identify_tire_load_sensitivity(
+                tire_load_sensitivity_spec(),
+                frozen,
+                &[run(&training)],
+                &[
+                    TireIdentificationRun {
+                        acquisition_id: 51,
+                        condition_id: 510,
+                        road_friction_scale: 1.0,
+                        samples: &dry_holdout,
+                    },
+                    TireIdentificationRun {
+                        acquisition_id: 52,
+                        condition_id: 520,
+                        road_friction_scale: 0.7,
+                        samples: &degraded,
+                    },
+                ],
+            ),
+            Err(TireIdentificationError::ResidualExceeded)
+        );
     }
 
     #[test]

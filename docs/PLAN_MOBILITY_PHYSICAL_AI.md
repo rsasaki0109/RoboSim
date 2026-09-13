@@ -434,19 +434,24 @@ and cross-backend results.
     rejected explicitly. This closes the synthetic software gate for the current low-order
     force law. A bounded CLI dataset/result path now freezes the split and template, labels the
     synthetic fixture honestly, SHA-256-binds both artifacts, and replays the fit during
-    validation. Relaxation length, load sensitivity, road scale, and physical-log validity
-    remain open and retain separate provenance. The physical acquisition subgate now rejects
+    validation. A separate staged load-sweep fit now freezes that steady result and identifies
+    only tire load sensitivity from bracketed combined-slip training conditions, with pooled and
+    per-condition holdout gates. Its bounded owned artifact replays the chain and detects
+    tampering. Road scale and physical-log validity remain separate provenance. The physical
+    acquisition subgate now rejects
     label-only claims and binds every dataset run to synchronized, unit/convention-explicit
     signals, mixed source/common conversion rates, raw capture, calibration/derivation records,
     and independent road-friction evidence under a streamed external-root verifier. No genuine
     physical capture is qualified yet; see
     [`MOBILITY_TIRE_IDENTIFICATION_V1.md`](MOBILITY_TIRE_IDENTIFICATION_V1.md).
-    A following transient subgate now identifies either longitudinal or lateral relaxation
+    A transient subgate now identifies either longitudinal or lateral relaxation
     length from physical observables rather than privileged tire state: it inverts the frozen
     pure-axis steady force law below a bounded utilization ceiling, then fits the runtime's
     exact speed/distance first-order update using training acquisitions only and applies pooled
-    and worst-condition holdout gates. Artifact binding, physical capture, and cross-backend
-    application of the transient fit remain open.
+    and worst-condition holdout gates. Owned transient artifacts, axis-aware physical manifests,
+    a three-manifest qualification request, and shared Rapier/MuJoCo profile application now
+    exist. No genuine capture is qualified. Physical load-sweep binding and integration of the
+    fitted load sensitivity into the transient/profile qualification chain remain open.
     Ackermann wheel/steering/IMU fatal faults now emit deterministic,
     cross-backend, status- and digest-bound Failure Capsules.
 16. M4/M5: in progress. The first M4 subgate now provides width-independent seeded
