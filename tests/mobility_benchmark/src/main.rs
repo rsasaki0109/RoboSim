@@ -9,7 +9,8 @@ use rne_mobility_benchmark::diff_caster::run_differential_caster_trace;
 use rne_mobility_benchmark::identified_suspension_road::run_identified_suspension_road_evidence;
 use rne_mobility_benchmark::identified_tire_backend::{
     decode_identified_tire_profile, run_identified_tire_backend_trace,
-    synthetic_identified_tire_profile, MAX_IDENTIFIED_TIRE_PROFILE_BYTES,
+    synthetic_identified_tire_profile, synthetic_load_sensitive_identified_tire_profile,
+    MAX_IDENTIFIED_TIRE_PROFILE_BYTES,
 };
 use rne_mobility_benchmark::mobility_randomization::{
     run_mobility_randomized_backend_trace, run_mobility_randomized_batch,
@@ -494,6 +495,13 @@ fn main() -> Result<()> {
             (
                 serde_json::to_string_pretty(&profile)? + "\n",
                 "identified-tire-profile-fixture",
+            )
+        }
+        "load-sensitive-tire-profile-fixture" => {
+            let profile = synthetic_load_sensitive_identified_tire_profile()?;
+            (
+                serde_json::to_string_pretty(&profile)? + "\n",
+                "load-sensitive-tire-profile-fixture",
             )
         }
         "suspension-uncertainty"

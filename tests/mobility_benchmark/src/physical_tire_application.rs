@@ -2,7 +2,7 @@
 
 use crate::identified_tire_backend::{
     run_identified_tire_backend_comparison, IdentifiedTireBackendComparison,
-    IdentifiedTireProfileEvidence,
+    IdentifiedTireProfileEvidence, IDENTIFIED_TIRE_PROFILE_SCHEMA_VERSION_V1,
 };
 use crate::tire_acquisition::{
     qualify_tire_dataset, TirePhysicalAcquisitionManifest, TirePhysicalQualificationEvidence,
@@ -68,6 +68,10 @@ impl PhysicalTireApplicationRequest {
         );
         self.profile.validate()?;
         ensure!(
+            self.profile.schema_version == IDENTIFIED_TIRE_PROFILE_SCHEMA_VERSION_V1,
+            "three-manifest physical gate cannot qualify load-sensitive profile v2"
+        );
+        ensure!(
             self.profile.longitudinal_dataset.axis == TireRelaxationAxis::Longitudinal
                 && self.profile.lateral_dataset.axis == TireRelaxationAxis::Lateral,
             "physical tire application axis drift"
@@ -105,6 +109,10 @@ pub fn build_physical_tire_application_request(
     lateral_acquisition: TireRelaxationAcquisitionManifest,
 ) -> Result<PhysicalTireApplicationRequest> {
     profile.validate()?;
+    ensure!(
+        profile.schema_version == IDENTIFIED_TIRE_PROFILE_SCHEMA_VERSION_V1,
+        "three-manifest physical gate cannot qualify load-sensitive profile v2"
+    );
     steady_acquisition.validate(&profile.longitudinal_dataset.steady_dataset)?;
     longitudinal_acquisition.validate(&profile.longitudinal_dataset)?;
     lateral_acquisition.validate(&profile.lateral_dataset)?;
@@ -344,6 +352,7 @@ mod tests {
     use super::*;
     use crate::identified_tire_backend::{
         build_identified_tire_profile, synthetic_identified_tire_profile,
+        synthetic_load_sensitive_identified_tire_profile,
     };
     use crate::tire_acquisition::{
         RoadFrictionEvidenceKind, TireCalibrationKind, TireCaptureClockKind, TireEvidenceFileRef,
@@ -558,6 +567,19 @@ mod tests {
             request.profile,
             request.steady_acquisition,
             request.lateral_acquisition.clone(),
+            request.lateral_acquisition,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn three_manifest_builder_rejects_load_sensitive_profile_v2() {
+        let root = tempfile::tempdir().unwrap();
+        let request = request_fixture(root.path());
+        assert!(build_physical_tire_application_request(
+            synthetic_load_sensitive_identified_tire_profile().unwrap(),
+            request.steady_acquisition,
+            request.longitudinal_acquisition,
             request.lateral_acquisition,
         )
         .is_err());

@@ -77,6 +77,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Add an identified-tire profile v2 that replays the staged load-sensitivity fit beside both
+  relaxation axes, applies all three fitted terms to the same backend-neutral plant, and runs
+  through the existing Rapier/MuJoCo TaskSpec path. The legacy three-manifest physical gate
+  rejects v2 until a retained load-sweep acquisition closure is supplied.
+
 - Add a backend-neutral staged tire load-sensitivity identifier. It freezes the previously
   identified steady law, requires combined-slip training loads to bracket the reference load,
   fits only the load-dependent peak-friction slope, and enforces pooled and per-condition

@@ -437,8 +437,10 @@ and cross-backend results.
     validation. A separate staged load-sweep fit now freezes that steady result and identifies
     only tire load sensitivity from bracketed combined-slip training conditions, with pooled and
     per-condition holdout gates. Its bounded owned artifact replays the chain and detects
-    tampering. Road scale and physical-log validity remain separate provenance. The physical
-    acquisition subgate now rejects
+    tampering. Identified-profile v2 now joins this evidence with both relaxation axes, requires
+    all three chains to share exact steady evidence, and applies the resulting tire unchanged to
+    the shared Rapier/MuJoCo TaskSpec. Road scale and physical-log validity remain separate
+    provenance. The physical acquisition subgate now rejects
     label-only claims and binds every dataset run to synchronized, unit/convention-explicit
     signals, mixed source/common conversion rates, raw capture, calibration/derivation records,
     and independent road-friction evidence under a streamed external-root verifier. No genuine
@@ -450,8 +452,9 @@ and cross-backend results.
     exact speed/distance first-order update using training acquisitions only and applies pooled
     and worst-condition holdout gates. Owned transient artifacts, axis-aware physical manifests,
     a three-manifest qualification request, and shared Rapier/MuJoCo profile application now
-    exist. No genuine capture is qualified. Physical load-sweep binding and integration of the
-    fitted load sensitivity into the transient/profile qualification chain remain open.
+    exist. No genuine capture is qualified. The legacy three-manifest request rejects profile v2
+    fail-closed; physical load-sweep binding and a four-manifest profile qualification chain
+    remain open.
     Ackermann wheel/steering/IMU fatal faults now emit deterministic,
     cross-backend, status- and digest-bound Failure Capsules.
 16. M4/M5: in progress. The first M4 subgate now provides width-independent seeded
