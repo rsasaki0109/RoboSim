@@ -40,6 +40,10 @@ use rne_mobility_benchmark::tire_identification::{
     decode_tire_identification_dataset, identify_tire_dataset,
     synthetic_tire_identification_dataset, MAX_TIRE_IDENTIFICATION_DATASET_BYTES,
 };
+use rne_mobility_benchmark::tire_load_sensitivity::{
+    decode_tire_load_sensitivity_dataset, identify_tire_load_sensitivity_dataset,
+    synthetic_tire_load_sensitivity_dataset, MAX_TIRE_LOAD_SENSITIVITY_DATASET_BYTES,
+};
 use rne_mobility_benchmark::tire_relaxation::{
     decode_tire_relaxation_acquisition_manifest, decode_tire_relaxation_dataset,
     identify_tire_relaxation_dataset, qualify_tire_relaxation_dataset,
@@ -478,6 +482,13 @@ fn main() -> Result<()> {
                 "tire-relaxation-fixture",
             )
         }
+        "tire-load-sensitivity-fixture" => {
+            let dataset = synthetic_tire_load_sensitivity_dataset()?;
+            (
+                serde_json::to_string_pretty(&dataset)? + "\n",
+                "tire-load-sensitivity-fixture",
+            )
+        }
         "identified-tire-profile-fixture" => {
             let profile = synthetic_identified_tire_profile()?;
             (
@@ -805,6 +816,17 @@ fn main() -> Result<()> {
                 "tire-relaxation-identification",
             )
         }
+        "tire-load-sensitivity-identification" => {
+            let input = input
+                .as_deref()
+                .context("--backend tire-load-sensitivity-identification requires --input")?;
+            let dataset = read_tire_load_sensitivity_dataset(input)?;
+            let evidence = identify_tire_load_sensitivity_dataset(&dataset)?;
+            (
+                serde_json::to_string_pretty(&evidence)? + "\n",
+                "tire-load-sensitivity-identification",
+            )
+        }
         "identified-tire-rapier" => {
             let input = input
                 .as_deref()
@@ -1063,6 +1085,7 @@ fn main() -> Result<()> {
                 | "tire-identification"
                 | "tire-acquisition-verify"
                 | "tire-relaxation-identification"
+                | "tire-load-sensitivity-identification"
                 | "tire-relaxation-acquisition-verify"
                 | "identified-tire-rapier"
                 | "identified-tire-compare"
@@ -1283,6 +1306,19 @@ fn read_tire_relaxation_dataset(
     );
     let bytes = std::fs::read(input).with_context(|| format!("read {}", input.display()))?;
     decode_tire_relaxation_dataset(&bytes)
+}
+
+fn read_tire_load_sensitivity_dataset(
+    input: &std::path::Path,
+) -> Result<rne_mobility_benchmark::tire_load_sensitivity::TireLoadSensitivityDataset> {
+    let metadata =
+        std::fs::metadata(input).with_context(|| format!("inspect {}", input.display()))?;
+    ensure!(
+        metadata.is_file() && metadata.len() <= MAX_TIRE_LOAD_SENSITIVITY_DATASET_BYTES as u64,
+        "tire load-sensitivity input is not a bounded regular file"
+    );
+    let bytes = std::fs::read(input).with_context(|| format!("read {}", input.display()))?;
+    decode_tire_load_sensitivity_dataset(&bytes)
 }
 
 fn read_identified_tire_profile(

@@ -105,6 +105,38 @@ This inverse is intentionally not used near force saturation, where `atanh` is i
 It also does not infer the steady tire parameters simultaneously: joint fitting would hide
 parameter non-identifiability and must use a separate protocol.
 
+## Load-sensitivity identification subgate
+
+The runtime peak-friction ratio decreases linearly with normalized load until the already
+declared minimum-friction clamp:
+
+```text
+q = normal_load / reference_load
+friction_ratio = max(1 - load_sensitivity * (q - 1), minimum_friction_ratio)
+```
+
+`identify_tire_load_sensitivity` is a separate staged fit. It freezes the preceding stiffnesses,
+reference-load peak friction, road scale, relaxation parameters, and clamp, then searches only
+`load_sensitivity_per_load_ratio`. Retained training samples must have combined slip on both axes,
+must bracket the reference load, and must cover a declared minimum load-ratio span. Complete
+acquisitions remain disjoint across train and holdout. After fitting, pooled and per-condition
+holdout vector-force residuals are evaluated without refitting.
+
+This follows the model-structure lesson from the original
+[TMeasy paper](https://doi.org/10.1080/00423110701776284): load-dependent tire characteristics
+are distinct physical parameters rather than generic collider friction. Project Chrono's
+[official TMeasy implementation](https://github.com/projectchrono/chrono/blob/main/src/chrono_vehicle/wheeled_vehicle/tire/ChTMeasyTire.h)
+likewise retains separate nominal-load and twice-nominal-load force characteristics and
+interpolates them using `q = Fz / Fz_nom`. RNE does not reproduce TMeasy's full quadratic
+interpolation; the present one-parameter law remains RNE's lower-order identifiable profile.
+
+The subgate rejects data whose load range would enter the minimum-friction clamp for any allowed
+candidate, because that flat region cannot identify the slope. Its deterministic synthetic tests
+recover only a known software fixture and reject unbracketed training or degraded holdout. An
+owned, bounded dataset/result artifact replays this fit and binds its frozen steady evidence,
+split, provenance, and self-hash. Physical acquisition binding, relaxation-chain integration,
+and cross-backend application of the fitted coefficient remain subsequent gates.
+
 The transient path owns its input rather than borrowing process memory. A
 `rne_mobility_tire_relaxation_dataset` freezes one axis, owns and replays the preceding steady
 dataset and fit evidence, then uses only that fit's tire law with complete transient
@@ -152,6 +184,8 @@ The identification fixture is deliberately non-physical:
 ```text
 cargo run -p rne_mobility_benchmark -- --backend tire-identification-fixture --output dataset.json
 cargo run -p rne_mobility_benchmark -- --backend tire-identification --input dataset.json --output result.json
+cargo run -p rne_mobility_benchmark -- --backend tire-load-sensitivity-fixture --output load-sensitivity.json
+cargo run -p rne_mobility_benchmark -- --backend tire-load-sensitivity-identification --input load-sensitivity.json --output load-sensitivity-result.json
 cargo run -p rne_mobility_benchmark -- --backend tire-relaxation-fixture --output transient.json
 cargo run -p rne_mobility_benchmark -- --backend tire-relaxation-identification --input transient.json --output transient-result.json
 cargo run -p rne_mobility_benchmark -- --backend identified-tire-profile-fixture --output tire-profile.json
@@ -226,5 +260,6 @@ identified tire profile to the shared Rapier/MuJoCo TaskSpec. The relaxation-len
 fit, owned artifact/acquisition binding, three-manifest physical application gate, and shared
 Rapier/MuJoCo execution path exist, but no genuine physical capture has passed that complete
 chain yet. Acquiring and independently reviewing the retained steady and transient files is now
-the remaining evidence step. Load-sensitivity identification still requires a separate
-excitation and validation protocol.
+the remaining evidence step for the existing profile. The load-sensitivity software fit and
+owned artifact now exist, but retained physical load-sweep binding and integration of its result
+into the relaxation/profile/cross-backend chain remain separate gates.
