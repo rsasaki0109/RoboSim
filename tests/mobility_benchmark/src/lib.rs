@@ -7,6 +7,7 @@ pub mod diff_caster;
 pub mod diff_caster_control;
 pub mod diff_caster_observed;
 pub mod identified_suspension_road;
+pub mod identified_tire_backend;
 pub mod mobility_randomization;
 pub mod observed;
 pub mod observed_batch;

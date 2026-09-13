@@ -1,5 +1,8 @@
 //! Process-level tire artifact coverage; the fixture is not physical evidence.
 
+use rne_mobility_benchmark::identified_tire_backend::{
+    IdentifiedTireBackendTrace, IdentifiedTireProfileEvidence,
+};
 use rne_mobility_benchmark::tire_acquisition::{
     RoadFrictionEvidenceKind, TireCalibrationKind, TireCaptureClockKind, TireEvidenceFileRef,
     TirePhysicalAcquisitionManifest, TirePhysicalQualificationEvidence, TireRawCaptureFormat,
@@ -102,6 +105,46 @@ fn tire_relaxation_cli_emits_a_bound_non_physical_result() {
     evidence.validate(&dataset).unwrap();
     assert!(!evidence.recorded_source_claim);
     assert!((evidence.result.relaxation_length_m - 0.35).abs() < 1.0e-12);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn identified_tire_cli_binds_profile_to_rapier_plant() {
+    let root = std::env::temp_dir().join(format!("rne-identified-tire-cli-{}", std::process::id()));
+    fs::create_dir(&root).unwrap();
+    let profile_path = root.join("profile.json");
+    let trace_path = root.join("rapier.json");
+
+    let fixture = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
+        .args(["--backend", "identified-tire-profile-fixture", "--output"])
+        .arg(&profile_path)
+        .output()
+        .unwrap();
+    assert!(
+        fixture.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fixture.stderr)
+    );
+    let execute = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
+        .args(["--backend", "identified-tire-rapier", "--input"])
+        .arg(&profile_path)
+        .arg("--output")
+        .arg(&trace_path)
+        .output()
+        .unwrap();
+    assert!(
+        execute.status.success(),
+        "{}",
+        String::from_utf8_lossy(&execute.stderr)
+    );
+
+    let profile: IdentifiedTireProfileEvidence =
+        serde_json::from_slice(&fs::read(profile_path).unwrap()).unwrap();
+    let evidence: IdentifiedTireBackendTrace =
+        serde_json::from_slice(&fs::read(trace_path).unwrap()).unwrap();
+    profile.validate().unwrap();
+    evidence.validate().unwrap();
+    assert_eq!(evidence.trace.plant.tire, profile.tire_spec);
     fs::remove_dir_all(root).unwrap();
 }
 

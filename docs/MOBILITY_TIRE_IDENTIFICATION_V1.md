@@ -120,6 +120,22 @@ derivation records, logger identity, and the exact RNE commit. Only the joined q
 can emit `physical_measurement: true`, after all referenced files have been streamed and
 hashed beneath the explicitly supplied evidence root.
 
+## Backend-neutral profile application
+
+An `rne_mobility_identified_tire_profile` accepts exactly one longitudinal and one lateral
+relaxation chain. Both must replay to the exact same owned steady dataset and steady fit. The
+profile starts from that steady result and replaces only the two axis-specific relaxation
+lengths; substituted stiffness, friction, load-sensitivity, or relaxation values fail
+validation.
+
+Mobility backend trace schema v2 now retains the complete backend-neutral plant beside the
+TaskSpec. The identified-profile runner requires that retained plant's tire element to equal
+the replayed profile bit-for-bit. Rapier and MuJoCo receive the same TaskSpec, seed, fixed step,
+motor, transmission, wheel, road, and identified tire profile. Their comparison retains the
+existing unit-bearing tolerances rather than claiming bitwise state equality across solvers.
+The bundled profile is synthetic and therefore demonstrates application plumbing, not physical
+qualification.
+
 ## CLI
 
 The identification fixture is deliberately non-physical:
@@ -129,6 +145,9 @@ cargo run -p rne_mobility_benchmark -- --backend tire-identification-fixture --o
 cargo run -p rne_mobility_benchmark -- --backend tire-identification --input dataset.json --output result.json
 cargo run -p rne_mobility_benchmark -- --backend tire-relaxation-fixture --output transient.json
 cargo run -p rne_mobility_benchmark -- --backend tire-relaxation-identification --input transient.json --output transient-result.json
+cargo run -p rne_mobility_benchmark -- --backend identified-tire-profile-fixture --output tire-profile.json
+cargo run -p rne_mobility_benchmark -- --backend identified-tire-rapier --input tire-profile.json --output rapier-application.json
+cargo run -p rne_mobility_benchmark --features mujoco -- --backend identified-tire-compare --input tire-profile.json --output cross-backend-application.json
 ```
 
 A recorded dataset is admitted to the physical gate only with its manifest and external
@@ -161,6 +180,7 @@ No repository fixture currently passes as genuine physical evidence. Completion 
 appropriately licensed retained capture, reviewed calibration and synchronization records,
 conversion into the frozen schema, train/holdout execution, and portable application of the
 identified tire profile to the shared Rapier/MuJoCo TaskSpec. The relaxation-length software
-fit and its owned artifact/acquisition binding exist, but no genuine physical execution has
-passed that gate yet. Portable application to the shared Rapier/MuJoCo TaskSpec also remains.
+fit, owned artifact/acquisition binding, and shared Rapier/MuJoCo application path exist, but no
+genuine physical execution has passed those gates yet. Applying two file-verified physical
+axis qualifications, rather than source-label claims, remains the next physical evidence step.
 Load-sensitivity identification still requires a separate excitation and validation protocol.

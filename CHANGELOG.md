@@ -6,6 +6,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Bind the exact backend-neutral plant profile into Mobility trace schema v2 and apply a
+  replay-verified steady-plus-two-axis tire profile to the same TaskSpec on Rapier and MuJoCo.
+  Cross-backend evidence retains explicit SI-unit tolerances and rejects plant substitution.
+
 - Add owned transient tire-relaxation datasets, deterministic replayable fit evidence, and an
   axis-aware physical acquisition manifest. Synthetic fixtures remain explicitly non-physical;
   only the joined, file-verified qualification can assert a physical measurement.

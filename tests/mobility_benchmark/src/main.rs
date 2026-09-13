@@ -7,6 +7,10 @@ use rne_mobility_benchmark::backend::run_backend_mobility_trace;
 use rne_mobility_benchmark::diff_caster::run_differential_caster_trace;
 #[cfg(feature = "mujoco")]
 use rne_mobility_benchmark::identified_suspension_road::run_identified_suspension_road_evidence;
+use rne_mobility_benchmark::identified_tire_backend::{
+    decode_identified_tire_profile, run_identified_tire_backend_trace,
+    synthetic_identified_tire_profile, MAX_IDENTIFIED_TIRE_PROFILE_BYTES,
+};
 use rne_mobility_benchmark::mobility_randomization::{
     run_mobility_randomized_backend_trace, run_mobility_randomized_batch,
 };
@@ -430,6 +434,13 @@ fn main() -> Result<()> {
                 "tire-relaxation-fixture",
             )
         }
+        "identified-tire-profile-fixture" => {
+            let profile = synthetic_identified_tire_profile()?;
+            (
+                serde_json::to_string_pretty(&profile)? + "\n",
+                "identified-tire-profile-fixture",
+            )
+        }
         "suspension-uncertainty"
         | "suspension-uncertainty-verify"
         | "suspension-derived-errors"
@@ -750,6 +761,28 @@ fn main() -> Result<()> {
                 "tire-relaxation-identification",
             )
         }
+        "identified-tire-rapier" => {
+            let input = input
+                .as_deref()
+                .context("--backend identified-tire-rapier requires --input")?;
+            let profile = read_identified_tire_profile(input)?;
+            let evidence = run_identified_tire_backend_trace(
+                RapierBackend::new(),
+                RapierBackend::manifest(),
+                profile,
+            )?;
+            ensure!(evidence.trace.passed, "identified tire Rapier task failed");
+            (
+                serde_json::to_string_pretty(&evidence)? + "\n",
+                "identified-tire-rapier",
+            )
+        }
+        "identified-tire-compare" => {
+            let input = input
+                .as_deref()
+                .context("--backend identified-tire-compare requires --input")?;
+            run_identified_tire_comparison(input)?
+        }
         "identified-road-compare" => {
             let input = input
                 .as_deref()
@@ -912,6 +945,8 @@ fn main() -> Result<()> {
                 | "tire-acquisition-verify"
                 | "tire-relaxation-identification"
                 | "tire-relaxation-acquisition-verify"
+                | "identified-tire-rapier"
+                | "identified-tire-compare"
                 | "identified-road-compare"
                 | "suspension-acquisition-verify"
                 | "suspension-acquired"
@@ -1117,6 +1152,49 @@ fn read_tire_relaxation_dataset(
     );
     let bytes = std::fs::read(input).with_context(|| format!("read {}", input.display()))?;
     decode_tire_relaxation_dataset(&bytes)
+}
+
+fn read_identified_tire_profile(
+    input: &std::path::Path,
+) -> Result<rne_mobility_benchmark::identified_tire_backend::IdentifiedTireProfileEvidence> {
+    let metadata =
+        std::fs::metadata(input).with_context(|| format!("inspect {}", input.display()))?;
+    ensure!(
+        metadata.is_file() && metadata.len() <= MAX_IDENTIFIED_TIRE_PROFILE_BYTES as u64,
+        "identified tire profile is not a bounded regular file"
+    );
+    let bytes = std::fs::read(input).with_context(|| format!("read {}", input.display()))?;
+    decode_identified_tire_profile(&bytes)
+}
+
+#[cfg(feature = "mujoco")]
+fn run_identified_tire_comparison(input: &std::path::Path) -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::backend::BACKEND_MOBILITY_FIXED_DELTA_TICKS;
+    use rne_mobility_benchmark::identified_tire_backend::run_identified_tire_backend_comparison;
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let evidence = run_identified_tire_backend_comparison(
+        RapierBackend::new(),
+        RapierBackend::manifest(),
+        MuJoCoBackend::new(SimDuration::from_ticks(BACKEND_MOBILITY_FIXED_DELTA_TICKS))?,
+        MuJoCoBackend::manifest(),
+        read_identified_tire_profile(input)?,
+    )?;
+    ensure!(
+        evidence.comparison.passed,
+        "identified tire backend comparison failed: {:#?}",
+        evidence.comparison.metrics
+    );
+    Ok((
+        serde_json::to_string_pretty(&evidence)? + "\n",
+        "identified-tire-rapier-vs-mujoco",
+    ))
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_identified_tire_comparison(_input: &std::path::Path) -> Result<(String, &'static str)> {
+    bail!("identified tire comparison requires --features mujoco")
 }
 
 #[cfg(feature = "mujoco")]
