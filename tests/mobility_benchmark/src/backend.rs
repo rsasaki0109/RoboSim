@@ -27,7 +27,7 @@ use crate::MobilityBenchmarkMetric;
 /// Artifact discriminator for one backend mobility trace.
 pub const BACKEND_MOBILITY_TRACE_KIND: &str = "rne_mobility_backend_trace";
 /// Current backend trace schema version.
-pub const BACKEND_MOBILITY_TRACE_SCHEMA_VERSION: u32 = 1;
+pub const BACKEND_MOBILITY_TRACE_SCHEMA_VERSION: u32 = 2;
 /// Artifact discriminator for a unit-aware cross-backend comparison.
 pub const BACKEND_MOBILITY_COMPARISON_KIND: &str = "rne_mobility_backend_comparison";
 /// Current cross-backend comparison schema version.
@@ -107,6 +107,8 @@ pub struct BackendMobilityTrace {
     pub backend: PhysicsBackendManifest,
     /// Exact portable task contract executed by this run.
     pub task_spec: TaskSpec,
+    /// Exact backend-neutral motor, transmission, wheel, tire, and road plant executed.
+    pub plant: LongitudinalMobilityPlantSpec,
     /// Fixed step in simulation nanosecond ticks.
     pub fixed_delta_ticks: u64,
     /// Explicit deterministic world seed.
@@ -131,6 +133,10 @@ impl BackendMobilityTrace {
             self.task_spec == backend_mobility_task_spec(),
             "exact TaskSpec mismatch"
         );
+        ensure!(
+            self.plant == backend_plant_spec(),
+            "exact plant profile mismatch"
+        );
         ensure!(self.seed == WORLD_SEED, "world seed mismatch");
         Ok(())
     }
@@ -143,6 +149,7 @@ impl BackendMobilityTrace {
         );
         self.backend.validate().context("backend manifest")?;
         self.task_spec.validate().context("TaskSpec")?;
+        ensure!(self.plant.is_valid(), "invalid Mobility plant profile");
         validate_backend_execution(
             self.fixed_delta_ticks,
             self.steps,
@@ -261,14 +268,19 @@ impl BackendMobilityComparison {
             self.schema_version == BACKEND_MOBILITY_COMPARISON_SCHEMA_VERSION,
             "comparison schema mismatch"
         );
-        self.first.validate().context("first backend trace")?;
-        self.second.validate().context("second backend trace")?;
+        self.first
+            .validate_execution()
+            .context("first backend trace")?;
+        self.second
+            .validate_execution()
+            .context("second backend trace")?;
         ensure!(
             self.first.backend.backend_id != self.second.backend.backend_id,
             "comparison requires distinct backend identities"
         );
         ensure!(
             self.first.task_spec == self.second.task_spec
+                && self.first.plant == self.second.plant
                 && self.first.fixed_delta_ticks == self.second.fixed_delta_ticks
                 && self.first.seed == self.second.seed,
             "backend execution contract mismatch"
@@ -292,14 +304,17 @@ pub fn compare_backend_mobility_traces(
     first: BackendMobilityTrace,
     second: BackendMobilityTrace,
 ) -> Result<BackendMobilityComparison> {
-    first.validate().context("first backend trace")?;
-    second.validate().context("second backend trace")?;
+    first.validate_execution().context("first backend trace")?;
+    second
+        .validate_execution()
+        .context("second backend trace")?;
     ensure!(
         first.backend.backend_id != second.backend.backend_id,
         "comparison requires distinct backend identities"
     );
     ensure!(
         first.task_spec == second.task_spec
+            && first.plant == second.plant
             && first.fixed_delta_ticks == second.fixed_delta_ticks
             && first.seed == second.seed,
         "backend execution contract mismatch"
@@ -329,10 +344,13 @@ pub fn backend_mobility_divergence_replay(
     second: &BackendMobilityTrace,
     diagnostic_position_tolerance_m: f64,
 ) -> Result<BehaviorReplayArtifact> {
-    first.validate().context("first backend trace")?;
-    second.validate().context("second backend trace")?;
+    first.validate_execution().context("first backend trace")?;
+    second
+        .validate_execution()
+        .context("second backend trace")?;
     ensure!(
         first.task_spec == second.task_spec
+            && first.plant == second.plant
             && first.fixed_delta_ticks == second.fixed_delta_ticks
             && first.seed == second.seed,
         "backend execution contract mismatch"
@@ -406,6 +424,7 @@ pub fn backend_mobility_divergence_replay(
     let violation = violation.context("diagnostic tolerance produced no divergence")?;
     let scenario_digest = fnv1a64(&serde_json::to_vec(&serde_json::json!({
         "task_spec": first.task_spec,
+        "plant": first.plant,
         "diagnostic_position_tolerance_m": diagnostic_position_tolerance_m,
         "first_backend": first.backend,
         "second_backend": second.backend,
@@ -756,6 +775,7 @@ pub(crate) fn run_backend_mobility_trace_configured<B: PhysicsBackend>(
         schema_version: BACKEND_MOBILITY_TRACE_SCHEMA_VERSION,
         backend: manifest,
         task_spec,
+        plant,
         fixed_delta_ticks: BACKEND_MOBILITY_FIXED_DELTA_TICKS,
         seed,
         steps: TOTAL_STEPS,

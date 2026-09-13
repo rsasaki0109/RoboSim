@@ -650,15 +650,26 @@ pub fn tire_relaxation_identification_spec() -> TireRelaxationIdentificationSpec
 
 /// Builds a deterministic non-physical fixture for the owned artifact path.
 pub fn synthetic_tire_relaxation_dataset() -> Result<TireRelaxationDataset> {
+    synthetic_tire_relaxation_dataset_for_axis(TireRelaxationAxis::Longitudinal)
+}
+
+/// Builds a deterministic non-physical fixture for one explicitly selected axis.
+pub fn synthetic_tire_relaxation_dataset_for_axis(
+    axis: TireRelaxationAxis,
+) -> Result<TireRelaxationDataset> {
     let steady_dataset = synthetic_tire_identification_dataset()?;
     let steady_identification = identify_tire_dataset(&steady_dataset)?;
     let tire = steady_identification.result.tire_spec;
-    let axis = TireRelaxationAxis::Longitudinal;
     let run = |phase| synthetic_run(tire, axis, 0.35, phase);
     let mut dataset = TireRelaxationDataset {
         kind: TIRE_RELAXATION_DATASET_KIND.into(),
         schema_version: TIRE_RELAXATION_SCHEMA_VERSION,
-        dataset_id: "rne.synthetic.tire.relaxation.longitudinal.v1".into(),
+        dataset_id: match axis {
+            TireRelaxationAxis::Longitudinal => {
+                "rne.synthetic.tire.relaxation.longitudinal.v1".into()
+            }
+            TireRelaxationAxis::Lateral => "rne.synthetic.tire.relaxation.lateral.v1".into(),
+        },
         source_kind: TireDatasetSourceKind::SyntheticFixture,
         source_description: "deterministic generated transient fixture; not physical data".into(),
         force_model: "rne_combined_slip_tanh_ellipse_relaxation_v1".into(),
