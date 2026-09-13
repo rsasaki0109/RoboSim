@@ -20,8 +20,9 @@ use rne_mobility_benchmark::per_wheel_observed::{
     run_per_wheel_observed_failure_capsule, run_per_wheel_observed_trace, PerWheelObservedFault,
 };
 use rne_mobility_benchmark::physical_tire_application::{
-    decode_physical_tire_application_request, qualify_physical_tire_profile,
-    PhysicalTireApplicationRequest, MAX_PHYSICAL_TIRE_APPLICATION_REQUEST_BYTES,
+    build_physical_tire_application_request, decode_physical_tire_application_request,
+    qualify_physical_tire_profile, PhysicalTireApplicationRequest,
+    MAX_PHYSICAL_TIRE_APPLICATION_REQUEST_BYTES,
 };
 use rne_mobility_benchmark::road_excitation::run_road_excitation_trace;
 use rne_mobility_benchmark::run_mobility_benchmark;
@@ -58,6 +59,9 @@ fn main() -> Result<()> {
     let mut input = None;
     let mut interval_tolerance_s = None;
     let mut acquisition_manifest = None;
+    let mut steady_acquisition_manifest = None;
+    let mut longitudinal_acquisition_manifest = None;
+    let mut lateral_acquisition_manifest = None;
     let mut evidence_root = None;
     let mut num_envs = None;
     let mut num_workers = None;
@@ -105,6 +109,36 @@ fn main() -> Result<()> {
                 acquisition_manifest = Some(PathBuf::from(
                     args.next()
                         .context("--acquisition-manifest requires a path")?,
+                ));
+            }
+            "--steady-acquisition-manifest" => {
+                ensure!(
+                    steady_acquisition_manifest.is_none(),
+                    "duplicate --steady-acquisition-manifest"
+                );
+                steady_acquisition_manifest = Some(PathBuf::from(
+                    args.next()
+                        .context("--steady-acquisition-manifest requires a path")?,
+                ));
+            }
+            "--longitudinal-acquisition-manifest" => {
+                ensure!(
+                    longitudinal_acquisition_manifest.is_none(),
+                    "duplicate --longitudinal-acquisition-manifest"
+                );
+                longitudinal_acquisition_manifest = Some(PathBuf::from(
+                    args.next()
+                        .context("--longitudinal-acquisition-manifest requires a path")?,
+                ));
+            }
+            "--lateral-acquisition-manifest" => {
+                ensure!(
+                    lateral_acquisition_manifest.is_none(),
+                    "duplicate --lateral-acquisition-manifest"
+                );
+                lateral_acquisition_manifest = Some(PathBuf::from(
+                    args.next()
+                        .context("--lateral-acquisition-manifest requires a path")?,
                 ));
             }
             "--evidence-root" => {
@@ -169,6 +203,9 @@ fn main() -> Result<()> {
             failure_replay.is_none()
                 && fault.is_none()
                 && acquisition_manifest.is_none()
+                && steady_acquisition_manifest.is_none()
+                && longitudinal_acquisition_manifest.is_none()
+                && lateral_acquisition_manifest.is_none()
                 && evidence_root.is_none()
                 && episode_index.is_none()
                 && lane_id.is_none(),
@@ -203,6 +240,9 @@ fn main() -> Result<()> {
             failure_replay.is_none()
                 && fault.is_none()
                 && acquisition_manifest.is_none()
+                && steady_acquisition_manifest.is_none()
+                && longitudinal_acquisition_manifest.is_none()
+                && lateral_acquisition_manifest.is_none()
                 && evidence_root.is_none()
                 && num_envs.is_none()
                 && root_seed.is_none()
@@ -787,6 +827,58 @@ fn main() -> Result<()> {
                 .context("--backend identified-tire-compare requires --input")?;
             run_identified_tire_comparison(input)?
         }
+        "physical-tire-request" => {
+            let input = input
+                .as_deref()
+                .context("--backend physical-tire-request requires --input profile")?;
+            let steady_path = steady_acquisition_manifest.as_deref().context(
+                "--backend physical-tire-request requires --steady-acquisition-manifest",
+            )?;
+            let longitudinal_path = longitudinal_acquisition_manifest.as_deref().context(
+                "--backend physical-tire-request requires --longitudinal-acquisition-manifest",
+            )?;
+            let lateral_path = lateral_acquisition_manifest.as_deref().context(
+                "--backend physical-tire-request requires --lateral-acquisition-manifest",
+            )?;
+            let profile = read_identified_tire_profile(input)?;
+            let steady_bytes = read_bounded_regular_file(
+                steady_path,
+                MAX_TIRE_ACQUISITION_MANIFEST_BYTES,
+                "steady tire acquisition manifest",
+            )?;
+            let longitudinal_bytes = read_bounded_regular_file(
+                longitudinal_path,
+                MAX_TIRE_RELAXATION_ACQUISITION_MANIFEST_BYTES,
+                "longitudinal tire relaxation acquisition manifest",
+            )?;
+            let lateral_bytes = read_bounded_regular_file(
+                lateral_path,
+                MAX_TIRE_RELAXATION_ACQUISITION_MANIFEST_BYTES,
+                "lateral tire relaxation acquisition manifest",
+            )?;
+            let steady_acquisition = decode_tire_acquisition_manifest(
+                &steady_bytes,
+                &profile.longitudinal_dataset.steady_dataset,
+            )?;
+            let longitudinal_acquisition = decode_tire_relaxation_acquisition_manifest(
+                &longitudinal_bytes,
+                &profile.longitudinal_dataset,
+            )?;
+            let lateral_acquisition = decode_tire_relaxation_acquisition_manifest(
+                &lateral_bytes,
+                &profile.lateral_dataset,
+            )?;
+            let request = build_physical_tire_application_request(
+                profile,
+                steady_acquisition,
+                longitudinal_acquisition,
+                lateral_acquisition,
+            )?;
+            (
+                serde_json::to_string_pretty(&request)? + "\n",
+                "physical-tire-application-request",
+            )
+        }
         "physical-tire-qualify" => {
             let input = input
                 .as_deref()
@@ -974,6 +1066,7 @@ fn main() -> Result<()> {
                 | "tire-relaxation-acquisition-verify"
                 | "identified-tire-rapier"
                 | "identified-tire-compare"
+                | "physical-tire-request"
                 | "physical-tire-qualify"
                 | "physical-tire-compare"
                 | "identified-road-compare"
@@ -1011,6 +1104,13 @@ fn main() -> Result<()> {
                 | "tire-relaxation-acquisition-verify"
         ) || acquisition_manifest.is_none(),
         "--acquisition-manifest requires an acquisition verification backend"
+    );
+    ensure!(
+        backend == "physical-tire-request"
+            || (steady_acquisition_manifest.is_none()
+                && longitudinal_acquisition_manifest.is_none()
+                && lateral_acquisition_manifest.is_none()),
+        "axis-specific acquisition manifests require --backend physical-tire-request"
     );
     ensure!(
         matches!(
@@ -1209,6 +1309,20 @@ fn read_physical_tire_application_request(
     );
     let bytes = std::fs::read(input).with_context(|| format!("read {}", input.display()))?;
     decode_physical_tire_application_request(&bytes)
+}
+
+fn read_bounded_regular_file(
+    input: &std::path::Path,
+    maximum_bytes: usize,
+    label: &str,
+) -> Result<Vec<u8>> {
+    let metadata =
+        std::fs::metadata(input).with_context(|| format!("inspect {}", input.display()))?;
+    ensure!(
+        metadata.is_file() && metadata.len() <= maximum_bytes as u64,
+        "{label} is not a bounded regular file"
+    );
+    std::fs::read(input).with_context(|| format!("read {}", input.display()))
 }
 
 #[cfg(feature = "mujoco")]
