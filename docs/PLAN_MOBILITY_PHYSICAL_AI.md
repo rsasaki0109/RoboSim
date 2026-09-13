@@ -435,7 +435,12 @@ and cross-backend results.
     force law. A bounded CLI dataset/result path now freezes the split and template, labels the
     synthetic fixture honestly, SHA-256-binds both artifacts, and replays the fit during
     validation. Relaxation length, load sensitivity, road scale, and physical-log validity
-    remain open and retain separate provenance. See [`MOBILITY_PLANT_V1.md`](MOBILITY_PLANT_V1.md).
+    remain open and retain separate provenance. The physical acquisition subgate now rejects
+    label-only claims and binds every dataset run to synchronized, unit/convention-explicit
+    signals, mixed source/common conversion rates, raw capture, calibration/derivation records,
+    and independent road-friction evidence under a streamed external-root verifier. No genuine
+    physical capture is qualified yet; see
+    [`MOBILITY_TIRE_IDENTIFICATION_V1.md`](MOBILITY_TIRE_IDENTIFICATION_V1.md).
     Ackermann wheel/steering/IMU fatal faults now emit deterministic,
     cross-backend, status- and digest-bound Failure Capsules.
 16. M4/M5: in progress. The first M4 subgate now provides width-independent seeded

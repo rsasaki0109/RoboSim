@@ -15,6 +15,8 @@ pub const TIRE_IDENTIFICATION_DATASET_KIND: &str = "rne_mobility_tire_identifica
 pub const TIRE_IDENTIFICATION_RESULT_KIND: &str = "rne_mobility_tire_identification_result";
 /// Identification artifact schema.
 pub const TIRE_IDENTIFICATION_SCHEMA_VERSION: u32 = 1;
+/// Result schema separating a recorded-source claim from physical qualification.
+pub const TIRE_IDENTIFICATION_RESULT_SCHEMA_VERSION: u32 = 2;
 /// Maximum accepted serialized dataset size.
 pub const MAX_TIRE_IDENTIFICATION_DATASET_BYTES: usize = 32 * 1024 * 1024;
 
@@ -180,8 +182,8 @@ pub struct TireIdentificationEvidence {
     pub dataset_content_sha256: String,
     /// Input provenance copied into the result.
     pub source_kind: TireDatasetSourceKind,
-    /// True only for bench or vehicle measurements.
-    pub physical_measurement: bool,
+    /// Source-label claim only; physical qualification requires an acquisition artifact.
+    pub recorded_source_claim: bool,
     /// Exact parameter bounds, excitation requirements, and residual gates.
     pub identification_spec: TireIdentificationSpec,
     /// Deterministically recomputed parameters and residuals.
@@ -196,13 +198,13 @@ impl TireIdentificationEvidence {
         dataset.validate()?;
         ensure!(
             self.kind == TIRE_IDENTIFICATION_RESULT_KIND
-                && self.schema_version == TIRE_IDENTIFICATION_SCHEMA_VERSION,
+                && self.schema_version == TIRE_IDENTIFICATION_RESULT_SCHEMA_VERSION,
             "tire identification result kind/schema drift"
         );
         ensure!(
             self.dataset_content_sha256 == dataset.content_sha256
                 && self.source_kind == dataset.source_kind
-                && self.physical_measurement == dataset.source_kind.is_physical_measurement(),
+                && self.recorded_source_claim == dataset.source_kind.is_physical_measurement(),
             "tire identification provenance drift"
         );
         let recomputed = identify(dataset, self.identification_spec)?;
@@ -346,10 +348,10 @@ pub fn identify_tire_dataset(
     let result = identify(dataset, identification_spec)?;
     let mut evidence = TireIdentificationEvidence {
         kind: TIRE_IDENTIFICATION_RESULT_KIND.to_string(),
-        schema_version: TIRE_IDENTIFICATION_SCHEMA_VERSION,
+        schema_version: TIRE_IDENTIFICATION_RESULT_SCHEMA_VERSION,
         dataset_content_sha256: dataset.content_sha256.clone(),
         source_kind: dataset.source_kind,
-        physical_measurement: dataset.source_kind.is_physical_measurement(),
+        recorded_source_claim: dataset.source_kind.is_physical_measurement(),
         identification_spec,
         result,
         content_sha256: String::new(),
@@ -417,7 +419,7 @@ mod tests {
         let first = identify_tire_dataset(&dataset).unwrap();
         let second = identify_tire_dataset(&dataset).unwrap();
         assert_eq!(first, second);
-        assert!(!first.physical_measurement);
+        assert!(!first.recorded_source_claim);
         assert_eq!(first.result.tire_spec.longitudinal_stiffness_n, 8_000.0);
         assert_eq!(first.result.tire_spec.lateral_stiffness_n, 7_000.0);
         assert!(first.result.holdout_rms_n < 1.0e-10);
@@ -431,7 +433,7 @@ mod tests {
         tampered_dataset.holdout_runs[0].samples[0].longitudinal_force_n += 1.0;
         assert!(tampered_dataset.validate().is_err());
         let mut tampered_evidence = evidence;
-        tampered_evidence.physical_measurement = true;
+        tampered_evidence.recorded_source_claim = true;
         assert!(tampered_evidence.validate(&dataset).is_err());
     }
 
