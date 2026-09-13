@@ -105,6 +105,21 @@ This inverse is intentionally not used near force saturation, where `atanh` is i
 It also does not infer the steady tire parameters simultaneously: joint fitting would hide
 parameter non-identifiability and must use a separate protocol.
 
+The transient path owns its input rather than borrowing process memory. A
+`rne_mobility_tire_relaxation_dataset` freezes one axis, owns and replays the preceding steady
+dataset and fit evidence, then uses only that fit's tire law with complete transient
+training/holdout acquisitions, provenance, and a self-excluding SHA-256. Its
+`rne_mobility_tire_relaxation_result` replays the fit and binds the exact dataset, fit contract,
+residuals, and source label. The result deliberately calls the provenance bit
+`recorded_source_claim`; it is not physical qualification.
+
+Physical qualification additionally requires an axis-aware transient acquisition manifest.
+Each run binds synchronized transport speed, kinematic target slip, normal load, and measured
+axis force channels, plus raw-segment identity, road-friction evidence, calibration or
+derivation records, logger identity, and the exact RNE commit. Only the joined qualification
+can emit `physical_measurement: true`, after all referenced files have been streamed and
+hashed beneath the explicitly supplied evidence root.
+
 ## CLI
 
 The identification fixture is deliberately non-physical:
@@ -112,6 +127,8 @@ The identification fixture is deliberately non-physical:
 ```text
 cargo run -p rne_mobility_benchmark -- --backend tire-identification-fixture --output dataset.json
 cargo run -p rne_mobility_benchmark -- --backend tire-identification --input dataset.json --output result.json
+cargo run -p rne_mobility_benchmark -- --backend tire-relaxation-fixture --output transient.json
+cargo run -p rne_mobility_benchmark -- --backend tire-relaxation-identification --input transient.json --output transient-result.json
 ```
 
 A recorded dataset is admitted to the physical gate only with its manifest and external
@@ -124,6 +141,13 @@ cargo run -p rne_mobility_benchmark -- \
   --acquisition-manifest acquisition.json \
   --evidence-root E:/rne-tire-capture \
   --output verified-acquisition.json
+
+cargo run -p rne_mobility_benchmark -- \
+  --backend tire-relaxation-acquisition-verify \
+  --input transient.json \
+  --acquisition-manifest transient-acquisition.json \
+  --evidence-root E:/rne-tire-capture \
+  --output verified-transient-acquisition.json
 ```
 
 The verifier bounds manifest and artifact sizes, rejects unknown fields and incomplete or
@@ -137,5 +161,6 @@ No repository fixture currently passes as genuine physical evidence. Completion 
 appropriately licensed retained capture, reviewed calibration and synchronization records,
 conversion into the frozen schema, train/holdout execution, and portable application of the
 identified tire profile to the shared Rapier/MuJoCo TaskSpec. The relaxation-length software
-fit exists, but its owned artifact/acquisition binding and physical execution remain open.
+fit and its owned artifact/acquisition binding exist, but no genuine physical execution has
+passed that gate yet. Portable application to the shared Rapier/MuJoCo TaskSpec also remains.
 Load-sensitivity identification still requires a separate excitation and validation protocol.
