@@ -557,7 +557,7 @@ pub fn decode_tire_acquisition_manifest(
     Ok(manifest)
 }
 
-fn verify_file(root: &Path, artifact: &TireEvidenceFileRef) -> Result<()> {
+pub(crate) fn verify_file(root: &Path, artifact: &TireEvidenceFileRef) -> Result<()> {
     artifact.validate()?;
     let candidate = root.join(PathBuf::from(&artifact.path));
     let canonical = candidate
@@ -596,7 +596,7 @@ fn verify_file(root: &Path, artifact: &TireEvidenceFileRef) -> Result<()> {
     Ok(())
 }
 
-fn valid_id(value: &str) -> bool {
+pub(crate) fn valid_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value
@@ -604,7 +604,7 @@ fn valid_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
-fn valid_text(value: &str) -> bool {
+pub(crate) fn valid_text(value: &str) -> bool {
     !value.is_empty() && value.len() <= 1_024 && !value.chars().any(char::is_control)
 }
 
@@ -618,7 +618,7 @@ fn valid_relative_path(value: &str) -> bool {
             .any(|component| component.is_empty() || matches!(component, "." | ".."))
 }
 
-fn valid_sha256(value: &str) -> bool {
+pub(crate) fn valid_sha256(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(|hex| {
         hex.len() == 64
             && hex
@@ -627,7 +627,7 @@ fn valid_sha256(value: &str) -> bool {
     })
 }
 
-fn valid_git_revision(value: &str) -> bool {
+pub(crate) fn valid_git_revision(value: &str) -> bool {
     value.len() == 40
         && value
             .bytes()

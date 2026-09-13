@@ -6,6 +6,10 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Add owned transient tire-relaxation datasets, deterministic replayable fit evidence, and an
+  axis-aware physical acquisition manifest. Synthetic fixtures remain explicitly non-physical;
+  only the joined, file-verified qualification can assert a physical measurement.
+
 - Freeze the external-validation campaign to the exact `v0.2.0` release URL
   across the registry, README, intake guide, and all four issue forms. Forms
   now reject generic release placeholders and warn contributors not to submit

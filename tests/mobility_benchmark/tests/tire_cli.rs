@@ -10,6 +10,7 @@ use rne_mobility_benchmark::tire_identification::{
     synthetic_tire_identification_dataset, TireDatasetSourceKind, TireIdentificationDataset,
     TireIdentificationEvidence,
 };
+use rne_mobility_benchmark::tire_relaxation::{TireRelaxationDataset, TireRelaxationEvidence};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::{fs, process::Command};
@@ -61,6 +62,46 @@ fn tire_cli_emits_a_bound_dataset_and_identification_result() {
     evidence.validate(&dataset).unwrap();
     assert_eq!(evidence.dataset_content_sha256, dataset.content_sha256);
 
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn tire_relaxation_cli_emits_a_bound_non_physical_result() {
+    let root = std::env::temp_dir().join(format!("rne-tire-relaxation-cli-{}", std::process::id()));
+    fs::create_dir(&root).unwrap();
+    let dataset_path = root.join("transient.json");
+    let evidence_path = root.join("transient-evidence.json");
+
+    let fixture = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
+        .args(["--backend", "tire-relaxation-fixture", "--output"])
+        .arg(&dataset_path)
+        .output()
+        .unwrap();
+    assert!(
+        fixture.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fixture.stderr)
+    );
+    let identify = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
+        .args(["--backend", "tire-relaxation-identification", "--input"])
+        .arg(&dataset_path)
+        .arg("--output")
+        .arg(&evidence_path)
+        .output()
+        .unwrap();
+    assert!(
+        identify.status.success(),
+        "{}",
+        String::from_utf8_lossy(&identify.stderr)
+    );
+
+    let dataset: TireRelaxationDataset =
+        serde_json::from_slice(&fs::read(&dataset_path).unwrap()).unwrap();
+    let evidence: TireRelaxationEvidence =
+        serde_json::from_slice(&fs::read(&evidence_path).unwrap()).unwrap();
+    evidence.validate(&dataset).unwrap();
+    assert!(!evidence.recorded_source_claim);
+    assert!((evidence.result.relaxation_length_m - 0.35).abs() < 1.0e-12);
     fs::remove_dir_all(root).unwrap();
 }
 

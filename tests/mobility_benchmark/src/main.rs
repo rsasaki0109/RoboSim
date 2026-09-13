@@ -31,6 +31,12 @@ use rne_mobility_benchmark::tire_identification::{
     decode_tire_identification_dataset, identify_tire_dataset,
     synthetic_tire_identification_dataset, MAX_TIRE_IDENTIFICATION_DATASET_BYTES,
 };
+use rne_mobility_benchmark::tire_relaxation::{
+    decode_tire_relaxation_acquisition_manifest, decode_tire_relaxation_dataset,
+    identify_tire_relaxation_dataset, qualify_tire_relaxation_dataset,
+    synthetic_tire_relaxation_dataset, MAX_TIRE_RELAXATION_ACQUISITION_MANIFEST_BYTES,
+    MAX_TIRE_RELAXATION_DATASET_BYTES,
+};
 use rne_physics_rapier::RapierBackend;
 use std::path::PathBuf;
 
@@ -417,6 +423,13 @@ fn main() -> Result<()> {
                 "tire-identification-fixture",
             )
         }
+        "tire-relaxation-fixture" => {
+            let dataset = synthetic_tire_relaxation_dataset()?;
+            (
+                serde_json::to_string_pretty(&dataset)? + "\n",
+                "tire-relaxation-fixture",
+            )
+        }
         "suspension-uncertainty"
         | "suspension-uncertainty-verify"
         | "suspension-derived-errors"
@@ -726,6 +739,17 @@ fn main() -> Result<()> {
                 "tire-identification",
             )
         }
+        "tire-relaxation-identification" => {
+            let input = input
+                .as_deref()
+                .context("--backend tire-relaxation-identification requires --input")?;
+            let dataset = read_tire_relaxation_dataset(input)?;
+            let evidence = identify_tire_relaxation_dataset(&dataset)?;
+            (
+                serde_json::to_string_pretty(&evidence)? + "\n",
+                "tire-relaxation-identification",
+            )
+        }
         "identified-road-compare" => {
             let input = input
                 .as_deref()
@@ -797,6 +821,34 @@ fn main() -> Result<()> {
                 "tire-acquisition-verified",
             )
         }
+        "tire-relaxation-acquisition-verify" => {
+            let input = input
+                .as_deref()
+                .context("--backend tire-relaxation-acquisition-verify requires --input")?;
+            let manifest_path = acquisition_manifest.as_deref().context(
+                "--backend tire-relaxation-acquisition-verify requires --acquisition-manifest",
+            )?;
+            let evidence_root = evidence_root
+                .as_deref()
+                .context("--backend tire-relaxation-acquisition-verify requires --evidence-root")?;
+            let dataset = read_tire_relaxation_dataset(input)?;
+            let metadata = std::fs::metadata(manifest_path)
+                .with_context(|| format!("inspect {}", manifest_path.display()))?;
+            ensure!(
+                metadata.is_file()
+                    && metadata.len() <= MAX_TIRE_RELAXATION_ACQUISITION_MANIFEST_BYTES as u64,
+                "tire relaxation acquisition manifest is not a bounded regular file"
+            );
+            let bytes = std::fs::read(manifest_path)
+                .with_context(|| format!("read {}", manifest_path.display()))?;
+            let manifest = decode_tire_relaxation_acquisition_manifest(&bytes, &dataset)?;
+            let qualification =
+                qualify_tire_relaxation_dataset(&dataset, &manifest, evidence_root)?;
+            (
+                serde_json::to_string_pretty(&qualification)? + "\n",
+                "tire-relaxation-acquisition-verified",
+            )
+        }
         "mobility-randomized-batch" => {
             let report = run_mobility_randomized_batch(
                 root_seed.context("--backend mobility-randomized-batch requires --seed")?,
@@ -858,6 +910,8 @@ fn main() -> Result<()> {
             "suspension-identification"
                 | "tire-identification"
                 | "tire-acquisition-verify"
+                | "tire-relaxation-identification"
+                | "tire-relaxation-acquisition-verify"
                 | "identified-road-compare"
                 | "suspension-acquisition-verify"
                 | "suspension-acquired"
@@ -888,7 +942,9 @@ fn main() -> Result<()> {
     ensure!(
         matches!(
             backend.as_str(),
-            "suspension-acquisition-verify" | "tire-acquisition-verify"
+            "suspension-acquisition-verify"
+                | "tire-acquisition-verify"
+                | "tire-relaxation-acquisition-verify"
         ) || acquisition_manifest.is_none(),
         "--acquisition-manifest requires an acquisition verification backend"
     );
@@ -897,6 +953,7 @@ fn main() -> Result<()> {
             backend.as_str(),
             "suspension-acquisition-verify"
                 | "tire-acquisition-verify"
+                | "tire-relaxation-acquisition-verify"
                 | "suspension-acquired"
                 | "suspension-acquired-verify"
                 | "suspension-uncertainty"
@@ -1047,6 +1104,19 @@ fn read_tire_identification_dataset(
     );
     let bytes = std::fs::read(input).with_context(|| format!("read {}", input.display()))?;
     decode_tire_identification_dataset(&bytes)
+}
+
+fn read_tire_relaxation_dataset(
+    input: &std::path::Path,
+) -> Result<rne_mobility_benchmark::tire_relaxation::TireRelaxationDataset> {
+    let metadata =
+        std::fs::metadata(input).with_context(|| format!("inspect {}", input.display()))?;
+    ensure!(
+        metadata.is_file() && metadata.len() <= MAX_TIRE_RELAXATION_DATASET_BYTES as u64,
+        "tire relaxation input is not a bounded regular file"
+    );
+    let bytes = std::fs::read(input).with_context(|| format!("read {}", input.display()))?;
+    decode_tire_relaxation_dataset(&bytes)
 }
 
 #[cfg(feature = "mujoco")]

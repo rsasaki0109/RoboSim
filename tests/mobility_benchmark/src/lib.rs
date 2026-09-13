@@ -32,6 +32,7 @@ pub mod suspension_timestamp_acquisition;
 pub mod suspension_uncertainty;
 pub mod tire_acquisition;
 pub mod tire_identification;
+pub mod tire_relaxation;
 
 use anyhow::{ensure, Result};
 use rne_robot::{
