@@ -16,6 +16,7 @@ pub mod observed_execution_capsule;
 pub mod observed_fixed_batch;
 pub mod per_wheel;
 pub mod per_wheel_observed;
+pub mod physical_tire_application;
 pub mod recorded_ddmr;
 pub mod recorded_ipin;
 pub mod recorded_nclt;

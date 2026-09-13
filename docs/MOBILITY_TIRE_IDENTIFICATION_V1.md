@@ -136,6 +136,15 @@ existing unit-bearing tolerances rather than claiming bitwise state equality acr
 The bundled profile is synthetic and therefore demonstrates application plumbing, not physical
 qualification.
 
+Physical execution has one additional fail-closed boundary. An
+`rne_mobility_physical_tire_application_request` embeds the exact identified profile plus three
+acquisition manifests: the shared steady-force dataset, longitudinal relaxation, and lateral
+relaxation. Qualification streams and rehashes every retained raw capture, road-friction record,
+calibration or derivation record, and acquisition procedure beneath one explicit evidence root.
+The resulting `rne_mobility_physically_qualified_tire_profile` binds those three qualifications
+to the exact profile digest. Only that joined artifact can enter the physical Rapier/MuJoCo
+comparison; a `recorded_source_claim` alone is rejected.
+
 ## CLI
 
 The identification fixture is deliberately non-physical:
@@ -169,6 +178,29 @@ cargo run -p rne_mobility_benchmark -- \
   --output verified-transient-acquisition.json
 ```
 
+After producing both axis manifests, assemble them with the shared steady manifest and exact
+identified profile in a sealed physical-application request. The same request is used for the
+standalone file gate and the cross-backend execution gate:
+
+```text
+cargo run -p rne_mobility_benchmark -- \
+  --backend physical-tire-qualify \
+  --input physical-tire-request.json \
+  --evidence-root E:/rne-tire-capture \
+  --output physically-qualified-profile.json
+
+cargo run -p rne_mobility_benchmark --features mujoco -- \
+  --backend physical-tire-compare \
+  --input physical-tire-request.json \
+  --evidence-root E:/rne-tire-capture \
+  --output physical-cross-backend-application.json
+```
+
+`physical-tire-compare` re-runs the complete file qualification immediately before simulation,
+then applies the qualified profile to the same retained plant and TaskSpec on Rapier and MuJoCo.
+The emitted comparison contains the joined qualification and both backend traces rather than
+trusting a previously serialized boolean.
+
 The verifier bounds manifest and artifact sizes, rejects unknown fields and incomplete or
 unordered runs/channels, confines canonicalized paths to the supplied root, streams hashes
 without loading large raw captures into memory, and detects file growth, truncation, or digest
@@ -180,7 +212,8 @@ No repository fixture currently passes as genuine physical evidence. Completion 
 appropriately licensed retained capture, reviewed calibration and synchronization records,
 conversion into the frozen schema, train/holdout execution, and portable application of the
 identified tire profile to the shared Rapier/MuJoCo TaskSpec. The relaxation-length software
-fit, owned artifact/acquisition binding, and shared Rapier/MuJoCo application path exist, but no
-genuine physical execution has passed those gates yet. Applying two file-verified physical
-axis qualifications, rather than source-label claims, remains the next physical evidence step.
-Load-sensitivity identification still requires a separate excitation and validation protocol.
+fit, owned artifact/acquisition binding, three-manifest physical application gate, and shared
+Rapier/MuJoCo execution path exist, but no genuine physical capture has passed that complete
+chain yet. Acquiring and independently reviewing the retained steady and transient files is now
+the remaining evidence step. Load-sensitivity identification still requires a separate
+excitation and validation protocol.

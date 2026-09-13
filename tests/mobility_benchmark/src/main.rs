@@ -19,6 +19,10 @@ use rne_mobility_benchmark::per_wheel::run_per_wheel_skid_trace;
 use rne_mobility_benchmark::per_wheel_observed::{
     run_per_wheel_observed_failure_capsule, run_per_wheel_observed_trace, PerWheelObservedFault,
 };
+use rne_mobility_benchmark::physical_tire_application::{
+    decode_physical_tire_application_request, qualify_physical_tire_profile,
+    PhysicalTireApplicationRequest, MAX_PHYSICAL_TIRE_APPLICATION_REQUEST_BYTES,
+};
 use rne_mobility_benchmark::road_excitation::run_road_excitation_trace;
 use rne_mobility_benchmark::run_mobility_benchmark;
 use rne_mobility_benchmark::suspension_acquisition::{
@@ -783,6 +787,29 @@ fn main() -> Result<()> {
                 .context("--backend identified-tire-compare requires --input")?;
             run_identified_tire_comparison(input)?
         }
+        "physical-tire-qualify" => {
+            let input = input
+                .as_deref()
+                .context("--backend physical-tire-qualify requires --input")?;
+            let evidence_root = evidence_root
+                .as_deref()
+                .context("--backend physical-tire-qualify requires --evidence-root")?;
+            let request = read_physical_tire_application_request(input)?;
+            let qualification = qualify_physical_tire_profile(&request, evidence_root)?;
+            (
+                serde_json::to_string_pretty(&qualification)? + "\n",
+                "physically-qualified-tire-profile",
+            )
+        }
+        "physical-tire-compare" => {
+            let input = input
+                .as_deref()
+                .context("--backend physical-tire-compare requires --input")?;
+            let evidence_root = evidence_root
+                .as_deref()
+                .context("--backend physical-tire-compare requires --evidence-root")?;
+            run_physical_tire_comparison(input, evidence_root)?
+        }
         "identified-road-compare" => {
             let input = input
                 .as_deref()
@@ -947,6 +974,8 @@ fn main() -> Result<()> {
                 | "tire-relaxation-acquisition-verify"
                 | "identified-tire-rapier"
                 | "identified-tire-compare"
+                | "physical-tire-qualify"
+                | "physical-tire-compare"
                 | "identified-road-compare"
                 | "suspension-acquisition-verify"
                 | "suspension-acquired"
@@ -989,6 +1018,8 @@ fn main() -> Result<()> {
             "suspension-acquisition-verify"
                 | "tire-acquisition-verify"
                 | "tire-relaxation-acquisition-verify"
+                | "physical-tire-qualify"
+                | "physical-tire-compare"
                 | "suspension-acquired"
                 | "suspension-acquired-verify"
                 | "suspension-uncertainty"
@@ -1167,6 +1198,19 @@ fn read_identified_tire_profile(
     decode_identified_tire_profile(&bytes)
 }
 
+fn read_physical_tire_application_request(
+    input: &std::path::Path,
+) -> Result<PhysicalTireApplicationRequest> {
+    let metadata =
+        std::fs::metadata(input).with_context(|| format!("inspect {}", input.display()))?;
+    ensure!(
+        metadata.is_file() && metadata.len() <= MAX_PHYSICAL_TIRE_APPLICATION_REQUEST_BYTES as u64,
+        "physical tire application request is not a bounded regular file"
+    );
+    let bytes = std::fs::read(input).with_context(|| format!("read {}", input.display()))?;
+    decode_physical_tire_application_request(&bytes)
+}
+
 #[cfg(feature = "mujoco")]
 fn run_identified_tire_comparison(input: &std::path::Path) -> Result<(String, &'static str)> {
     use rne_core::SimDuration;
@@ -1195,6 +1239,39 @@ fn run_identified_tire_comparison(input: &std::path::Path) -> Result<(String, &'
 #[cfg(not(feature = "mujoco"))]
 fn run_identified_tire_comparison(_input: &std::path::Path) -> Result<(String, &'static str)> {
     bail!("identified tire comparison requires --features mujoco")
+}
+
+#[cfg(feature = "mujoco")]
+fn run_physical_tire_comparison(
+    input: &std::path::Path,
+    evidence_root: &std::path::Path,
+) -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::backend::BACKEND_MOBILITY_FIXED_DELTA_TICKS;
+    use rne_mobility_benchmark::physical_tire_application::run_physical_tire_backend_comparison;
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let request = read_physical_tire_application_request(input)?;
+    let evidence = run_physical_tire_backend_comparison(
+        RapierBackend::new(),
+        RapierBackend::manifest(),
+        MuJoCoBackend::new(SimDuration::from_ticks(BACKEND_MOBILITY_FIXED_DELTA_TICKS))?,
+        MuJoCoBackend::manifest(),
+        &request,
+        evidence_root,
+    )?;
+    Ok((
+        serde_json::to_string_pretty(&evidence)? + "\n",
+        "physical-tire-rapier-vs-mujoco",
+    ))
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_physical_tire_comparison(
+    _input: &std::path::Path,
+    _evidence_root: &std::path::Path,
+) -> Result<(String, &'static str)> {
+    bail!("physical tire comparison requires --features mujoco")
 }
 
 #[cfg(feature = "mujoco")]
