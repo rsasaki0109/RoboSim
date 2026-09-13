@@ -74,6 +74,37 @@ The road-friction scale is never inferred by the v1 fit. Every run instead binds
 instrumented reference tire, calibrated friction trailer, or calibrated bench-surface record.
 Reusing a path with a different size or digest is rejected.
 
+## Transient relaxation subgate
+
+`identify_tire_relaxation_length` identifies longitudinal or lateral relaxation length only
+after the steady stiffness, peak friction, load sensitivity, and road scale have been frozen.
+Its physical rows contain capture time, regularized transport speed, kinematic target slip,
+normal load, road-friction scale, and independently measured force on the selected axis. It
+does not accept an internal `relaxed_slip` state as if that state were a sensor.
+
+For pure-axis data below a declared force-utilization ceiling, the identifier inverts RNE's
+steady law to reconstruct the measured relaxation state:
+
+```text
+force = peak * tanh(stiffness * load_ratio * relaxed_slip / peak)
+```
+
+It then fits the exact distance-domain first-order update used by the runtime:
+
+```text
+x[k+1] = target[k] + (x[k] - target[k]) * exp(-speed[k] * dt[k] / length)
+```
+
+The target and speed are zero-order held over each interval. Saturated force rows, low-speed
+rows, weakly excited transitions, invalid clocks, and out-of-envelope load/slip are rejected or
+excluded according to the frozen spec. Complete acquisition IDs remain disjoint; fitting uses
+training only, followed by pooled and per-condition holdout gates. Longitudinal and lateral
+lengths are separate calls and may not be silently tied.
+
+This inverse is intentionally not used near force saturation, where `atanh` is ill-conditioned.
+It also does not infer the steady tire parameters simultaneously: joint fitting would hide
+parameter non-identifiability and must use a separate protocol.
+
 ## CLI
 
 The identification fixture is deliberately non-physical:
@@ -105,6 +136,6 @@ drift. Its output is the joined physical-qualification artifact, not a copy of t
 No repository fixture currently passes as genuine physical evidence. Completion requires an
 appropriately licensed retained capture, reviewed calibration and synchronization records,
 conversion into the frozen schema, train/holdout execution, and portable application of the
-identified tire profile to the shared Rapier/MuJoCo TaskSpec. Relaxation-length and
-load-sensitivity identification require separate excitation and validation protocols rather
-than expansion of this steady fit.
+identified tire profile to the shared Rapier/MuJoCo TaskSpec. The relaxation-length software
+fit exists, but its owned artifact/acquisition binding and physical execution remain open.
+Load-sensitivity identification still requires a separate excitation and validation protocol.
