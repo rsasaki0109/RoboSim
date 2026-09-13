@@ -154,19 +154,22 @@ hashed beneath the explicitly supplied evidence root.
 
 ## Backend-neutral profile application
 
-An `rne_mobility_identified_tire_profile` accepts exactly one longitudinal and one lateral
-relaxation chain. Both must replay to the exact same owned steady dataset and steady fit. The
-profile starts from that steady result and replaces only the two axis-specific relaxation
-lengths; substituted stiffness, friction, load-sensitivity, or relaxation values fail
-validation.
+An `rne_mobility_identified_tire_profile` v1 accepts exactly one longitudinal and one lateral
+relaxation chain. Profile v2 additionally owns and replays one load-sensitivity dataset/result.
+All three staged chains must share the exact same owned steady dataset and steady fit. V2 starts
+from that steady result and replaces only the fitted load-sensitivity coefficient and the two
+axis-specific relaxation lengths; substituted stiffness, friction, load-sensitivity, or
+relaxation values fail validation. The v1 decoder remains accepted for existing three-manifest
+physical evidence.
 
 Mobility backend trace schema v2 now retains the complete backend-neutral plant beside the
 TaskSpec. The identified-profile runner requires that retained plant's tire element to equal
 the replayed profile bit-for-bit. Rapier and MuJoCo receive the same TaskSpec, seed, fixed step,
 motor, transmission, wheel, road, and identified tire profile. Their comparison retains the
 existing unit-bearing tolerances rather than claiming bitwise state equality across solvers.
-The bundled profile is synthetic and therefore demonstrates application plumbing, not physical
-qualification.
+The bundled profiles are synthetic and therefore demonstrate application plumbing, not physical
+qualification. The v2 fixture is applied unchanged by the same Rapier/MuJoCo runner and retained
+inside the backend trace/comparison artifact.
 
 Physical execution has one additional fail-closed boundary. An
 `rne_mobility_physical_tire_application_request` embeds the exact identified profile plus three
@@ -189,8 +192,10 @@ cargo run -p rne_mobility_benchmark -- --backend tire-load-sensitivity-identific
 cargo run -p rne_mobility_benchmark -- --backend tire-relaxation-fixture --output transient.json
 cargo run -p rne_mobility_benchmark -- --backend tire-relaxation-identification --input transient.json --output transient-result.json
 cargo run -p rne_mobility_benchmark -- --backend identified-tire-profile-fixture --output tire-profile.json
+cargo run -p rne_mobility_benchmark -- --backend load-sensitive-tire-profile-fixture --output load-sensitive-profile.json
+cargo run -p rne_mobility_benchmark -- --backend identified-tire-rapier --input load-sensitive-profile.json --output load-sensitive-rapier.json
 cargo run -p rne_mobility_benchmark -- --backend identified-tire-rapier --input tire-profile.json --output rapier-application.json
-cargo run -p rne_mobility_benchmark --features mujoco -- --backend identified-tire-compare --input tire-profile.json --output cross-backend-application.json
+cargo run -p rne_mobility_benchmark --features mujoco -- --backend identified-tire-compare --input load-sensitive-profile.json --output cross-backend-application.json
 ```
 
 A recorded dataset is admitted to the physical gate only with its manifest and external
@@ -246,6 +251,11 @@ trusting a previously serialized boolean. `physical-tire-request` validates exac
 axis identities, source kinds, and manifest self-hashes before it writes anything; it does not
 read the referenced captures or assert physical qualification.
 
+The physical request schema remains deliberately limited to profile v1. It rejects a
+load-sensitive profile v2 before qualification because its three manifests do not bind the
+load-sweep dataset. This fail-closed boundary prevents a recorded-source label or a valid
+software fit from being mistaken for physical load-sensitivity evidence.
+
 The verifier bounds manifest and artifact sizes, rejects unknown fields and incomplete or
 unordered runs/channels, confines canonicalized paths to the supplied root, streams hashes
 without loading large raw captures into memory, and detects file growth, truncation, or digest
@@ -262,4 +272,5 @@ Rapier/MuJoCo execution path exist, but no genuine physical capture has passed t
 chain yet. Acquiring and independently reviewing the retained steady and transient files is now
 the remaining evidence step for the existing profile. The load-sensitivity software fit and
 owned artifact now exist, but retained physical load-sweep binding and integration of its result
-into the relaxation/profile/cross-backend chain remain separate gates.
+into the physical qualification chain remain separate gates. Software profile v2 and the shared
+Rapier/MuJoCo application path already bind and execute that fitted coefficient.
