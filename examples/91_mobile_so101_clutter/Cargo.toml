@@ -1,0 +1,14 @@
+[package]
+name = "mobile_so101_clutter"
+version = "0.2.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rne_ai = { workspace = true }
+
+[[example]]
+name = "91_mobile_so101_clutter"
+path = "main.rs"

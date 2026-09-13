@@ -4,7 +4,7 @@ use crate::parse::rpy_to_quat;
 use crate::schema::{UrdfDocument, UrdfJointDynamics, UrdfJointType, UrdfRobot};
 use crate::spawn::{SpawnedUrdfRobot, UrdfSpawnError};
 use rne_ecs::{Entity, Name, World};
-use rne_math::Vec3;
+use rne_math::{Quat, Vec3};
 use rne_physics::{
     FixedJointDesc, JointMotor, JointPassiveDynamics, MultibodyLink, PrismaticJointDesc,
     RevoluteJointDesc, RigidBody, RigidBodyType,
@@ -26,6 +26,12 @@ pub struct UrdfArticulationConfig {
     pub motor_max_force: f32,
     /// When true, links are wired as one reduced-coordinate multibody.
     pub multibody: bool,
+    /// When true, revolute/prismatic joint frames carry the URDF joint-origin
+    /// rotation so joint angle zero matches the authored pose. Defaults to
+    /// false (legacy axis-aligned frames) so existing assets simulate
+    /// bit-identically; OnShape-style URDFs with non-identity joint `rpy`
+    /// (e.g. SO101) must opt in.
+    pub use_joint_origin_rpy: bool,
 }
 
 impl Default for UrdfArticulationConfig {
@@ -34,6 +40,7 @@ impl Default for UrdfArticulationConfig {
             base_body_type: RigidBodyType::Fixed,
             motor_max_force: 50.0,
             multibody: false,
+            use_joint_origin_rpy: false,
         }
     }
 }
@@ -131,12 +138,18 @@ fn attach_urdf_articulation_impl(
             UrdfJointType::Revolute | UrdfJointType::Continuous => {
                 ensure_dynamic_link(world, child);
                 let (lower_rad, upper_rad) = revolute_limits_rad(joint);
+                let relative_rotation = if config.use_joint_origin_rpy {
+                    rpy_to_quat(joint.origin_rpy)
+                } else {
+                    Quat::IDENTITY
+                };
                 world.entity_mut(child).insert((
                     RevoluteJointDesc {
                         parent,
                         axis: normalize_axis(joint.axis),
                         anchor_parent_m: joint.origin_xyz,
                         anchor_child_m: Vec3::ZERO,
+                        relative_rotation,
                         lower_rad,
                         upper_rad,
                     },
@@ -167,6 +180,11 @@ fn attach_urdf_articulation_impl(
                         axis: normalize_axis(joint.axis),
                         anchor_parent_m: joint.origin_xyz,
                         anchor_child_m: Vec3::ZERO,
+                        relative_rotation: if config.use_joint_origin_rpy {
+                            rpy_to_quat(joint.origin_rpy)
+                        } else {
+                            Quat::IDENTITY
+                        },
                         lower_m,
                         upper_m,
                     },

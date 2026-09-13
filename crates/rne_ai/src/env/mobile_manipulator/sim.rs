@@ -19,9 +19,9 @@ use rne_data::{
 use rne_ecs::{Entity, World};
 use rne_math::{yaw_rad, Hertz, Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, ContactEvent, FixedJointDesc, JointMotor,
-    JointState as PhysicsJointState, PhysicsBackend, PhysicsError, PhysicsWorldDesc,
-    PhysicsWorldId, RigidBody, RigidBodyType,
+    Collider, ColliderShape, ContactEvent, FixedJointDesc, JointMotor, JointMotorGainModel,
+    JointPassiveDynamics, JointState as PhysicsJointState, PhysicsBackend, PhysicsError,
+    PhysicsWorldDesc, PhysicsWorldId, RigidBody, RigidBodyType,
 };
 use rne_physics_rapier::RapierBackend;
 use rne_render::HeadlessRenderBackend;
@@ -150,6 +150,16 @@ trait MobileManipulatorPhysics: Send + Sync {
         dt: SimDuration,
     ) -> Result<(), PhysicsError>;
     fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError>;
+    /// Reads a single-DoF reduced-coordinate joint state when the backend
+    /// simulates the link as a multibody joint; `None` otherwise.
+    fn multibody_joint_state(
+        &self,
+        physics_world: PhysicsWorldId,
+        entity: Entity,
+    ) -> Option<(f64, f64)> {
+        let _ = (physics_world, entity);
+        None
+    }
     fn apply_velocity_impulse(
         &mut self,
         physics_world: PhysicsWorldId,
@@ -202,6 +212,14 @@ impl<B: PhysicsBackend> MobileManipulatorPhysics for MobileManipulatorPhysicsAda
 
     fn contacts(&self, physics_world: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError> {
         self.backend.contacts(physics_world)
+    }
+
+    fn multibody_joint_state(
+        &self,
+        physics_world: PhysicsWorldId,
+        entity: Entity,
+    ) -> Option<(f64, f64)> {
+        self.backend.multibody_joint_state(physics_world, entity)
     }
 
     fn apply_velocity_impulse(
@@ -484,6 +502,51 @@ pub fn mm_mobile_scene_path() -> PathBuf {
     crate::asset_path::bundled_asset_path("scenes/mm_mobile.rne.scene.toml")
 }
 
+/// Default scene asset for the diff-drive `mm_mobile_so101` robot
+/// (mm_mobile chassis with an SO101 6-DoF arm).
+pub fn mm_mobile_so101_scene_path() -> PathBuf {
+    crate::asset_path::bundled_asset_path("scenes/mm_mobile_so101.rne.scene.toml")
+}
+
+/// Scene asset with a diff-drive SO101 base and three 4 cm cubes on a
+/// jaw-height table for clutter pick episodes.
+pub fn mm_mobile_so101_clutter_scene_path() -> PathBuf {
+    crate::asset_path::bundled_asset_path("scenes/mm_mobile_so101_clutter.rne.scene.toml")
+}
+
+/// SO101 arm joint names used by the `mm_mobile_so101` variant.
+pub const SO101_SHOULDER_PAN_JOINT: &str = "shoulder_pan";
+/// SO101 arm joint names used by the `mm_mobile_so101` variant.
+pub const SO101_SHOULDER_LIFT_JOINT: &str = "shoulder_lift";
+/// SO101 arm joint names used by the `mm_mobile_so101` variant.
+pub const SO101_ELBOW_FLEX_JOINT: &str = "elbow_flex";
+/// SO101 arm joint names used by the `mm_mobile_so101` variant.
+pub const SO101_WRIST_FLEX_JOINT: &str = "wrist_flex";
+/// SO101 arm joint names used by the `mm_mobile_so101` variant.
+pub const SO101_WRIST_ROLL_JOINT: &str = "wrist_roll";
+/// SO101 gripper joint name used by the `mm_mobile_so101` variant.
+pub const SO101_GRIPPER_JOINT: &str = "gripper";
+
+/// Returns true for actuated gripper joints across all mobile-manipulator variants.
+fn is_finger_joint(name: &str) -> bool {
+    matches!(
+        name,
+        "left_finger_joint" | "right_finger_joint" | SO101_GRIPPER_JOINT
+    )
+}
+
+/// Returns true for SO101 arm joints (light-link position-hold gains).
+fn is_so101_arm_joint(name: &str) -> bool {
+    matches!(
+        name,
+        SO101_SHOULDER_PAN_JOINT
+            | SO101_SHOULDER_LIFT_JOINT
+            | SO101_ELBOW_FLEX_JOINT
+            | SO101_WRIST_FLEX_JOINT
+            | SO101_WRIST_ROLL_JOINT
+    )
+}
+
 /// Default scene asset for the lift-capable `mm_mobile_lift` robot.
 pub fn mm_mobile_lift_scene_path() -> PathBuf {
     crate::asset_path::bundled_asset_path("scenes/mm_mobile_lift.rne.scene.toml")
@@ -613,9 +676,40 @@ const MOBILE_LIFT_ARM_DIRECT_DAMPING: f64 = 320.0;
 /// authoritative throughout that worst-case pose while remaining scoped to the
 /// deliberately heavy lift-capable mobile asset.
 const MOBILE_LIFT_ARM_MAX_FORCE: f64 = 2_000.0;
-/// Torque cap for the lift robot's arm joints (overrides the 50 Nﾂｷm revolute default),
+/// Torque cap for the lift robot's arm joints (overrides the 50 N·m revolute default),
 /// so the position motor can move and settle the heavy arm reasonably quickly.
 const ARM_MOTOR_MAX_FORCE: f64 = 200.0;
+/// Position-hold stiffness for the light SO101 arm (links ~0.1 kg, inertias
+/// ~1e-4 kg·m²). The mm-scale 400/4000 stiffnesses are far beyond stability at
+/// 60 Hz on these links (ω·dt >> 1) and explode to NaN within a few steps, so
+/// SO101 arm joints use small-arm-scale gains instead.
+const SO101_ARM_STIFFNESS: f64 = 4000.0;
+/// Damping for [`SO101_ARM_STIFFNESS`]. Deliberately high (overdamped): the
+/// light arm sags several centimeters under driving vibration at lower gains,
+/// and near-critical damping lets wheel/ground vibration pump a growing
+/// oscillation through the chain.
+const SO101_ARM_DAMPING: f64 = 100.0;
+/// Torque cap for SO101 arm joints in newton-meters.
+const SO101_ARM_MAX_FORCE: f64 = 50.0;
+/// Passive viscous damping (N·m·s/rad) for SO101 arm joints. Kept light: the
+/// position motors already damp, and heavy passive damping energizes the
+/// light chain instead of settling it.
+const SO101_ARM_PASSIVE_DAMPING: f64 = 0.05;
+/// Passive viscous damping (N·m·s/rad) for SO101 wheel joints.
+const SO101_WHEEL_PASSIVE_DAMPING: f64 = 0.05;
+/// Jaw-pocket radius (m) within which a jaw contact counts as a bracketed
+/// grasp for the SO101 single moving jaw.
+const SO101_POCKET_CAPTURE_M: f64 = 0.05;
+/// Jaw angle (rad) below which the SO101 jaw counts as closed enough to latch
+/// a grasp (the jaw shuts toward decreasing angles; the stop is about -0.175).
+const SO101_GRASP_JAW_CLOSED_RAD: f64 = -0.15;
+
+/// Position-hold stiffness for the SO101 gripper jaw (~0.012 kg).
+const SO101_FINGER_STIFFNESS: f64 = 20.0;
+/// Damping for [`SO101_FINGER_STIFFNESS`].
+const SO101_FINGER_DAMPING: f64 = 0.6;
+/// Force cap for the SO101 gripper jaw in newtons.
+const SO101_FINGER_MAX_FORCE: f64 = 1.0;
 /// Clamp on a position-holding arm joint's integrated angle target (radians).
 const ARM_TARGET_LIMIT_RAD: f64 = std::f64::consts::PI;
 /// Maximum lead the mobile arm's integrated angle target may hold over the joint's
@@ -927,6 +1021,9 @@ pub struct MobileManipulatorSim {
     wrist_depth_stream: Option<StreamId>,
     render_backend: HeadlessRenderBackend,
     mobile_base: bool,
+    /// True when the SO101 arm is wired as a reduced-coordinate multibody. The
+    /// base re-pin then owns the whole assembly (see `PhysicsOwnedPose`).
+    rigid_multibody: bool,
     /// When true, planar base motion is zeroed after each physics step (arm-only manipulation).
     base_planar_locked: bool,
     /// Commanded forward speed for the pending physics tick, used to kinematically
@@ -954,6 +1051,12 @@ impl MobileManipulatorSim {
     /// Creates the built-in diff-drive base with a 2-DOF arm.
     pub fn new_mm_mobile() -> Self {
         Self::from_scene_path(&mm_mobile_scene_path()).expect("built-in mm_mobile scene")
+    }
+
+    /// Creates the built-in diff-drive base with an SO101 6-DoF arm.
+    pub fn new_mm_mobile_so101() -> Self {
+        Self::from_scene_path(&mm_mobile_so101_scene_path())
+            .expect("built-in mm_mobile_so101 scene")
     }
 
     /// Creates the built-in diff-drive base with a vertical lift and 2-DOF arm.
@@ -1048,6 +1151,11 @@ impl MobileManipulatorSim {
             wrist_camera,
             wrist_camera_stream,
             mobile_base,
+            robot_asset
+                .urdf
+                .as_ref()
+                .map(|urdf| urdf.multibody)
+                .unwrap_or(false),
             world_seed,
             None,
             physics_factory,
@@ -1237,9 +1345,25 @@ impl MobileManipulatorSim {
     pub fn observe(&self) -> MobileManipulatorObservation {
         let base = world_transform_of(&self.world, self.base_link);
         let ee = world_transform_of(&self.world, self.ee_link).translation;
-        let shoulder = self.joint_position_rad("shoulder_joint");
-        let elbow = self.joint_position_rad("elbow_joint");
-        let wrist_yaw = self.joint_position_rad("wrist_yaw_joint");
+        let is_so101 = self
+            .joint_names
+            .iter()
+            .any(|name| name == SO101_SHOULDER_LIFT_JOINT);
+        let shoulder = if is_so101 {
+            self.joint_position_rad(SO101_SHOULDER_LIFT_JOINT)
+        } else {
+            self.joint_position_rad("shoulder_joint")
+        };
+        let elbow = if is_so101 {
+            self.joint_position_rad(SO101_ELBOW_FLEX_JOINT)
+        } else {
+            self.joint_position_rad("elbow_joint")
+        };
+        let wrist_yaw = if is_so101 {
+            self.joint_position_rad(SO101_WRIST_ROLL_JOINT)
+        } else {
+            self.joint_position_rad("wrist_yaw_joint")
+        };
         let lift_position_m = self.lift_position_m();
         let gripper_position_rad = self.gripper_position_rad();
         let gripper_position_m = self.gripper_position_m();
@@ -1269,6 +1393,7 @@ impl MobileManipulatorSim {
             })
             .unwrap_or((0.0, 0.0));
         let wrist_target = self.latest_wrist_rgbd_target();
+        let pocket = self.grasp_pocket_world();
 
         MobileManipulatorObservation {
             base_x_m: base.translation.x,
@@ -1304,6 +1429,9 @@ impl MobileManipulatorSim {
             gripper_target_dx_m: 0.0,
             gripper_target_dy_m: 0.0,
             gripper_target_dz_m: 0.0,
+            gripper_pocket_x_m: pocket.x,
+            gripper_pocket_y_m: pocket.y,
+            gripper_pocket_z_m: pocket.z,
         }
     }
 
@@ -1690,6 +1818,7 @@ impl MobileManipulatorSim {
         wrist_camera: Option<WristCameraMount>,
         wrist_camera_stream: Option<StreamId>,
         mobile_base: bool,
+        multibody: bool,
         world_seed: u64,
         _base_y_m: Option<f64>,
         physics_factory: Arc<dyn MobileManipulatorPhysicsFactoryDyn>,
@@ -1704,10 +1833,18 @@ impl MobileManipulatorSim {
         // The lift robot's tall jointed chain (lift + shoulder + elbow + gripper) needs
         // more constraint-solver iterations to stay stable, and so does the mobile
         // robot's position-held arm on its floating diff-drive base; fixed-base robots
-        // keep the default.
+        // keep the default. The light SO101 multibody chain instead goes unstable
+        // under raised iteration counts, so it keeps the backend default; its
+        // impulse-joint form uses the raised count like the mm arms.
+        let so101 = links.contains_key("moving_jaw_so101_v1_link");
+        let rigid_multibody = multibody && so101;
         let physics_world = backend
             .create_world(PhysicsWorldDesc {
-                solver_iterations: LIFT_SOLVER_ITERATIONS,
+                solver_iterations: if rigid_multibody {
+                    0
+                } else {
+                    LIFT_SOLVER_ITERATIONS
+                },
                 ..PhysicsWorldDesc::default()
             })
             .map_err(|error| AssetError::Invalid {
@@ -1715,14 +1852,25 @@ impl MobileManipulatorSim {
                 message: error.to_string(),
             })?;
 
-        let ee_link = links
-            .get("forearm_link")
-            .copied()
-            .expect("forearm_link missing from URDF robot");
-        let finger_links = ["left_finger_link", "right_finger_link"]
+        let ee_link = ["gripper_link", "wrist_link", "forearm_link"]
             .iter()
             .filter_map(|name| links.get(*name).copied())
-            .collect();
+            .next()
+            .expect("gripper_link/wrist_link/forearm_link missing from URDF robot");
+        let finger_links = if links.contains_key("left_finger_link") {
+            ["left_finger_link", "right_finger_link"]
+                .iter()
+                .filter_map(|name| links.get(*name).copied())
+                .collect()
+        } else {
+            // SO101 single-jaw gripper: the moving jaw closes against the
+            // fixed pad riding on gripper_link (the frame link itself is
+            // outside the multibody set, so it carries no physics body).
+            ["moving_jaw_so101_v1_link", "gripper_link"]
+                .iter()
+                .filter_map(|name| links.get(*name).copied())
+                .collect()
+        };
 
         let wrist_depth_stream = wrist_camera_stream.map(wrist_camera_depth_stream);
 
@@ -1757,6 +1905,7 @@ impl MobileManipulatorSim {
             wrist_depth_stream,
             render_backend: HeadlessRenderBackend::new(),
             mobile_base,
+            rigid_multibody,
             base_planar_locked: false,
             base_command_forward_m_s: 0.0,
             base_command_yaw_rate_rad_s: 0.0,
@@ -1768,9 +1917,12 @@ impl MobileManipulatorSim {
             step_count: 0,
             joint_sequence: 0,
         };
+        sim.configure_so101_physics_owned_poses();
         sim.configure_lift_motor();
         sim.configure_arm_position_motors();
         sim.configure_finger_motors();
+        sim.configure_wheel_motors();
+        sim.configure_so101_passive_damping();
         sim.configure_linear_finger_material();
         sim.backend
             .preflight(&sim.world)
@@ -1976,6 +2128,13 @@ impl MobileManipulatorSim {
         if self.finger_links.is_empty() {
             return false;
         }
+        if self.is_so101() {
+            // Same relaxed single-jaw gate used for acquisition: the passive
+            // anvil never registers a manifold for a small object, so
+            // requiring two links would drop every SO101 grasp on the first
+            // carry tick.
+            return self.so101_object_in_pocket(object) && self.so101_jaw_closed();
+        }
         // A reduced-coordinate prismatic motor may hold a pad stationary against
         // a payload without producing a fresh accumulated normal impulse on every
         // tick. Acquisition already uses the geometric two-pad gate for this
@@ -2003,6 +2162,9 @@ impl MobileManipulatorSim {
     /// before the slower finger has developed squeeze, producing a logical grasp
     /// that drops immediately on lift.
     fn find_friction_graspable_in_contact(&self) -> Option<Entity> {
+        if self.is_so101() {
+            return self.so101_pocket_candidate();
+        }
         // Rapier can report a zero accumulated impulse for a parallel-jaw pad
         // that is already interpenetrating a slowly supported payload: the
         // reduced-coordinate motor has not generated a new solver impulse on
@@ -2045,6 +2207,9 @@ impl MobileManipulatorSim {
     /// entity index for a deterministic pick on the rare tick where more than one
     /// body satisfies full contact.
     fn find_graspable_in_contact(&self) -> Option<Entity> {
+        if self.is_so101() {
+            return self.so101_pocket_candidate();
+        }
         if self.finger_links.is_empty() {
             return None;
         }
@@ -2071,6 +2236,26 @@ impl MobileManipulatorSim {
                 .iter()
                 .all(|finger| self.contacts_between(*finger, object))
         })
+    }
+
+    /// Geometric grasp candidate for the SO101 single jaw: a graspable object
+    /// whose center lies in the jaw pocket while the jaw is shut.
+    ///
+    /// A quasi-static pad/object overlap produces no Rapier `ContactEvent`
+    /// (there is no relative motion to predict a contact from), so the single
+    /// jaw cannot enumerate candidates from contact events. It scans the
+    /// graspable bodies directly instead.
+    fn so101_pocket_candidate(&self) -> Option<Entity> {
+        let mut candidates: Vec<Entity> = self
+            .world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .filter(|entity| self.is_graspable(*entity))
+            .collect();
+        candidates.sort_unstable();
+        candidates
+            .into_iter()
+            .find(|object| self.so101_object_in_pocket(*object) && self.so101_jaw_closed())
     }
 
     /// A body is graspable when it is dynamic and not part of the robot articulation.
@@ -2222,6 +2407,20 @@ impl MobileManipulatorSim {
             self.grasp_pinch_right_limit_m = Some(MOBILE_LIFT_FRICTION_GRASP_RIGHT_LIMIT_M);
             return;
         }
+        if self
+            .joint_names
+            .iter()
+            .any(|name| name == SO101_GRIPPER_JOINT)
+        {
+            // The jaw closes toward decreasing angles (see `velocity_for_joint`),
+            // so its pinch budget is a floor.
+            let current = self.joint_position_rad(SO101_GRIPPER_JOINT);
+            let half_width_m = object_half_width_m(&self.world, object);
+            let budget = self.pinch_close_budget_rad(0, half_width_m);
+            self.grasp_pinch_left_limit_rad = Some(current - budget);
+            self.grasp_pinch_right_limit_rad = None;
+            return;
+        }
         let left_rad = self.joint_position_rad("left_finger_joint");
         let right_rad = self.joint_position_rad("right_finger_joint");
         let half_width_m = object_half_width_m(&self.world, object);
@@ -2264,6 +2463,17 @@ impl MobileManipulatorSim {
         if self.has_linear_gripper() {
             self.grasp_pinch_left_limit_m = Some(MOBILE_LIFT_FRICTION_GRASP_LEFT_LIMIT_M);
             self.grasp_pinch_right_limit_m = Some(MOBILE_LIFT_FRICTION_GRASP_RIGHT_LIMIT_M);
+            return;
+        }
+        if self
+            .joint_names
+            .iter()
+            .any(|name| name == SO101_GRIPPER_JOINT)
+        {
+            // Floor slot: the jaw closes toward decreasing angles.
+            let current = self.joint_position_rad(SO101_GRIPPER_JOINT);
+            self.grasp_pinch_left_limit_rad = Some(current - FRICTION_GRASP_PINCH_LEFT_MARGIN_RAD);
+            self.grasp_pinch_right_limit_rad = None;
             return;
         }
         let left_rad = self.joint_position_rad("left_finger_joint");
@@ -2314,7 +2524,9 @@ impl MobileManipulatorSim {
             return velocity;
         }
         match joint_name {
-            "left_finger_joint" => {
+            // The SO101 jaw closes toward decreasing angles like the left
+            // parallel finger, so it shares the floor-slot clamp.
+            "left_finger_joint" | "gripper" => {
                 let limit = if self.has_linear_gripper() {
                     self.grasp_pinch_left_limit_m
                 } else {
@@ -2371,6 +2583,64 @@ impl MobileManipulatorSim {
         self.grasp_pinch_right_limit_m = None;
     }
 
+    fn is_so101(&self) -> bool {
+        self.joint_names
+            .iter()
+            .any(|name| name == SO101_GRIPPER_JOINT)
+    }
+
+    /// Returns true when the SO101 jaw has closed near its stop.
+    fn so101_jaw_closed(&self) -> bool {
+        self.joint_position_rad(SO101_GRIPPER_JOINT) < SO101_GRASP_JAW_CLOSED_RAD
+    }
+
+    /// Returns true when `object` lies within the SO101 jaw pocket region.
+    fn so101_object_in_pocket(&self, object: Entity) -> bool {
+        let object_position = world_transform_of(&self.world, object).translation;
+        (object_position - self.grasp_pocket_world()).length() < SO101_POCKET_CAPTURE_M
+    }
+
+    /// World-frame grasp pocket center: the point the jaws bracket.
+    ///
+    /// For the SO101 single moving jaw this is the midpoint between the jaw
+    /// tip and the fixed anvil on `gripper_link` (both offset from their link
+    /// origins); for parallel grippers it is the midpoint of the two finger
+    /// link origins. Exposed so a policy can aim the actual pocket instead of
+    /// an open-loop base offset that drifts under arm deflection.
+    fn grasp_pocket_world(&self) -> Vec3 {
+        let so101 = self
+            .joint_names
+            .iter()
+            .any(|name| name == SO101_GRIPPER_JOINT);
+        if so101 {
+            let jaw = self
+                .finger_links
+                .first()
+                .copied()
+                .map(|link| world_transform_of(&self.world, link));
+            let anvil_link = self
+                .finger_links
+                .get(1)
+                .copied()
+                .or(Some(self.ee_link))
+                .map(|link| world_transform_of(&self.world, link));
+            if let (Some(jaw), Some(anvil_link)) = (jaw, anvil_link) {
+                // Matches the authored grip pads (see the generator script):
+                // moving-jaw pad at the tip and fixed anvil at the frame origin.
+                let tip = jaw.translation + jaw.rotation * Vec3::new(0.0, -0.072, 0.019);
+                let anvil = anvil_link.translation
+                    + anvil_link.rotation * Vec3::new(-0.0079, -0.0002, -0.0982);
+                return 0.5 * (tip + anvil);
+            }
+        }
+        if self.finger_links.len() == 2 {
+            let a = world_transform_of(&self.world, self.finger_links[0]).translation;
+            let b = world_transform_of(&self.world, self.finger_links[1]).translation;
+            return 0.5 * (a + b);
+        }
+        world_transform_of(&self.world, self.ee_link).translation
+    }
+
     fn has_linear_gripper(&self) -> bool {
         self.actuated
             .iter()
@@ -2380,6 +2650,17 @@ impl MobileManipulatorSim {
     fn gripper_velocity_command(&self, action: MobileManipulatorAction) -> (f64, f64) {
         if self.has_linear_gripper() {
             (action.gripper_velocity_m_s, 0.005)
+        } else if self
+            .joint_names
+            .iter()
+            .any(|name| name == SO101_GRIPPER_JOINT)
+        {
+            let command = if action.so101_gripper_velocity_rad_s != 0.0 {
+                action.so101_gripper_velocity_rad_s
+            } else {
+                action.gripper_velocity_rad_s
+            };
+            (command, 0.05)
         } else {
             (action.gripper_velocity_rad_s, 0.05)
         }
@@ -2393,6 +2674,18 @@ impl MobileManipulatorSim {
     }
 
     fn sample_joint(&self, joint: &ActuatedJoint) -> JointSample {
+        // Reduced-coordinate joints report exact generalized positions; prefer
+        // them over the link-orientation fallback, which is only meaningful
+        // for world-axis-aligned planar joints.
+        if let Some((position_rad, velocity_rad_s)) = self
+            .backend
+            .multibody_joint_state(self.physics_world, joint.link)
+        {
+            return JointSample {
+                position_rad,
+                velocity_rad_s,
+            };
+        }
         let fallback = joint_sample(&self.world, joint);
         match self.world.get::<PhysicsJointState>(joint.link).copied() {
             Some(PhysicsJointState::Revolute {
@@ -2425,6 +2718,13 @@ impl MobileManipulatorSim {
         if self.has_linear_gripper() {
             return 0.0;
         }
+        if self
+            .joint_names
+            .iter()
+            .any(|name| name == SO101_GRIPPER_JOINT)
+        {
+            return self.joint_position_rad(SO101_GRIPPER_JOINT);
+        }
         let left = self.joint_position_rad("left_finger_joint");
         let right = self.joint_position_rad("right_finger_joint");
         if self
@@ -2451,6 +2751,11 @@ impl MobileManipulatorSim {
         self.apply_wrist_yaw_target(action.wrist_yaw_target_rad);
         if let Some(target) = action.lift_joint_target {
             self.apply_lift_joint_targets(target);
+            self.apply_gripper_and_base_velocities(action);
+            return;
+        }
+        if let Some(target) = action.so101_joint_target {
+            self.apply_so101_joint_targets(target);
             self.apply_gripper_and_base_velocities(action);
             return;
         }
@@ -2502,9 +2807,12 @@ impl MobileManipulatorSim {
             // otherwise external disturbances (payload swings, base turns) re-base
             // the clamped target onto the back-driven joint and permanently deform
             // the held pose instead of springing back.
-            let windup_position_rad =
-                (!has_lift && joint.axis == JointReadAxis::YawY && velocity != 0.0)
-                    .then(|| self.sample_joint(&self.actuated[index]).position_rad);
+            let windup_position_rad = (!has_lift
+                && (joint.axis == JointReadAxis::YawY
+                    || (joint.axis == JointReadAxis::RotZ
+                        && !joint_name.ends_with("wheel_joint")))
+                && velocity != 0.0)
+                .then(|| self.sample_joint(&self.actuated[index]).position_rad);
             if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
                 if joint.axis == JointReadAxis::LiftY {
                     // Position (spring-damper) control with the velocity as feedforward.
@@ -2518,8 +2826,7 @@ impl MobileManipulatorSim {
                     // joints re-assert their spring constants (direct lift targets
                     // may have overridden them); finger joints keep their own
                     // lighter constants (see `configure_finger_motors`).
-                    let is_finger =
-                        joint_name == "left_finger_joint" || joint_name == "right_finger_joint";
+                    let is_finger = is_finger_joint(joint_name);
                     if !is_finger {
                         let (stiffness, damping) = if has_lift && self.mobile_base {
                             if velocity == 0.0 {
@@ -2528,7 +2835,7 @@ impl MobileManipulatorSim {
                                 (ARM_MOTOR_STIFFNESS, ARM_MOTOR_DAMPING)
                             }
                         } else {
-                            arm_motor_constants(self.mobile_base, velocity)
+                            arm_motor_constants_for(joint_name, self.mobile_base, velocity)
                         };
                         motor.stiffness = stiffness;
                         motor.gain = damping;
@@ -2594,8 +2901,7 @@ impl MobileManipulatorSim {
                     } else {
                         velocity
                     };
-                    let is_finger =
-                        joint_name == "left_finger_joint" || joint_name == "right_finger_joint";
+                    let is_finger = is_finger_joint(joint_name);
                     apply_friction_grasp_finger_max_force(
                         &mut motor,
                         is_finger,
@@ -2610,6 +2916,33 @@ impl MobileManipulatorSim {
             }
         }
         self.apply_mobile_base_planar_drive(action);
+    }
+
+    /// Drives the SO101 arm joints to absolute IK targets.
+    ///
+    /// The jaw is handled by [`Self::apply_gripper_and_base_velocities`], which
+    /// the caller invokes next.
+    fn apply_so101_joint_targets(&mut self, target: crate::so101_kinematics::So101JointTarget) {
+        let angles = [
+            (SO101_SHOULDER_PAN_JOINT, target.shoulder_pan_rad),
+            (SO101_SHOULDER_LIFT_JOINT, target.shoulder_lift_rad),
+            (SO101_ELBOW_FLEX_JOINT, target.elbow_flex_rad),
+            (SO101_WRIST_FLEX_JOINT, target.wrist_flex_rad),
+            (SO101_WRIST_ROLL_JOINT, target.wrist_roll_rad),
+        ];
+        for (name, angle_rad) in angles {
+            let Some(index) = self.joint_names.iter().position(|n| n == name) else {
+                continue;
+            };
+            let link = self.actuated[index].link;
+            if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(link) {
+                motor.target_position = angle_rad;
+                motor.velocity_rad_s = 0.0;
+                motor.stiffness = SO101_ARM_STIFFNESS;
+                motor.gain = SO101_ARM_DAMPING;
+                motor.max_force = SO101_ARM_MAX_FORCE;
+            }
+        }
     }
 
     fn apply_lift_joint_targets(&mut self, target: crate::mm_lift_kinematics::MmLiftJointTarget) {
@@ -2700,13 +3033,19 @@ impl MobileManipulatorSim {
             };
             if matches!(
                 joint_name.as_str(),
-                "lift_joint" | "shoulder_joint" | "elbow_joint"
+                "lift_joint"
+                    | "shoulder_joint"
+                    | "elbow_joint"
+                    | "shoulder_pan"
+                    | "shoulder_lift"
+                    | "elbow_flex"
+                    | "wrist_flex"
+                    | "wrist_roll"
             ) {
                 continue;
             }
             if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
-                let is_finger =
-                    joint_name == "left_finger_joint" || joint_name == "right_finger_joint";
+                let is_finger = is_finger_joint(joint_name);
                 if is_finger && motor.stiffness > 0.0 {
                     let mut target = (motor.target_position + velocity * dt_s)
                         .clamp(-ARM_TARGET_LIMIT_RAD, ARM_TARGET_LIMIT_RAD);
@@ -2803,7 +3142,6 @@ impl MobileManipulatorSim {
         if !self.mobile_base {
             return;
         }
-
         let dt_s = self.dt.as_seconds().value();
         let (pos0, yaw0) = self.base_pose_before_step;
         let forward_dir = Quat::from_rotation_y(yaw0) * Vec3::X;
@@ -2818,10 +3156,12 @@ impl MobileManipulatorSim {
         // toward -Z to reach its pick/place targets there.
         let new_yaw = wrap_yaw_rad(yaw0 + self.base_command_yaw_rate_rad_s * dt_s);
 
+        // Re-pin the root only. Reduced-coordinate children derive their poses
+        // from the root plus joint state, and the Rapier sync deliberately does
+        // not write their positions (see `sync_from_ecs`), so teleporting the
+        // root carries the whole assembly rigidly without desynchronizing it.
         if let Some(mut transform) = self.world.get_mut::<Transform3>(self.base_link) {
-            transform.translation.x = new_pos.x;
-            transform.translation.y = MOBILE_BASE_NOMINAL_Y_M;
-            transform.translation.z = new_pos.z;
+            transform.translation = Vec3::new(new_pos.x, MOBILE_BASE_NOMINAL_Y_M, new_pos.z);
             transform.rotation = Quat::from_rotation_y(new_yaw);
         }
         if let Some(mut body) = self.world.get_mut::<RigidBody>(self.base_link) {
@@ -2853,7 +3193,16 @@ impl MobileManipulatorSim {
             return;
         }
         for (joint, name) in self.actuated.iter().zip(self.joint_names.iter()) {
-            if name != "shoulder_joint" && name != "elbow_joint" {
+            if !matches!(
+                name.as_str(),
+                "shoulder_joint"
+                    | "elbow_joint"
+                    | "shoulder_pan"
+                    | "shoulder_lift"
+                    | "elbow_flex"
+                    | "wrist_flex"
+                    | "wrist_roll"
+            ) {
                 continue;
             }
             let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) else {
@@ -2861,11 +3210,20 @@ impl MobileManipulatorSim {
             };
             // Initial state is an uncommanded hold; `apply_action` re-selects the
             // constants every step from the live per-joint command.
-            let (stiffness, damping) = arm_motor_constants(self.mobile_base, 0.0);
+            let (stiffness, damping) = arm_motor_constants_for(name, self.mobile_base, 0.0);
             motor.stiffness = stiffness;
             motor.gain = damping;
             motor.target_position = 0.0;
-            motor.max_force = ARM_MOTOR_MAX_FORCE;
+            motor.max_force = arm_motor_max_force_for(name);
+            // SO101 links are two orders of magnitude lighter than the mm arms
+            // the acceleration-based default was tuned for: gravity needs
+            // newton-meter authority, so these joints use the force-based
+            // motor model. Wheels and legacy arms keep the default.
+            if is_so101_arm_joint(name) {
+                self.world
+                    .entity_mut(joint.link)
+                    .insert(JointMotorGainModel::ForceBased);
+            }
         }
     }
 
@@ -2902,6 +3260,87 @@ impl MobileManipulatorSim {
         }
     }
 
+    /// Marks the SO101 arm members as physics-owned.
+    ///
+    /// The chassis is analytically re-pinned each step; the backend only
+    /// teleports the root from ECS and lets the reduced-coordinate chain carry
+    /// its children. Without this marker the stale child poses would be written
+    /// back and desynchronize the assembly, and the arm would lose its pose
+    /// under sustained driving.
+    fn configure_so101_physics_owned_poses(&mut self) {
+        if !self.rigid_multibody {
+            return;
+        }
+        let members: Vec<Entity> = self.robot_links.values().copied().collect();
+        for member in members {
+            if member == self.base_link {
+                continue;
+            }
+            self.world
+                .entity_mut(member)
+                .insert(rne_physics::PhysicsOwnedPose);
+        }
+    }
+
+    /// Adds passive viscous damping to the reduced-coordinate SO101 arm so
+    /// ground/contact vibration cannot pump the light links.
+    fn configure_so101_passive_damping(&mut self) {
+        // Passive joint dynamics require a reduced-coordinate articulation.
+        if !self.rigid_multibody {
+            return;
+        }
+        for (joint, name) in self.actuated.iter().zip(self.joint_names.iter()) {
+            let link = joint.link;
+            let damping = if name.ends_with("wheel_joint") {
+                SO101_WHEEL_PASSIVE_DAMPING
+            } else if is_so101_arm_joint(name) {
+                SO101_ARM_PASSIVE_DAMPING
+            } else {
+                continue;
+            };
+            self.world
+                .entity_mut(link)
+                .insert(JointPassiveDynamics::Revolute {
+                    viscous_damping_nm_s_per_rad: damping,
+                    coulomb_friction_nm: 0.0,
+                    coulomb_transition_velocity_rad_s: 0.0,
+                });
+        }
+    }
+
+    /// Strengthens wheel velocity tracking on reduced-coordinate joints.
+    ///
+    /// Impulse-joint wheels (legacy robots) track fine on defaults and are left
+    /// untouched. Multibody wheels carrying an asymmetric arm load scrub and
+    /// chatter under the weak acceleration-based default, which grows into
+    /// assembly-wide instability, so those joints alone switch to the
+    /// force-based model with firm velocity damping.
+    fn configure_wheel_motors(&mut self) {
+        const SO101_WHEEL_DAMPING: f64 = 8.0;
+        // Only the SO101 variant simulates wheels as reduced-coordinate joints
+        // (detected by its arm joints, since backend joints do not exist yet at
+        // configure time); legacy impulse-joint wheels keep their defaults.
+        if !self
+            .joint_names
+            .iter()
+            .any(|n| n == SO101_SHOULDER_LIFT_JOINT)
+        {
+            return;
+        }
+        for name in ["left_wheel_joint", "right_wheel_joint"] {
+            let Some(index) = self.joint_names.iter().position(|n| n == name) else {
+                continue;
+            };
+            let link = self.actuated[index].link;
+            if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(link) {
+                motor.gain = SO101_WHEEL_DAMPING;
+            }
+            self.world
+                .entity_mut(link)
+                .insert(JointMotorGainModel::ForceBased);
+        }
+    }
+
     /// Configures the gripper finger joint motors so they actually track and hold
     /// their commands instead of flailing:
     ///
@@ -2916,7 +3355,7 @@ impl MobileManipulatorSim {
     fn configure_finger_motors(&mut self) {
         let has_lift = self.actuated.iter().any(|j| j.axis == JointReadAxis::LiftY);
         for (joint, name) in self.actuated.iter().zip(self.joint_names.iter()) {
-            if name != "left_finger_joint" && name != "right_finger_joint" {
+            if !is_finger_joint(name) {
                 continue;
             }
             if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(joint.link) {
@@ -2925,6 +3364,14 @@ impl MobileManipulatorSim {
                     motor.stiffness = 0.0;
                     motor.target_position = 0.0;
                     motor.max_force = 0.0;
+                } else if name == SO101_GRIPPER_JOINT {
+                    motor.stiffness = SO101_FINGER_STIFFNESS;
+                    motor.gain = SO101_FINGER_DAMPING;
+                    motor.target_position = 0.0;
+                    motor.max_force = SO101_FINGER_MAX_FORCE;
+                    self.world
+                        .entity_mut(joint.link)
+                        .insert(JointMotorGainModel::ForceBased);
                 } else {
                     motor.stiffness = FINGER_MOTOR_STIFFNESS;
                     motor.gain = FINGER_MOTOR_DAMPING;
@@ -2938,22 +3385,32 @@ impl MobileManipulatorSim {
     /// position holds for a physical friction grasp. Planar grippers already use
     /// position motors and only need their current target preserved.
     fn configure_friction_grasp_finger_motors(&mut self) {
-        let finger_targets: Vec<(Entity, f64)> = self
+        let finger_targets: Vec<(Entity, f64, bool)> = self
             .actuated
             .iter()
             .zip(self.joint_names.iter())
-            .filter(|(_, name)| {
-                name.as_str() == "left_finger_joint" || name.as_str() == "right_finger_joint"
+            .filter(|(_, name)| is_finger_joint(name))
+            .map(|(joint, name)| {
+                (
+                    joint.link,
+                    self.sample_joint(joint).position_rad,
+                    *name == SO101_GRIPPER_JOINT,
+                )
             })
-            .map(|(joint, _)| (joint.link, self.sample_joint(joint).position_rad))
             .collect();
-        for (finger, target_position) in finger_targets {
+        for (finger, target_position, is_so101) in finger_targets {
             if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(finger) {
-                motor.stiffness = FINGER_MOTOR_STIFFNESS;
-                motor.gain = FINGER_MOTOR_DAMPING;
+                if is_so101 {
+                    motor.stiffness = SO101_FINGER_STIFFNESS;
+                    motor.gain = SO101_FINGER_DAMPING;
+                    motor.max_force = SO101_FINGER_MAX_FORCE;
+                } else {
+                    motor.stiffness = FINGER_MOTOR_STIFFNESS;
+                    motor.gain = FINGER_MOTOR_DAMPING;
+                    motor.max_force = FRICTION_GRASP_FINGER_MAX_FORCE;
+                }
                 motor.target_position = target_position;
                 motor.velocity_rad_s = 0.0;
-                motor.max_force = FRICTION_GRASP_FINGER_MAX_FORCE;
             }
         }
     }
@@ -3068,6 +3525,33 @@ fn velocity_for_joint(
         "lift_joint" => action.lift_velocity_m_s,
         "shoulder_joint" => action.shoulder_velocity_rad_s,
         "elbow_joint" => action.elbow_velocity_rad_s,
+        "shoulder_pan" => action.shoulder_pan_velocity_rad_s,
+        "shoulder_lift" => {
+            if action.shoulder_lift_velocity_rad_s != 0.0 {
+                action.shoulder_lift_velocity_rad_s
+            } else {
+                action.shoulder_velocity_rad_s
+            }
+        }
+        "elbow_flex" => {
+            if action.elbow_flex_velocity_rad_s != 0.0 {
+                action.elbow_flex_velocity_rad_s
+            } else {
+                action.elbow_velocity_rad_s
+            }
+        }
+        "wrist_flex" => action.wrist_flex_velocity_rad_s,
+        "wrist_roll" => action.wrist_roll_velocity_rad_s,
+        // SO101 jaw: negative motor velocity decreases the joint angle and
+        // shuts the jaw, matching the shared close-negative action convention
+        // (policies, grasp state machine, pinch limits) without a sign flip.
+        "gripper" => {
+            if action.so101_gripper_velocity_rad_s != 0.0 {
+                action.so101_gripper_velocity_rad_s
+            } else {
+                action.gripper_velocity_rad_s
+            }
+        }
         "left_finger_joint" if joint_axis == JointReadAxis::SlideZ => action.gripper_velocity_m_s,
         "right_finger_joint" if joint_axis == JointReadAxis::SlideZ => -action.gripper_velocity_m_s,
         "left_finger_joint" => action.gripper_velocity_rad_s,
@@ -3128,6 +3612,30 @@ fn arm_motor_constants(mobile_base: bool, velocity_command: f64) -> (f64, f64) {
         (MOBILE_ARM_HOLD_STIFFNESS, MOBILE_ARM_HOLD_DAMPING)
     } else {
         (ARM_MOTOR_STIFFNESS, ARM_MOTOR_DAMPING)
+    }
+}
+
+/// Selects position-hold gains per joint: SO101 arm joints use small-arm-scale
+/// gains (see [`SO101_ARM_STIFFNESS`]) on any base; other joints keep the
+/// legacy [`arm_motor_constants`] schedule.
+fn arm_motor_constants_for(
+    joint_name: &str,
+    mobile_base: bool,
+    velocity_command: f64,
+) -> (f64, f64) {
+    if is_so101_arm_joint(joint_name) {
+        (SO101_ARM_STIFFNESS, SO101_ARM_DAMPING)
+    } else {
+        arm_motor_constants(mobile_base, velocity_command)
+    }
+}
+
+/// Selects the position-motor force cap per joint.
+fn arm_motor_max_force_for(joint_name: &str) -> f64 {
+    if is_so101_arm_joint(joint_name) {
+        SO101_ARM_MAX_FORCE
+    } else {
+        ARM_MOTOR_MAX_FORCE
     }
 }
 
@@ -3210,7 +3718,8 @@ fn clamp_friction_finger_target(
         (pinch_left_limit_rad, pinch_right_limit_rad)
     };
     match joint_name {
-        "left_finger_joint" => left_limit.map_or(target, |limit| target.max(limit)),
+        // The SO101 jaw closes toward decreasing angles like the left finger.
+        "left_finger_joint" | "gripper" => left_limit.map_or(target, |limit| target.max(limit)),
         "right_finger_joint" => right_limit.map_or(target, |limit| target.min(limit)),
         _ => target,
     }
@@ -3313,6 +3822,26 @@ fn actuated_joints_for_robot(
         names.push("lift_joint".into());
     }
 
+    // SO101 variant: 5-DOF arm + single-jaw gripper on the diff-drive base.
+    // Detected by the SO101 moving jaw; all SO101 revolutes use RotZ
+    // (URDF axis 0 0 1) matching the wheel-joint read convention.
+    if links.contains_key("moving_jaw_so101_v1_link") {
+        for (link_name, joint_name) in [
+            ("shoulder_link", SO101_SHOULDER_PAN_JOINT),
+            ("upper_arm_link", SO101_SHOULDER_LIFT_JOINT),
+            ("lower_arm_link", SO101_ELBOW_FLEX_JOINT),
+            ("wrist_link", SO101_WRIST_FLEX_JOINT),
+            ("gripper_link", SO101_WRIST_ROLL_JOINT),
+        ] {
+            joints.push(ActuatedJoint {
+                link: link_entity(links, link_name)?,
+                axis: JointReadAxis::RotZ,
+            });
+            names.push(joint_name.into());
+        }
+        return Ok(append_gripper_joints(joints, names, links));
+    }
+
     joints.push(ActuatedJoint {
         link: link_entity(links, "upper_arm_link")?,
         axis: JointReadAxis::YawY,
@@ -3340,6 +3869,15 @@ fn append_gripper_joints(
     mut names: Vec<String>,
     links: &HashMap<String, Entity>,
 ) -> (Vec<ActuatedJoint>, Vec<String>) {
+    // SO101 single moving jaw: position-hold revolute read about Z.
+    if let Ok(jaw) = link_entity(links, "moving_jaw_so101_v1_link") {
+        joints.push(ActuatedJoint {
+            link: jaw,
+            axis: JointReadAxis::RotZ,
+        });
+        names.push(SO101_GRIPPER_JOINT.into());
+        return (joints, names);
+    }
     let finger_axis = if links.contains_key("torso_link")
         && links.contains_key("left_wheel")
         && links.contains_key("right_wheel")
@@ -3508,6 +4046,66 @@ mod tests {
         assert_eq!(sim.latest_wrist_camera(), wrist_camera_at_snapshot);
         assert_eq!(sim.step_count(), snapshot.step_count);
         assert_eq!(sim.snapshot(), snapshot);
+    }
+
+    #[test]
+    fn mm_mobile_so101_holds_arm_while_driving() {
+        // Regression guard for the reduced-coordinate re-pin and force-based
+        // motor fixes: the light SO101 arm must stay near its commanded pose
+        // while the base drives (previously the root-only re-pin pumped the
+        // assembly and the arm drifted decimetres).
+        let mut sim = MobileManipulatorSim::new_mm_mobile_so101();
+        for _ in 0..60 {
+            sim.step(MobileManipulatorAction::default());
+        }
+        for _ in 0..600 {
+            sim.step(MobileManipulatorAction {
+                left_wheel_velocity_rad_s: 2.0,
+                right_wheel_velocity_rad_s: 2.0,
+                ..MobileManipulatorAction::default()
+            });
+        }
+        let joints = sim.latest_joint_state().positions_rad;
+        for (index, name) in sim.joint_names().iter().enumerate() {
+            if is_so101_arm_joint(name) {
+                assert!(
+                    joints[index].abs() < 0.35,
+                    "{name} drifted to {:.3} rad while driving",
+                    joints[index]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mm_mobile_so101_loads_with_so101_arm_and_gripper() {
+        let mut sim = MobileManipulatorSim::new_mm_mobile_so101();
+        assert!(sim.mobile_base());
+        assert_eq!(sim.joint_names().len(), 8);
+        assert!(sim.joint_names().iter().any(|n| n == "shoulder_pan"));
+        assert!(sim.joint_names().iter().any(|n| n == "shoulder_lift"));
+        assert!(sim.joint_names().iter().any(|n| n == "elbow_flex"));
+        assert!(sim.joint_names().iter().any(|n| n == "wrist_flex"));
+        assert!(sim.joint_names().iter().any(|n| n == "wrist_roll"));
+        assert!(sim.joint_names().iter().any(|n| n == "gripper"));
+        let obs = sim.observe();
+        assert!(obs.ee_x_m.is_finite() && obs.ee_y_m.is_finite() && obs.ee_z_m.is_finite());
+        assert!(obs.shoulder_position_rad.is_finite());
+        assert!(obs.elbow_position_rad.is_finite());
+        // Step arm + gripper + base together; must stay finite and planar.
+        for _ in 0..60 {
+            sim.step(MobileManipulatorAction {
+                left_wheel_velocity_rad_s: 2.0,
+                right_wheel_velocity_rad_s: 2.0,
+                shoulder_lift_velocity_rad_s: 0.3,
+                elbow_flex_velocity_rad_s: -0.2,
+                so101_gripper_velocity_rad_s: -0.3,
+                ..MobileManipulatorAction::default()
+            });
+        }
+        let moved = sim.observe();
+        assert!(moved.ee_x_m.is_finite());
+        assert_mobile_base_planar(&sim);
     }
 
     #[test]

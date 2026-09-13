@@ -592,6 +592,366 @@ impl Policy<crate::MobileManipulatorEpisode> for IkMobileClutterPickPlacePolicy 
     }
 }
 
+/// Jaw-pocket-to-object distance below which the SO101 approach starts closing.
+/// At the hold threshold: the cube is between the pads before the jaw shuts,
+/// and the close command then persists (the hardware stop caps the travel).
+const SO101_CLOSE_POCKET_DISTANCE_M: f64 = 0.02;
+/// Pocket-to-object distance (m) below which the IK fine-placement engages.
+/// Beyond this the object is outside the arm's reach and the solver would
+/// saturate; the base approach closes the gap first.
+const SO101_IK_ENGAGE_M: f64 = 0.12;
+/// Fraction of the measured pocket offset the base approach uses, pulling the
+/// base closer so the cube stays inside the arm reach for the IK final.
+const SO101_PICK_REACH_BIAS: f64 = 1.0;
+
+/// Jaw angle above which the jaw counts as fully open (the jaw shuts toward
+/// decreasing angles; its open stop is about +1.745).
+const SO101_JAW_OPEN_RAD: f64 = 1.5;
+
+/// Carry drive speed for the SO101 (m/s). Slower than the mm carrier: the
+/// light arm cannot hold a swinging payload through a fast turn.
+const SO101_CARRY_DRIVE_SPEED_M_S: f64 = 0.10;
+/// Carry phase length for the SO101 (steps). The slow light-arm carry needs
+/// more travel time than the mm carrier to cross the west place route.
+const SO101_CARRY_DRIVE_STEPS: u64 = 1400;
+/// Forward reach of the tucked carry pose (m from the base): shorter than the
+/// neutral pocket so the carried payload rides a shorter lever.
+const SO101_TUCK_REACH_M: f64 = 0.40;
+/// Height of the tucked carry pose above the base center (m).
+const SO101_TUCK_HEIGHT_M: f64 = 0.10;
+/// Pocket-to-object hold distance (m): once the pocket centers on the cube the
+/// base holds position and only the jaw keeps closing. Sized to the jaw gap
+/// (about 1.5 cm): close enough that the cube sits between the pads, loose
+/// enough that the moving measured offset is not chased into a base spin.
+const SO101_PICK_HOLD_DISTANCE_M: f64 = 0.008;
+/// Forward speed cap while poking the SO101 jaw pocket into the pick object
+/// (m/s). Slower than the mm drive-in: the light jaw bulldozes the 50 g cube
+/// instead of bracketing it at higher speed.
+const SO101_PICK_DRIVE_SPEED_M_S: f64 = 0.10;
+/// Post-grasp retreat length for SO101 (steps). Longer than the mm retreat so
+/// the base gets well west of the table before the carry turns toward the
+/// place target; otherwise the leading jaw clips the table's near corner.
+const SO101_RETREAT_STEPS: u64 = 450;
+/// SO101 neutral jaw angle (rad) held during the approach. A fully open jaw
+/// swings the long moving finger ~0.1 m off the pocket center line, which the
+/// short base cannot steer back; holding neutral keeps the pocket compact.
+const SO101_APPROACH_JAW_NEUTRAL_RAD: f64 = 0.0;
+/// Proportional gain (1/s) holding the approach jaw at neutral.
+const SO101_APPROACH_JAW_GAIN: f64 = 4.0;
+/// SO101 gripper close command once the cube sits in the jaw pocket.
+const SO101_CLOSE_GRIPPER_RAD_S: f64 = -2.5;
+/// SO101 gripper release command.
+const SO101_RELEASE_GRIPPER_RAD_S: f64 = 3.0;
+
+/// Scripted navigate → pick → retreat → carry → release for `mm_mobile_so101`
+/// clutter episodes.
+///
+/// Same observation-gated phase machine as [`IkMobileClutterPickPlacePolicy`],
+/// but the jaw pocket rides ~0.55 m ahead and ~0.26 m off the base centerline,
+/// so the pick drive aims the pocket (not the base) at the cube and the arm
+/// stays at its zero hold throughout. The shared close-negative gripper
+/// convention applies: the motor-wire sign flip lives in the sim.
+#[derive(Clone, Debug, PartialEq)]
+pub struct So101MobileClutterPickPlacePolicy {
+    step: u64,
+    /// Previous IK solution, used as the next solve's seed so the arm does not
+    /// jump between equivalent branches.
+    arm_seed: crate::so101_kinematics::So101JointTarget,
+    /// Latches once the approach starts closing the jaw: the closing pad moves
+    /// the measured pocket, so without a latch the close/neutral commands
+    /// alternate and the jaw never stays shut.
+    closing: bool,
+}
+
+impl Default for So101MobileClutterPickPlacePolicy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl So101MobileClutterPickPlacePolicy {
+    /// Creates a policy for the default SO101 mobile clutter place target.
+    pub fn new() -> Self {
+        Self {
+            step: 0,
+            arm_seed: crate::so101_kinematics::So101JointTarget::default(),
+            closing: false,
+        }
+    }
+
+    /// Solves the SO101 arm pose that tucks the grasp pocket close to the base
+    /// for the carry.
+    ///
+    /// The payload is welded to the end effector, so pulling the pocket back
+    /// toward the chassis shortens the lever arm and cuts the swing that the
+    /// light single-jaw arm otherwise cannot hold through a carry turn.
+    fn so101_tuck_ik(
+        &mut self,
+        observation: &MobileManipulatorObservation,
+    ) -> Option<crate::so101_kinematics::So101JointTarget> {
+        use crate::so101_kinematics::So101Kinematics;
+        use rne_math::{Quat, Transform3, Vec3};
+
+        let base = Transform3::from_translation_rotation(
+            Vec3::new(
+                observation.base_x_m,
+                observation.base_y_m,
+                observation.base_z_m,
+            ),
+            Quat::from_rotation_y(observation.base_yaw_rad),
+        );
+        let forward = Quat::from_rotation_y(observation.base_yaw_rad) * Vec3::X;
+        let target = Vec3::new(
+            observation.base_x_m,
+            observation.base_y_m,
+            observation.base_z_m,
+        ) + forward * SO101_TUCK_REACH_M
+            + Vec3::new(0.0, SO101_TUCK_HEIGHT_M, 0.0);
+        match So101Kinematics::new().inverse_pocket(base, target, &self.arm_seed, 200) {
+            Ok(solved) => {
+                self.arm_seed = solved;
+                Some(solved)
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Solves the SO101 arm pose that puts the grasp pocket on the pick object.
+    fn so101_pick_ik(
+        &mut self,
+        observation: &MobileManipulatorObservation,
+    ) -> Option<crate::so101_kinematics::So101JointTarget> {
+        use crate::so101_kinematics::So101Kinematics;
+        use rne_math::{Quat, Transform3, Vec3};
+
+        let base = Transform3::from_translation_rotation(
+            Vec3::new(
+                observation.base_x_m,
+                observation.base_y_m,
+                observation.base_z_m,
+            ),
+            Quat::from_rotation_y(observation.base_yaw_rad),
+        );
+        // Aim the pocket at the object center. The wrist is held at the seed
+        // and only the three positioning joints move (see
+        // `So101Kinematics::inverse_pocket`), so the solve is well determined.
+        let target = Vec3::new(
+            observation.pick_object_x_m,
+            observation.pick_object_y_m,
+            observation.pick_object_z_m,
+        );
+        // Evaluate the pocket at the jaw angle the sim reports, so the solved
+        // pose matches the pad geometry the servo is actually holding.
+        let seed = crate::so101_kinematics::So101JointTarget {
+            gripper_rad: observation.gripper_position_rad,
+            ..self.arm_seed
+        };
+        match So101Kinematics::new().inverse_pocket(base, target, &seed, 200) {
+            Ok(solved) => {
+                self.arm_seed = solved;
+                Some(solved)
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Total scripted steps (settle → pick drive → retreat → carry drive → release).
+    pub fn total_steps(&self) -> u64 {
+        MOBILE_CLUTTER_SETTLE_STEPS
+            + MOBILE_CLUTTER_PICK_DRIVE_STEPS
+            + SO101_RETREAT_STEPS
+            + SO101_CARRY_DRIVE_STEPS
+            + MOBILE_CLUTTER_RELEASE_STEPS
+    }
+
+    /// Overrides the internal step counter (for composing drive + arm phases in tests).
+    pub fn set_step(&mut self, step: u64) {
+        self.step = step;
+    }
+
+    /// Returns the internal step counter.
+    pub fn current_step(&self) -> u64 {
+        self.step
+    }
+
+    /// Returns the action for the current step and advances the internal counter.
+    pub fn next_action(
+        &mut self,
+        observation: &MobileManipulatorObservation,
+    ) -> crate::MobileManipulatorAction {
+        use crate::MobileManipulatorAction;
+
+        let settle_end = MOBILE_CLUTTER_SETTLE_STEPS;
+        let pick_drive_end = settle_end + MOBILE_CLUTTER_PICK_DRIVE_STEPS;
+        let retreat_end = pick_drive_end + SO101_RETREAT_STEPS;
+        let carry_drive_end = retreat_end + SO101_CARRY_DRIVE_STEPS;
+        let release_end = carry_drive_end + MOBILE_CLUTTER_RELEASE_STEPS;
+
+        // Before a grasp the episode reports the pick object pose (nonzero Y for a
+        // tabletop object); once grasped it zeroes the pick pose and switches the
+        // target deltas to place-target-relative.
+        let grasped = observation.pick_object_y_m == 0.0;
+
+        // Observation-gated early phase exits. The retreat always runs full
+        // length (no distance shortcut): the grasped cube must be dragged
+        // well west of the table edge before the carry turns, and with the
+        // west place target the base is usually already past the mm-style
+        // distance the moment the pick ends.
+        let mut s = self.step;
+        if (settle_end..pick_drive_end).contains(&s) && grasped {
+            s = pick_drive_end;
+        }
+        if (retreat_end..carry_drive_end).contains(&s)
+            && grasped
+            && observation.target_dx_m.hypot(observation.target_dz_m)
+                < MOBILE_CLUTTER_RELEASE_GATE_M
+        {
+            s = carry_drive_end;
+        }
+        self.step = s + 1;
+
+        if s < settle_end {
+            if s == 0 {
+                self.closing = false;
+                self.arm_seed = crate::so101_kinematics::So101JointTarget::default();
+            }
+            MobileManipulatorAction {
+                gripper_velocity_rad_s: ((SO101_APPROACH_JAW_NEUTRAL_RAD
+                    - observation.gripper_position_rad)
+                    * SO101_APPROACH_JAW_GAIN)
+                    .clamp(-2.0, 2.0),
+                ..MobileManipulatorAction::default()
+            }
+        } else if s < pick_drive_end {
+            let (object_x_m, object_z_m) = mobile_pick_object_xz(observation);
+            // Drive the base so the measured jaw pocket lands on the cube; hold
+            // once it is centered (see `so101_pick_drive_action`).
+            let pocket_error_m = pocket_to_object_distance_m(observation);
+            let mut action = if pocket_error_m < SO101_PICK_HOLD_DISTANCE_M {
+                MobileManipulatorAction::default()
+            } else {
+                so101_pick_drive_action(observation, object_x_m, object_z_m)
+            };
+            // Actively place the pocket on the cube with inverse kinematics
+            // once the base is close. Far away the cube is outside the arm's
+            // reach, so the solver would saturate and swing the arm; the base
+            // approach (neutral arm) brings the pocket within reach first, and
+            // then the IK holds the grasp point on the object through closure.
+            action.so101_joint_target = if pocket_error_m < SO101_IK_ENGAGE_M {
+                self.so101_pick_ik(observation)
+            } else {
+                None
+            };
+            let pocket_distance_m = pocket_to_object_distance_m(observation);
+            // Close once the pocket centers and keep closing: the hardware stop
+            // caps the travel, and `update_grasp_friction` needs an active close
+            // command on the tick the cube enters the pocket. Latch so the pad's
+            // own motion cannot re-open the jaw mid-close.
+            if pocket_distance_m < SO101_CLOSE_POCKET_DISTANCE_M {
+                self.closing = true;
+            }
+            action.gripper_velocity_rad_s = if self.closing {
+                SO101_CLOSE_GRIPPER_RAD_S
+            } else {
+                ((SO101_APPROACH_JAW_NEUTRAL_RAD - observation.gripper_position_rad)
+                    * SO101_APPROACH_JAW_GAIN)
+                    .clamp(-2.0, 2.0)
+            };
+            action
+        } else if s < retreat_end {
+            MobileManipulatorAction {
+                left_wheel_velocity_rad_s: MOBILE_CLUTTER_RETREAT_WHEEL_RAD_S,
+                right_wheel_velocity_rad_s: MOBILE_CLUTTER_RETREAT_WHEEL_RAD_S,
+                ..MobileManipulatorAction::default()
+            }
+        } else if s < carry_drive_end {
+            if grasped {
+                let mut action = mobile_carry_object_toward_action_with_lead_speed(
+                    observation,
+                    SO101_TUCK_REACH_M,
+                    SO101_CARRY_DRIVE_SPEED_M_S,
+                );
+                action.so101_joint_target = self.so101_tuck_ik(observation);
+                action
+            } else {
+                mobile_drive_toward_action(
+                    observation,
+                    crate::mm_minimal_kinematics::SO101_MOBILE_CLUTTER_PLACE_X_M,
+                    crate::mm_minimal_kinematics::SO101_MOBILE_CLUTTER_PLACE_Z_M,
+                    MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S,
+                )
+            }
+        } else if s < release_end {
+            // Stop once fully open for the same anti-hammering reason.
+            let jaw_open = observation.gripper_position_rad > SO101_JAW_OPEN_RAD;
+            MobileManipulatorAction {
+                gripper_velocity_rad_s: if jaw_open {
+                    0.0
+                } else {
+                    SO101_RELEASE_GRIPPER_RAD_S
+                },
+                ..MobileManipulatorAction::default()
+            }
+        } else {
+            MobileManipulatorAction::default()
+        }
+    }
+}
+
+impl Policy<crate::MobileManipulatorEpisode> for So101MobileClutterPickPlacePolicy {
+    fn act(
+        &mut self,
+        observation: &crate::MobileManipulatorObservation,
+    ) -> crate::MobileManipulatorAction {
+        self.next_action(observation)
+    }
+}
+
+/// World-frame jaw pocket position (m), measured from the live arm pose so the
+/// pick drive tracks the actual pocket rather than an open-loop base offset.
+fn so101_pocket_xz(observation: &MobileManipulatorObservation) -> (f64, f64) {
+    (
+        observation.gripper_pocket_x_m,
+        observation.gripper_pocket_z_m,
+    )
+}
+
+/// Jaw-pocket-to-object horizontal distance (m) for the SO101 close gate.
+fn pocket_to_object_distance_m(observation: &MobileManipulatorObservation) -> f64 {
+    let (object_x_m, object_z_m) = mobile_pick_object_xz(observation);
+    let (pocket_x_m, pocket_z_m) = so101_pocket_xz(observation);
+    (object_x_m - pocket_x_m).hypot(object_z_m - pocket_z_m)
+}
+
+/// SO101 pick drive: heading-based base approach that lands the neutral jaw
+/// pocket on the object.
+///
+/// Aims the base at `object - rot(yaw)·(pocket offset)`, then reuses the stable
+/// heading controller the mm robots use. The offset is the fixed neutral pocket
+/// offset, NOT the live measured offset: the arm deflects while the base moves,
+/// so a measured-offset target keeps moving and the controller never settles
+/// (it reaches the target, the arm relaxes, and the base spins chasing the
+/// returning offset). The fixed offset converges, and the arm's transient
+/// deflection relaxes once the base stops.
+fn so101_pick_drive_action(
+    observation: &MobileManipulatorObservation,
+    object_x_m: f64,
+    object_z_m: f64,
+) -> crate::MobileManipulatorAction {
+    // Measured pocket offset: robust to the arm's sag under driving, so the
+    // base lands the actual pocket near the cube. Bias the base slightly closer
+    // than the neutral standoff so the cube sits inside the arm's reach and the
+    // IK can put the pocket exactly on it instead of stretching to its limit.
+    let offset_x = (observation.gripper_pocket_x_m - observation.base_x_m) * SO101_PICK_REACH_BIAS;
+    let offset_z = (observation.gripper_pocket_z_m - observation.base_z_m) * SO101_PICK_REACH_BIAS;
+    mobile_drive_toward_action(
+        observation,
+        object_x_m - offset_x,
+        object_z_m - offset_z,
+        SO101_PICK_DRIVE_SPEED_M_S,
+    )
+}
+
 const MOBILE_LIFT_SETTLE_STEPS: u64 = 600;
 // The portable flagship controller caps the base at 0.1 m/s. The shipped
 // scene requires 1.3 m of travel to the 0.9 m pickup standoff, so the 60 Hz
@@ -1606,26 +1966,64 @@ const MOBILE_CLUTTER_CARRY_OBJECT_GAIN: f64 = 0.6;
 fn mobile_carry_object_toward_action(
     observation: &MobileManipulatorObservation,
 ) -> crate::MobileManipulatorAction {
+    mobile_carry_object_toward_action_with_lead(observation, MOBILE_CLUTTER_CARRY_OBJECT_LEAD_M)
+}
+
+/// [`mobile_carry_object_toward_action`] with an explicit object lookahead (m)
+/// for carriers whose pocket rides at a different lever arm (e.g. SO101).
+fn mobile_carry_object_toward_action_with_lead(
+    observation: &MobileManipulatorObservation,
+    lead_m: f64,
+) -> crate::MobileManipulatorAction {
+    mobile_carry_object_toward_action_with_lead_speed(
+        observation,
+        lead_m,
+        MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S,
+    )
+}
+
+/// [`mobile_carry_object_toward_action_with_lead`] with an explicit speed cap.
+fn mobile_carry_object_toward_action_with_lead_speed(
+    observation: &MobileManipulatorObservation,
+    lead_m: f64,
+    max_speed_m_s: f64,
+) -> crate::MobileManipulatorAction {
+    drive_point_toward_action(
+        observation.base_yaw_rad,
+        observation.target_dx_m,
+        observation.target_dz_m,
+        lead_m,
+        max_speed_m_s,
+        0.3,
+    )
+}
+
+/// Unicycle feedback step driving an arbitrary world-frame error vector to zero
+/// through a lookahead point `lead_m` ahead of the base (shared core behind the
+/// carry controller and the SO101 pocket pick drive).
+fn drive_point_toward_action(
+    base_yaw_rad: f64,
+    error_x_m: f64,
+    error_z_m: f64,
+    lead_m: f64,
+    max_forward_m_s: f64,
+    max_yaw_rate_rad_s: f64,
+) -> crate::MobileManipulatorAction {
     use crate::mm_mobile_twist_to_wheel_velocities;
     use crate::MobileManipulatorAction;
 
-    let error_x = observation.target_dx_m;
-    let error_z = observation.target_dz_m;
-    let yaw = observation.base_yaw_rad;
+    let yaw = base_yaw_rad;
     // Base forward axis in the XZ plane is `Quat::from_rotation_y(yaw) * X`
     // (see `apply_mobile_base_planar_drive`), and its yaw-derivative is `g`.
     let forward = (yaw.cos(), -yaw.sin());
     let forward_yaw_derivative = (-yaw.sin(), -yaw.cos());
-    let along_m = error_x * forward.0 + error_z * forward.1;
-    let lateral_m = error_x * forward_yaw_derivative.0 + error_z * forward_yaw_derivative.1;
+    let along_m = error_x_m * forward.0 + error_z_m * forward.1;
+    let lateral_m = error_x_m * forward_yaw_derivative.0 + error_z_m * forward_yaw_derivative.1;
 
-    let forward_m_s = (MOBILE_CLUTTER_CARRY_OBJECT_GAIN * along_m).clamp(
-        -MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S,
-        MOBILE_CLUTTER_CARRY_DRIVE_SPEED_M_S,
-    );
-    let yaw_rate_rad_s = (MOBILE_CLUTTER_CARRY_OBJECT_GAIN * lateral_m
-        / MOBILE_CLUTTER_CARRY_OBJECT_LEAD_M)
-        .clamp(-0.7, 0.7);
+    let forward_m_s =
+        (MOBILE_CLUTTER_CARRY_OBJECT_GAIN * along_m).clamp(-max_forward_m_s, max_forward_m_s);
+    let yaw_rate_rad_s = (MOBILE_CLUTTER_CARRY_OBJECT_GAIN * lateral_m / lead_m)
+        .clamp(-max_yaw_rate_rad_s, max_yaw_rate_rad_s);
     let (left, right) = mm_mobile_twist_to_wheel_velocities(forward_m_s, yaw_rate_rad_s);
     MobileManipulatorAction {
         left_wheel_velocity_rad_s: left.clamp(-3.0, 3.0),

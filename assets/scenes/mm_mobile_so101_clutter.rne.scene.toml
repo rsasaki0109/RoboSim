@@ -1,0 +1,39 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 48
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/mm_mobile_so101.rne.robot.toml"
+
+# SO101 jaw pocket rides ~(0.595, 0.40, 0.19) in base frame; the fixed-jaw pad
+# gap; 1.5 cm cubes sit
+# inside the ~1.4 cm jaw gap when the base aims the measured pocket at them.
+[[obstacles]]
+name = "clutter_table"
+translation_m = [1.65, 0.4475, 0.0]
+half_extents_m = [0.85, 0.02, 0.12]
+body_type = "fixed"
+
+[[obstacles]]
+name = "clutter_cube_a"
+translation_m = [0.95, 0.475, 0.0]
+half_extents_m = [0.01, 0.01, 0.01]
+body_type = "dynamic"
+mass_kg = 0.03
+
+[[obstacles]]
+name = "clutter_cube_b"
+translation_m = [1.65, 0.475, 0.0]
+half_extents_m = [0.01, 0.01, 0.01]
+body_type = "dynamic"
+mass_kg = 0.03
+
+[[obstacles]]
+name = "clutter_cube_c"
+translation_m = [2.35, 0.475, 0.0]
+half_extents_m = [0.01, 0.01, 0.01]
+body_type = "dynamic"
+mass_kg = 0.03

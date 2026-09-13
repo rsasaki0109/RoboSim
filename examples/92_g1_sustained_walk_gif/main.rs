@@ -1,0 +1,762 @@
+//! Renders the G1 v0.3 sustained walk as a hero GIF.
+//!
+//! The capture follows the pinned v0.3 heading candidate
+//! ([`UnitreeG1CommandedTorquePolicy::validated_heading`]) under a forward +
+//! turn command for ~32 s: the long-horizon stability envelope that walks six
+//! times the v0.2.1 horizon without falling. `--smoke` runs the same plant
+//! headlessly and asserts no fall and the yaw-rate sign without a renderer.
+//! Set `RNE_HDRI_PATH` to a Radiance `.hdr` equirectangular map to enable the
+//! photoreal environment background and image-based lighting.
+//! Set `RNE_TAA=1` to enable deterministic temporal anti-aliasing for static
+//! or slowly changing captures.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use png::{BitDepth, ColorType, Encoder};
+use rne_ai::{
+    build_visual_render_scene, unitree_g1_dynamic_scene_path, unitree_g1_gait_targets_for_velocity,
+    UnitreeG1CommandedTorquePolicy, UnitreeG1GaitCommand, UnitreeG1VelocityCommand,
+    UnitreeG1VelocityPolicyInput, UrdfJointPositionTarget, UrdfJointTorqueTarget, UrdfSceneSim,
+};
+use rne_math::{Transform3, Vec3};
+use rne_render::{
+    Camera, EnvironmentLighting, EnvironmentMap, ImageFrame, MeshRenderCache, PbrMaterial,
+    RenderBackend, RenderScene, RenderSceneItem, TriangleMesh, VisualShape,
+};
+use rne_render_wgpu::{CameraOrbit, TaaSettings, WgpuRenderBackend};
+
+const PANEL_WIDTH: u32 = 960;
+const PANEL_HEIGHT: u32 = 540;
+const FRAME_COUNT: usize = 160;
+const STEPS_PER_FRAME: u64 = 12;
+const PREROLL_STEPS: u64 = 480;
+const WINDOW_STEPS: u64 = 480;
+const CAPTURE_STEPS: u64 = FRAME_COUNT as u64 * STEPS_PER_FRAME;
+const SETTLE_STEPS: u64 = 240;
+const KP: f64 = 300.0;
+const KD: f64 = 10.0;
+const TORQUE_LIMIT_NM: f64 = 88.0;
+const SPEED_LIMIT_RAD_S: f64 = 30.0;
+const WALK_STRIDE_RAD: f64 = 0.065;
+const WALK_FOOT_LIFT_RAD: f64 = 0.12;
+const WALK_CYCLE_STEPS: u64 = 100;
+const TRAIL_EVERY_STEPS: u64 = 36;
+const CLEAR_COLOR: [f32; 4] = [0.025, 0.035, 0.05, 1.0];
+const COMMAND_MIN_WINDOW_M: f64 = 0.12;
+
+const SUSTAINED_YAW_RATE_RAD_S: f64 = 0.05;
+
+const TORQUE_LINKS: [&str; 8] = [
+    "left_hip_pitch_link",
+    "left_hip_roll_link",
+    "left_hip_yaw_link",
+    "left_knee_link",
+    "right_hip_pitch_link",
+    "right_hip_roll_link",
+    "right_hip_yaw_link",
+    "right_knee_link",
+];
+
+fn walk_command() -> UnitreeG1GaitCommand {
+    UnitreeG1GaitCommand {
+        stride_rad: WALK_STRIDE_RAD,
+        foot_lift_rad: WALK_FOOT_LIFT_RAD,
+        cycle_steps: WALK_CYCLE_STEPS,
+    }
+}
+
+struct G1Walker {
+    sim: UrdfSceneSim,
+    policy: UnitreeG1CommandedTorquePolicy,
+    command: UnitreeG1VelocityCommand,
+    step: u64,
+    capture_step: u64,
+    capture_start_xz_m: [f64; 2],
+    window_start_xz_m: [f64; 2],
+    window_a_m: f64,
+    window_b_m: f64,
+    min_height_m: f64,
+    trail_m: Vec<[f64; 2]>,
+    capture_active: bool,
+    camera_focus_xz_m: [f64; 2],
+    camera_focus_y_m: f64,
+    camera_along_xz: [f64; 2],
+    camera_yaw_rad: f64,
+}
+
+impl G1Walker {
+    fn new(policy: UnitreeG1CommandedTorquePolicy, command: UnitreeG1VelocityCommand) -> Self {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_g1_dynamic_scene_path())
+            .expect("load dynamic G1");
+        sim.configure_position_motors(220.0, 24.0, TORQUE_LIMIT_NM);
+        let stand = unitree_g1_gait_targets_for_velocity(
+            0,
+            walk_command(),
+            UnitreeG1VelocityCommand::default(),
+        );
+        for _ in 0..SETTLE_STEPS {
+            sim.step_joint_position_targets(&stand);
+        }
+        let observed = sim.observe();
+        Self {
+            sim,
+            policy,
+            command,
+            step: 0,
+            capture_step: 0,
+            capture_start_xz_m: [observed.base_x_m, observed.base_z_m],
+            window_start_xz_m: [observed.base_x_m, observed.base_z_m],
+            window_a_m: 0.0,
+            window_b_m: 0.0,
+            min_height_m: observed.base_y_m,
+            trail_m: Vec::new(),
+            capture_active: false,
+            camera_focus_xz_m: [observed.base_x_m, observed.base_z_m],
+            camera_focus_y_m: observed.base_y_m * 0.62,
+            camera_along_xz: [0.0, 1.0],
+            camera_yaw_rad: 0.0,
+        }
+    }
+
+    fn begin_capture(&mut self) {
+        let observed = self.sim.observe();
+        self.capture_step = 0;
+        self.capture_start_xz_m = [observed.base_x_m, observed.base_z_m];
+        self.window_start_xz_m = self.capture_start_xz_m;
+        self.window_a_m = 0.0;
+        self.window_b_m = 0.0;
+        self.min_height_m = observed.base_y_m;
+        self.trail_m.clear();
+        self.capture_active = true;
+        self.record_trail();
+        self.lock_camera();
+    }
+
+    fn lock_camera(&mut self) {
+        let observed = self.sim.observe();
+        let pelvis = self.sim.named_transform("pelvis").expect("G1 pelvis pose");
+        let body_forward = pelvis.rotation * Vec3::Z;
+        let along = Vec3::new(body_forward.x, 0.0, body_forward.z).normalize_or_zero();
+        let along = if along.length_squared() > 0.0 {
+            along
+        } else {
+            Vec3::Z
+        };
+        let side = Vec3::new(-along.z, 0.0, along.x);
+        let eye_direction = (-along * 0.45 + side * 0.90).normalize_or_zero();
+        self.camera_along_xz = [along.x, along.z];
+        self.camera_yaw_rad = eye_direction.x.atan2(eye_direction.z);
+        self.camera_focus_xz_m = [observed.base_x_m, observed.base_z_m];
+        self.camera_focus_y_m = observed.base_y_m * 0.62;
+    }
+
+    fn advance_camera(&mut self) {
+        let observed = self.sim.observe();
+        // Follow the walked curve in world XZ with a light low-pass so step
+        // bounce does not shake the orbit; heading stays locked.
+        let target = [observed.base_x_m, observed.base_z_m];
+        const FOLLOW: f64 = 0.06;
+        self.camera_focus_xz_m[0] += FOLLOW * (target[0] - self.camera_focus_xz_m[0]);
+        self.camera_focus_xz_m[1] += FOLLOW * (target[1] - self.camera_focus_xz_m[1]);
+    }
+
+    fn step_frame(&mut self, steps: u64) {
+        for _ in 0..steps {
+            if self.capture_active && self.capture_step.is_multiple_of(TRAIL_EVERY_STEPS) {
+                self.record_trail();
+            }
+            let targets =
+                unitree_g1_gait_targets_for_velocity(self.step, walk_command(), self.command);
+            let servo: Vec<UrdfJointPositionTarget<'_>> = targets
+                .iter()
+                .filter(|target| !TORQUE_LINKS.contains(&target.link_name))
+                .copied()
+                .collect();
+            self.sim.set_joint_position_targets(&servo);
+            let stance = [
+                self.sim.link_contact_impulse_ns("left_ankle_roll_link") > 0.0,
+                self.sim.link_contact_impulse_ns("right_ankle_roll_link") > 0.0,
+            ];
+            let observation = self.sim.observe();
+            let world_velocity = Vec3::new(
+                observation.base_linear_velocity_x_m_s,
+                observation.base_linear_velocity_y_m_s,
+                observation.base_linear_velocity_z_m_s,
+            );
+            let body_rotation = self
+                .sim
+                .named_transform("pelvis")
+                .expect("G1 pelvis pose")
+                .rotation;
+            let input = UnitreeG1VelocityPolicyInput {
+                two_cycle_phase: (self.step % (2 * WALK_CYCLE_STEPS)) as f64
+                    / (2 * WALK_CYCLE_STEPS) as f64,
+                stance,
+                command: self.command,
+                measured_forward_velocity_m_s: (body_rotation.inverse() * world_velocity).z,
+                measured_yaw_rate_rad_s: observation.base_angular_velocity_y_rad_s,
+                target_heading_rad: 0.0,
+                measured_heading_rad: 0.0,
+                heading_error_rad: 0.0,
+                yaw_rate_error_rad_s: self.command.yaw_rate_rad_s
+                    - observation.base_angular_velocity_y_rad_s,
+            };
+            let feed_forward = self.policy.torques_nm_for_command(input, TORQUE_LIMIT_NM);
+            let torques: Vec<UrdfJointTorqueTarget<'_>> = TORQUE_LINKS
+                .iter()
+                .enumerate()
+                .map(|(index, link_name)| {
+                    let target_position = targets
+                        .iter()
+                        .find(|target| target.link_name == *link_name)
+                        .expect("torque link in gait targets")
+                        .position;
+                    let q = self
+                        .sim
+                        .named_joint_position(link_name)
+                        .expect("joint position");
+                    let qd = self
+                        .sim
+                        .named_joint_velocity(link_name)
+                        .expect("joint velocity");
+                    UrdfJointTorqueTarget {
+                        link_name,
+                        torque_nm: (KP * (target_position - q) - KD * qd + feed_forward[index])
+                            .clamp(-TORQUE_LIMIT_NM, TORQUE_LIMIT_NM),
+                        max_velocity_rad_s: SPEED_LIMIT_RAD_S,
+                    }
+                })
+                .collect();
+            self.sim.step_joint_torques(&torques);
+            let observed = self.sim.observe();
+            assert!(
+                observed.base_y_m.is_finite(),
+                "G1 walker became non-finite at step {}",
+                self.step
+            );
+            self.step += 1;
+            if self.capture_active {
+                self.capture_step += 1;
+                self.min_height_m = self.min_height_m.min(observed.base_y_m);
+                let position = [observed.base_x_m, observed.base_z_m];
+                if self.capture_step == WINDOW_STEPS {
+                    self.window_a_m = distance_m(self.window_start_xz_m, position);
+                    self.window_start_xz_m = position;
+                } else if self.capture_step == CAPTURE_STEPS {
+                    self.window_b_m = distance_m(self.window_start_xz_m, position);
+                }
+            }
+        }
+        if self.capture_active {
+            self.record_trail();
+        }
+    }
+
+    fn record_trail(&mut self) {
+        let observed = self.sim.observe();
+        let position = [observed.base_x_m, observed.base_z_m];
+        let should_push = self
+            .trail_m
+            .last()
+            .is_none_or(|last| distance_m(*last, position) > 0.005);
+        if should_push {
+            self.trail_m.push(position);
+        }
+    }
+
+    fn minimum_window_m(&self) -> f64 {
+        self.window_a_m.min(self.window_b_m)
+    }
+}
+
+fn distance_m(a: [f64; 2], b: [f64; 2]) -> f64 {
+    (b[0] - a[0]).hypot(b[1] - a[1])
+}
+
+fn main() {
+    if std::env::args().any(|argument| argument == "--smoke") {
+        run_smoke();
+        return;
+    }
+    if std::env::var("RNE_SKIP_GPU").is_ok() {
+        return;
+    }
+
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let media_dir = repo_root.join("docs/media");
+    let floor_texture =
+        load_texture(&repo_root.join(
+            "examples/63_g1_stride_gif/assets/photoreal_test_bay/concrete_floor_basecolor.png",
+        ));
+    let floor_normal_texture = load_texture(
+        &repo_root
+            .join("examples/63_g1_stride_gif/assets/photoreal_test_bay/concrete_floor_normal.png"),
+    );
+    let floor_roughness_texture =
+        load_texture(&repo_root.join(
+            "examples/63_g1_stride_gif/assets/photoreal_test_bay/concrete_floor_roughness.png",
+        ));
+    let frames_dir = media_dir.join("unitree-g1-sustained-walk-frames");
+    let _ = fs::remove_dir_all(&frames_dir);
+    fs::create_dir_all(&frames_dir).expect("create learned G1 frame directory");
+
+    let command = UnitreeG1VelocityCommand {
+        forward_m_s: 0.0276,
+        yaw_rate_rad_s: SUSTAINED_YAW_RATE_RAD_S,
+    };
+    let mut learned = G1Walker::new(UnitreeG1CommandedTorquePolicy::validated_heading(), command);
+    learned.step_frame(PREROLL_STEPS);
+    learned.begin_capture();
+
+    let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
+    configure_environment(&mut backend);
+    configure_taa(&mut backend);
+    let camera = Camera::new(PANEL_WIDTH, PANEL_HEIGHT, std::f64::consts::FRAC_PI_4);
+    let mesh_roots: Vec<PathBuf> = learned.sim.mesh_package_roots().to_vec();
+    let mesh_root_refs: Vec<&Path> = mesh_roots.iter().map(PathBuf::as_path).collect();
+    let mut mesh_cache = MeshRenderCache::new();
+
+    for frame in 0..FRAME_COUNT {
+        learned.step_frame(STEPS_PER_FRAME);
+        learned.advance_camera();
+        let rgba = render_panel(
+            &mut backend,
+            &camera,
+            &mut mesh_cache,
+            &mesh_root_refs,
+            &learned,
+            &floor_texture,
+            &floor_normal_texture,
+            &floor_roughness_texture,
+            [0.98, 0.54, 0.16, 1.0],
+        );
+        write_png(
+            &frames_dir.join(format!("frame-{frame:03}.png")),
+            &rgba,
+            PANEL_WIDTH,
+            PANEL_HEIGHT,
+        )
+        .expect("write learned G1 frame");
+    }
+
+    let learned_min = learned.minimum_window_m();
+    assert!(
+        learned_min > COMMAND_MIN_WINDOW_M,
+        "sustained G1 must keep covering ground: {learned_min:.3} m"
+    );
+    assert!(
+        learned.min_height_m > 0.75,
+        "sustained G1 should stay upright, min height {:.3} m",
+        learned.min_height_m
+    );
+
+    let gif_path = media_dir.join("unitree-g1-sustained-walk.gif");
+    build_gif(&frames_dir, &gif_path).expect("encode learned G1 gif");
+    image::open(frames_dir.join(format!("frame-{:03}.png", FRAME_COUNT - 1)))
+        .expect("read learned G1 poster frame")
+        .save(media_dir.join("unitree-g1-sustained-walk.png"))
+        .expect("write learned G1 poster");
+    let _ = fs::remove_dir_all(&frames_dir);
+    println!(
+        "rendered sustained G1 media to {} (window {:.3}/{:.3} m, minH {:.3} m)",
+        gif_path.display(),
+        learned.window_a_m,
+        learned.window_b_m,
+        learned.min_height_m,
+    );
+}
+
+fn configure_environment(backend: &mut WgpuRenderBackend) {
+    let Some(path) = std::env::var_os("RNE_HDRI_PATH") else {
+        return;
+    };
+    let path = PathBuf::from(path);
+    let map = EnvironmentMap::load(&path)
+        .unwrap_or_else(|error| panic!("load HDRI environment {}: {error}", path.display()));
+    let mut lighting = EnvironmentLighting::from_map(Arc::new(map));
+    if let Ok(value) = std::env::var("RNE_HDRI_INTENSITY") {
+        lighting.intensity = value
+            .parse()
+            .unwrap_or_else(|error| panic!("parse RNE_HDRI_INTENSITY={value:?}: {error}"));
+    }
+    if let Ok(value) = std::env::var("RNE_HDRI_ROTATION_RAD") {
+        lighting.rotation_rad = value
+            .parse()
+            .unwrap_or_else(|error| panic!("parse RNE_HDRI_ROTATION_RAD={value:?}: {error}"));
+    }
+    backend.set_environment(lighting);
+    println!("using HDRI environment {}", path.display());
+}
+
+fn configure_taa(backend: &mut WgpuRenderBackend) {
+    let enabled = std::env::var("RNE_TAA")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "on"
+            )
+        })
+        .unwrap_or(false);
+    if !enabled {
+        return;
+    }
+
+    let mut settings = TaaSettings::enabled();
+    if let Ok(value) = std::env::var("RNE_TAA_FEEDBACK") {
+        settings.feedback = value
+            .parse()
+            .unwrap_or_else(|error| panic!("parse RNE_TAA_FEEDBACK={value:?}: {error}"));
+    }
+    if let Ok(value) = std::env::var("RNE_TAA_JITTER_PX") {
+        settings.jitter_scale_px = value
+            .parse()
+            .unwrap_or_else(|error| panic!("parse RNE_TAA_JITTER_PX={value:?}: {error}"));
+    }
+    backend.set_taa(settings);
+    println!(
+        "using temporal anti-aliasing (feedback {:.2}, jitter {:.2}px)",
+        backend.taa().feedback,
+        backend.taa().jitter_scale_px,
+    );
+}
+
+fn run_smoke() {
+    let command = UnitreeG1VelocityCommand {
+        forward_m_s: 0.0276,
+        yaw_rate_rad_s: SUSTAINED_YAW_RATE_RAD_S,
+    };
+    let mut walker = G1Walker::new(UnitreeG1CommandedTorquePolicy::validated_heading(), command);
+    walker.step_frame(PREROLL_STEPS);
+    walker.begin_capture();
+    walker.step_frame(CAPTURE_STEPS);
+    let learned_min = walker.minimum_window_m();
+    assert!(
+        learned_min > COMMAND_MIN_WINDOW_M,
+        "sustained G1 smoke must keep covering ground: {learned_min:.3} m",
+    );
+    assert!(
+        walker.min_height_m > 0.75,
+        "sustained G1 smoke fell: minimum height {:.3} m",
+        walker.min_height_m,
+    );
+    println!(
+        "sustained G1 walk smoke passed: windows {:.3}/{:.3} m, minimum height {:.3} m",
+        walker.window_a_m, walker.window_b_m, walker.min_height_m,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_panel(
+    backend: &mut WgpuRenderBackend,
+    camera: &Camera,
+    mesh_cache: &mut MeshRenderCache,
+    mesh_root_refs: &[&Path],
+    walker: &G1Walker,
+    floor_texture: &Arc<ImageFrame>,
+    floor_normal_texture: &Arc<ImageFrame>,
+    floor_roughness_texture: &Arc<ImageFrame>,
+    trail_color: [f32; 4],
+) -> Vec<u8> {
+    let mut scene = build_visual_render_scene(walker.sim.world());
+    scene.items.retain(|item| {
+        !matches!(item.shape, VisualShape::Box { size_m } if size_m.x > 5.0 && size_m.z > 5.0)
+    });
+    append_realistic_test_bay(
+        &mut scene,
+        walker.capture_start_xz_m[0],
+        walker.capture_start_xz_m[1],
+        floor_texture,
+        floor_normal_texture,
+        floor_roughness_texture,
+    );
+    for position in &walker.trail_m {
+        scene.items.push(RenderSceneItem {
+            transform: Transform3 {
+                translation: Vec3::new(position[0], 0.012, position[1]),
+                rotation: rne_math::Quat::IDENTITY,
+                scale: Vec3::new(0.055, 0.008, 0.055),
+            },
+            shape: VisualShape::Box { size_m: Vec3::ONE },
+            color_rgba: trail_color,
+            mesh: None,
+            base_color_texture: None,
+            material: Default::default(),
+        });
+    }
+    mesh_cache
+        .resolve_scene(&mut scene, mesh_root_refs)
+        .expect("resolve official G1 meshes");
+    let orbit = CameraOrbit {
+        focus: Vec3::new(
+            walker.camera_focus_xz_m[0],
+            walker.camera_focus_y_m,
+            walker.camera_focus_xz_m[1],
+        ),
+        yaw_rad: walker.camera_yaw_rad,
+        pitch_rad: 1.38,
+        distance_m: 2.75,
+    };
+    let output = backend
+        .render_scene_camera(camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)
+        .expect("render learned G1 panel");
+    output.color.rgba8
+}
+
+fn append_realistic_test_bay(
+    scene: &mut RenderScene,
+    center_x_m: f64,
+    center_z_m: f64,
+    floor_texture: &Arc<ImageFrame>,
+    floor_normal_texture: &Arc<ImageFrame>,
+    floor_roughness_texture: &Arc<ImageFrame>,
+) {
+    // The G1 physics scene intentionally stays minimal. These render-only props make the
+    // hero capture read as a real robotics test bay without changing contacts or dynamics.
+    const FLOOR: [f32; 4] = [0.19, 0.21, 0.22, 1.0];
+    const FLOOR_SEAM: [f32; 4] = [0.075, 0.09, 0.10, 1.0];
+    const SAFETY_YELLOW: [f32; 4] = [0.72, 0.46, 0.08, 1.0];
+    const WALL: [f32; 4] = [0.14, 0.17, 0.20, 1.0];
+    const WALL_PANEL: [f32; 4] = [0.09, 0.13, 0.17, 1.0];
+    const METAL: [f32; 4] = [0.30, 0.34, 0.36, 1.0];
+    const WINDOW: [f32; 4] = [0.035, 0.10, 0.14, 1.0];
+    const LIGHT: [f32; 4] = [0.82, 0.86, 0.78, 1.0];
+    const STATUS: [f32; 4] = [0.10, 0.74, 0.48, 1.0];
+
+    let floor_center = Vec3::new(center_x_m + 0.25, -0.035, center_z_m - 0.35);
+    push_box(scene, floor_center, Vec3::new(5.4, 0.07, 4.6), FLOOR);
+    push_textured_floor(
+        scene,
+        floor_center,
+        Vec3::new(5.4, 0.0, 4.6),
+        floor_texture,
+        floor_normal_texture,
+        floor_roughness_texture,
+    );
+
+    for x_offset in [-1.8, -0.9, 0.0, 0.9, 1.8] {
+        push_box(
+            scene,
+            Vec3::new(center_x_m + x_offset, 0.004, center_z_m - 0.35),
+            Vec3::new(0.012, 0.006, 4.35),
+            FLOOR_SEAM,
+        );
+    }
+    for z_offset in [-1.4, -0.45, 0.5, 1.45] {
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 0.25, 0.004, center_z_m + z_offset),
+            Vec3::new(5.25, 0.006, 0.012),
+            FLOOR_SEAM,
+        );
+    }
+
+    // A pair of inset safety lines gives the walking lane a scale cue and keeps the
+    // measured trails readable against the matte floor.
+    for z_offset in [-0.82, 0.82] {
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 0.25, 0.009, center_z_m + z_offset),
+            Vec3::new(4.8, 0.008, 0.035),
+            SAFETY_YELLOW,
+        );
+    }
+
+    // Corner walls: the camera looks into the corner, so the clear color is only a
+    // narrow upper margin rather than an empty flat backdrop.
+    push_box(
+        scene,
+        Vec3::new(center_x_m + 2.45, 1.35, center_z_m - 0.35),
+        Vec3::new(0.10, 2.7, 4.7),
+        WALL,
+    );
+    push_box(
+        scene,
+        Vec3::new(center_x_m + 0.25, 1.35, center_z_m - 2.25),
+        Vec3::new(4.5, 2.7, 0.10),
+        WALL,
+    );
+
+    // Recessed blue wall panels and a few narrow metal mullions suggest a real
+    // calibration room while remaining cheap primitive geometry.
+    for z_offset in [-1.55, -0.55, 0.45, 1.45] {
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 2.385, 1.42, center_z_m + z_offset),
+            Vec3::new(0.018, 2.15, 0.84),
+            WALL_PANEL,
+        );
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 2.32, 1.42, center_z_m + z_offset - 0.5),
+            Vec3::new(0.025, 2.18, 0.018),
+            METAL,
+        );
+    }
+    for z_offset in [-1.05, -0.05, 0.95] {
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 2.31, 1.55, center_z_m + z_offset),
+            Vec3::new(0.026, 1.18, 0.68),
+            WINDOW,
+        );
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 2.285, 1.55, center_z_m + z_offset - 0.36),
+            Vec3::new(0.032, 0.025, 0.72),
+            METAL,
+        );
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 2.285, 1.55, center_z_m + z_offset + 0.36),
+            Vec3::new(0.032, 0.025, 0.72),
+            METAL,
+        );
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 2.275, 1.55, center_z_m + z_offset),
+            Vec3::new(0.035, 1.18, 0.025),
+            METAL,
+        );
+    }
+
+    // A low service rail and a few status strips add depth behind the robot without
+    // competing with the white G1 body.
+    push_box(
+        scene,
+        Vec3::new(center_x_m + 1.95, 0.42, center_z_m - 2.17),
+        Vec3::new(0.08, 0.78, 0.08),
+        METAL,
+    );
+    push_box(
+        scene,
+        Vec3::new(center_x_m + 1.95, 0.78, center_z_m - 2.17),
+        Vec3::new(0.08, 0.06, 0.08),
+        STATUS,
+    );
+    push_box(
+        scene,
+        Vec3::new(center_x_m + 2.38, 0.22, center_z_m - 1.92),
+        Vec3::new(0.04, 0.16, 0.52),
+        SAFETY_YELLOW,
+    );
+
+    // Suspended LED panels catch the existing directional shadows and make the
+    // ceiling area feel intentional without adding a second render pass.
+    for z_offset in [-1.2, 0.0, 1.2] {
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 0.20, 2.55, center_z_m + z_offset),
+            Vec3::new(0.72, 0.035, 0.18),
+            LIGHT,
+        );
+        push_box(
+            scene,
+            Vec3::new(center_x_m + 0.20, 2.49, center_z_m + z_offset),
+            Vec3::new(0.06, 0.12, 0.06),
+            METAL,
+        );
+    }
+}
+
+fn load_texture(path: &Path) -> Arc<ImageFrame> {
+    let rgba = image::open(path)
+        .unwrap_or_else(|error| panic!("load render texture {}: {error}", path.display()))
+        .into_rgba8();
+    Arc::new(ImageFrame::from_rgba8(
+        rgba.width(),
+        rgba.height(),
+        rgba.into_raw(),
+    ))
+}
+
+fn push_textured_floor(
+    scene: &mut RenderScene,
+    center: Vec3,
+    footprint_m: Vec3,
+    texture: &Arc<ImageFrame>,
+    normal_texture: &Arc<ImageFrame>,
+    roughness_texture: &Arc<ImageFrame>,
+) {
+    let half_x_m = footprint_m.x * 0.5;
+    let half_z_m = footprint_m.z * 0.5;
+    let repeat_x = (footprint_m.x / 0.75).max(1.0) as f32;
+    let repeat_z = (footprint_m.z / 0.75).max(1.0) as f32;
+    let top_y_m = 0.038;
+    let mesh = TriangleMesh {
+        positions: vec![
+            [-half_x_m as f32, top_y_m, -half_z_m as f32],
+            [half_x_m as f32, top_y_m, -half_z_m as f32],
+            [half_x_m as f32, top_y_m, half_z_m as f32],
+            [-half_x_m as f32, top_y_m, half_z_m as f32],
+        ],
+        normals: vec![[0.0, 1.0, 0.0]; 4],
+        texcoords: vec![
+            [0.0, 0.0],
+            [repeat_x, 0.0],
+            [repeat_x, repeat_z],
+            [0.0, repeat_z],
+        ],
+        indices: vec![0, 1, 2, 0, 2, 3],
+        skinning: None,
+    };
+    scene.items.push(RenderSceneItem {
+        transform: Transform3 {
+            translation: center,
+            rotation: rne_math::Quat::IDENTITY,
+            scale: Vec3::ONE,
+        },
+        shape: VisualShape::DynamicMesh,
+        color_rgba: [1.0; 4],
+        mesh: Some(Arc::new(mesh)),
+        base_color_texture: Some(Arc::clone(texture)),
+        material: PbrMaterial::new([1.0; 4], 0.9, 0.0, [0.0; 3]).with_texture_maps(
+            Some(Arc::clone(normal_texture)),
+            Some(Arc::clone(roughness_texture)),
+        ),
+    });
+}
+
+fn push_box(scene: &mut RenderScene, translation: Vec3, size_m: Vec3, color_rgba: [f32; 4]) {
+    scene.items.push(RenderSceneItem {
+        transform: Transform3 {
+            translation,
+            rotation: rne_math::Quat::IDENTITY,
+            scale: size_m,
+        },
+        shape: VisualShape::Box { size_m: Vec3::ONE },
+        color_rgba,
+        mesh: None,
+        base_color_texture: None,
+        material: Default::default(),
+    });
+}
+
+fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
+    let status = std::process::Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-framerate",
+            "12",
+            "-i",
+            &frames_dir.join("frame-%03d.png").to_string_lossy(),
+            "-vf",
+            "fps=12,scale=960:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=192[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3",
+            &gif_path.to_string_lossy(),
+        ])
+        .status()?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| std::io::Error::other("ffmpeg learned G1 gif encode failed"))
+}
+
+fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> std::io::Result<()> {
+    let file = fs::File::create(path)?;
+    let mut encoder = Encoder::new(file, width, height);
+    encoder.set_color(ColorType::Rgba);
+    encoder.set_depth(BitDepth::Eight);
+    let mut writer = encoder.write_header()?;
+    writer.write_image_data(rgba).map_err(std::io::Error::other)
+}

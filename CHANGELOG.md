@@ -4,6 +4,18 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `rne.unitree_g1.joint_locomotion.v1`: a joint-space Unitree G1 locomotion
+  episode with a 12-leg-joint residual action and the OSS projected-gravity /
+  gait-clock observation and velocity-tracking / air-time reward recipe, plus a
+  pyo3 binding (`rne_py.UnitreeG1JointLocomotionEpisode`), a `std::thread`
+  parallel batch (`VectorizedUnitreeG1JointLocomotionEnv`,
+  `rne_py.UnitreeG1JointBatch`), and a Gymnasium + Stable-Baselines3 PPO
+  example (`examples/93_g1_joint_locomotion_rl`). This replaces the
+  three-parameter scripted stepper as the trainable G1 boundary; from-scratch
+  walking remains compute-bound on CPU (see `docs/G1_LOCOMOTION.md`).
+
 ### Changed
 
 - Add a typed CLI construction path for physical tire application requests. It binds an exact
@@ -86,6 +98,63 @@ All notable changes to Robot Native Engine are documented in this file.
   identified steady law, requires combined-slip training loads to bracket the reference load,
   fits only the load-dependent peak-friction slope, and enforces pooled and per-condition
   holdout residuals without tuning road friction or the minimum-friction clamp.
+
+- Add the G1 sustained-walk hero capture (example 92,
+  `g1_sustained_walk_gif`): a 160-frame wgpu render of the v0.3 long-horizon
+  walk under a forward+turn command with the walked curve drawn as a floor
+  trail, plus a headless no-fall/coverage smoke. It writes
+  `docs/media/unitree-g1-sustained-walk.gif` and the reduced-motion PNG.
+
+- Add the G1 v0.3 long-horizon stability envelope. The validated heading
+  candidate walks 3000 ticks (50 s, six times the v0.2.1 horizon) without
+  falling (pelvis > 0.784 m, tilt < 0.13 rad) with the correct mean yaw-rate
+  sign over ~1.2 m of ground, and the integrated yaw stays bounded by the
+  clamped target: the plant cannot accumulate net turn on this contact
+  schedule, so v0.3 is a stability claim, measured and documented as such.
+  `UNITREE_G1_HEADING_ENVELOPE_STEPS_V03`, the
+  `v03_sustained_envelope_walks_50s_without_falling` library test, and example
+  68 pin it.
+
+- Add an `mm_mobile_so101` mobile manipulator: the `mm_mobile` diff-drive base
+  with the vendored SO101 6-DoF arm (`scripts/gen_mm_mobile_so101_urdf.py`),
+  reduced-coordinate joint control, force-based light-link motors, a
+  root-rigid re-pin for multibody members, and a measured jaw-pocket
+  observation. The generator authors explicit moving-jaw/fixed-anvil grip pads
+  and drops the arm links' shell-AABB colliders, and
+  `MobileManipulatorSim::so101_jaw_contacts` gates acquisition on a real
+  contact manifold plus pocket residency (no jaw-angle fallback).
+  `MobileManipulatorAction` gains SO101 arm/jaw channels and an optional
+  absolute `so101_joint_target`, `So101MobileClutterPickPlacePolicy` and the
+  `mm_mobile_so101_clutter` scene drive the reach, and example 91 exercises it
+  headlessly. `So101Kinematics` adds pure forward kinematics (validated against
+  the sim spawn pose and the live pick pose to sub-millimetre) and
+  damped-least-squares inverse kinematics for the grasp pocket over the three
+  primary positioning joints (the redundant wrist is held, avoiding the
+  joint-limit pinning a five-joint solve suffered). The policy aligns the
+  measured pocket to the cube within a few millimetres and closes the jaw onto
+  it. Because a quasi-static pad/object overlap produces no Rapier
+  `ContactEvent`, the single jaw enumerates grasp candidates geometrically
+  (`so101_pocket_candidate`) rather than from contact events, and the grasp
+  latches when a graspable body sits in the pocket with the jaw shut. Example
+  91 now reaches and grasps the cube (weld mode); carrying the captured payload
+  to the place target is still tuning, as the light single-jaw arm loses the
+  swung payload during the carry turn.
+- Honor `JointMotorGainModel` on the legacy `JointMotor` path (previously the
+  acceleration-based default was always used) so light reduced-coordinate
+  chains can request newton-metre authority.
+- Add `PhysicsOwnedPose`, a marker telling the Rapier backend not to write an
+  entity's ECS transform back into its physics body. The `mm_mobile_so101`
+  chassis is re-pinned every step; marking its arm members keeps the
+  reduced-coordinate assembly consistent so the arm holds its commanded pose
+  under sustained driving (previously it drifted decimetres). Unmarked
+  multibody robots are unchanged.
+- Add `GravityScale` for per-body gravity multipliers (Rapier honors it;
+  absent means `1.0`).
+- Add `RevoluteJointDesc::relative_rotation` / `PrismaticJointDesc::relative_rotation`
+  and `UrdfArticulationConfig::use_joint_origin_rpy` (manifest
+  `use_joint_origin_rpy`) so URDF joint-origin `rpy` is composed into the joint
+  frame; angle zero then matches OnShape-style assets such as SO101. Defaults to
+  identity, leaving existing impulse-joint assets bit-identical.
 
 - Add a fail-closed `external-project-check` intake path that binds a clean
   independent Git revision, official release archive, TaskSpec, complete

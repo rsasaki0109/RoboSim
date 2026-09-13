@@ -896,6 +896,7 @@ fn spawn_passive_caster(
             anchor_child_m: Vec3::ZERO,
             lower_rad: None,
             upper_rad: None,
+            relative_rotation: Quat::IDENTITY,
         },
         JointState::Revolute {
             position_rad: spec.initial_swivel_rad,
@@ -937,6 +938,7 @@ fn spawn_passive_caster(
             anchor_child_m: Vec3::ZERO,
             lower_rad: None,
             upper_rad: None,
+            relative_rotation: Quat::IDENTITY,
         },
         JointState::Revolute {
             position_rad: 0.0,

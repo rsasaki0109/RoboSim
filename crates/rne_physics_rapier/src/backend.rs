@@ -13,11 +13,12 @@ use rne_ecs::{Entity, World};
 use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
 use rne_physics::{
-    Collider, ContactEvent, ContactPointSample, ExternalBodyWrench, FixedJointDesc, JointActuation,
-    JointEffortMeasurement, JointMotor, JointMotorGainModel, JointPassiveDynamics, JointState,
-    MultibodyLink, PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability,
-    PhysicsCapability, PhysicsError, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc,
-    RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
+    Collider, ContactEvent, ContactPointSample, ExternalBodyWrench, FixedJointDesc, GravityScale,
+    JointActuation, JointEffortMeasurement, JointMotor, JointMotorGainModel, JointPassiveDynamics,
+    JointState, MultibodyLink, PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability,
+    PhysicsCapability, PhysicsError, PhysicsOwnedPose, PhysicsWorldDesc, PhysicsWorldId,
+    PrismaticJointDesc, RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyInertia,
+    RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::HashMap;
@@ -205,7 +206,12 @@ fn multibody_joint_coordinate(state: &RapierWorldState, entity: Entity) -> Optio
     let rel = data.local_frame1.inverse() * joint.body_to_parent() * data.local_frame2;
     let free_bits = (!data.locked_axes.bits()) & 0b11_1111;
     let dof = free_bits.trailing_zeros() as usize;
-    let position = if dof < 3 {
+    let position = joint_coordinate_value(&rel, dof);
+    Some((position, multibody.joint_velocity(link)[0] as f64))
+}
+
+fn joint_coordinate_value(rel: &Isometry<f32>, dof: usize) -> f64 {
+    if dof < 3 {
         rel.translation.vector[dof] as f64
     } else {
         let quat = rel.rotation.quaternion();
@@ -216,8 +222,7 @@ fn multibody_joint_coordinate(state: &RapierWorldState, entity: Entity) -> Optio
             angle += 2.0 * std::f64::consts::PI;
         }
         angle
-    };
-    Some((position, multibody.joint_velocity(link)[0] as f64))
+    }
 }
 
 impl Default for RapierBackend {
@@ -298,11 +303,23 @@ impl PhysicsBackend for RapierBackend {
             let isometry = transform_to_isometry(&transform);
 
             if let Some(body_handle) = state.entity_to_body.get(&entity).copied() {
+                // A marked reduced-coordinate member's pose and velocity are
+                // owned by its multibody assembly (root pose + joint state).
+                // Writing the stale ECS pose back into it after a root re-pin
+                // would desynchronize the chain, so only unmarked bodies (the
+                // root, impulse links, and every legacy multibody robot) are
+                // driven from ECS.
+                let physics_owned = world.get::<PhysicsOwnedPose>(entity).is_some();
                 if let Some(body) = state.bodies.get_mut(body_handle) {
-                    body.set_position(isometry, true);
-                    if rigid_body.body_type != RigidBodyType::Fixed {
-                        body.set_linvel(vec3_to_rapier(rigid_body.linear_velocity_m_s), true);
-                        body.set_angvel(vec3_to_rapier(rigid_body.angular_velocity_rad_s), true);
+                    if !physics_owned {
+                        body.set_position(isometry, true);
+                        if rigid_body.body_type != RigidBodyType::Fixed {
+                            body.set_linvel(vec3_to_rapier(rigid_body.linear_velocity_m_s), true);
+                            body.set_angvel(
+                                vec3_to_rapier(rigid_body.angular_velocity_rad_s),
+                                true,
+                            );
+                        }
                     }
                 }
                 sync_entity_collider(world, state, entity, body_handle, collider);
@@ -311,6 +328,9 @@ impl PhysicsBackend for RapierBackend {
 
             let mut builder =
                 RigidBodyBuilder::new(body_type_to_rapier(rigid_body.body_type)).position(isometry);
+            if let Some(scale) = world.get::<GravityScale>(entity) {
+                builder = builder.gravity_scale(scale.0 as f32);
+            }
             if let Some(inertia) = world.get::<RigidBodyInertia>(entity).copied() {
                 if !inertia.is_valid()
                     || !rigid_body.mass_kg.is_finite()
@@ -713,6 +733,15 @@ impl PhysicsBackend for RapierBackend {
         Ok(&self.world(physics_world)?.contact_points)
     }
 
+    fn multibody_joint_state(
+        &self,
+        physics_world: PhysicsWorldId,
+        entity: Entity,
+    ) -> Option<(f64, f64)> {
+        let state = self.worlds.get(&physics_world)?;
+        multibody_joint_coordinate(state, entity)
+    }
+
     fn capabilities(&self) -> &[PhysicsCapability] {
         CAPABILITIES
     }
@@ -869,7 +898,12 @@ fn sync_joints_from_ecs(world: &World, state: &mut RapierWorldState) -> Result<(
             if let (Some(lower_rad), Some(upper_rad)) = (desc.lower_rad, desc.upper_rad) {
                 builder = builder.limits([lower_rad as f32, upper_rad as f32]);
             }
-            let joint = builder.build();
+            let mut joint = builder.build();
+            // Compose the authored joint-origin rotation into the parent frame
+            // so joint angle zero matches the URDF pose (identity for legacy
+            // descs, which keeps existing assets bit-identical).
+            joint.data.local_frame1.rotation =
+                quat_to_rapier(desc.relative_rotation) * joint.data.local_frame1.rotation;
             (
                 desc.parent,
                 GenericJoint::from(joint),
@@ -882,7 +916,9 @@ fn sync_joints_from_ecs(world: &World, state: &mut RapierWorldState) -> Result<(
             if let (Some(lower_m), Some(upper_m)) = (desc.lower_m, desc.upper_m) {
                 builder = builder.limits([lower_m as f32, upper_m as f32]);
             }
-            let joint = builder.build();
+            let mut joint = builder.build();
+            joint.data.local_frame1.rotation =
+                quat_to_rapier(desc.relative_rotation) * joint.data.local_frame1.rotation;
             (
                 desc.parent,
                 GenericJoint::from(joint),
@@ -1090,7 +1126,21 @@ fn apply_motor_command(
         return Ok(());
     };
     // Legacy motor compatibility: zero stiffness is a velocity motor and a
-    // positive stiffness adds a position spring.
+    // positive stiffness adds a position spring. Honors an explicit
+    // [`JointMotorGainModel`] so light multibody chains can request
+    // newton-meter authority; without the component the acceleration-based
+    // default preserves legacy behavior bit-for-bit.
+    let gain_model = world
+        .get::<JointMotorGainModel>(entity)
+        .copied()
+        .unwrap_or_default();
+    joint.set_motor_model(
+        axis,
+        match gain_model {
+            JointMotorGainModel::AccelerationBased => MotorModel::AccelerationBased,
+            JointMotorGainModel::ForceBased => MotorModel::ForceBased,
+        },
+    );
     joint.set_motor(
         axis,
         motor.target_position as f32,
@@ -1965,6 +2015,7 @@ mod tests {
                 axis: Vec3::new(0.0, 1.0, 0.0),
                 anchor_parent_m: Vec3::new(0.0, -2.5, 0.0),
                 anchor_child_m: Vec3::ZERO,
+                relative_rotation: Quat::IDENTITY,
                 lower_m: None,
                 upper_m: None,
             },
@@ -2004,6 +2055,86 @@ mod tests {
         );
     }
 
+    #[test]
+    fn multibody_link_collider_contacts_external_dynamic_body() {
+        let mut backend = RapierBackend::new();
+        let physics_world = backend
+            .create_world(PhysicsWorldDesc {
+                gravity_m_s2: Vec3::new(0.0, -9.81, 0.0),
+                solver_iterations: 16,
+            })
+            .unwrap();
+        let mut world = World::new();
+        let root = spawn_named(&mut world, "mb_root");
+        world.entity_mut(root).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider::sphere(0.05),
+            MultibodyLink,
+            Transform3::default(),
+        ));
+        let link = spawn_named(&mut world, "mb_link");
+        world.entity_mut(link).insert((
+            RigidBody {
+                mass_kg: 1.0,
+                ..RigidBody::default()
+            },
+            Collider {
+                shape: rne_physics::ColliderShape::Cuboid {
+                    half_extents_m: Vec3::splat(0.05),
+                },
+                local_offset: Transform3::from_translation_rotation(
+                    Vec3::new(0.0, -1.0, 0.0),
+                    Quat::IDENTITY,
+                ),
+                ..Collider::default()
+            },
+            MultibodyLink,
+            Transform3::from_translation_rotation(-Vec3::Y, Quat::IDENTITY),
+            RevoluteJointDesc {
+                parent: root,
+                axis: Vec3::Z,
+                anchor_parent_m: Vec3::ZERO,
+                anchor_child_m: Vec3::Y,
+                relative_rotation: Quat::IDENTITY,
+                lower_rad: Some(-1.0),
+                upper_rad: Some(1.0),
+            },
+        ));
+        // Free dynamic cube dropped onto the grip collider (at world y=-2).
+        let cube = spawn_named(&mut world, "mb_cube");
+        world.entity_mut(cube).insert((
+            RigidBody {
+                mass_kg: 0.1,
+                ..RigidBody::default()
+            },
+            Collider::cuboid(Vec3::splat(0.05)),
+            Transform3::from_translation_rotation(Vec3::new(0.0, -1.5, 0.0), Quat::IDENTITY),
+        ));
+        let mut dyn_hits = 0;
+        for _ in 0..300 {
+            step_physics(&mut backend, &mut world, physics_world, fixed_step()).unwrap();
+            for c in backend.contacts(physics_world).unwrap() {
+                let pair = |a, b| {
+                    (c.entity_a == a && c.entity_b == b) || (c.entity_a == b && c.entity_b == a)
+                };
+                if pair(link, cube) {
+                    dyn_hits += 1;
+                }
+            }
+        }
+        let cp = world.get::<Transform3>(cube).unwrap().translation;
+        eprintln!(
+            "cube fell to y={:.3} (expect ~ -1.9 to rest on the link), dynamic contacts={dyn_hits}",
+            cp.y
+        );
+        assert!(
+            dyn_hits > 0,
+            "multibody link must contact a dropped dynamic body"
+        );
+    }
     #[test]
     fn multibody_motor_lifts_mass_against_gravity() {
         let displacement = lift_displacement(40.0, true);
@@ -2054,6 +2185,7 @@ mod tests {
                 axis: Vec3::Z,
                 anchor_parent_m: Vec3::ZERO,
                 anchor_child_m: Vec3::Y,
+                relative_rotation: Quat::IDENTITY,
                 lower_rad: Some(-1.0),
                 upper_rad: Some(1.0),
             },
@@ -2100,6 +2232,7 @@ mod tests {
                 axis: Vec3::Z,
                 anchor_parent_m: Vec3::ZERO,
                 anchor_child_m: Vec3::Y,
+                relative_rotation: Quat::IDENTITY,
                 lower_rad: None,
                 upper_rad: None,
             },
@@ -2186,6 +2319,7 @@ mod tests {
                 axis: Vec3::X,
                 anchor_parent_m: Vec3::ZERO,
                 anchor_child_m: Vec3::ZERO,
+                relative_rotation: Quat::IDENTITY,
                 lower_rad: Some(-1.0),
                 upper_rad: Some(1.0),
             },
@@ -2255,6 +2389,7 @@ mod tests {
                 axis: Vec3::X,
                 anchor_parent_m: Vec3::ZERO,
                 anchor_child_m: Vec3::Y,
+                relative_rotation: Quat::IDENTITY,
                 lower_m: Some(-0.25),
                 upper_m: Some(0.25),
             },
@@ -2316,6 +2451,7 @@ mod tests {
                 anchor_child_m: Vec3::ZERO,
                 lower_m: None,
                 upper_m: None,
+                relative_rotation: Quat::IDENTITY,
             },
         ));
         backend.sync_from_ecs(&mut world, physics_world).unwrap();
@@ -2360,6 +2496,7 @@ mod tests {
                 axis: Vec3::Z,
                 anchor_parent_m: Vec3::ZERO,
                 anchor_child_m: Vec3::Y,
+                relative_rotation: Quat::IDENTITY,
                 lower_rad: None,
                 upper_rad: None,
             },

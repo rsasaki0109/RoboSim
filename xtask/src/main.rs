@@ -2890,6 +2890,9 @@ fn run_asset_smokes() -> anyhow::Result<()> {
     )?;
     run_step("cargo run --locked -p g1_rgbd_sensor --example 71_g1_rgbd_sensor -- --smoke")?;
     run_step("cargo run --locked -p g1_stride_gif --example 63_g1_stride_gif -- --smoke")?;
+    run_step(
+        "cargo run --locked -p g1_sustained_walk_gif --example 92_g1_sustained_walk_gif -- --smoke",
+    )?;
     run_step("cargo run --locked -p plateau_drone_gif --example 46_plateau_drone_gif -- --smoke")?;
     run_step(
         "cargo run --locked -p tsukuba_confirmation --example 75_tsukuba_confirmation -- --smoke",
@@ -3918,6 +3921,8 @@ fn validate_repo_assets() -> anyhow::Result<()> {
         root.join("assets/scenes/mm_minimal_clutter.rne.scene.toml"),
         root.join("assets/scenes/mm_mobile_clutter.rne.scene.toml"),
         root.join("assets/scenes/mm_mobile_hero.rne.scene.toml"),
+        root.join("assets/scenes/mm_mobile_so101.rne.scene.toml"),
+        root.join("assets/scenes/mm_mobile_so101_clutter.rne.scene.toml"),
         root.join("assets/scenes/unitree_g1_dex3_pick_place.rne.scene.toml"),
         root.join("assets/scenes/deformable_cable.rne.scene.toml"),
         root.join("assets/scenes/deformable_cloth.rne.scene.toml"),
@@ -3930,6 +3935,7 @@ fn validate_repo_assets() -> anyhow::Result<()> {
         root.join("assets/robots/diff_drive_urdf.rne.robot.toml"),
         root.join("assets/robots/mm_minimal.rne.robot.toml"),
         root.join("assets/robots/mm_mobile.rne.robot.toml"),
+        root.join("assets/robots/mm_mobile_so101.rne.robot.toml"),
         root.join("assets/robots/mm_lift.rne.robot.toml"),
         root.join("assets/robots/unitree_g1_29dof_dex3_fixed.rne.robot.toml"),
     ];
@@ -4023,6 +4029,10 @@ fn mobile_manipulator_rl_smokes() -> anyhow::Result<()> {
     }
     for script in ["run.py", "train_cem.py", "train_ppo.py"] {
         let script_path = format!("examples/66_locomotion_rl/{script}");
+        run_program(&venv_py, &[&script_path, "--smoke"])?;
+    }
+    for script in ["run.py", "train_ppo.py"] {
+        let script_path = format!("examples/93_g1_joint_locomotion_rl/{script}");
         run_program(&venv_py, &[&script_path, "--smoke"])?;
     }
     Ok(())

@@ -191,6 +191,23 @@ gate; the honest next step is a better gait schedule, not a larger torque
 budget. `UnitreeG1CommandedTorquePolicy::validated_heading()` freezes the
 gains shared by both envelopes.
 
+## v0.3 long-horizon stability envelope
+
+The same validated heading candidate walks for **50 s (3000 ticks)** — six
+times the v0.2.1 horizon — without falling: pelvis height stays above 0.784 m,
+tilt stays under 0.13 rad, and the proximal torque stays inside its ceiling.
+Both turn commands keep the correct mean yaw-rate sign and cover ~1.2 m of
+ground (`x=-0.722, z=+0.916` left; `x=-0.332, z=-0.410` right).
+
+Crucially, the integrated yaw does **not** accumulate: it stays bounded by the
+clamped heading target (|yaw| ≤ 0.087 rad) even with the clamp raised to 100 rad.
+The plant cannot sustain net turn on this contact schedule at any horizon — the
+mean yaw rate is a bounded oscillation, not a trackable rate. v0.3 is therefore
+a long-horizon **stability** claim, not a sustained-turn claim; the honest next
+step remains a better gait schedule. `v03_sustained_envelope_walks_50s_without_falling`
+pins no-fall, height, tilt, bounded integrated yaw, and the mean-rate sign, and
+example 68 prints the full v0.3 metrics.
+
 Example 68 also provides a deterministic 48-dimensional CEM over the optional
 eight-joint yaw overlay on top of that bounded calibration. It evaluates both
 turn directions, scores the median of three ULP-perturbed replays against the
@@ -204,7 +221,129 @@ cargo run --release -p g1_heading_turn --example 68_g1_heading_turn -- --train
 cargo run --release -p g1_heading_turn --example 68_g1_heading_turn -- --smoke
 ```
 
+The v0.3 long-horizon walk has its own hero capture,
+`examples/92_g1_sustained_walk_gif`: it follows the validated heading candidate
+under a forward + `+0.05 rad/s` command for ~32 s (a 160-frame wgpu capture)
+with the walked curve drawn as a floor trail. `--smoke` runs the same plant
+headlessly and asserts no fall and continuing ground coverage. It writes
+`docs/media/unitree-g1-sustained-walk.gif` and the reduced-motion
+`docs/media/unitree-g1-sustained-walk.png`.
+
 The existing `examples/63_g1_stride_gif` capture remains the visual hero for
 the learned-stride/path baseline: its realistic robotics test bay is render-
 only, while example 68 is intentionally headless so heading evaluation stays
 usable in CI without a GPU.
+
+## The sustained-turn boundary, searched
+
+v0.3 walks 50 s upright but cannot accumulate yaw. To test whether that is a
+tuning artifact, an eight-dimension deterministic CEM searched the schedule
+knobs the harness exposes — base stride and foot lift, differential stride
+scale, right-leg phase offset, torso-yaw target, and hip-roll / hip-yaw /
+swing-hip-yaw targets — over 18 iterations of 40 candidates, scoring the
+minimum signed integrated yaw of both turn directions at 25 s with an upright
+gate (pelvis > 0.75 m, tilt < 0.35 rad).
+
+**No upright sustained-turn candidate exists in this space.** The best
+candidates turn hard and fall: a phase-offset bias of `5 s/(rad/s)` integrates
+**+4.66 rad (267°)** in 20 s and a hip-roll bias of `1.0 rad/(rad/s)` integrates
+**+14.2 rad (811°)** — both end flat (pelvis below zero, tilt > 1.9 rad). The
+`swing_hip_yaw` / `swing_hip_roll` channels stay upright but accumulate nothing.
+
+Two further walls confirm the operating point is on the solver's edge, not a
+tuning basin: raising the forward command above the pinned `0.0276 m/s` (within
+the advertised `[0, 0.06]` envelope) blows the solver up into NaNs, and a
+pelvis disturbance over a long horizon does the same. The honest next step is
+therefore **a contact-schedule redesign one level above the joint targets**
+(foot-placement timing and swing trajectory planning) plus a wider 60 Hz solver
+stability margin — not another gain search.
+
+## The solver-margin hypothesis
+
+The next hypothesis was that the NaN onset above the pinned `0.0276 m/s`
+forward command was a 60 Hz fixed-step artifact. Measurements at that fixed
+step (no substep) narrow the wall and show gain rescaling does not move it:
+
+- Forward command `0.028` and `0.030 m/s` walk upright; `0.034` and `0.040`
+  reach NaNs inside the Rapier step.
+- A `0.03 rad` pelvis disturbance over 600 ticks falls (pelvis 0.11 m below
+  the settled reference) even at the pinned command.
+- Lowering the proximal torque-PD stiffness to `0.5×` and `0.25×` does not
+  stabilize `0.034/0.040`; the state diverges (pelvis metres below the floor)
+  instead of tracking.
+
+An early attempt to raise the effective rate with naive integer-tick substepping
+(control held constant, legacy acceleration-based `JointMotor` gains) is **not
+a valid test**: it destabilizes the nominal `0.0276 m/s` walk into NaNs from two
+substeps up, before any higher command is tried. That is a coupling between the
+mass-normalized motor model and the timestep, not a property of the plant.
+
+The honest conclusion is therefore narrower than "the wall is the schedule":
+the pinned command is within ~9% of the fastest stable 60 Hz command (`0.030`),
+gain rescaling does not help, and a proper higher-rate test needs a dedicated
+fixed-delta plant with gains re-derived for that rate (Theme A of the frontier
+plan, still open). Until that exists, the contact-schedule redesign (Theme B)
+is the lever with a clear path.
+
+## Joint-space RL boundary (the stepper's replacement)
+
+The scripted gait above is a near-stationary stepper: its own module documents
+that forward transport is created by stance torques, and the only trainable
+action the episode exposed was three gait parameters (stride, lift, yaw). No
+policy in that space can produce real stepping, which is why every learned
+result plateaued at a shuffle.
+
+`rne.unitree_g1.joint_locomotion.v1`
+(`crates/rne_ai/src/env/urdf_scene/unitree_g1_joint_locomotion.rs`) replaces it
+with the OSS reinforcement-learning contract:
+
+- **Action (12):** normalized leg-joint offsets in `[-1, 1]` around the nominal
+  stance, tracked by the hybrid plant (eight proximal joints under torque PD,
+  four ankles position-servoed). With `nominal_gait = true` the action is a
+  residual on a scripted periodic gait, so a zero action steps rather than
+  stands.
+- **Observation (46):** base angular velocity (3), projected gravity (3),
+  velocity command (2), leg joint position (12), velocity (12), previous action
+  (12), gait clock sin/cos (2) — the projected-gravity + clock + previous-action
+  recipe from `unitree_rl_gym` / `mujoco_playground`.
+- **Reward:** forward/yaw velocity tracking, forward progress, upright, height,
+  lateral-slip and action-rate/magnitude penalties, a swing air-time bonus, and
+  a fall penalty.
+
+`examples/93_g1_joint_locomotion_rl` is the Python learning boundary: a
+TaskSpec-derived Gymnasium wrapper and a Stable-Baselines3 PPO trainer. The
+pyo3 class `rne_py.UnitreeG1JointLocomotionEpisode` exposes it to Python.
+
+### Measured boundaries of this plant
+
+Zero-action (the nominal residual gait) sweeps over stride/lift/cycle show a
+hard trade-off: low lift is upright but shuffles backward, high lift moves
+forward and falls within 1–2 s. The best stable-forward nominal found is
+`cycle = 60, stride = 0.10, lift = 0.08` at `~0.07 m/s` for 6.8 s before it
+topples. A nine-gain deterministic balance controller (pitch/roll/height/
+velocity feedback) can keep the nominal upright for the full 8.3 s episode,
+but transport then drops to `~0.02 m/s` — the same plateau as the torque-overlay
+search. A thirteen-gain **phase-conditioned** CEM (lateral weight shift,
+capture-point swing-foot placement, ankle/hip pitch and roll feedback) over 60
+generations lands on the same wall: the best 600-tick survivor is upright
+(minimum height 0.784 m) but transports only `0.019 m/s`, while every faster
+candidate falls within ~1.5 s. Four independent methods — the scripted/overlay
+CEM, joint-space RL, linear balance feedback, and phase-conditioned CEM — all
+plateau at a stable shuffle of `~0.02–0.03 m/s`.
+
+From-scratch PPO is **compute-bound**, not reward-bound. Three measured
+boundaries:
+
+- Sequential Python (`DummyVecEnv` / one env): `~0.78 ms` per physics tick.
+- Python `SubprocVecEnv`, 8 envs: `~750` env-steps/s (per-step FFI + pipe cost).
+- Native Rust parallel batch (`VectorizedUnitreeG1JointLocomotionEnv`, eight
+  envs stepped with `std::thread`, action repeat 4): `~2700` physics ticks/s in
+  a microbenchmark, but end-to-end Stable-Baselines3 PPO reaches only `~262`
+  env-steps/s (`~1050` physics ticks/s) because the CPU policy update dominates.
+
+A 20M-environment-step run therefore needs roughly 20 hours on this 8-core CPU.
+OSS humanoid stacks train 100M+ steps on GPU with thousands of parallel envs,
+so genuine walking needs either a GPU PPO path or an offline-distilled policy.
+The environment, native batch, pyo3 bindings (single and batch), and the SB3
+trainer are in place as the foundation; no stable walking policy is claimed on
+this plant yet.

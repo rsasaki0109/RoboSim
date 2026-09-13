@@ -287,6 +287,25 @@ pub fn mm_mobile_clutter_place_target() -> crate::reach::ReachTarget {
     )
 }
 
+/// Ground place target for SO101 mobile clutter episodes: west of the table in
+/// open space, so the carry route (retreat west, then southwest) never passes
+/// the leading jaw near the table corner.
+pub const SO101_MOBILE_CLUTTER_PLACE_X_M: f64 = -1.3;
+/// Ground place height for SO101 mobile clutter episodes.
+pub const SO101_MOBILE_CLUTTER_PLACE_Y_M: f64 = 0.03;
+/// Ground place lateral target for SO101 mobile clutter episodes.
+pub const SO101_MOBILE_CLUTTER_PLACE_Z_M: f64 = -0.6;
+
+/// Returns the SO101 mobile clutter [`ReachTarget`](crate::ReachTarget) used by
+/// `mobile_so101_clutter` episodes.
+pub fn so101_mobile_clutter_place_target() -> crate::reach::ReachTarget {
+    crate::reach::ReachTarget::new(
+        SO101_MOBILE_CLUTTER_PLACE_X_M,
+        SO101_MOBILE_CLUTTER_PLACE_Y_M,
+        SO101_MOBILE_CLUTTER_PLACE_Z_M,
+    )
+}
+
 /// Rotates a world-frame XZ offset into the mobile-base frame (positive yaw about +Y).
 pub(crate) fn rotate_y_xz(x: f64, z: f64, angle_rad: f64) -> (f64, f64) {
     let (sin, cos) = angle_rad.sin_cos();

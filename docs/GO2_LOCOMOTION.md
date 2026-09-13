@@ -447,3 +447,21 @@ and the winner's turn (~0.014 rad/s, windows +0.126/+0.111) lands exactly
 on the walkable-schedule plateau rather than beating the overlay. Under
 position servos, flight phases cost stability and buy no steering; the
 foot-geometry/friction lever is the one still standing.
+
+## Foot clearance and the parkour boundary
+
+The obvious next crowd-pleaser — a Go2 parkour course — was measured before it
+was built, and the plant says no. The swing foot's maximum world height is
+**2.1 cm** and is essentially fixed: the learned pure-torque walk, the scripted
+trot at its maximum `foot_lift_rad = 0.4`, and a hand-augmented calf/thigh
+overlay all plateau at the same 2.1 cm clearance. The plateau is kinematic —
+the position targets the gait can express do not lift the toe further at any
+tested stride, lift, or overlay.
+
+On a 4 cm step the walk does not climb; it topples (tilt ≈ 1.85 rad). A real
+parkour goal therefore needs a **foot-clearance-trained gait**, not a larger
+torque budget or a different overlay: the search must be allowed to retime
+contact and reshape the foot trajectory, which the current
+`UnitreeGo2TorqueOverlay` / `UnitreeGo2GaitSchedule` spaces were not asked to
+do for height. This is a campaign, not a parameter tweak; the boundary itself
+is now measured rather than assumed.

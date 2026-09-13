@@ -6,10 +6,13 @@ mod sim;
 
 use pyo3::prelude::*;
 use rne_ai::{
-    unitree_go2_task_spec, DiffDriveEpisodeConfig, Episode, GraspMode, IkClutterPickPlacePolicy,
-    IkMobileClutterPickPlacePolicy, IkMobileLiftPickPlacePolicy, MobileLiftFailureClass, Policy,
-    PortableBatchConfig, PortableBatchRunner, PortableBatchStep, TaskSpec, UnitreeGo2Action,
-    UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2Observation,
+    unitree_g1_joint_locomotion_task_spec, unitree_go2_task_spec, DiffDriveEpisodeConfig, Episode,
+    GraspMode, IkClutterPickPlacePolicy, IkMobileClutterPickPlacePolicy,
+    IkMobileLiftPickPlacePolicy, MobileLiftFailureClass, Policy, PortableBatchConfig,
+    PortableBatchRunner, PortableBatchStep, TaskSpec, UnitreeG1JointAction,
+    UnitreeG1JointLocomotionConfig, UnitreeG1JointLocomotionEpisode, UnitreeG1JointObservation,
+    UnitreeGo2Action, UnitreeGo2Episode, UnitreeGo2EpisodeConfig, UnitreeGo2Observation,
+    VectorizedUnitreeG1JointLocomotionConfig, VectorizedUnitreeG1JointLocomotionEnv,
 };
 use sim::{
     DiffDriveObservation, DiffDriveSim, MmLiftGripperTarget, MmLiftIkError, MmLiftJointTarget,
@@ -475,6 +478,335 @@ impl From<rne_ai::EpisodeStep<UnitreeGo2Observation>> for PyUnitreeGo2StepResult
     }
 }
 
+fn unitree_g1_joint_observation_vector(observation: UnitreeG1JointObservation) -> Vec<f64> {
+    let mut vector = Vec::with_capacity(46);
+    vector.extend_from_slice(&observation.base_angular_velocity_rad_s);
+    vector.extend_from_slice(&observation.projected_gravity);
+    vector.extend_from_slice(&observation.command);
+    vector.extend_from_slice(&observation.joint_position_rad);
+    vector.extend_from_slice(&observation.joint_velocity_rad_s);
+    vector.extend_from_slice(&observation.previous_action);
+    vector.extend_from_slice(&observation.gait_clock);
+    vector
+}
+
+/// Result of a joint-space Unitree G1 locomotion reset or step.
+#[pyclass(name = "UnitreeG1JointStepResult", skip_from_py_object)]
+#[derive(Clone)]
+struct PyUnitreeG1JointStepResult {
+    observation: Vec<f64>,
+    reward: f64,
+    terminated: bool,
+    truncated: bool,
+}
+
+#[pymethods]
+impl PyUnitreeG1JointStepResult {
+    #[getter]
+    fn observation(&self) -> Vec<f64> {
+        self.observation.clone()
+    }
+
+    #[getter]
+    fn reward(&self) -> f64 {
+        self.reward
+    }
+
+    #[getter]
+    fn terminated(&self) -> bool {
+        self.terminated
+    }
+
+    #[getter]
+    fn truncated(&self) -> bool {
+        self.truncated
+    }
+
+    #[getter]
+    fn done(&self) -> bool {
+        self.terminated || self.truncated
+    }
+}
+
+fn unitree_g1_joint_step_result(
+    step: rne_ai::EpisodeStep<UnitreeG1JointObservation>,
+) -> PyUnitreeG1JointStepResult {
+    PyUnitreeG1JointStepResult {
+        observation: unitree_g1_joint_observation_vector(step.observation),
+        reward: step.reward,
+        terminated: step.terminated,
+        truncated: step.truncated,
+    }
+}
+
+/// Headless joint-space Unitree G1 locomotion episode exposed to Python RL.
+#[pyclass(name = "UnitreeG1JointLocomotionEpisode")]
+struct PyUnitreeG1JointLocomotionEpisode {
+    inner: UnitreeG1JointLocomotionEpisode,
+    task_spec: TaskSpec,
+}
+
+#[pymethods]
+impl PyUnitreeG1JointLocomotionEpisode {
+    /// Creates a seeded G1 joint-locomotion episode.
+    #[new]
+    #[pyo3(signature = (max_steps=500, seed=1, command_forward_m_s=0.4, command_yaw_rate_rad_s=0.0))]
+    fn new(
+        max_steps: u64,
+        seed: u64,
+        command_forward_m_s: f64,
+        command_yaw_rate_rad_s: f64,
+    ) -> PyResult<Self> {
+        if max_steps == 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "max_steps must be greater than zero",
+            ));
+        }
+        let config = UnitreeG1JointLocomotionConfig {
+            max_steps,
+            command_forward_m_s,
+            command_yaw_rate_rad_s,
+            ..UnitreeG1JointLocomotionConfig::default()
+        };
+        let inner =
+            UnitreeG1JointLocomotionEpisode::new_with_seed(config, seed).map_err(|error| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "failed to load Unitree G1 joint locomotion scene: {error:?}"
+                ))
+            })?;
+        let task_spec = unitree_g1_joint_locomotion_task_spec(max_steps);
+        task_spec.validate().map_err(|error| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "internal Unitree G1 joint TaskSpec is invalid: {error}"
+            ))
+        })?;
+        Ok(Self { inner, task_spec })
+    }
+
+    /// Returns the canonical portable TaskSpec JSON used by this episode.
+    fn task_spec_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.task_spec).map_err(|error| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "failed to serialize Unitree G1 joint TaskSpec: {error}"
+            ))
+        })
+    }
+
+    /// Resets the episode and returns its 46-element numeric observation.
+    fn reset(&mut self) -> PyUnitreeG1JointStepResult {
+        unitree_g1_joint_step_result(self.inner.reset())
+    }
+
+    /// Applies twelve normalized leg-joint offsets and advances one 60 Hz tick.
+    fn step(&mut self, leg_action: Vec<f64>) -> PyResult<PyUnitreeG1JointStepResult> {
+        if leg_action.len() != 12 {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "leg_action must have 12 entries, got {}",
+                leg_action.len()
+            )));
+        }
+        let mut action = UnitreeG1JointAction::default();
+        action.leg_action.copy_from_slice(&leg_action);
+        Ok(unitree_g1_joint_step_result(self.inner.step(action)))
+    }
+
+    /// Number of completed control ticks in the current episode.
+    #[getter]
+    fn step_in_episode(&self) -> u64 {
+        self.inner.step_in_episode()
+    }
+
+    /// Current pelvis world X position in meters (evaluation only).
+    #[getter]
+    fn base_x_m(&self) -> f64 {
+        self.inner.sim().observe().base_x_m
+    }
+
+    /// Current pelvis world Y (up) position in meters (evaluation only).
+    #[getter]
+    fn base_y_m(&self) -> f64 {
+        self.inner.sim().observe().base_y_m
+    }
+
+    /// Current pelvis world Z position in meters (evaluation only).
+    #[getter]
+    fn base_z_m(&self) -> f64 {
+        self.inner.sim().observe().base_z_m
+    }
+}
+
+/// Result of a native parallel Unitree G1 joint-locomotion batch step.
+#[pyclass(name = "UnitreeG1JointBatchStep", skip_from_py_object)]
+#[derive(Clone)]
+struct PyUnitreeG1JointBatchStep {
+    observations: Vec<Vec<f64>>,
+    rewards: Vec<f64>,
+    terminated: Vec<bool>,
+    truncated: Vec<bool>,
+    episode_indices: Vec<u32>,
+}
+
+#[pymethods]
+impl PyUnitreeG1JointBatchStep {
+    #[getter]
+    fn observations(&self) -> Vec<Vec<f64>> {
+        self.observations.clone()
+    }
+
+    #[getter]
+    fn rewards(&self) -> Vec<f64> {
+        self.rewards.clone()
+    }
+
+    #[getter]
+    fn terminated(&self) -> Vec<bool> {
+        self.terminated.clone()
+    }
+
+    #[getter]
+    fn truncated(&self) -> Vec<bool> {
+        self.truncated.clone()
+    }
+
+    #[getter]
+    fn episode_indices(&self) -> Vec<u32> {
+        self.episode_indices.clone()
+    }
+}
+
+/// Native parallel batch of G1 joint-locomotion environments for PPO.
+///
+/// One call steps every environment on the available cores in Rust, avoiding
+/// the per-step Python round-trip that limits `SubprocVecEnv` to a few hundred
+/// steps per second.
+#[pyclass(name = "UnitreeG1JointBatch")]
+struct PyUnitreeG1JointBatch {
+    inner: VectorizedUnitreeG1JointLocomotionEnv,
+    task_spec: TaskSpec,
+}
+
+#[pymethods]
+impl PyUnitreeG1JointBatch {
+    /// Creates a seeded parallel G1 joint-locomotion batch.
+    #[new]
+    #[pyo3(signature = (num_envs=8, seed=1, command_forward_m_s=0.4, command_yaw_rate_rad_s=0.0, max_steps=500))]
+    fn new(
+        num_envs: usize,
+        seed: u64,
+        command_forward_m_s: f64,
+        command_yaw_rate_rad_s: f64,
+        max_steps: u64,
+    ) -> PyResult<Self> {
+        if num_envs == 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "num_envs must be greater than zero",
+            ));
+        }
+        if max_steps == 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "max_steps must be greater than zero",
+            ));
+        }
+        let config = VectorizedUnitreeG1JointLocomotionConfig {
+            episode: UnitreeG1JointLocomotionConfig {
+                max_steps,
+                command_forward_m_s,
+                command_yaw_rate_rad_s,
+                ..UnitreeG1JointLocomotionConfig::default()
+            },
+            num_envs,
+            seed,
+            auto_reset: true,
+        };
+        let inner = VectorizedUnitreeG1JointLocomotionEnv::new(config).map_err(|error| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "failed to load parallel Unitree G1 joint locomotion batch: {error:?}"
+            ))
+        })?;
+        let task_spec = unitree_g1_joint_locomotion_task_spec(max_steps);
+        task_spec.validate().map_err(|error| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "internal Unitree G1 joint TaskSpec is invalid: {error}"
+            ))
+        })?;
+        Ok(Self { inner, task_spec })
+    }
+
+    /// Returns the canonical portable TaskSpec JSON used by this batch.
+    fn task_spec_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.task_spec).map_err(|error| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "failed to serialize Unitree G1 joint TaskSpec: {error}"
+            ))
+        })
+    }
+
+    /// Resets every environment and returns the batch observations.
+    fn reset(&mut self) -> PyUnitreeG1JointBatchStep {
+        let step = self.inner.reset();
+        PyUnitreeG1JointBatchStep {
+            observations: step
+                .observations
+                .into_iter()
+                .map(unitree_g1_joint_observation_vector)
+                .collect(),
+            rewards: step.rewards,
+            terminated: step.terminated,
+            truncated: step.truncated,
+            episode_indices: step.episode_indices,
+        }
+    }
+
+    /// Applies one 12-element action per environment for `repeat` ticks.
+    #[pyo3(signature = (actions, repeat=1))]
+    fn step(&mut self, actions: Vec<Vec<f64>>, repeat: u32) -> PyResult<PyUnitreeG1JointBatchStep> {
+        if actions.len() != self.inner.num_envs() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "expected {} actions, got {}",
+                self.inner.num_envs(),
+                actions.len()
+            )));
+        }
+        let mut parsed = Vec::with_capacity(actions.len());
+        for action in &actions {
+            if action.len() != 12 {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "each action must have 12 entries, got {}",
+                    action.len()
+                )));
+            }
+            let mut value = UnitreeG1JointAction::default();
+            value.leg_action.copy_from_slice(action);
+            parsed.push(value);
+        }
+        let step = self.inner.step_repeat(&parsed, repeat);
+        Ok(PyUnitreeG1JointBatchStep {
+            observations: step
+                .observations
+                .into_iter()
+                .map(unitree_g1_joint_observation_vector)
+                .collect(),
+            rewards: step.rewards,
+            terminated: step.terminated,
+            truncated: step.truncated,
+            episode_indices: step.episode_indices,
+        })
+    }
+
+    /// Number of parallel environments.
+    #[getter]
+    fn num_envs(&self) -> usize {
+        self.inner.num_envs()
+    }
+
+    /// Current pelvis world X per environment (evaluation only).
+    fn base_x(&self) -> Vec<f64> {
+        (0..self.inner.num_envs())
+            .map(|index| self.inner.episode(index).sim().observe().base_x_m)
+            .collect()
+    }
+}
+
 /// Result of a portable Unitree Go2 batch reset or step.
 #[pyclass(name = "PortableUnitreeGo2BatchStep", skip_from_py_object)]
 #[derive(Clone)]
@@ -883,6 +1215,12 @@ impl PyMmAction {
         lift_velocity_m_s=0.0,
         lift_joint_target=None,
         wrist_yaw_target_rad=None,
+        shoulder_pan_velocity_rad_s=0.0,
+        shoulder_lift_velocity_rad_s=0.0,
+        elbow_flex_velocity_rad_s=0.0,
+        wrist_flex_velocity_rad_s=0.0,
+        wrist_roll_velocity_rad_s=0.0,
+        so101_gripper_velocity_rad_s=0.0,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -895,6 +1233,12 @@ impl PyMmAction {
         lift_velocity_m_s: f64,
         lift_joint_target: Option<PyMmLiftJointTarget>,
         wrist_yaw_target_rad: Option<f64>,
+        shoulder_pan_velocity_rad_s: f64,
+        shoulder_lift_velocity_rad_s: f64,
+        elbow_flex_velocity_rad_s: f64,
+        wrist_flex_velocity_rad_s: f64,
+        wrist_roll_velocity_rad_s: f64,
+        so101_gripper_velocity_rad_s: f64,
     ) -> Self {
         Self {
             inner: MobileManipulatorAction {
@@ -902,11 +1246,18 @@ impl PyMmAction {
                 right_wheel_velocity_rad_s,
                 shoulder_velocity_rad_s,
                 elbow_velocity_rad_s,
+                shoulder_pan_velocity_rad_s,
+                shoulder_lift_velocity_rad_s,
+                elbow_flex_velocity_rad_s,
+                wrist_flex_velocity_rad_s,
+                wrist_roll_velocity_rad_s,
+                so101_gripper_velocity_rad_s,
                 gripper_velocity_rad_s,
                 gripper_velocity_m_s,
                 lift_velocity_m_s,
                 lift_joint_target: lift_joint_target.map(Into::into),
                 wrist_yaw_target_rad,
+                so101_joint_target: None,
             },
         }
     }
@@ -1843,6 +2194,10 @@ fn rne_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStepResult>()?;
     m.add_class::<PyUnitreeGo2GaitEpisode>()?;
     m.add_class::<PyUnitreeGo2StepResult>()?;
+    m.add_class::<PyUnitreeG1JointLocomotionEpisode>()?;
+    m.add_class::<PyUnitreeG1JointStepResult>()?;
+    m.add_class::<PyUnitreeG1JointBatch>()?;
+    m.add_class::<PyUnitreeG1JointBatchStep>()?;
     m.add_class::<PyPortableUnitreeGo2Batch>()?;
     m.add_class::<PyPortableUnitreeGo2BatchStep>()?;
     m.add_class::<PyMmLiftJointTarget>()?;

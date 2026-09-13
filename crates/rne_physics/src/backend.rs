@@ -2,7 +2,7 @@
 
 use crate::{ContactEvent, ContactPointSample, ExternalBodyWrench, RaycastHit, RaycastQuery};
 use rne_core::SimDuration;
-use rne_ecs::World;
+use rne_ecs::{Entity, World};
 use rne_math::Vec3;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -450,6 +450,21 @@ pub trait PhysicsBackend: Send + Sync + 'static {
         Err(PhysicsError::MissingCapabilities {
             missing: vec![PhysicsCapability::ContactPointKinematics],
         })
+    }
+
+    /// Reads the generalized position/velocity of an entity's single-DoF
+    /// reduced-coordinate joint: `(position_rad, velocity_rad_s)` for revolute
+    /// joints or `(position_m, velocity_m_s)` for prismatic joints.
+    ///
+    /// Returns `None` for entities without a single-DoF multibody joint in the
+    /// given world and for backends without reduced-coordinate articulations.
+    /// The default implementation reports no joint state.
+    fn multibody_joint_state(
+        &self,
+        _physics_world: PhysicsWorldId,
+        _entity: Entity,
+    ) -> Option<(f64, f64)> {
+        None
     }
 
     /// Returns supported capabilities for this backend.

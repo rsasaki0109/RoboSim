@@ -364,6 +364,11 @@ for a humanoid. Core crates remain robot-native and ROS2-free.
 | P | Photoreal Unitree G1 capture v0.3-H | Official G1 URDF/STL visual hierarchy in the photoreal test bay, PBR floor maps, optional HDRI/TAA capture, and deterministic mesh-resolution smoke | Done |
 | Q | Photoreal RGB-D sensor loop v0.3-I | G1 `head_link` camera mount, renderer-independent CameraSpec effects, paired DataBus RGB/depth streams with latency, GPU capture manifest, and deterministic headless replay smoke | Done |
 | R | Photoreal industrial environment v0.3-J | CC0 Poly Haven Machine Shop HDRI and Hand Truck glTF package with provenance/SHA-256, default G1 capture integration, procedural fallback controls, and asset-aware headless smoke | Done |
+| S | G1 long-horizon stability v0.3 | 50 s no-fall sustained walk envelope, library test, and hero capture (example 92) | Done |
+
+The measured locomotion frontier (Go2 foot-clearance/parkour wall, G1
+sustained-turn and 60 Hz solver-stability walls) and the next campaign are
+recorded in [PLAN_LEGGED_LOCOMOTION_FRONTIER.md](PLAN_LEGGED_LOCOMOTION_FRONTIER.md).
 
 Official robot-model integration has started with Unitree Go2: the upstream
 BSD-3-Clause URDF/meshes are vendored with provenance, COLLADA visuals are

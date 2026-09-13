@@ -16,7 +16,8 @@ use rne_ai::{
     run_unitree_g1_commanded_gait_with_policy, UnitreeG1CommandedGaitConfig,
     UnitreeG1CommandedGaitOutcome, UnitreeG1CommandedTorquePolicy, UnitreeG1TorqueOverlay,
     UnitreeG1VelocityCommand, UNITREE_G1_HEADING_ENVELOPE_STEPS_V02,
-    UNITREE_G1_HEADING_ENVELOPE_STEPS_V021, UNITREE_G1_HEADING_TARGET_CLAMP_RAD,
+    UNITREE_G1_HEADING_ENVELOPE_STEPS_V021, UNITREE_G1_HEADING_ENVELOPE_STEPS_V03,
+    UNITREE_G1_HEADING_TARGET_CLAMP_RAD,
 };
 
 const FORWARD_M_S: f64 = 0.0276;
@@ -385,4 +386,38 @@ fn main() {
         );
     }
     assert_v021_mean_rate(v021[2], v021[3]);
+
+    println!(
+        "v0.3 sustained envelope ({} ticks, long-horizon stability)",
+        UNITREE_G1_HEADING_ENVELOPE_STEPS_V03
+    );
+    let v03 = evaluate_candidate(
+        Candidate::validated_heading(),
+        UNITREE_G1_HEADING_ENVELOPE_STEPS_V03,
+    );
+    for (label, outcome) in [("left", v03[2]), ("right", v03[3])] {
+        print_outcome(label, outcome);
+        assert!(finite(outcome));
+        assert!(!outcome.fell, "v0.3 sustained G1 command fell");
+        assert!(
+            outcome.min_height_m > 0.75,
+            "G1 dropped below the sustained envelope"
+        );
+        assert!(
+            outcome.max_tilt_rad < 0.25,
+            "sustained tilt {:.3} rad",
+            outcome.max_tilt_rad
+        );
+    }
+    assert_v021_mean_rate(v03[2], v03[3]);
+    // The plant cannot accumulate net turn over a long horizon; the integrated
+    // yaw stays bounded by the clamped target instead of running away. v0.3 is
+    // a long-horizon stability claim, not a sustained-turn claim.
+    for outcome in [v03[2], v03[3]] {
+        assert!(
+            outcome.total_yaw_rad.abs() <= UNITREE_G1_HEADING_TARGET_CLAMP_RAD + 0.05,
+            "integrated yaw {:.3} rad escaped the bounded envelope",
+            outcome.total_yaw_rad
+        );
+    }
 }

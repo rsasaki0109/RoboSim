@@ -1,0 +1,28 @@
+kind = "urdf"
+model_name = "mm_mobile_so101"
+
+[urdf]
+path = "mm_mobile_so101/mm_mobile_so101.urdf"
+# Dynamic chassis, analytically re-pinned each step. The backend does not write
+# reduced-coordinate children back from ECS, so the root teleport carries the
+# whole multibody assembly rigidly instead of desynchronizing it.
+base_body_type = "dynamic"
+initial_translation_m = [0.0, 0.25, 0.0]
+articulation = true
+multibody = true
+use_declared_inertial_masses = true
+# SO101 joints carry non-identity origin `rpy`; joint frames must include it
+# so angle zero matches the authored pose instead of snapping on step one.
+use_joint_origin_rpy = true
+# Keep default collision groups: the arm links carry no colliders (only the
+# moving-jaw and fixed-anvil grip pads do), so self-contact cannot lock the
+# arm, and the pads need to collide with scene objects (the `without_self_collision`
+# filter suppressed the jaw/object manifold).
+self_collisions = true
+
+[wrist_camera]
+mount_link = "wrist_link"
+mount_offset_m = [0.05, 0.0, 0.0]
+width = 64
+height = 48
+update_rate_hz = 10.0

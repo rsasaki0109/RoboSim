@@ -40,6 +40,12 @@ pub const UNITREE_G1_HEADING_ENVELOPE_STEPS_V02: u64 = 240;
 /// v0.2.1 extended horizon: mean yaw-rate sign must match; integrated yaw may
 /// still cross zero because the contact schedule is asymmetric.
 pub const UNITREE_G1_HEADING_ENVELOPE_STEPS_V021: u64 = 480;
+/// v0.3 sustained horizon: the validated heading candidate must keep walking
+/// upright for 50 s (six times the v0.2.1 envelope) with the mean yaw-rate sign
+/// tracking the command. The integrated yaw stays bounded, not accumulated:
+/// this contact schedule cannot sustain net turn over a long horizon, so v0.3
+/// is a long-horizon *stability* claim, not a sustained-turn claim.
+pub const UNITREE_G1_HEADING_ENVELOPE_STEPS_V03: u64 = 3000;
 /// Bounded absolute heading target used by the v0.2 / v0.2.1 heading contract.
 pub const UNITREE_G1_HEADING_TARGET_CLAMP_RAD: f64 = 0.08;
 
@@ -801,5 +807,75 @@ mod tests {
         // contract is the mean-rate sign above, not the final unwrap.
         assert!(left.total_yaw_rad.is_finite());
         assert!(right.total_yaw_rad.is_finite());
+    }
+
+    #[test]
+    fn v03_sustained_envelope_walks_50s_without_falling() {
+        let candidate = UnitreeG1CommandedTorquePolicy::validated_heading();
+        let base = UnitreeG1CommandedGaitConfig {
+            settle_steps: 60,
+            rollout_steps: UNITREE_G1_HEADING_ENVELOPE_STEPS_V03,
+            mirror_negative_yaw: false,
+            yaw_hip_yaw_right_sign: -1.0,
+            yaw_hip_yaw_target_rad_per_rad_s: 0.0,
+            heading_target_clamp_rad: UNITREE_G1_HEADING_TARGET_CLAMP_RAD,
+            ..UnitreeG1CommandedGaitConfig::default()
+        };
+        let left = run_unitree_g1_commanded_gait_with_policy(
+            UnitreeG1CommandedGaitConfig {
+                command: UnitreeG1VelocityCommand {
+                    forward_m_s: 0.0276,
+                    yaw_rate_rad_s: 0.05,
+                },
+                ..base.clone()
+            },
+            candidate,
+        )
+        .expect("left sustained replay");
+        let right = run_unitree_g1_commanded_gait_with_policy(
+            UnitreeG1CommandedGaitConfig {
+                command: UnitreeG1VelocityCommand {
+                    forward_m_s: 0.0276,
+                    yaw_rate_rad_s: -0.05,
+                },
+                ..base
+            },
+            candidate,
+        )
+        .expect("right sustained replay");
+
+        for outcome in [left, right] {
+            assert!(!outcome.fell, "sustained envelope must not fall");
+            assert!(
+                outcome.min_height_m > 0.75,
+                "sustained height {:.3} m",
+                outcome.min_height_m
+            );
+            assert!(
+                outcome.max_tilt_rad < 0.25,
+                "sustained tilt {:.3} rad",
+                outcome.max_tilt_rad
+            );
+            assert!(outcome.max_command_nm <= UNITREE_G1_TORQUE_LIMIT_NM);
+            assert!(outcome.mean_yaw_rate_rad_s.is_finite());
+            // The integrated yaw is bounded by the target clamp; this plant
+            // cannot accumulate net turn, so v0.3 claims long-horizon
+            // stability, not sustained turning.
+            assert!(
+                outcome.total_yaw_rad.abs() <= UNITREE_G1_HEADING_TARGET_CLAMP_RAD + 0.05,
+                "integrated yaw {:.3} rad exceeded the bounded envelope",
+                outcome.total_yaw_rad
+            );
+        }
+        assert!(
+            left.mean_yaw_rate_rad_s > 0.005,
+            "left sustained mean yaw rate {:+.4}",
+            left.mean_yaw_rate_rad_s
+        );
+        assert!(
+            right.mean_yaw_rate_rad_s < -0.005,
+            "right sustained mean yaw rate {:+.4}",
+            right.mean_yaw_rate_rad_s
+        );
     }
 }

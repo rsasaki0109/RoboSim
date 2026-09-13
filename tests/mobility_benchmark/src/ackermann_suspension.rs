@@ -810,6 +810,7 @@ pub(crate) fn spawn_stations(
                 anchor_child_m: Vec3::ZERO,
                 lower_m: Some(suspension.minimum_position_m),
                 upper_m: Some(suspension.maximum_position_m),
+                relative_rotation: Quat::IDENTITY,
             },
             suspension,
             suspension_actuation,
@@ -836,6 +837,7 @@ pub(crate) fn spawn_stations(
                 anchor_child_m: Vec3::ZERO,
                 lower_rad: Some(-steering_limit_rad),
                 upper_rad: Some(steering_limit_rad),
+                relative_rotation: Quat::IDENTITY,
             },
             JointActuation::RevolutePosition {
                 target_position_rad: 0.0,

@@ -210,6 +210,12 @@ pub struct UrdfRobotAsset {
     /// inertia tensors override legacy link defaults when declared.
     #[serde(default)]
     pub use_declared_inertial_masses: bool,
+    /// When true, revolute/prismatic joint frames carry the URDF joint-origin
+    /// rotation so joint angle zero matches the authored pose. Defaults to
+    /// false (legacy axis-aligned frames); OnShape-style URDFs with
+    /// non-identity joint `rpy` (e.g. SO101) must opt in.
+    #[serde(default)]
+    pub use_joint_origin_rpy: bool,
 }
 
 /// Unit-bearing passive-dynamics override for one URDF joint.
@@ -286,6 +292,7 @@ impl UrdfRobotAsset {
         UrdfArticulationConfig {
             base_body_type: self.base_body_type.into(),
             multibody: self.multibody,
+            use_joint_origin_rpy: self.use_joint_origin_rpy,
             ..UrdfArticulationConfig::default()
         }
     }

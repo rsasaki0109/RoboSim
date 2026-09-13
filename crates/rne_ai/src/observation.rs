@@ -119,4 +119,10 @@ pub struct MobileManipulatorObservation {
     pub gripper_target_dy_m: f64,
     /// Gripper-frame Z offset to the pick object (object_z - gripper_z).
     pub gripper_target_dz_m: f64,
+    /// World-frame grasp pocket center X (the point the jaws bracket).
+    pub gripper_pocket_x_m: f64,
+    /// World-frame grasp pocket center Y.
+    pub gripper_pocket_y_m: f64,
+    /// World-frame grasp pocket center Z.
+    pub gripper_pocket_z_m: f64,
 }

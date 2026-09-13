@@ -127,6 +127,8 @@ members = [
   "examples/88_house_3dgs_hybrid",
   "examples/89_house_mobile_lift_hero",
   "examples/90_showcase_captures",
+  "examples/91_mobile_so101_clutter",
+  "examples/92_g1_sustained_walk_gif",
   "tests/determinism",
   "tests/dynamics",
   "tests/mobility_benchmark",

@@ -13,6 +13,7 @@ mod unitree_g1_gait;
 mod unitree_g1_gait_episode;
 mod unitree_g1_inspection;
 mod unitree_g1_inspection_episode;
+mod unitree_g1_joint_locomotion;
 mod unitree_g1_parts_episode;
 mod unitree_g1_workbench_mission;
 mod unitree_go2_episode;
@@ -36,10 +37,11 @@ pub use unitree_g1_commanded_gait::{
     step_unitree_g1_hybrid_joint_targets, step_unitree_g1_hybrid_joint_targets_with_limits,
     UnitreeG1CommandedGaitConfig, UnitreeG1CommandedGaitOutcome,
     UNITREE_G1_HEADING_ENVELOPE_STEPS_V02, UNITREE_G1_HEADING_ENVELOPE_STEPS_V021,
-    UNITREE_G1_HEADING_TARGET_CLAMP_RAD, UNITREE_G1_LEARNED_STRIDE_OVERLAY_SCALE,
-    UNITREE_G1_POSITION_DAMPING, UNITREE_G1_POSITION_STIFFNESS, UNITREE_G1_SIM_DT_S,
-    UNITREE_G1_SPEED_LIMIT_RAD_S, UNITREE_G1_TORQUE_LIMIT_NM, UNITREE_G1_TORQUE_LINKS,
-    UNITREE_G1_TORQUE_PD_DAMPING, UNITREE_G1_TORQUE_PD_STIFFNESS,
+    UNITREE_G1_HEADING_ENVELOPE_STEPS_V03, UNITREE_G1_HEADING_TARGET_CLAMP_RAD,
+    UNITREE_G1_LEARNED_STRIDE_OVERLAY_SCALE, UNITREE_G1_POSITION_DAMPING,
+    UNITREE_G1_POSITION_STIFFNESS, UNITREE_G1_SIM_DT_S, UNITREE_G1_SPEED_LIMIT_RAD_S,
+    UNITREE_G1_TORQUE_LIMIT_NM, UNITREE_G1_TORQUE_LINKS, UNITREE_G1_TORQUE_PD_DAMPING,
+    UNITREE_G1_TORQUE_PD_STIFFNESS,
 };
 pub use unitree_g1_dex3::{unitree_g1_dex3_pick_targets, UnitreeG1Dex3HandCommand};
 pub use unitree_g1_dex3_behavior::{UnitreeG1Dex3BehaviorConfig, UnitreeG1Dex3BehaviorScenario};
@@ -65,6 +67,12 @@ pub use unitree_g1_inspection::{step_unitree_g1_inspection, unitree_g1_inspectio
 pub use unitree_g1_inspection_episode::{
     UnitreeG1InspectionAction, UnitreeG1InspectionEpisode, UnitreeG1InspectionEpisodeConfig,
     UnitreeG1InspectionObservation,
+};
+pub use unitree_g1_joint_locomotion::{
+    unitree_g1_joint_locomotion_task_spec, UnitreeG1JointAction, UnitreeG1JointLocomotionConfig,
+    UnitreeG1JointLocomotionEpisode, UnitreeG1JointObservation,
+    VectorizedUnitreeG1JointLocomotionConfig, VectorizedUnitreeG1JointLocomotionEnv,
+    VectorizedUnitreeG1JointLocomotionStep, UNITREE_G1_LEG_JOINT_LINKS, UNITREE_G1_LEG_NOMINAL_RAD,
 };
 pub use unitree_g1_parts_episode::{
     UnitreeG1PartsAction, UnitreeG1PartsEpisode, UnitreeG1PartsEpisodeConfig,
@@ -1532,15 +1540,7 @@ impl UrdfSceneSim {
     /// lets a controller send a stable superset of targets across related URDF
     /// variants. Motors retain their existing force, stiffness, and damping.
     pub fn step_joint_position_targets(&mut self, targets: &[UrdfJointPositionTarget<'_>]) {
-        for target in targets {
-            let Some(entity) = find_link_by_name(&self.world, target.link_name) else {
-                continue;
-            };
-            if let Some(mut motor) = self.world.get_mut::<JointMotor>(entity) {
-                motor.target_position = target.position;
-                motor.velocity_rad_s = 0.0;
-            }
-        }
+        self.set_joint_position_targets(targets);
         self.step_physics();
     }
 

@@ -1399,6 +1399,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "g1_sustained_walk_gif"
+version = "0.2.0"
+dependencies = [
+ "image",
+ "png",
+ "rne_ai",
+ "rne_math",
+ "rne_render",
+ "rne_render_wgpu",
+]
+
+[[package]]
 name = "g1_workbench_mission"
 version = "0.2.0"
 dependencies = [
@@ -2427,6 +2439,13 @@ dependencies = [
 
 [[package]]
 name = "mobile_manipulator_wrist_cam"
+version = "0.2.0"
+dependencies = [
+ "rne_ai",
+]
+
+[[package]]
+name = "mobile_so101_clutter"
 version = "0.2.0"
 dependencies = [
  "rne_ai",

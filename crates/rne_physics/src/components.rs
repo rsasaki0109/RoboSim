@@ -283,6 +283,12 @@ pub struct RevoluteJointDesc {
     pub anchor_parent_m: Vec3,
     /// Anchor point in the child body's local frame.
     pub anchor_child_m: Vec3,
+    /// Orientation of the child joint frame relative to the parent joint
+    /// frame at joint angle zero. [`Quat::IDENTITY`] preserves the legacy
+    /// axis-aligned convention; URDF import sets the joint-origin rotation
+    /// when the asset opts into `use_joint_origin_rpy` so angle zero matches
+    /// the authored pose.
+    pub relative_rotation: Quat,
     /// Optional lower angle limit in radians.
     pub lower_rad: Option<f64>,
     /// Optional upper angle limit in radians.
@@ -303,6 +309,9 @@ pub struct PrismaticJointDesc {
     pub anchor_parent_m: Vec3,
     /// Anchor point in the child body's local frame.
     pub anchor_child_m: Vec3,
+    /// Orientation of the child joint frame relative to the parent joint
+    /// frame at zero displacement (see [`RevoluteJointDesc::relative_rotation`]).
+    pub relative_rotation: Quat,
     /// Optional lower translation limit in meters.
     pub lower_m: Option<f64>,
     /// Optional upper translation limit in meters.
@@ -334,6 +343,30 @@ pub struct FixedJointDesc {
 /// marker may also be placed on the root so it is simulated without a collider.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MultibodyLink;
+
+/// Marks a rigid body whose pose is owned by its reduced-coordinate assembly
+/// rather than by the ECS.
+///
+/// A backend must not write the entity's ECS transform back into its physics
+/// body: when an assembly's root is re-pinned each step, writing stale child
+/// poses desynchronizes the chain. The root itself is not marked and remains
+/// ECS-driven.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PhysicsOwnedPose;
+
+/// Per-body gravity multiplier.
+///
+/// `1.0` (the default when absent) applies the world gravity unchanged; `0.0`
+/// makes the body weightless. Used for a velocity-driven mobile chassis whose
+/// reduced-coordinate arm must not be dragged down by a falling base.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GravityScale(pub f64);
+
+impl Default for GravityScale {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
 
 /// Velocity motor command applied to a joint before each physics step.
 ///

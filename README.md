@@ -130,10 +130,23 @@ Model equations, measured errors, and acceptance tests are in
 
 ## G1 locomotion
 
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-g1-sustained-walk.png">
+    <img src="docs/media/unitree-g1-sustained-walk.gif" alt="The official Unitree G1 walking a sustained curved path for 50 seconds in a robotics test bay" width="760">
+  </picture>
+  <br>
+  <sub>v0.3 long-horizon walk: the official G1 holds its feet for 50 s (six times the v0.2.1 horizon) under a forward+turn command, upright the whole way, with the walked curve drawn as a floor trail.</sub>
+</p>
+
 Example 67 evaluates typed forward, stop, and differential-steering commands
 without a renderer. Example 68 adds a bounded 240-tick true body-heading
-candidate with heading, yaw-rate, turn-radius, height, torque, and exact-replay
-checks. Sustained long-horizon heading tracking remains a follow-up milestone.
+candidate and the v0.3 sustained envelope: the same validated heading candidate
+walks 3000 ticks (50 s) without falling (pelvis > 0.784 m, tilt < 0.13 rad) with
+the correct mean yaw-rate sign. The integrated yaw stays bounded by the clamped
+target — an eight-dimension gait-schedule search found **no** upright sustained
+turn on this official contact schedule, so sustained turning remains open and
+v0.3 is a stability claim rather than a sustained-turn claim.
 
 ```bash
 cargo run --release -p g1_commanded_locomotion --example 67_g1_commanded_locomotion
@@ -141,8 +154,9 @@ cargo run --release -p g1_commanded_locomotion --example 67_g1_commanded_locomot
 cargo run --release -p g1_heading_turn --example 68_g1_heading_turn
 cargo run --release -p g1_heading_turn --example 68_g1_heading_turn -- --train
 
-# Regenerate the wgpu hero GIF and reduced-motion PNG
+# Regenerate the wgpu hero GIFs and reduced-motion PNGs
 cargo run --release -p g1_stride_gif --example 63_g1_stride_gif
+cargo run --release -p g1_sustained_walk_gif --example 92_g1_sustained_walk_gif
 ```
 
 The full measurements and limitations are in [docs/G1_LOCOMOTION.md](docs/G1_LOCOMOTION.md).
@@ -368,6 +382,7 @@ ROS 2 is optional and isolated under [adapters/ros2](adapters/ros2). See the
 - [G1 head × splat background](docs/G1_HEAD_SPLAT_BACKGROUND.md)
 - [G1 locomotion](docs/G1_LOCOMOTION.md)
 - [Go2 locomotion](docs/GO2_LOCOMOTION.md)
+- [Legged locomotion frontier plan](docs/PLAN_LEGGED_LOCOMOTION_FRONTIER.md)
 - [Sensor simulation](docs/IMU_SIMULATION.md)
 - [Examples](examples/README.md)
 - [Changelog](CHANGELOG.md)

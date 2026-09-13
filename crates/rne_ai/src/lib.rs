@@ -21,6 +21,9 @@ pub mod joint_trajectory;
 pub mod lidar;
 pub mod mm_lift_kinematics;
 pub mod mm_minimal_kinematics;
+pub mod so101_kinematics;
+
+pub use so101_kinematics::{So101IkError, So101JointTarget, So101Kinematics};
 pub mod mobility_observation;
 pub mod multi_robot;
 pub mod observation;
@@ -78,19 +81,21 @@ pub use env::{
     mm_lift_pick_scene_path, mm_lift_scene_path, mm_minimal_clutter_scene_path,
     mm_minimal_grasp_scene_path, mm_minimal_scene_path, mm_minimal_transport_scene_path,
     mm_mobile_clutter_scene_path, mm_mobile_lift_pick_place_scene_path, mm_mobile_lift_scene_path,
-    mm_mobile_scene_path, mm_mobile_twist_to_wheel_velocities, mm_mobile_wheel_velocities_to_twist,
-    quadruped_scene_path, quadruped_trot_targets, run_unitree_g1_commanded_gait,
+    mm_mobile_scene_path, mm_mobile_so101_clutter_scene_path, mm_mobile_so101_scene_path,
+    mm_mobile_twist_to_wheel_velocities, mm_mobile_wheel_velocities_to_twist, quadruped_scene_path,
+    quadruped_trot_targets, run_unitree_g1_commanded_gait,
     run_unitree_g1_commanded_gait_with_policy, so101_scene_path,
     step_unitree_g1_hybrid_joint_targets, step_unitree_g1_inspection, unitree_g1_dex3_pick_targets,
     unitree_g1_dex3_scene_path, unitree_g1_dynamic_scene_path, unitree_g1_factory_scene_path,
     unitree_g1_gait_targets, unitree_g1_gait_targets_for_velocity,
     unitree_g1_gait_targets_for_velocity_with_yaw_stride,
     unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase, unitree_g1_gait_task_spec,
-    unitree_g1_inspection_targets, unitree_g1_parts_pick_place_scene_path, unitree_g1_scene_path,
-    unitree_g1_workbench_task_spec, unitree_go2_dynamic_scene_path, unitree_go2_scene_path,
-    unitree_go2_scheduled_targets, unitree_go2_task_spec, unitree_go2_terrain_scene_path,
-    unitree_go2_trot_targets, unitree_go2_trot_targets_with_overlay, wheel_command_to_motor_rad_s,
-    ClutterPickConfig, DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveEpisodeSnapshot,
+    unitree_g1_inspection_targets, unitree_g1_joint_locomotion_task_spec,
+    unitree_g1_parts_pick_place_scene_path, unitree_g1_scene_path, unitree_g1_workbench_task_spec,
+    unitree_go2_dynamic_scene_path, unitree_go2_scene_path, unitree_go2_scheduled_targets,
+    unitree_go2_task_spec, unitree_go2_terrain_scene_path, unitree_go2_trot_targets,
+    unitree_go2_trot_targets_with_overlay, wheel_command_to_motor_rad_s, ClutterPickConfig,
+    DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveEpisodeSnapshot,
     DiffDriveEpisodeSnapshotError, DiffDriveSim, GraspMode, HumanoidAction, HumanoidEpisode,
     HumanoidEpisodeConfig, HumanoidObservation, MobileManipulatorEpisode,
     MobileManipulatorEpisodeConfig, MobileManipulatorEpisodeProgressSnapshot,
@@ -107,8 +112,9 @@ pub use env::{
     UnitreeG1Dex3Phase, UnitreeG1Episode, UnitreeG1EpisodeConfig, UnitreeG1GaitAction,
     UnitreeG1GaitCommand, UnitreeG1GaitEpisode, UnitreeG1GaitEpisodeConfig,
     UnitreeG1GaitObservation, UnitreeG1InspectionAction, UnitreeG1InspectionEpisode,
-    UnitreeG1InspectionEpisodeConfig, UnitreeG1InspectionObservation, UnitreeG1Observation,
-    UnitreeG1PartsAction, UnitreeG1PartsEpisode, UnitreeG1PartsEpisodeConfig,
+    UnitreeG1InspectionEpisodeConfig, UnitreeG1InspectionObservation, UnitreeG1JointAction,
+    UnitreeG1JointLocomotionConfig, UnitreeG1JointLocomotionEpisode, UnitreeG1JointObservation,
+    UnitreeG1Observation, UnitreeG1PartsAction, UnitreeG1PartsEpisode, UnitreeG1PartsEpisodeConfig,
     UnitreeG1PartsObservation, UnitreeG1PartsPhase, UnitreeG1TorqueOverlay,
     UnitreeG1TorquePolicyInput, UnitreeG1VelocityCommand, UnitreeG1VelocityPolicyInput,
     UnitreeG1WorkbenchFault, UnitreeG1WorkbenchMissionConfig, UnitreeG1WorkbenchMissionScenario,
@@ -125,19 +131,23 @@ pub use env::{
     VectorizedMobileManipulatorEnv, VectorizedMobileManipulatorSnapshot,
     VectorizedMobileManipulatorSnapshotError, VectorizedMobileManipulatorStep,
     VectorizedUnitreeG1GaitCheckpoint, VectorizedUnitreeG1GaitConfig, VectorizedUnitreeG1GaitEnv,
-    VectorizedUnitreeG1GaitStep, VectorizedUnitreeGo2GaitCheckpoint,
-    VectorizedUnitreeGo2GaitConfig, VectorizedUnitreeGo2GaitEnv, VectorizedUnitreeGo2GaitStep,
-    G1_WORKBENCH_ARM_WINDOW_M, G1_WORKBENCH_MIN_PELVIS_Y_M, G1_WORKBENCH_MISSION_TASK_ID,
-    G1_WORKBENCH_PARK_RADIUS_M, LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD,
-    LEKIWI_WHEEL_JOINT_SIGN, LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M,
+    VectorizedUnitreeG1GaitStep, VectorizedUnitreeG1JointLocomotionConfig,
+    VectorizedUnitreeG1JointLocomotionEnv, VectorizedUnitreeG1JointLocomotionStep,
+    VectorizedUnitreeGo2GaitCheckpoint, VectorizedUnitreeGo2GaitConfig,
+    VectorizedUnitreeGo2GaitEnv, VectorizedUnitreeGo2GaitStep, G1_WORKBENCH_ARM_WINDOW_M,
+    G1_WORKBENCH_MIN_PELVIS_Y_M, G1_WORKBENCH_MISSION_TASK_ID, G1_WORKBENCH_PARK_RADIUS_M,
+    LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
+    LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M,
     MOBILE_MANIPULATOR_SIM_SNAPSHOT_MIN_VERSION, MOBILE_MANIPULATOR_SIM_SNAPSHOT_VERSION,
-    QUADRUPED_FOOT_LINKS, UNITREE_G1_HEADING_ENVELOPE_STEPS_V02,
-    UNITREE_G1_HEADING_ENVELOPE_STEPS_V021, UNITREE_G1_HEADING_TARGET_CLAMP_RAD,
-    UNITREE_G1_LEARNED_STRIDE_OVERLAY_SCALE, UNITREE_G1_POSITION_DAMPING,
-    UNITREE_G1_POSITION_STIFFNESS, UNITREE_G1_SIM_DT_S, UNITREE_G1_SPEED_LIMIT_RAD_S,
-    UNITREE_G1_TORQUE_LIMIT_NM, UNITREE_G1_TORQUE_LINKS, UNITREE_G1_TORQUE_PD_DAMPING,
-    UNITREE_G1_TORQUE_PD_STIFFNESS, UNITREE_GO2_POLICY_FEATURES,
-    UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
+    QUADRUPED_FOOT_LINKS, SO101_ELBOW_FLEX_JOINT, SO101_GRIPPER_JOINT, SO101_SHOULDER_LIFT_JOINT,
+    SO101_SHOULDER_PAN_JOINT, SO101_WRIST_FLEX_JOINT, SO101_WRIST_ROLL_JOINT,
+    UNITREE_G1_HEADING_ENVELOPE_STEPS_V02, UNITREE_G1_HEADING_ENVELOPE_STEPS_V021,
+    UNITREE_G1_HEADING_ENVELOPE_STEPS_V03, UNITREE_G1_HEADING_TARGET_CLAMP_RAD,
+    UNITREE_G1_LEARNED_STRIDE_OVERLAY_SCALE, UNITREE_G1_LEG_JOINT_LINKS,
+    UNITREE_G1_LEG_NOMINAL_RAD, UNITREE_G1_POSITION_DAMPING, UNITREE_G1_POSITION_STIFFNESS,
+    UNITREE_G1_SIM_DT_S, UNITREE_G1_SPEED_LIMIT_RAD_S, UNITREE_G1_TORQUE_LIMIT_NM,
+    UNITREE_G1_TORQUE_LINKS, UNITREE_G1_TORQUE_PD_DAMPING, UNITREE_G1_TORQUE_PD_STIFFNESS,
+    UNITREE_GO2_POLICY_FEATURES, UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
 };
 pub use env::{
     evaluate_office_desk_delivery_stop, office_agv_delivery_scene_path,
@@ -201,10 +211,12 @@ pub use mm_lift_kinematics::{
     MmLiftGripperTarget, MmLiftIkError, MmLiftJointTarget, MmLiftKinematics,
 };
 pub use mm_minimal_kinematics::{
-    mm_minimal_clutter_place_target, mm_mobile_clutter_place_target, MmMinimalGripperTarget,
-    MmMinimalIkError, MmMinimalJointTarget, MmMinimalKinematics, MM_MINIMAL_CLUTTER_PLACE_X_M,
+    mm_minimal_clutter_place_target, mm_mobile_clutter_place_target,
+    so101_mobile_clutter_place_target, MmMinimalGripperTarget, MmMinimalIkError,
+    MmMinimalJointTarget, MmMinimalKinematics, MM_MINIMAL_CLUTTER_PLACE_X_M,
     MM_MINIMAL_CLUTTER_PLACE_Y_M, MM_MINIMAL_CLUTTER_PLACE_Z_M, MM_MOBILE_CLUTTER_PLACE_X_M,
-    MM_MOBILE_CLUTTER_PLACE_Y_M, MM_MOBILE_CLUTTER_PLACE_Z_M,
+    MM_MOBILE_CLUTTER_PLACE_Y_M, MM_MOBILE_CLUTTER_PLACE_Z_M, SO101_MOBILE_CLUTTER_PLACE_X_M,
+    SO101_MOBILE_CLUTTER_PLACE_Y_M, SO101_MOBILE_CLUTTER_PLACE_Z_M,
 };
 pub use mobility_observation::{
     diff_drive_actor_observation, stable_diff_drive_actor_observation_digest, ActorFrameMetadata,
@@ -220,7 +232,7 @@ pub use policy::{
     ConstantVelocityPolicy, IkClutterPickPlacePolicy, IkLiftPickPlacePolicy,
     IkMobileClutterPickPlacePolicy, IkMobileLiftPickPlacePolicy, LiftPickPlacePolicy,
     LocomotionPolicy, MobileLiftFailureClass, MobileLiftPickPlacePhase, Policy,
-    VisuomotorReachPolicy,
+    So101MobileClutterPickPlacePolicy, VisuomotorReachPolicy,
 };
 pub use portable_batch::{
     PortableBatchCheckpoint, PortableBatchConfig, PortableBatchError, PortableBatchLaneCheckpoint,
