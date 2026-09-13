@@ -6,6 +6,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Require file-verified steady-force, longitudinal-relaxation, and lateral-relaxation
+  acquisition closures before an identified tire profile can claim physical application.
+  The physical CLI revalidates all retained files before running the exact profile and plant on
+  Rapier and MuJoCo; recorded-source labels alone cannot enter this path.
+
 - Bind the exact backend-neutral plant profile into Mobility trace schema v2 and apply a
   replay-verified steady-plus-two-axis tire profile to the same TaskSpec on Rapier and MuJoCo.
   Cross-backend evidence retains explicit SI-unit tolerances and rejects plant substitution.
