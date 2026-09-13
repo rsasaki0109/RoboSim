@@ -321,6 +321,166 @@ pub struct CombinedSlipTireIdentificationResult {
     pub condition_residuals: Vec<TireConditionResidual>,
 }
 
+/// Failure returned by transient tire relaxation-length identification.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
+pub enum TireRelaxationIdentificationError {
+    /// Bounds, gates, or deterministic work limits are invalid.
+    #[error("invalid tire relaxation identification specification")]
+    InvalidSpec,
+    /// A run contains invalid timing, speed, or slip data.
+    #[error("invalid tire relaxation identification sample")]
+    InvalidSample,
+    /// Training or holdout does not contain the required transient excitation.
+    #[error("insufficient tire relaxation excitation")]
+    InsufficientExcitation,
+    /// An acquisition identity occurs in more than one split entry.
+    #[error("duplicate tire relaxation acquisition identity")]
+    DuplicateAcquisition,
+    /// Candidate evaluation produced non-finite arithmetic.
+    #[error("non-physical tire relaxation result")]
+    NonPhysicalResult,
+    /// Training, pooled holdout, or worst-condition residual exceeded its gate.
+    #[error("tire relaxation residual exceeded")]
+    ResidualExceeded,
+}
+
+/// Tire-force axis whose relaxation length is identified.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TireRelaxationAxis {
+    /// Longitudinal slip ratio and longitudinal force.
+    Longitudinal,
+    /// Lateral slip tangent and lateral force.
+    Lateral,
+}
+
+/// One physically observable input/force row for the first-order relaxation law.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TireRelaxationIdentificationSample {
+    /// Source capture time in seconds.
+    pub capture_time_s: f64,
+    /// Positive regularized transport speed used by the tire law, in meters per second.
+    pub transport_speed_m_s: f64,
+    /// Kinematic slip input held until the next row.
+    pub target_slip: f64,
+    /// Contact-normal load at this row, in newtons.
+    pub normal_load_n: f64,
+    /// Independently established dimensionless road-friction multiplier.
+    pub road_friction_scale: f64,
+    /// Measured force along the selected tire axis, in newtons.
+    pub measured_force_n: f64,
+}
+
+/// One complete transient acquisition assigned wholly to training or holdout.
+#[derive(Clone, Copy, Debug)]
+pub struct TireRelaxationIdentificationRun<'a> {
+    /// Stable acquisition identity.
+    pub acquisition_id: u64,
+    /// Stable speed/road/tire condition identity used for worst-case scoring.
+    pub condition_id: u64,
+    /// Strictly ordered rows from this acquisition.
+    pub samples: &'a [TireRelaxationIdentificationSample],
+}
+
+/// Bounds and acceptance gates for relaxation-length identification.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TireRelaxationIdentificationSpec {
+    /// Inclusive search bounds for relaxation length, in meters.
+    pub relaxation_length_bounds_m: [f64; 2],
+    /// Minimum transport speed retained in a transition, in meters per second.
+    pub minimum_transport_speed_m_s: f64,
+    /// Minimum absolute target/current slip difference retained as excitation.
+    pub minimum_slip_excitation: f64,
+    /// Maximum absolute target or observed slip admitted by the fit.
+    pub maximum_abs_slip: f64,
+    /// Maximum absolute measured-force/peak-force ratio admitted for stable inversion.
+    pub maximum_force_utilization: f64,
+    /// Minimum retained training transitions.
+    pub minimum_training_transitions: usize,
+    /// Minimum retained combined holdout transitions.
+    pub minimum_holdout_transitions: usize,
+    /// Minimum retained transitions in every holdout condition.
+    pub minimum_holdout_transitions_per_condition: usize,
+    /// Odd grid width for each deterministic refinement pass.
+    pub grid_points: usize,
+    /// Number of deterministic coarse-to-fine refinement passes.
+    pub refinement_passes: usize,
+    /// Maximum training slip RMS.
+    pub maximum_training_rms_slip: f64,
+    /// Maximum pooled holdout slip RMS.
+    pub maximum_holdout_rms_slip: f64,
+    /// Maximum holdout slip RMS in any declared condition.
+    pub maximum_worst_condition_rms_slip: f64,
+}
+
+impl TireRelaxationIdentificationSpec {
+    fn is_valid(self) -> bool {
+        self.relaxation_length_bounds_m
+            .iter()
+            .all(|value| value.is_finite())
+            && self.relaxation_length_bounds_m[0] > 0.0
+            && self.relaxation_length_bounds_m[0] < self.relaxation_length_bounds_m[1]
+            && [
+                self.minimum_transport_speed_m_s,
+                self.minimum_slip_excitation,
+                self.maximum_abs_slip,
+                self.maximum_force_utilization,
+                self.maximum_training_rms_slip,
+                self.maximum_holdout_rms_slip,
+                self.maximum_worst_condition_rms_slip,
+            ]
+            .iter()
+            .all(|value| value.is_finite())
+            && self.minimum_transport_speed_m_s > 0.0
+            && self.minimum_slip_excitation > 0.0
+            && self.minimum_slip_excitation < self.maximum_abs_slip
+            && self.maximum_force_utilization > 0.0
+            && self.maximum_force_utilization < 1.0
+            && self.minimum_training_transitions >= 4
+            && self.minimum_holdout_transitions_per_condition >= 2
+            && self.minimum_holdout_transitions / 2
+                >= self.minimum_holdout_transitions_per_condition
+            && (5..=101).contains(&self.grid_points)
+            && self.grid_points % 2 == 1
+            && (1..=10).contains(&self.refinement_passes)
+            && self.maximum_training_rms_slip >= 0.0
+            && self.maximum_holdout_rms_slip >= 0.0
+            && self.maximum_worst_condition_rms_slip >= 0.0
+    }
+}
+
+/// Holdout slip residual for one declared transient condition.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TireRelaxationConditionResidual {
+    /// Stable condition identity.
+    pub condition_id: u64,
+    /// Retained transition count.
+    pub transition_count: usize,
+    /// One-step relaxed-slip RMS.
+    pub rms_slip: f64,
+}
+
+/// Frozen relaxation-length fit and train/holdout diagnostics.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TireRelaxationIdentificationResult {
+    /// Identified relaxation length in meters.
+    pub relaxation_length_m: f64,
+    /// Retained training transition count.
+    pub training_transition_count: usize,
+    /// Retained holdout transition count.
+    pub holdout_transition_count: usize,
+    /// Training one-step slip RMS.
+    pub training_rms_slip: f64,
+    /// Pooled holdout one-step slip RMS.
+    pub holdout_rms_slip: f64,
+    /// Deterministically ordered per-condition residuals.
+    pub condition_residuals: Vec<TireRelaxationConditionResidual>,
+}
+
 /// Failure returned by deterministic suspension-force identification.
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SuspensionIdentificationError {
@@ -2325,6 +2485,247 @@ pub fn identify_combined_slip_tire_steady(
         holdout_rms_n,
         condition_residuals,
     })
+}
+
+type TireRelaxationTransition = (f64, f64, f64, f64, f64, u64);
+
+/// Identifies one tire-slip relaxation length from complete transient acquisitions.
+///
+/// Row `i` supplies measured axis force, load, road scale, transport speed, and the
+/// zero-order-held kinematic target for the interval ending at row `i + 1`. The
+/// already-frozen pure-slip steady force law is inverted below the declared force
+/// utilization limit to reconstruct the relaxation state. Complete acquisition IDs
+/// may occur only once across training and holdout. The fit uses training transitions
+/// only; pooled and per-condition holdout residuals are computed after freezing the length.
+pub fn identify_tire_relaxation_length(
+    spec: TireRelaxationIdentificationSpec,
+    tire: CombinedSlipTireSpec,
+    axis: TireRelaxationAxis,
+    training_runs: &[TireRelaxationIdentificationRun<'_>],
+    holdout_runs: &[TireRelaxationIdentificationRun<'_>],
+) -> Result<TireRelaxationIdentificationResult, TireRelaxationIdentificationError> {
+    if !spec.is_valid()
+        || evaluate_combined_slip_tire_steady_force(tire, 0.0, 0.0, tire.reference_load_n, 1.0)
+            .is_err()
+    {
+        return Err(TireRelaxationIdentificationError::InvalidSpec);
+    }
+    if training_runs.is_empty() || holdout_runs.is_empty() {
+        return Err(TireRelaxationIdentificationError::InsufficientExcitation);
+    }
+    let mut acquisition_ids = std::collections::BTreeSet::new();
+    let mut total_samples = 0_usize;
+    for run in training_runs.iter().chain(holdout_runs) {
+        if !acquisition_ids.insert(run.acquisition_id) {
+            return Err(TireRelaxationIdentificationError::DuplicateAcquisition);
+        }
+        if run.samples.len() < 2 {
+            return Err(TireRelaxationIdentificationError::InsufficientExcitation);
+        }
+        total_samples = total_samples.saturating_add(run.samples.len());
+        if total_samples > 100_000 {
+            return Err(TireRelaxationIdentificationError::InvalidSpec);
+        }
+        for (index, sample) in run.samples.iter().enumerate() {
+            if !sample.capture_time_s.is_finite()
+                || !sample.transport_speed_m_s.is_finite()
+                || sample.transport_speed_m_s <= 0.0
+                || !sample.target_slip.is_finite()
+                || !sample.normal_load_n.is_finite()
+                || sample.normal_load_n <= 0.0
+                || sample.normal_load_n > tire.reference_load_n * tire.maximum_load_ratio
+                || !sample.road_friction_scale.is_finite()
+                || sample.road_friction_scale <= 0.0
+                || !sample.measured_force_n.is_finite()
+                || sample.target_slip.abs() > spec.maximum_abs_slip
+                || index > 0 && sample.capture_time_s <= run.samples[index - 1].capture_time_s
+            {
+                return Err(TireRelaxationIdentificationError::InvalidSample);
+            }
+        }
+    }
+
+    let training = tire_relaxation_transitions(spec, tire, axis, training_runs)?;
+    let holdout = tire_relaxation_transitions(spec, tire, axis, holdout_runs)?;
+    if training.len() < spec.minimum_training_transitions
+        || holdout.len() < spec.minimum_holdout_transitions
+    {
+        return Err(TireRelaxationIdentificationError::InsufficientExcitation);
+    }
+    let work = training
+        .len()
+        .saturating_mul(spec.grid_points)
+        .saturating_mul(spec.refinement_passes);
+    if work > 10_000_000 {
+        return Err(TireRelaxationIdentificationError::InvalidSpec);
+    }
+
+    let relaxation_length_m = fit_tire_relaxation_length(spec, &training)?;
+    let training_squared_error = tire_relaxation_squared_error(relaxation_length_m, &training);
+    let holdout_squared_error = tire_relaxation_squared_error(relaxation_length_m, &holdout);
+    if !training_squared_error.is_finite() || !holdout_squared_error.is_finite() {
+        return Err(TireRelaxationIdentificationError::NonPhysicalResult);
+    }
+    let training_rms_slip = (training_squared_error / training.len() as f64).sqrt();
+    let holdout_rms_slip = (holdout_squared_error / holdout.len() as f64).sqrt();
+    let mut conditions = std::collections::BTreeMap::<u64, (usize, f64)>::new();
+    for transition in &holdout {
+        let error = tire_relaxation_prediction(relaxation_length_m, *transition) - transition.4;
+        let condition = conditions.entry(transition.5).or_default();
+        condition.0 += 1;
+        condition.1 += error * error;
+    }
+    if conditions.len() < 2
+        || conditions
+            .values()
+            .any(|(count, _)| *count < spec.minimum_holdout_transitions_per_condition)
+    {
+        return Err(TireRelaxationIdentificationError::InsufficientExcitation);
+    }
+    let condition_residuals = conditions
+        .into_iter()
+        .map(
+            |(condition_id, (transition_count, squared_error))| TireRelaxationConditionResidual {
+                condition_id,
+                transition_count,
+                rms_slip: (squared_error / transition_count as f64).sqrt(),
+            },
+        )
+        .collect::<Vec<_>>();
+    let worst_condition_rms_slip = condition_residuals
+        .iter()
+        .map(|condition| condition.rms_slip)
+        .fold(0.0_f64, f64::max);
+    if !training_rms_slip.is_finite()
+        || !holdout_rms_slip.is_finite()
+        || !worst_condition_rms_slip.is_finite()
+    {
+        return Err(TireRelaxationIdentificationError::NonPhysicalResult);
+    }
+    if training_rms_slip > spec.maximum_training_rms_slip
+        || holdout_rms_slip > spec.maximum_holdout_rms_slip
+        || worst_condition_rms_slip > spec.maximum_worst_condition_rms_slip
+    {
+        return Err(TireRelaxationIdentificationError::ResidualExceeded);
+    }
+
+    Ok(TireRelaxationIdentificationResult {
+        relaxation_length_m,
+        training_transition_count: training.len(),
+        holdout_transition_count: holdout.len(),
+        training_rms_slip,
+        holdout_rms_slip,
+        condition_residuals,
+    })
+}
+
+fn tire_relaxation_transitions(
+    spec: TireRelaxationIdentificationSpec,
+    tire: CombinedSlipTireSpec,
+    axis: TireRelaxationAxis,
+    runs: &[TireRelaxationIdentificationRun<'_>],
+) -> Result<Vec<TireRelaxationTransition>, TireRelaxationIdentificationError> {
+    let mut transitions = Vec::new();
+    for run in runs {
+        for pair in run.samples.windows(2) {
+            let current = pair[0];
+            let next = pair[1];
+            let current_slip = tire_relaxation_observed_slip(spec, tire, axis, current)?;
+            let next_slip = tire_relaxation_observed_slip(spec, tire, axis, next)?;
+            if current.transport_speed_m_s < spec.minimum_transport_speed_m_s
+                || (current.target_slip - current_slip).abs() < spec.minimum_slip_excitation
+            {
+                continue;
+            }
+            transitions.push((
+                current_slip,
+                current.target_slip,
+                current.transport_speed_m_s,
+                next.capture_time_s - current.capture_time_s,
+                next_slip,
+                run.condition_id,
+            ));
+        }
+    }
+    Ok(transitions)
+}
+
+fn tire_relaxation_observed_slip(
+    identification: TireRelaxationIdentificationSpec,
+    tire: CombinedSlipTireSpec,
+    axis: TireRelaxationAxis,
+    sample: TireRelaxationIdentificationSample,
+) -> Result<f64, TireRelaxationIdentificationError> {
+    let load_ratio = (sample.normal_load_n / tire.reference_load_n).min(tire.maximum_load_ratio);
+    let friction_ratio = (1.0 - tire.load_sensitivity_per_load_ratio * (load_ratio - 1.0))
+        .max(tire.minimum_friction_ratio);
+    let (stiffness_n, peak_friction) = match axis {
+        TireRelaxationAxis::Longitudinal => (
+            tire.longitudinal_stiffness_n,
+            tire.longitudinal_peak_friction,
+        ),
+        TireRelaxationAxis::Lateral => (tire.lateral_stiffness_n, tire.lateral_peak_friction),
+    };
+    let peak_force_n =
+        peak_friction * friction_ratio * sample.normal_load_n * sample.road_friction_scale;
+    let utilization = sample.measured_force_n / peak_force_n;
+    if !utilization.is_finite() || utilization.abs() > identification.maximum_force_utilization {
+        return Err(TireRelaxationIdentificationError::InvalidSample);
+    }
+    let slip = utilization.atanh() * peak_force_n / (stiffness_n * load_ratio);
+    if !slip.is_finite() || slip.abs() > identification.maximum_abs_slip {
+        return Err(TireRelaxationIdentificationError::InvalidSample);
+    }
+    Ok(slip)
+}
+
+fn fit_tire_relaxation_length(
+    spec: TireRelaxationIdentificationSpec,
+    transitions: &[TireRelaxationTransition],
+) -> Result<f64, TireRelaxationIdentificationError> {
+    let original = spec.relaxation_length_bounds_m;
+    let mut bounds = original;
+    let divisions = (spec.grid_points - 1) as f64;
+    let mut best = (bounds[0], f64::INFINITY);
+    for _ in 0..spec.refinement_passes {
+        let step = (bounds[1] - bounds[0]) / divisions;
+        for index in 0..spec.grid_points {
+            let length_m = bounds[0] + step * index as f64;
+            let squared_error = tire_relaxation_squared_error(length_m, transitions);
+            if squared_error < best.1 {
+                best = (length_m, squared_error);
+            }
+        }
+        if !best.1.is_finite() {
+            return Err(TireRelaxationIdentificationError::NonPhysicalResult);
+        }
+        bounds = [
+            (best.0 - step).max(original[0]),
+            (best.0 + step).min(original[1]),
+        ];
+    }
+    Ok(best.0)
+}
+
+fn tire_relaxation_squared_error(
+    relaxation_length_m: f64,
+    transitions: &[TireRelaxationTransition],
+) -> f64 {
+    transitions
+        .iter()
+        .map(|transition| {
+            let error = tire_relaxation_prediction(relaxation_length_m, *transition) - transition.4;
+            error * error
+        })
+        .sum()
+}
+
+fn tire_relaxation_prediction(
+    relaxation_length_m: f64,
+    transition: TireRelaxationTransition,
+) -> f64 {
+    let (current, target, speed_m_s, dt_s, _, _) = transition;
+    target + (current - target) * (-speed_m_s * dt_s / relaxation_length_m).exp()
 }
 
 fn validate_tire_identification_runs(
@@ -5742,6 +6143,238 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error, TireIdentificationError::InsufficientExcitation);
+    }
+
+    fn tire_relaxation_identification_spec() -> TireRelaxationIdentificationSpec {
+        TireRelaxationIdentificationSpec {
+            relaxation_length_bounds_m: [0.10, 0.60],
+            minimum_transport_speed_m_s: 1.0,
+            minimum_slip_excitation: 0.01,
+            maximum_abs_slip: 1.0,
+            maximum_force_utilization: 0.95,
+            minimum_training_transitions: 40,
+            minimum_holdout_transitions: 80,
+            minimum_holdout_transitions_per_condition: 40,
+            grid_points: 11,
+            refinement_passes: 3,
+            maximum_training_rms_slip: 1.0e-12,
+            maximum_holdout_rms_slip: 1.0e-12,
+            maximum_worst_condition_rms_slip: 1.0e-12,
+        }
+    }
+
+    fn tire_relaxation_run(
+        tire: CombinedSlipTireSpec,
+        axis: TireRelaxationAxis,
+        relaxation_length_m: f64,
+        phase: usize,
+    ) -> Vec<TireRelaxationIdentificationSample> {
+        let targets = [0.15, -0.12, 0.08, -0.15];
+        let dt_s = 0.01;
+        let mut relaxed_slip = 0.0;
+        (0..240)
+            .map(|index| {
+                let target_slip = targets[((index / 30) + phase) % targets.len()];
+                let transport_speed_m_s = 4.0 + (index % 17) as f64 * 0.02;
+                let (longitudinal_slip, lateral_slip) = match axis {
+                    TireRelaxationAxis::Longitudinal => (relaxed_slip, 0.0),
+                    TireRelaxationAxis::Lateral => (0.0, relaxed_slip),
+                };
+                let forces =
+                    steady_tire_forces(tire, longitudinal_slip, lateral_slip, 1_000.0, 1.0);
+                let sample = TireRelaxationIdentificationSample {
+                    capture_time_s: index as f64 * dt_s,
+                    transport_speed_m_s,
+                    target_slip,
+                    normal_load_n: 1_000.0,
+                    road_friction_scale: 1.0,
+                    measured_force_n: match axis {
+                        TireRelaxationAxis::Longitudinal => forces.0,
+                        TireRelaxationAxis::Lateral => forces.1,
+                    },
+                };
+                relaxed_slip = relax_slip(
+                    relaxed_slip,
+                    target_slip,
+                    relaxation_length_m,
+                    transport_speed_m_s,
+                    dt_s,
+                );
+                sample
+            })
+            .collect()
+    }
+
+    #[test]
+    fn tire_relaxation_identification_recovers_length_and_holds_out_conditions() {
+        let tire = identified_tire_template();
+        let axis = TireRelaxationAxis::Longitudinal;
+        let training = tire_relaxation_run(tire, axis, 0.35, 0);
+        let holdout_a = tire_relaxation_run(tire, axis, 0.35, 1);
+        let holdout_b = tire_relaxation_run(tire, axis, 0.35, 2);
+        let identify = || {
+            identify_tire_relaxation_length(
+                tire_relaxation_identification_spec(),
+                tire,
+                axis,
+                &[TireRelaxationIdentificationRun {
+                    acquisition_id: 1,
+                    condition_id: 10,
+                    samples: &training,
+                }],
+                &[
+                    TireRelaxationIdentificationRun {
+                        acquisition_id: 2,
+                        condition_id: 20,
+                        samples: &holdout_a,
+                    },
+                    TireRelaxationIdentificationRun {
+                        acquisition_id: 3,
+                        condition_id: 30,
+                        samples: &holdout_b,
+                    },
+                ],
+            )
+            .unwrap()
+        };
+        let first = identify();
+        let second = identify();
+        assert_eq!(first, second);
+        assert!((first.relaxation_length_m - 0.35).abs() < 1.0e-12);
+        assert!(first.training_rms_slip < 1.0e-14);
+        assert!(first.holdout_rms_slip < 1.0e-14);
+        assert_eq!(first.condition_residuals.len(), 2);
+
+        let axis = TireRelaxationAxis::Lateral;
+        let lateral_training = tire_relaxation_run(tire, axis, 0.35, 0);
+        let lateral_holdout_a = tire_relaxation_run(tire, axis, 0.35, 1);
+        let lateral_holdout_b = tire_relaxation_run(tire, axis, 0.35, 2);
+        let lateral = identify_tire_relaxation_length(
+            tire_relaxation_identification_spec(),
+            tire,
+            axis,
+            &[TireRelaxationIdentificationRun {
+                acquisition_id: 11,
+                condition_id: 10,
+                samples: &lateral_training,
+            }],
+            &[
+                TireRelaxationIdentificationRun {
+                    acquisition_id: 12,
+                    condition_id: 20,
+                    samples: &lateral_holdout_a,
+                },
+                TireRelaxationIdentificationRun {
+                    acquisition_id: 13,
+                    condition_id: 30,
+                    samples: &lateral_holdout_b,
+                },
+            ],
+        )
+        .unwrap();
+        assert!((lateral.relaxation_length_m - 0.35).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn tire_relaxation_identification_rejects_overlap_clock_and_holdout_drift() {
+        let tire = identified_tire_template();
+        let axis = TireRelaxationAxis::Longitudinal;
+        let training = tire_relaxation_run(tire, axis, 0.35, 0);
+        let holdout_a = tire_relaxation_run(tire, axis, 0.35, 1);
+        let mut holdout_b = tire_relaxation_run(tire, axis, 0.35, 2);
+        let training_run = TireRelaxationIdentificationRun {
+            acquisition_id: 1,
+            condition_id: 10,
+            samples: &training,
+        };
+        assert_eq!(
+            identify_tire_relaxation_length(
+                tire_relaxation_identification_spec(),
+                tire,
+                axis,
+                &[training_run],
+                &[TireRelaxationIdentificationRun {
+                    acquisition_id: 1,
+                    condition_id: 20,
+                    samples: &holdout_a,
+                }],
+            ),
+            Err(TireRelaxationIdentificationError::DuplicateAcquisition)
+        );
+
+        let mut bad_clock = holdout_a.clone();
+        bad_clock[10].capture_time_s = bad_clock[9].capture_time_s;
+        assert_eq!(
+            identify_tire_relaxation_length(
+                tire_relaxation_identification_spec(),
+                tire,
+                axis,
+                &[training_run],
+                &[
+                    TireRelaxationIdentificationRun {
+                        acquisition_id: 2,
+                        condition_id: 20,
+                        samples: &bad_clock,
+                    },
+                    TireRelaxationIdentificationRun {
+                        acquisition_id: 3,
+                        condition_id: 30,
+                        samples: &holdout_b,
+                    },
+                ],
+            ),
+            Err(TireRelaxationIdentificationError::InvalidSample)
+        );
+
+        holdout_b[80].measured_force_n += 10.0;
+        assert_eq!(
+            identify_tire_relaxation_length(
+                tire_relaxation_identification_spec(),
+                tire,
+                axis,
+                &[training_run],
+                &[
+                    TireRelaxationIdentificationRun {
+                        acquisition_id: 2,
+                        condition_id: 20,
+                        samples: &holdout_a,
+                    },
+                    TireRelaxationIdentificationRun {
+                        acquisition_id: 3,
+                        condition_id: 30,
+                        samples: &holdout_b,
+                    },
+                ],
+            ),
+            Err(TireRelaxationIdentificationError::ResidualExceeded)
+        );
+
+        let mut saturated = holdout_a;
+        saturated[20].measured_force_n = 0.96
+            * tire.longitudinal_peak_friction
+            * saturated[20].normal_load_n
+            * saturated[20].road_friction_scale;
+        assert_eq!(
+            identify_tire_relaxation_length(
+                tire_relaxation_identification_spec(),
+                tire,
+                axis,
+                &[training_run],
+                &[
+                    TireRelaxationIdentificationRun {
+                        acquisition_id: 2,
+                        condition_id: 20,
+                        samples: &saturated,
+                    },
+                    TireRelaxationIdentificationRun {
+                        acquisition_id: 3,
+                        condition_id: 30,
+                        samples: &holdout_b,
+                    },
+                ],
+            ),
+            Err(TireRelaxationIdentificationError::InvalidSample)
+        );
     }
 
     #[test]
