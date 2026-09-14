@@ -258,6 +258,38 @@ All notable changes to Robot Native Engine are documented in this file.
   RRT-Connect plan when the CHOMP refinement is infeasible, and `StompPlanner`
   returns `NoPath` instead of a colliding trajectory.
 
+- Mark `rne_nav` and `rne_slam` `publish = false`. `#261`-`#266` added these
+  crates without declaring publish status, so cargo treated them as
+  publishable and `xtask release-check` failed its `publishable package set
+  differs` assertion against `PUBLIC_RELEASE_PACKAGES` on every PR (`linux`,
+  `windows`, `release_candidate`, `release_contract`). Registering them in
+  `PUBLIC_RELEASE_PACKAGES` instead would also require adding them to the
+  frozen `release/rust-api-baseline.toml` (the two lists are asserted to stay
+  the same length), and that file is immutable within release 0.2.0, so that
+  would force a `release_version` bump. Keeping the two crates out of the
+  published set is the minimal fix; promoting them to published crates is
+  deferred to a future release bump.
+
+- Mark `rne_planning` `publish = false` for the same reason as `rne_nav` and
+  `rne_slam` above. `#270` (native motion planning) added `rne_planning`
+  without declaring publish status while this PR was in flight, reintroducing
+  the same `publishable package set differs` failure the previous entry just
+  fixed.
+
+- Fix two broken `rustdoc` intra-doc links that `xtask release-check`'s
+  `cargo doc --workspace -D warnings` step had never reached before (it
+  aborted earlier on the `publish = false` issue above).
+  `crates/rne_robot/src/self_collision.rs` (`#261`) linked to a nonexistent
+  `SelfCollisionChecker::min_link_distance` field; `min_link_distance` is a
+  constructor parameter of `SelfCollisionChecker::from_robot_with_min_link_distance`,
+  which the link now points to. `crates/rne_slam/src/slam3d.rs` (`#265`) used
+  a redundant explicit link target for `IcpOdometry`, which is already in
+  scope via `use`; shortened to the plain `[`IcpOdometry`]` form used
+  elsewhere in the crate. A third link in `crates/rne_robot/src/kinematics.rs`
+  that this PR originally also fixed has since been rewritten by `#270`
+  (native motion planning) and is no longer broken on `main`, so that change
+  is dropped here.
+
 - Gate the SO101 end-effector link priority list (`gripper_link` /
   `wrist_link` / `forearm_link`) added for SO101 mobile-manipulator support so
   it only applies to SO101 robots. The ungated list unintentionally retargeted
