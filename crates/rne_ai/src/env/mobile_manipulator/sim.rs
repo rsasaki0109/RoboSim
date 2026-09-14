@@ -1852,11 +1852,24 @@ impl MobileManipulatorSim {
                 message: error.to_string(),
             })?;
 
-        let ee_link = ["gripper_link", "wrist_link", "forearm_link"]
-            .iter()
-            .filter_map(|name| links.get(*name).copied())
-            .next()
-            .expect("gripper_link/wrist_link/forearm_link missing from URDF robot");
+        // SO101 robots (detected the same way as the solver-iteration and
+        // finger_links branches above/below) expose their end effector as
+        // gripper_link, falling back to wrist_link if absent. Non-SO101
+        // robots keep the pre-SO101 resolution (forearm_link) unchanged, so
+        // e.g. mm_mobile_lift's forearm_link/wrist_link chain is unaffected
+        // by the SO101 priority list.
+        let ee_link = if so101 {
+            ["gripper_link", "wrist_link", "forearm_link"]
+                .iter()
+                .filter_map(|name| links.get(*name).copied())
+                .next()
+                .expect("gripper_link/wrist_link/forearm_link missing from URDF robot")
+        } else {
+            links
+                .get("forearm_link")
+                .copied()
+                .expect("forearm_link missing from URDF robot")
+        };
         let finger_links = if links.contains_key("left_finger_link") {
             ["left_finger_link", "right_finger_link"]
                 .iter()
