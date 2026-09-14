@@ -180,7 +180,11 @@ pub struct TireSignalEvidence {
 }
 
 impl TireSignalEvidence {
-    fn validate(&self) -> Result<()> {
+    /// Validates identity, unit/convention binding, rates, resolution, and calibration class.
+    ///
+    /// `pub(crate)` so sibling acquisition-manifest modules (for example the load-sweep
+    /// manifest) can reuse this exact five-channel signal contract instead of duplicating it.
+    pub(crate) fn validate(&self) -> Result<()> {
         ensure!(valid_id(&self.sensor_id), "invalid tire sensor identity");
         ensure!(self.unit == self.signal.unit(), "tire signal unit drift");
         ensure!(

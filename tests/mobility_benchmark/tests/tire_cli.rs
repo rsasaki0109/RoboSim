@@ -13,6 +13,12 @@ use rne_mobility_benchmark::tire_identification::{
     synthetic_tire_identification_dataset, TireDatasetSourceKind, TireIdentificationDataset,
     TireIdentificationEvidence,
 };
+use rne_mobility_benchmark::tire_load_sensitivity::synthetic_tire_load_sensitivity_dataset;
+use rne_mobility_benchmark::tire_load_sensitivity_acquisition::{
+    TireLoadSensitivityAcquisitionManifest, TireLoadSensitivityPhysicalQualificationEvidence,
+    TireLoadSensitivityRunAcquisitionEvidence, TIRE_LOAD_SENSITIVITY_ACQUISITION_MANIFEST_KIND,
+    TIRE_LOAD_SENSITIVITY_ACQUISITION_SCHEMA_VERSION,
+};
 use rne_mobility_benchmark::tire_relaxation::{TireRelaxationDataset, TireRelaxationEvidence};
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -248,6 +254,129 @@ fn tire_acquisition_cli_verifies_physical_bindings_and_external_files() {
         String::from_utf8_lossy(&result.stderr)
     );
     let verified: TirePhysicalQualificationEvidence =
+        serde_json::from_slice(&fs::read(output_path).unwrap()).unwrap();
+    assert!(verified.physical_measurement);
+    verified.validate(&dataset, &manifest, &root).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn tire_load_sensitivity_acquisition_cli_verifies_physical_bindings_and_external_files() {
+    let root = std::env::temp_dir().join(format!(
+        "rne-tire-load-sensitivity-acquisition-cli-{}",
+        std::process::id()
+    ));
+    fs::create_dir(&root).unwrap();
+    let mut dataset = synthetic_tire_load_sensitivity_dataset().unwrap();
+    dataset.steady_dataset.source_kind = TireDatasetSourceKind::RecordedBench;
+    dataset.steady_dataset.source_description =
+        "process test only; not real physical evidence".into();
+    dataset.steady_dataset.seal().unwrap();
+    dataset.steady_identification =
+        rne_mobility_benchmark::tire_identification::identify_tire_dataset(&dataset.steady_dataset)
+            .unwrap();
+    dataset.source_kind = TireDatasetSourceKind::RecordedBench;
+    dataset.source_description = "process test only; not real physical evidence".into();
+    dataset.seal().unwrap();
+    let raw = file_ref(&root, "load_capture.mcap", b"process-test raw load capture");
+    let road = file_ref(&root, "load_road.txt", b"process-test load road evidence");
+    let calibration = file_ref(
+        &root,
+        "load_calibration.txt",
+        b"process-test load calibration",
+    );
+    let procedure = file_ref(&root, "load_procedure.txt", b"process-test load procedure");
+    let signals = || {
+        [
+            TireSignalKind::LongitudinalSlipRatio,
+            TireSignalKind::LateralSlipTangent,
+            TireSignalKind::NormalLoad,
+            TireSignalKind::LongitudinalForce,
+            TireSignalKind::LateralForce,
+        ]
+        .into_iter()
+        .map(|signal| TireSignalEvidence {
+            signal,
+            sensor_id: format!("sensor.load.{signal:?}"),
+            unit: signal.unit().into(),
+            convention: signal.convention().into(),
+            origin: TireSignalOrigin::Measured,
+            source_sample_rate_hz: if signal == TireSignalKind::LateralSlipTangent {
+                400.0
+            } else {
+                100.0
+            },
+            converted_sample_rate_hz: 100.0,
+            resolution_si: 1.0e-6,
+            expanded_uncertainty_si: 1.0e-4,
+            calibration_kind: TireCalibrationKind::Iso17025,
+            calibration_artifact: calibration.clone(),
+        })
+        .collect()
+    };
+    let mut runs = dataset
+        .training_runs
+        .iter()
+        .chain(&dataset.holdout_runs)
+        .map(|run| TireLoadSensitivityRunAcquisitionEvidence {
+            acquisition_id: run.acquisition_id,
+            condition_id: run.condition_id,
+            road_friction_scale: run.road_friction_scale,
+            tire_id: "tire.load.test.serial_1".into(),
+            clock_kind: TireCaptureClockKind::SharedHardware,
+            all_channels_synchronized: true,
+            maximum_timestamp_uncertainty_s: 0.0001,
+            raw_capture_format: TireRawCaptureFormat::Mcap,
+            raw_capture: raw.clone(),
+            raw_segment_id: format!("load.segment.{}", run.acquisition_id),
+            road_friction_evidence_kind: RoadFrictionEvidenceKind::CalibratedBenchSurface,
+            road_friction_artifact: road.clone(),
+            signals: signals(),
+        })
+        .collect::<Vec<_>>();
+    runs.sort_by_key(|run| run.acquisition_id);
+    let mut manifest = TireLoadSensitivityAcquisitionManifest {
+        kind: TIRE_LOAD_SENSITIVITY_ACQUISITION_MANIFEST_KIND.into(),
+        schema_version: TIRE_LOAD_SENSITIVITY_ACQUISITION_SCHEMA_VERSION,
+        capture_id: "campaign.process.load.test".into(),
+        source_kind: TireDatasetSourceKind::RecordedBench,
+        dataset_content_sha256: dataset.content_sha256.clone(),
+        vehicle_id: "rig.process.load.test".into(),
+        data_logger_id: "logger.process.load.test".into(),
+        logger_software: "process test load logger 1.0".into(),
+        acquisition_procedure: procedure,
+        runs,
+        rne_commit: "0123456789abcdef0123456789abcdef01234567".into(),
+        content_sha256: String::new(),
+    };
+    manifest.seal().unwrap();
+    let dataset_path = root.join("load-dataset.json");
+    let manifest_path = root.join("load-manifest.json");
+    let output_path = root.join("load-verified.json");
+    fs::write(&dataset_path, serde_json::to_vec(&dataset).unwrap()).unwrap();
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+    let result = Command::new(env!("CARGO_BIN_EXE_rne-mobility-benchmark"))
+        .args([
+            "--backend",
+            "tire-load-sensitivity-acquisition-verify",
+            "--input",
+        ])
+        .arg(&dataset_path)
+        .arg("--acquisition-manifest")
+        .arg(&manifest_path)
+        .arg("--evidence-root")
+        .arg(&root)
+        .arg("--output")
+        .arg(&output_path)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let verified: TireLoadSensitivityPhysicalQualificationEvidence =
         serde_json::from_slice(&fs::read(output_path).unwrap()).unwrap();
     assert!(verified.physical_measurement);
     verified.validate(&dataset, &manifest, &root).unwrap();
