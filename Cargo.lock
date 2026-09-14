@@ -4288,6 +4288,7 @@ dependencies = [
  "rne_math",
  "rne_nav",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
