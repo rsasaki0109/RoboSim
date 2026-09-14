@@ -278,6 +278,19 @@ All notable changes to Robot Native Engine are documented in this file.
   changed, no existing export's kind/methods/properties changed, and the constructor extension is
   backward compatible (new keywords are appended with defaults).
 
+- Add the fourth physical acquisition manifest (load-sweep) and a four-manifest physical
+  qualification gate so identified tire profile schema v2 (steady + load sensitivity +
+  longitudinal relaxation + lateral relaxation) can be physically qualified and applied to
+  Rapier and MuJoCo through the same TaskSpec. The physical application request is now
+  versioned: schema v1 stays byte-compatible with every existing three-manifest profile-v1
+  request, and schema v2 additionally requires and streams the load-sweep acquisition manifest
+  bound to the profile's owned load-sensitivity dataset. Both versions re-hash every retained
+  raw, calibration, and road-friction file at qualification time; no serialized boolean or past
+  qualification result is trusted. The `tire-load-sensitivity-acquisition-verify` CLI backend
+  and a `--load-acquisition-manifest` argument to `physical-tire-request` are added; only
+  synthetic, explicitly labeled test fixtures exercise this path today, so no genuine physical
+  load-sweep capture is qualified yet.
+
 - Add a typed CLI construction path for physical tire application requests. It binds an exact
   identified profile to the steady, longitudinal-relaxation, and lateral-relaxation manifests,
   validates their identities, and computes the request digest without manual hash transcription.

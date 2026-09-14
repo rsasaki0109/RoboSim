@@ -21,6 +21,7 @@ use rne_mobility_benchmark::per_wheel_observed::{
     run_per_wheel_observed_failure_capsule, run_per_wheel_observed_trace, PerWheelObservedFault,
 };
 use rne_mobility_benchmark::physical_tire_application::{
+    build_load_sensitive_physical_tire_application_request,
     build_physical_tire_application_request, decode_physical_tire_application_request,
     qualify_physical_tire_profile, PhysicalTireApplicationRequest,
     MAX_PHYSICAL_TIRE_APPLICATION_REQUEST_BYTES,
@@ -45,6 +46,10 @@ use rne_mobility_benchmark::tire_load_sensitivity::{
     decode_tire_load_sensitivity_dataset, identify_tire_load_sensitivity_dataset,
     synthetic_tire_load_sensitivity_dataset, MAX_TIRE_LOAD_SENSITIVITY_DATASET_BYTES,
 };
+use rne_mobility_benchmark::tire_load_sensitivity_acquisition::{
+    decode_tire_load_sensitivity_acquisition_manifest, qualify_tire_load_sensitivity_dataset,
+    MAX_TIRE_LOAD_SENSITIVITY_ACQUISITION_MANIFEST_BYTES,
+};
 use rne_mobility_benchmark::tire_relaxation::{
     decode_tire_relaxation_acquisition_manifest, decode_tire_relaxation_dataset,
     identify_tire_relaxation_dataset, qualify_tire_relaxation_dataset,
@@ -65,6 +70,7 @@ fn main() -> Result<()> {
     let mut interval_tolerance_s = None;
     let mut acquisition_manifest = None;
     let mut steady_acquisition_manifest = None;
+    let mut load_acquisition_manifest = None;
     let mut longitudinal_acquisition_manifest = None;
     let mut lateral_acquisition_manifest = None;
     let mut evidence_root = None;
@@ -124,6 +130,16 @@ fn main() -> Result<()> {
                 steady_acquisition_manifest = Some(PathBuf::from(
                     args.next()
                         .context("--steady-acquisition-manifest requires a path")?,
+                ));
+            }
+            "--load-acquisition-manifest" => {
+                ensure!(
+                    load_acquisition_manifest.is_none(),
+                    "duplicate --load-acquisition-manifest"
+                );
+                load_acquisition_manifest = Some(PathBuf::from(
+                    args.next()
+                        .context("--load-acquisition-manifest requires a path")?,
                 ));
             }
             "--longitudinal-acquisition-manifest" => {
@@ -209,6 +225,7 @@ fn main() -> Result<()> {
                 && fault.is_none()
                 && acquisition_manifest.is_none()
                 && steady_acquisition_manifest.is_none()
+                && load_acquisition_manifest.is_none()
                 && longitudinal_acquisition_manifest.is_none()
                 && lateral_acquisition_manifest.is_none()
                 && evidence_root.is_none()
@@ -246,6 +263,7 @@ fn main() -> Result<()> {
                 && fault.is_none()
                 && acquisition_manifest.is_none()
                 && steady_acquisition_manifest.is_none()
+                && load_acquisition_manifest.is_none()
                 && longitudinal_acquisition_manifest.is_none()
                 && lateral_acquisition_manifest.is_none()
                 && evidence_root.is_none()
@@ -898,12 +916,32 @@ fn main() -> Result<()> {
                 &lateral_bytes,
                 &profile.lateral_dataset,
             )?;
-            let request = build_physical_tire_application_request(
-                profile,
-                steady_acquisition,
-                longitudinal_acquisition,
-                lateral_acquisition,
-            )?;
+            let request = if let Some(load_path) = load_acquisition_manifest.as_deref() {
+                let load_dataset = profile.load_sensitivity_dataset.as_ref().context(
+                    "--load-acquisition-manifest requires a load-sensitive profile v2 input",
+                )?;
+                let load_bytes = read_bounded_regular_file(
+                    load_path,
+                    MAX_TIRE_LOAD_SENSITIVITY_ACQUISITION_MANIFEST_BYTES,
+                    "load-sensitivity tire acquisition manifest",
+                )?;
+                let load_acquisition =
+                    decode_tire_load_sensitivity_acquisition_manifest(&load_bytes, load_dataset)?;
+                build_load_sensitive_physical_tire_application_request(
+                    profile,
+                    steady_acquisition,
+                    load_acquisition,
+                    longitudinal_acquisition,
+                    lateral_acquisition,
+                )?
+            } else {
+                build_physical_tire_application_request(
+                    profile,
+                    steady_acquisition,
+                    longitudinal_acquisition,
+                    lateral_acquisition,
+                )?
+            };
             (
                 serde_json::to_string_pretty(&request)? + "\n",
                 "physical-tire-application-request",
@@ -1031,6 +1069,30 @@ fn main() -> Result<()> {
                 "tire-relaxation-acquisition-verified",
             )
         }
+        "tire-load-sensitivity-acquisition-verify" => {
+            let input = input
+                .as_deref()
+                .context("--backend tire-load-sensitivity-acquisition-verify requires --input")?;
+            let manifest_path = acquisition_manifest.as_deref().context(
+                "--backend tire-load-sensitivity-acquisition-verify requires --acquisition-manifest",
+            )?;
+            let evidence_root = evidence_root.as_deref().context(
+                "--backend tire-load-sensitivity-acquisition-verify requires --evidence-root",
+            )?;
+            let dataset = read_tire_load_sensitivity_dataset(input)?;
+            let bytes = read_bounded_regular_file(
+                manifest_path,
+                MAX_TIRE_LOAD_SENSITIVITY_ACQUISITION_MANIFEST_BYTES,
+                "tire load-sensitivity acquisition manifest",
+            )?;
+            let manifest = decode_tire_load_sensitivity_acquisition_manifest(&bytes, &dataset)?;
+            let qualification =
+                qualify_tire_load_sensitivity_dataset(&dataset, &manifest, evidence_root)?;
+            (
+                serde_json::to_string_pretty(&qualification)? + "\n",
+                "tire-load-sensitivity-acquisition-verified",
+            )
+        }
         "mobility-randomized-batch" => {
             let report = run_mobility_randomized_batch(
                 root_seed.context("--backend mobility-randomized-batch requires --seed")?,
@@ -1095,6 +1157,7 @@ fn main() -> Result<()> {
                 | "tire-relaxation-identification"
                 | "tire-load-sensitivity-identification"
                 | "tire-relaxation-acquisition-verify"
+                | "tire-load-sensitivity-acquisition-verify"
                 | "identified-tire-rapier"
                 | "identified-tire-compare"
                 | "physical-tire-request"
@@ -1133,12 +1196,14 @@ fn main() -> Result<()> {
             "suspension-acquisition-verify"
                 | "tire-acquisition-verify"
                 | "tire-relaxation-acquisition-verify"
+                | "tire-load-sensitivity-acquisition-verify"
         ) || acquisition_manifest.is_none(),
         "--acquisition-manifest requires an acquisition verification backend"
     );
     ensure!(
         backend == "physical-tire-request"
             || (steady_acquisition_manifest.is_none()
+                && load_acquisition_manifest.is_none()
                 && longitudinal_acquisition_manifest.is_none()
                 && lateral_acquisition_manifest.is_none()),
         "axis-specific acquisition manifests require --backend physical-tire-request"
@@ -1149,6 +1214,7 @@ fn main() -> Result<()> {
             "suspension-acquisition-verify"
                 | "tire-acquisition-verify"
                 | "tire-relaxation-acquisition-verify"
+                | "tire-load-sensitivity-acquisition-verify"
                 | "physical-tire-qualify"
                 | "physical-tire-compare"
                 | "suspension-acquired"

@@ -451,10 +451,14 @@ and cross-backend results.
     pure-axis steady force law below a bounded utilization ceiling, then fits the runtime's
     exact speed/distance first-order update using training acquisitions only and applies pooled
     and worst-condition holdout gates. Owned transient artifacts, axis-aware physical manifests,
-    a three-manifest qualification request, and shared Rapier/MuJoCo profile application now
-    exist. No genuine capture is qualified. The legacy three-manifest request rejects profile v2
-    fail-closed; physical load-sweep binding and a four-manifest profile qualification chain
-    remain open.
+    a versioned qualification request, and shared Rapier/MuJoCo profile application now exist.
+    No genuine capture is qualified. The physical application request is versioned to match the
+    profile it carries: schema v1 stays exactly the legacy three-manifest request (steady,
+    longitudinal, lateral) and remains byte-compatible with every existing profile-v1 request;
+    schema v2 adds a fourth `rne_mobility_tire_load_sensitivity_acquisition_manifest`, reusing
+    the steady manifest's five-channel signal contract, and is required whenever the profile is
+    load-sensitive v2. Both versions fail closed on any manifest/profile/schema mismatch, and
+    qualification always rehashes every retained file rather than trusting a previous result.
     Ackermann wheel/steering/IMU fatal faults now emit deterministic,
     cross-backend, status- and digest-bound Failure Capsules.
 16. M4/M5: in progress. The first M4 subgate now provides width-independent seeded
