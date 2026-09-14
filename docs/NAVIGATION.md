@@ -34,6 +34,9 @@ path planning and scan matching; those arrive in later phases.
 | `VoxelLayer` | Sparse 3D obstacle voxels from depth/3D LiDAR projected onto the costmap |
 | `KeepoutZone` / `SpeedFilter` | Lethal keepout regions and slow zones |
 | `TrafficCoordinator` | Reservation-based multi-robot cell leasing and deadlock resolution |
+| `save_map` / `load_map` | Versioned `.rne.map` occupancy-map serialization |
+| `ObstacleTracker` | Constant-velocity tracking of moving obstacles |
+| `select_predictive_command` | Collision-free command selection against predicted obstacle motion |
 | `NavMap` / `PendingScans` / `TfTree` | ECS resources |
 | `integrate_pending_scans` | ECS system that drains the scan queue and refreshes the costmap |
 | `NavGoal` | Planar goal component for future planners |
@@ -206,6 +209,24 @@ coords, now)` grants a lease for `TrafficConfig::claim_horizon_s` only when no
 other robot holds an unexpired claim; `expire`/`release` free leases. When two
 robots wait on each other, `resolve_deadlock(waiting, now)` grants the
 highest-priority (lowest-id) robot and evicts only lower-priority blockers.
+
+## Map serialization
+
+`to_map_json` / `save_map` write an occupancy grid as versioned `.rne.map` JSON
+(`RNE_MAP_FORMAT`, `RNE_MAP_VERSION`) carrying the dimensions, resolution,
+origin, and the fixed-point log-odds array; `from_map_json` / `load_map` validate
+the format tag and version before restoring the grid bit-for-bit with
+`OccupancyGrid::from_log_odds`. Unknown formats and versions are rejected.
+
+## Dynamic obstacles
+
+`ObstacleTracker` associates detections to constant-velocity tracks with a
+distance gate and a smoothing gain, adding new tracks for unmatched detections
+and dropping tracks after `max_missed`. `predictive_collision` rolls a candidate
+command forward against the predicted obstacle motion, and
+`select_predictive_command` returns the collision-free candidate that makes the
+most progress toward the goal. Association is greedy and index-ordered, so a
+detection stream replays deterministically.
 
 ## Determinism
 

@@ -25,10 +25,12 @@ pub mod coordination;
 pub mod costmap;
 pub mod drive;
 pub mod dwa;
+pub mod dynamic;
 pub mod elevation;
 pub mod fusion;
 pub mod grid;
 pub mod layers;
+pub mod map_io;
 pub mod navsat;
 pub mod path;
 pub mod planner;
@@ -55,12 +57,19 @@ pub use drive::{
     DriveLimits, DriveOutput, MecanumDrive, MobileBase, WheelSpeeds,
 };
 pub use dwa::{DwaConfig, DwaError, DwaOutcome, DwaPlanner};
+pub use dynamic::{
+    predictive_collision, select_predictive_command, Detection, DynamicError, ObstacleTracker,
+    ObstacleTrackerConfig, PredictiveConfig, Track,
+};
 pub use elevation::{ElevationCell, ElevationConfig, ElevationMap, ElevationReport};
 pub use fusion::{
     map_from_odom, wrap_angle, EkfConfig, EkfFusion, FusionError, PoseWithCovariance2d,
 };
 pub use grid::{GridCoord, GridError, OccupancyGrid};
 pub use layers::{KeepoutZone, SpeedFilter, SpeedLimitZone, VoxelConfig, VoxelLayer};
+pub use map_io::{
+    from_map_json, load_map, save_map, to_map_json, MapIoError, RNE_MAP_FORMAT, RNE_MAP_VERSION,
+};
 pub use navsat::{NavSatError, NavSatTransform, EARTH_RADIUS_M};
 pub use path::{ClosestPoint, Path2d, PathError};
 pub use planner::{plan_path, GlobalPlannerConfig, PlanError};

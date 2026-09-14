@@ -16,6 +16,7 @@ pub mod likelihood;
 pub mod localization;
 pub mod odometry3d;
 pub mod pose_graph;
+pub mod relocalize;
 pub mod resources;
 pub mod scan_match;
 pub mod slam;
@@ -27,6 +28,9 @@ pub use likelihood::{LikelihoodConfig, LikelihoodField};
 pub use localization::{Amcl, AmclConfig, AmclUpdate, Particle};
 pub use odometry3d::{voxel_downsample, IcpOdometry, IcpOdometryConfig, IcpOdometryUpdate};
 pub use pose_graph::{PoseGraph, PoseGraphEdge, PoseGraphError};
+pub use relocalize::{
+    GlobalRelocalizer, RelocalizationConfig, RelocalizationError, RelocalizationResult,
+};
 pub use resources::{PendingSlamScans, SlamScanInput, SlamState};
 pub use scan_match::{scan_points_2d, ScanMatchConfig, ScanMatchResult, ScanMatcher};
 pub use slam::{closure_consistent, Slam2d, SlamConfig, SlamUpdate};
