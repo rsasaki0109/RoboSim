@@ -1613,6 +1613,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "go2_hop"
+version = "0.2.0"
+dependencies = [
+ "glam",
+ "rne_ai",
+ "rne_ecs",
+ "rne_math",
+ "rne_physics",
+ "rne_robot",
+]
+
+[[package]]
 name = "go2_jump"
 version = "0.2.0"
 dependencies = [
