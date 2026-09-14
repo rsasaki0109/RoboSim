@@ -403,6 +403,12 @@ cargo run -p legged_pattern --example 104_legged_pattern
 
 See [legged walking templates](docs/architecture/013_legged_templates.md).
 
+The same crate adds a classical **centroidal layer** for dynamic maneuvers: a
+single-rigid-body contact-force distribution with a Coulomb friction cone,
+Raibert foot placement, and a minimal-jerk swing trajectory, following the
+open-source `cajun` and `go2-convex-mpc` centroidal controllers. This is the
+reduced-order abstraction a push-off / flight / landing controller needs.
+
 ### Native whole-body control
 
 `rne_wbc` realizes task-space objectives as joint torques on a floating-base

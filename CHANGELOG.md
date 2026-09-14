@@ -6,6 +6,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- `rne_legged::centroidal`: the classical centroidal layer for dynamic maneuvers.
+  It provides a single-rigid-body model and state, a weighted least-squares
+  `distribute_contact_forces` that matches a desired net wrench and projects each
+  contact into its Coulomb friction cone, `raibert_foot_placement`, a
+  minimal-jerk `SwingTrajectory` with apex, and ballistic flight helpers. The
+  formulation follows the open-source centroidal controllers in `yxyang/cajun`
+  and `go2-convex-mpc`.
+
 - `rne_wbc`: a backend-neutral whole-body controller. It solves a weighted
   inverse-dynamics problem over joint accelerations and contact wrenches with
   the floating-base equations of motion and contact no-slip rows, an optional
