@@ -219,6 +219,18 @@ All notable changes to Robot Native Engine are documented in this file.
   RRT-Connect plan when the CHOMP refinement is infeasible, and `StompPlanner`
   returns `NoPath` instead of a colliding trajectory.
 
+- Mark `rne_nav` and `rne_slam` `publish = false`. `#261`-`#266` added these
+  crates without declaring publish status, so cargo treated them as
+  publishable and `xtask release-check` failed its `publishable package set
+  differs` assertion against `PUBLIC_RELEASE_PACKAGES` on every PR (`linux`,
+  `windows`, `release_candidate`, `release_contract`). Registering them in
+  `PUBLIC_RELEASE_PACKAGES` instead would also require adding them to the
+  frozen `release/rust-api-baseline.toml` (the two lists are asserted to stay
+  the same length), and that file is immutable within release 0.2.0, so that
+  would force a `release_version` bump. Keeping the two crates out of the
+  published set is the minimal fix; promoting them to published crates is
+  deferred to a future release bump.
+
 - Gate the SO101 end-effector link priority list (`gripper_link` /
   `wrist_link` / `forearm_link`) added for SO101 mobile-manipulator support so
   it only applies to SO101 robots. The ungated list unintentionally retargeted
