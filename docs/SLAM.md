@@ -95,6 +95,18 @@ eigenvalue has a larger magnitude. `IcpResult` reports the transform, iteration
 and correspondence counts, convergence, and the mean residual. This is the 3D
 front-end used with the `rne_nav` elevation map for LiDAR/point-cloud mapping.
 
+## 3D ICP odometry
+
+`IcpOdometry` is the 3D LiDAR front-end. It keeps a voxel-downsampled map cloud
+and estimates the sensor pose by aligning each new scan to it, using the
+odometry delta as the motion prediction: the predicted world points are aligned
+to the map with `Icp3d`, the resulting correction is composed onto the
+prediction, and the scan is integrated at the corrected pose. `voxel_downsample`
+collapses points to one centroid per voxel in deterministic (`BTreeMap`) order.
+`IcpOdometryUpdate` reports the corrected pose, correspondence count, residual,
+convergence, and whether ICP was applied. Feed the corrected pose into
+`rne_nav::ElevationMap` for 3D/outdoor mapping.
+
 ## ECS glue
 - `SlamState` wraps a `Slam2d` estimator as a resource.
 - `PendingSlamScans` queues `(scan, odom_pose, sensor_from_base)`.

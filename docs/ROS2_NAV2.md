@@ -76,6 +76,21 @@ navigation actions run a **spin recovery** (mirroring the Rust
 checks every server, then sends `NavigateToPose`, `ComputePathToPose`, `Spin`,
 and `BackUp` goals and confirms each succeeds.
 
+## ros2_control boundary
+
+The bridge also exposes a `ros2_control`-style interface:
+
+- `/dynamic_joint_states` (`control_msgs/msg/DynamicJointState`) publishes each
+  wheel's `position`, `velocity`, and `effort`.
+- `/joint_trajectory_controller/follow_joint_trajectory`
+  (`control_msgs/action/FollowJointTrajectory`) samples the goal's wheel
+  positions/velocities, maps them through the differential-drive geometry, and
+  drives the base, streaming `desired`/`actual`/`error` feedback.
+
+The Rust-side mapping that mirrors this is `rne_robot::DiffDriveWheelController`
+plus `JointTrajectory` interpolation. `nav2_action_smoke.sh` sends a wheel
+trajectory goal and checks it succeeds.
+
 ## Frames and QoS
 
 - `/tf` publishes `map → odom → base_footprint → base_link → lidar` with yaw

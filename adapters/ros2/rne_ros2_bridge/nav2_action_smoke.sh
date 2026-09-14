@@ -80,4 +80,13 @@ backup_output="$(timeout 30 ros2 action send_goal /backup nav2_msgs/action/BackU
   "{target: {x: 0.2}, speed: 0.2, time_allowance: {sec: 5}}")"
 [[ "$backup_output" == *"SUCCEEDED"* ]]
 
+echo "Checking the ros2_control boundary..."
+[[ "$(timeout 20 ros2 action list)" == *"/joint_trajectory_controller/follow_joint_trajectory"* ]]
+[[ "$(timeout 20 ros2 topic list)" == *"/dynamic_joint_states"* ]]
+jtraj_output="$(timeout 30 ros2 action send_goal \
+  /joint_trajectory_controller/follow_joint_trajectory \
+  control_msgs/action/FollowJointTrajectory \
+  "{trajectory: {joint_names: ['left_wheel_joint', 'right_wheel_joint'], points: [{positions: [1.0, 1.0], velocities: [3.0, 3.0], time_from_start: {sec: 0}}, {positions: [2.0, 2.0], velocities: [3.0, 3.0], time_from_start: {sec: 0, nanosec: 300000000}}]}}")"
+[[ "$jtraj_output" == *"SUCCEEDED"* ]]
+
 echo "Nav2 NavigateToPose action smoke passed"

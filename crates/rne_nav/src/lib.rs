@@ -21,12 +21,14 @@ pub mod avoidance;
 pub mod behavior_tree;
 pub mod components;
 pub mod control;
+pub mod coordination;
 pub mod costmap;
 pub mod drive;
 pub mod dwa;
 pub mod elevation;
 pub mod fusion;
 pub mod grid;
+pub mod layers;
 pub mod navsat;
 pub mod path;
 pub mod planner;
@@ -44,6 +46,7 @@ pub use avoidance::{avoid_velocities, rollout_collides, AvoidanceConfig, Circula
 pub use behavior_tree::{Action, BtContext, BtNode, BtStatus, Condition, Selector, Sequence};
 pub use components::NavGoal;
 pub use control::{pure_pursuit_follow, FollowResult, PurePursuitConfig, VelocityCommand2d};
+pub use coordination::{TrafficConfig, TrafficCoordinator, TrafficError};
 pub use costmap::{
     Costmap, CostmapConfig, COST_FREE, COST_INSCRIBED, COST_LETHAL, COST_NO_INFORMATION,
 };
@@ -57,6 +60,7 @@ pub use fusion::{
     map_from_odom, wrap_angle, EkfConfig, EkfFusion, FusionError, PoseWithCovariance2d,
 };
 pub use grid::{GridCoord, GridError, OccupancyGrid};
+pub use layers::{KeepoutZone, SpeedFilter, SpeedLimitZone, VoxelConfig, VoxelLayer};
 pub use navsat::{NavSatError, NavSatTransform, EARTH_RADIUS_M};
 pub use path::{ClosestPoint, Path2d, PathError};
 pub use planner::{plan_path, GlobalPlannerConfig, PlanError};

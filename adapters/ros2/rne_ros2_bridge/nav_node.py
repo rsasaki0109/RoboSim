@@ -35,6 +35,7 @@ import os
 import time
 
 import rclpy
+from builtin_interfaces.msg import Time
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from rclpy.lifecycle import LifecycleNode, TransitionCallbackReturn
@@ -59,6 +60,15 @@ try:
 except ImportError:  # pragma: no cover - nav2_msgs is optional
     HAS_ACTION = False
 
+try:
+    from control_msgs.action import FollowJointTrajectory
+    from control_msgs.msg import DynamicJointState, InterfaceValue
+    from trajectory_msgs.msg import JointTrajectoryPoint
+
+    HAS_CONTROL = True
+except ImportError:  # pragma: no cover - control_msgs is optional
+    HAS_CONTROL = False
+
 from ros_convert import (
     command_from_twist,
     make_clock_message,
@@ -69,6 +79,7 @@ from ros_convert import (
     make_path,
     make_transform_stamped,
     make_tf_message,
+    sim_ticks_to_ros_time,
 )
 
 BEAM_COUNT = 360
@@ -107,6 +118,8 @@ class RneNavBridge(LifecycleNode):
         self.right_angle_rad = 0.0
         self.wheel_radius_m = 0.05
         self.track_width_m = 0.3
+        self.left_joint = "left_wheel_joint"
+        self.right_joint = "right_wheel_joint"
         self.sim_ticks = 0
         self.dt_s = float(self.get_parameter("publish_period_s").value)
         self.range_max_m = float(self.get_parameter("range_max_m").value)
@@ -149,6 +162,22 @@ class RneNavBridge(LifecycleNode):
             self.get_logger().info("Nav2 action servers ready")
         else:
             self.get_logger().warn("nav2_msgs unavailable; action servers disabled")
+        self.dynamic_joint_pub = None
+        self.joint_trajectory_server = None
+        if HAS_CONTROL:
+            self.dynamic_joint_pub = self.create_publisher(
+                DynamicJointState, "/dynamic_joint_states", 10
+            )
+            if HAS_ACTION:
+                self.joint_trajectory_server = ActionServer(
+                    self,
+                    FollowJointTrajectory,
+                    "joint_trajectory_controller/follow_joint_trajectory",
+                    execute_callback=self.execute_follow_joint_trajectory,
+                    goal_callback=self.handle_goal,
+                    cancel_callback=self.handle_cancel,
+                )
+            self.get_logger().info("ros2_control joint trajectory boundary ready")
         self.create_timer(self.dt_s, self.tick)
         self.get_logger().info("RNE nav bridge ready; publish /cmd_vel to drive")
 
@@ -256,6 +285,19 @@ class RneNavBridge(LifecycleNode):
                 ticks,
             )
         )
+        if self.dynamic_joint_pub is not None:
+            dynamic = DynamicJointState()
+            dynamic.header.stamp = self._time_message(ticks)
+            dynamic.joint_names = ["left_wheel_joint", "right_wheel_joint"]
+            for position, velocity in (
+                (self.left_angle_rad, left_rate),
+                (self.right_angle_rad, right_rate),
+            ):
+                interface = InterfaceValue()
+                interface.interface_names = ["position", "velocity", "effort"]
+                interface.values = [position, velocity, 0.0]
+                dynamic.interface_values.append(interface)
+            self.dynamic_joint_pub.publish(dynamic)
 
     def handle_goal(self, goal_request: object) -> object:
         """Accepts every NavigateToPose goal."""
@@ -545,6 +587,128 @@ class RneNavBridge(LifecycleNode):
                 self.get_logger().warn(f"load_map failed: {error}")
         response.result = 1
         return response
+
+    @staticmethod
+    def _time_message(ticks: int) -> Time:
+        """Builds a `builtin_interfaces/Time` from simulation ticks."""
+        stamp = Time()
+        stamp.sec, stamp.nanosec = sim_ticks_to_ros_time(ticks)
+        return stamp
+
+    @staticmethod
+    def _component(values: object, index: int) -> float:
+        """Reads a joint component, defaulting to zero when absent."""
+        return float(values[index]) if index < len(values) else 0.0
+
+    def _sample_wheel(self, points: list, times: list, joint_index: int, time_s: float):
+        """Samples one joint's (position, velocity) from a trajectory."""
+        if time_s <= times[0]:
+            point = points[0]
+            return (
+                self._component(point.positions, joint_index),
+                self._component(point.velocities, joint_index),
+            )
+        if time_s >= times[-1]:
+            point = points[-1]
+            return (
+                self._component(point.positions, joint_index),
+                self._component(point.velocities, joint_index),
+            )
+        for start, end, t0, t1 in zip(points, points[1:], times, times[1:]):
+            if time_s <= t1:
+                fraction = (time_s - t0) / max(t1 - t0, 1.0e-9)
+                position = self._component(start.positions, joint_index) + (
+                    self._component(end.positions, joint_index)
+                    - self._component(start.positions, joint_index)
+                ) * fraction
+                velocity = self._component(start.velocities, joint_index) + (
+                    self._component(end.velocities, joint_index)
+                    - self._component(start.velocities, joint_index)
+                ) * fraction
+                return position, velocity
+        point = points[-1]
+        return (
+            self._component(point.positions, joint_index),
+            self._component(point.velocities, joint_index),
+        )
+
+    def execute_follow_joint_trajectory(self, goal_handle: object) -> object:
+        """Drives the wheels along a `joint_trajectory_controller` goal."""
+        trajectory = goal_handle.request.trajectory
+        names = list(trajectory.joint_names)
+        result = FollowJointTrajectory.Result()
+        if self.left_joint not in names or self.right_joint not in names:
+            result.error_code = -2
+            result.error_string = "trajectory does not command both wheel joints"
+            goal_handle.abort()
+            return result
+        left_index = names.index(self.left_joint)
+        right_index = names.index(self.right_joint)
+        points = list(trajectory.points)
+        if not points:
+            result.error_code = -1
+            result.error_string = "empty trajectory"
+            goal_handle.abort()
+            return result
+
+        times = [
+            point.time_from_start.sec + point.time_from_start.nanosec * 1.0e-9
+            for point in points
+        ]
+        total_s = times[-1]
+        feedback = FollowJointTrajectory.Feedback()
+        feedback.joint_names = [self.left_joint, self.right_joint]
+        self.goal_active = True
+        elapsed_s = 0.0
+        try:
+            while rclpy.ok():
+                if goal_handle.is_cancel_requested:
+                    self.step_base(0.0, 0.0)
+                    goal_handle.canceled()
+                    result.error_code = -1
+                    result.error_string = "canceled"
+                    return result
+                left_pos, left_vel = self._sample_wheel(
+                    points, times, left_index, elapsed_s
+                )
+                right_pos, right_vel = self._sample_wheel(
+                    points, times, right_index, elapsed_s
+                )
+                linear = self.wheel_radius_m * 0.5 * (left_vel + right_vel)
+                angular = (
+                    self.wheel_radius_m * (right_vel - left_vel) / self.track_width_m
+                )
+                self.step_base(linear, angular)
+
+                desired = JointTrajectoryPoint()
+                desired.positions = [left_pos, right_pos]
+                desired.velocities = [left_vel, right_vel]
+                actual = JointTrajectoryPoint()
+                actual.positions = [self.left_angle_rad, self.right_angle_rad]
+                actual.velocities = [left_vel, right_vel]
+                error = JointTrajectoryPoint()
+                error.positions = [
+                    self.left_angle_rad - left_pos,
+                    self.right_angle_rad - right_pos,
+                ]
+                feedback.desired = desired
+                feedback.actual = actual
+                feedback.error = error
+                feedback.header.stamp = self._time_message(self.sim_ticks)
+                goal_handle.publish_feedback(feedback)
+
+                if elapsed_s >= total_s:
+                    self.step_base(0.0, 0.0)
+                    break
+                elapsed_s += self.dt_s
+                time.sleep(self.dt_s)
+        finally:
+            self.goal_active = False
+        result.error_code = 0
+        result.error_string = ""
+        goal_handle.succeed()
+        self.get_logger().info(f"joint trajectory complete; {total_s:.2f} s")
+        return result
 
     @staticmethod
     def _beam_angles() -> list[float]:
