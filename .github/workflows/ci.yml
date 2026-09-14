@@ -158,9 +158,9 @@ jobs:
       fail-fast: false
       matrix:
         packages:
-          - "-p rne_ai"
-          - "-p rne_py"
-          - "-p rne_assets -p rne_plateau"
+          - "-p rne_ai -p rne_nav"
+          - "-p rne_py -p rne_planning"
+          - "-p rne_assets -p rne_plateau -p rne_slam"
           - "-p rne_render_wgpu -p rne_sensor -p rne_physics_rapier -p rne_urdf_import"
           - "-p rne_data -p rne_log -p rne_plugin -p rne_openscenario -p rne_traffic -p rne_traci -p rne_sumo"
           - "-p rne_core -p rne_ecs -p rne_world -p rne_robot -p rne_physics -p rne_physics_analytic -p rne_deformable"

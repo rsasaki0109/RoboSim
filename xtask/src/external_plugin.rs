@@ -521,7 +521,7 @@ mod tests {
             release: ReleaseIdentity {
                 tag: format!("v{RELEASE_VERSION}"),
                 target: "x86_64-pc-windows-msvc".to_string(),
-                archive: artifact("rne-0.2.0-x86_64-pc-windows-msvc.zip", b"archive"),
+                archive: artifact("rne-0.3.0-x86_64-pc-windows-msvc.zip", b"archive"),
             },
             platform: Platform {
                 operating_system: "windows".to_string(),
@@ -612,7 +612,7 @@ mod tests {
         fs::create_dir_all(evidence_repo.join("logs")).unwrap();
         fs::create_dir_all(&downloads).unwrap();
 
-        let release_archive = downloads.join("rne-0.2.0-x86_64-pc-windows-msvc.zip");
+        let release_archive = downloads.join("rne-0.3.0-x86_64-pc-windows-msvc.zip");
         let library = downloads.join("external_controller.dll");
         let manifest = downloads.join("rne-plugin.json");
         let conformance = downloads.join("controller-conformance.json");
@@ -659,7 +659,7 @@ mod tests {
         submission.evidence_repository.url =
             "https://github.com/external-owner/controller".to_string();
         submission.release.archive = artifact(
-            "rne-0.2.0-x86_64-pc-windows-msvc.zip",
+            "rne-0.3.0-x86_64-pc-windows-msvc.zip",
             &fs::read(&release_archive).unwrap(),
         );
         submission.artifacts.library =

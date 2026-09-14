@@ -4,17 +4,17 @@ Robot Native Engine release bundles are native, self-contained rehearsal
 artifacts for Linux x86-64 and Windows x86-64. Select the archive whose target
 matches the host:
 
-- `rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz`
-- `rne-0.2.0-x86_64-pc-windows-msvc.zip`
+- `rne-0.3.0-x86_64-unknown-linux-gnu.tar.gz`
+- `rne-0.3.0-x86_64-pc-windows-msvc.zip`
 
 Extract the archive without flattening its top-level directory. Before running
 anything, first verify that the archive itself has GitHub/Sigstore provenance
 bound to this repository, then verify every extracted entry in `SHA256SUMS`:
 
 ```bash
-gh release download v0.2.0 -R rsasaki0109/RoboSim \
+gh release download v0.3.0 -R rsasaki0109/RoboSim \
   --pattern SHA256SUMS \
-  --pattern 'rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz'
+  --pattern 'rne-0.3.0-x86_64-unknown-linux-gnu.tar.gz'
 sha256sum --ignore-missing --check SHA256SUMS
 ```
 
@@ -24,20 +24,20 @@ manifest checks downloaded asset identity before extraction; the separate
 `SHA256SUMS` inside the archive checks every extracted member.
 
 ```bash
-REVISION="$(gh api repos/rsasaki0109/RoboSim/commits/v0.2.0 --jq .sha)"
-gh attestation verify rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz \
+REVISION="$(gh api repos/rsasaki0109/RoboSim/commits/v0.3.0 --jq .sha)"
+gh attestation verify rne-0.3.0-x86_64-unknown-linux-gnu.tar.gz \
   -R rsasaki0109/RoboSim \
-  --cert-identity https://github.com/rsasaki0109/RoboSim/.github/workflows/release.yml@refs/tags/v0.2.0 \
-  --source-ref refs/tags/v0.2.0 \
+  --cert-identity https://github.com/rsasaki0109/RoboSim/.github/workflows/release.yml@refs/tags/v0.3.0 \
+  --source-ref refs/tags/v0.3.0 \
   --source-digest "$REVISION" \
   --signer-digest "$REVISION" \
   --cert-oidc-issuer https://token.actions.githubusercontent.com \
   --predicate-type https://slsa.dev/provenance/v1 \
   --deny-self-hosted-runners
-gh attestation verify rne_py-0.2.0-cp39-abi3-manylinux_2_*.whl \
+gh attestation verify rne_py-0.3.0-cp39-abi3-manylinux_2_*.whl \
   -R rsasaki0109/RoboSim \
-  --cert-identity https://github.com/rsasaki0109/RoboSim/.github/workflows/release.yml@refs/tags/v0.2.0 \
-  --source-ref refs/tags/v0.2.0 \
+  --cert-identity https://github.com/rsasaki0109/RoboSim/.github/workflows/release.yml@refs/tags/v0.3.0 \
+  --source-ref refs/tags/v0.3.0 \
   --source-digest "$REVISION" \
   --signer-digest "$REVISION" \
   --cert-oidc-issuer https://token.actions.githubusercontent.com \
@@ -62,7 +62,7 @@ provenance and subject digest. Checksums remain a separate, offline integrity
 layer after extraction. On Linux:
 
 ```bash
-cd rne-0.2.0-x86_64-unknown-linux-gnu
+cd rne-0.3.0-x86_64-unknown-linux-gnu
 sha256sum --check SHA256SUMS
 ./bin/rne-asset --version
 ```
@@ -77,7 +77,7 @@ both Rapier and MuJoCo. `third-party/mujoco/runtime-manifest.json` records the
 pinned official MuJoCo archive URL and SHA-256 plus byte identities for the
 shipped runtime and license files.
 `reproducible` is true only for a clean build whose exact
-`v0.2.0` tag points to the tested commit.
+`v0.3.0` tag points to the tested commit.
 The retained `Cargo.lock` also lets the installed Failure Capsule author record
 the exact release graph during bundle rehearsal; when run from an external
 project, the same CLI records that project's own lockfile and Git revision.
@@ -107,7 +107,7 @@ provenance or artifact identities.
   --evidence assets/tasks/diff_drive_goal.task.json \
   --output failure-capsule \
   --backend external-project \
-  --backend-version 0.2.0
+  --backend-version 0.3.0
 ./bin/rne-asset failure-capsule verify failure-capsule
 ./bin/rne-asset run assets/runs/scenario_speed.rne.run.toml \
   --replay-out scenario.rne-replay
@@ -275,7 +275,7 @@ maturin build --locked --release --features extension-module \
   --manifest-path crates/rne_py/Cargo.toml --out artifacts/wheels
 cargo run --locked -p xtask -- release-bundle \
   --target x86_64-unknown-linux-gnu \
-  --wheel artifacts/wheels/rne_py-0.2.0-*.whl
+  --wheel artifacts/wheels/rne_py-0.3.0-*.whl
 ```
 
 `release-install-smoke --archive ARCHIVE --bundle-dir PATH --output-dir

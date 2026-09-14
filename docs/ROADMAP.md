@@ -759,6 +759,15 @@ Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
 - Browser-viewable, replay-bearing Failure Capsule and exact producer binding
 - Named-machine 15-minute measurement and independent evidence intake
 
+## v0.3.0 (Rust API baseline retarget)
+
+- Rust API baseline retargeted to absorb breaking changes merged into `main`
+  since the `0.2.0` freeze (notably `MobileManipulatorAction` gaining public
+  fields and the `rne_robot` API changes)
+- `rne_nav`, `rne_slam`, and `rne_planning` promoted from `publish = false`
+  workspace-internal crates to public, semver-checked release packages
+- Unblocks `cargo package -p rne_adapter_ros2`, which path-depends on `rne_nav`
+
 ## v0.4 candidates
 
 | Area | Idea | Status |
@@ -793,7 +802,7 @@ After merging release changes, set `RNE_VERSION` to the exact version being
 shipped and run the clean release gate before creating generated release notes:
 
 ```bash
-RNE_VERSION=0.2.0
+RNE_VERSION=0.3.0
 cargo run --locked -p xtask -- ci
 cargo run --locked -p xtask -- release-exit --output artifacts/release-exit/report.json
 git diff --exit-code

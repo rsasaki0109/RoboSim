@@ -1,12 +1,12 @@
 {
   "kind": "rne_one_zero_readiness_report",
   "schema_version": 1,
-  "manifest_sha256": "sha256:8bf8ac44d85929be88eac42eaa2e6b8f78137fa47b8433b8e46041ea315d9cfd",
-  "release_version": "0.2.0",
-  "as_of": "2026-08-20",
-  "candidate_revision": "9e1ea8cb2dab8f468cf7bc51fac8bd381359acc4",
-  "candidate_tree": "5d888b77e0d4785fa57c9edd10ce1292089fab5a",
-  "candidate_since": "2026-08-20",
+  "manifest_sha256": "sha256:b5e6d9c543ac8aa65184120fa43484786ce82401724ff61d84efc756395225b1",
+  "release_version": "0.3.0",
+  "as_of": "2026-09-15",
+  "candidate_revision": "d0139576c232fed66d2f0b97ea7b01b0773b83b8",
+  "candidate_tree": "6269a96cdc26c3ddd6f22ad097e4c14af21600ae",
+  "candidate_since": "2026-09-15",
   "calendar_stability_days": 0,
   "observed_external_use_days": 0,
   "eligible": false,
@@ -60,7 +60,6 @@
       "evidence_sha256": [
         "sha256:13502cbd0775b01ee9ff25027661c8b9591190144b8881952470c08794557235",
         "sha256:150991cb822fc4c77e0edd5ca5fef68c21dc51a451923870b774bacc21899ce7",
-        "sha256:1a0570a265f3f9c42a0ac34aac3bab7cb9612bdb54d017f384daa40a1808066a",
         "sha256:1eacbafef764aab5ef74a3e4e6c1492dd2c3b3ff4dfe542a32a2a4f9633530c1",
         "sha256:23810e9647a2a322e1fc2ee0f50fe91dd606719bba80eacb8df30488fdaa9bef",
         "sha256:26653c3af256cc2bfbeb45033fa07e7e0a1d4235c7ca36c5f400e0591fea6efb",
@@ -70,11 +69,12 @@
         "sha256:6c9c0e93b0d22e86ce87bb028f08e9005a008a9a6494f76acf52ebf78af48b2c",
         "sha256:6cec3d06de73e9443dc28139f0b4a1c300b227d5e32a92eb92d662892ed87217",
         "sha256:6e659e42ae0cd7970a10dcf21064d0a5d2f3531f18ff7a336e4a64c313f3647a",
+        "sha256:78570e3436f1eb35d127c9c760c28476cc30edc7f3c4a6cbfbebb1c5b256fff3",
         "sha256:7ea7b47394e3ab3541bb129d9cb7a7c673adaa49f7c7c0b64c3a4dc544e5ecc5",
         "sha256:87aea0aed415beb06bb321bf7d234516c53f16df3e1ccad1ef244e1d2beddeb2",
         "sha256:890bf3040331544873bdba7ffe3142d54f210f0475ec2fc64511a6defc6ab8a8",
         "sha256:904f0e92382c1e5ac765306e3b2b879dacc974f63b2fbcd4dc762f4375f6f7dc",
-        "sha256:921e580a31270deebd1fb6759544b663ebc9bb593907d88cef426dc997e60018",
+        "sha256:955dfaaf313d5fd355fe0aba9a06600b4ac26d5967a24a006ba3518d137763fa",
         "sha256:97fbab0cc8ce36a44a4519136bff059d1bdc77673ee414cf5083f2fe2514d936",
         "sha256:98d9a1802c2622d9e2d6a8566c5f75627cbc186e81ebccb9db4b491d28c5fe7f",
         "sha256:998640e79945057bb755182009c397f3537996be583ec9f74c048fd1c6dcda71",
@@ -103,7 +103,7 @@
       "status": "passed",
       "detail": "release blocker registry has zero open P0/P1 entries",
       "evidence_sha256": [
-        "sha256:7f74e79edbb24c25cf3ea97ec190826bce3984d17dddcf00cb5d1ee0c44de63d"
+        "sha256:84cb71f566b752473739667d0a1f366e6a3ca68ceb74f3da5e4f4cc7a27362c3"
       ]
     },
     {

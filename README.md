@@ -86,8 +86,8 @@ tasks and independently maintained extensions pass the shipped conformance
 kits. Native release bundles include the required tools; cloning the RNE
 source tree is not required to submit evidence.
 
-The current campaign accepts only [v0.2.0 official
-assets](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.2.0). If that
+The current campaign accepts only [v0.3.0 official
+assets](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.3.0). If that
 release page does not yet contain the native archives and `SHA256SUMS`, prepare
 the repository and checklist but do not open an evidence issue. The published
 v0.1.0 prerelease does not qualify for this campaign.

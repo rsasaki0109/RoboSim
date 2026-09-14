@@ -4,6 +4,22 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Prepare the `0.3.0` release candidate and retarget the immutable Rust API
+  baseline. All workspace packages and exact internal dependency requirements
+  now use `0.3.0`; release metadata, native archive/wheel names, provenance
+  identities, Python API checks, and installation instructions advance
+  together. `release/rust-api-baseline.toml` moves its frozen commit/tree to
+  `d013957`/`6269a96` (the tip of `main` at bump time), absorbing breaking
+  changes merged since the `0.2.0` freeze — notably `MobileManipulatorAction`
+  (`crates/rne_ai/src/action.rs`) gaining public fields and the `rne_robot`
+  API changes from PR #270 — into the new baseline rather than reverting them.
+  `rne_nav`, `rne_slam`, and `rne_planning` drop `publish = false` and join the
+  public, semver-checked release set (31 -> 34 packages), which also unblocks
+  `cargo package -p rne_adapter_ros2`, a published crate that path-depends on
+  `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
+
 ### Added
 
 - `rne_legged::centroidal`: the classical centroidal layer for dynamic maneuvers.

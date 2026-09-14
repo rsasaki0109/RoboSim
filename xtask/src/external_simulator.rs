@@ -618,7 +618,7 @@ mod tests {
             release: ReleaseIdentity {
                 tag: format!("v{RELEASE_VERSION}"),
                 target: "x86_64-unknown-linux-gnu".to_string(),
-                archive: artifact("rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz"),
+                archive: artifact("rne-0.3.0-x86_64-unknown-linux-gnu.tar.gz"),
             },
             platform: Platform {
                 operating_system: "linux".to_string(),

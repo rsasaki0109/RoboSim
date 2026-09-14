@@ -1,8 +1,8 @@
 {
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
-  "release_version": "0.2.0",
-  "registry_sha256": "sha256:921e580a31270deebd1fb6759544b663ebc9bb593907d88cef426dc997e60018",
+  "release_version": "0.3.0",
+  "registry_sha256": "sha256:955dfaaf313d5fd355fe0aba9a06600b4ac26d5967a24a006ba3518d137763fa",
   "checks": [
     {
       "id": "accelerator_capability_v1",
