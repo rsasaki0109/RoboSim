@@ -29,6 +29,8 @@ path planning and scan matching; those arrive in later phases.
 | `avoid_velocities` | Deterministic sampling sense-and-avoid for multiple robots |
 | `integrate_point_cloud` | Projects a 3D point cloud (height band) into the occupancy grid |
 | `ElevationMap` | 2.5D per-cell min/max/mean height map with slope and traversability queries |
+| `apply_terrain_layer` | Folds elevation slope/step into a costmap as lethal and graded costs |
+| `NavSatTransform` | Geographic datum ↔ local map projection (`navsat_transform`) |
 | `NavMap` / `PendingScans` / `TfTree` | ECS resources |
 | `integrate_pending_scans` | ECS system that drains the scan queue and refreshes the costmap |
 | `NavGoal` | Planar goal component for future planners |
@@ -120,6 +122,16 @@ traversability queries. `to_obstacle_grid` converts large intra-cell steps into
 a planar `OccupancyGrid` for the existing planner and costmap. Integration is
 index-ordered and deterministic.
 
+## Terrain layering
+
+`apply_terrain_layer(costmap, elevation, config)` turns the elevation map into
+planner-usable cost. Cells whose intra-cell step reaches `lethal_step_m`, or
+whose slope reaches `lethal_slope_rad`, become lethal; slopes between
+`max_traversable_slope_rad` and `lethal_slope_rad` add a graded cost so the
+planner's `cost_weight` prefers gentler ground. It uses
+`Costmap::apply_cost`, which never lowers existing inflation or lethality, so a
+terrain layer composes with the obstacle and inflation layers.
+
 ## Drive actuators
 
 `MobileBase::new(drive, limits)` couples a `DriveKind`
@@ -168,6 +180,12 @@ covariance with `EkfConfig` process noise; measurements are fused through
 `update_odometry` (forward velocity + yaw rate), `update_yaw_rate` (IMU only),
 and `update_position` (a planar fix such as GPS, in the map frame). Angles wrap
 to `(-pi, pi]` and the covariance is re-symmetrized after every update.
+
+`pose_with_covariance` exposes the `[x, y, yaw]` sub-block for
+`geometry_msgs/PoseWithCovariance`. `update_navsat` projects a geographic fix
+through a `NavSatTransform` (an equirectangular datum-to-ENU conversion, the RNE
+`navsat_transform`) before fusing it, and `map_from_odom(fused, odom)` yields the
+`map → odom` transform to publish under `tf`.
 
 ## Determinism
 

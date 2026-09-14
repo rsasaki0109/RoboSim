@@ -203,6 +203,28 @@ impl Costmap {
             .filter(|cost| **cost == COST_LETHAL)
             .count()
     }
+
+    /// Merges a layer cost into a cell, returning whether it was in bounds.
+    ///
+    /// Unknown cells adopt the layer cost, lethal always wins, and otherwise the
+    /// cell keeps the larger of its current cost and the layer cost. This lets a
+    /// terrain or obstacle layer raise cost without lowering existing
+    /// inflation or lethality.
+    pub fn apply_cost(&mut self, coord: GridCoord, cost: u8) -> bool {
+        if !self.contains(coord) {
+            return false;
+        }
+        let index = coord.y as usize * self.width + coord.x as usize;
+        let current = self.costs[index];
+        self.costs[index] = if cost == COST_LETHAL {
+            COST_LETHAL
+        } else if current == COST_NO_INFORMATION || current == COST_FREE {
+            cost
+        } else {
+            current.max(cost)
+        };
+        true
+    }
 }
 
 /// Two-pass chamfer distance transform in cell units from the nearest lethal cell.

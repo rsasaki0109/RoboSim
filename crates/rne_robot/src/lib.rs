@@ -11,6 +11,7 @@ pub mod diff_drive;
 pub mod joint;
 pub mod kinematics;
 pub mod motion;
+pub mod ros2_control;
 pub mod self_collision;
 pub mod systems;
 
@@ -46,6 +47,10 @@ pub use kinematics::{
 pub use motion::{
     body_motion_from_world, BodyMotion, BodyMotionSample, JointInterpolation, JointKeyframe,
     JointTrack, MotionError,
+};
+pub use ros2_control::{
+    DiffDriveCommand, DiffDriveControllerConfig, DiffDriveWheelController, JointCommand,
+    JointTrajectory, JointTrajectoryPoint, Ros2ControlError,
 };
 pub use self_collision::{
     check_self_collisions, CollisionPrimitive, SelfCollisionChecker, SelfCollisionPair,

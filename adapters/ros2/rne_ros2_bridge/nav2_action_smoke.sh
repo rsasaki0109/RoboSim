@@ -39,7 +39,15 @@ if ! kill -0 "$NODE_PID" 2>/dev/null; then
 fi
 
 echo "Checking /navigate_to_pose action..."
-timeout 20 ros2 action list | grep -q "/navigate_to_pose"
+actions="$(timeout 20 ros2 action list)"
+[[ "$actions" == *"/navigate_to_pose"* ]]
+for action in /compute_path_to_pose /follow_path /follow_waypoints /spin /backup; do
+  echo "Checking ${action}..."
+  [[ "$actions" == *"${action}"* ]]
+done
+echo "Checking /load_map service..."
+services="$(timeout 20 ros2 service list)"
+[[ "$services" == *"/load_map"* ]]
 
 echo "Sending a NavigateToPose goal..."
 goal_output="$(
@@ -56,5 +64,20 @@ if ! awk "BEGIN {exit !(${odom_x} > 0.8)}"; then
   echo "expected the base to reach the goal" >&2
   exit 1
 fi
+
+echo "Sending a ComputePathToPose goal..."
+path_output="$(timeout 30 ros2 action send_goal /compute_path_to_pose nav2_msgs/action/ComputePathToPose \
+  "{goal: {header: {frame_id: map}, pose: {position: {x: 2.0}, orientation: {w: 1.0}}}, use_start: false}")"
+[[ "$path_output" == *"SUCCEEDED"* ]]
+
+echo "Sending a Spin goal..."
+spin_output="$(timeout 30 ros2 action send_goal /spin nav2_msgs/action/Spin \
+  "{target_yaw: 0.5, time_allowance: {sec: 5}}")"
+[[ "$spin_output" == *"SUCCEEDED"* ]]
+
+echo "Sending a BackUp goal..."
+backup_output="$(timeout 30 ros2 action send_goal /backup nav2_msgs/action/BackUp \
+  "{target: {x: 0.2}, speed: 0.2, time_allowance: {sec: 5}}")"
+[[ "$backup_output" == *"SUCCEEDED"* ]]
 
 echo "Nav2 NavigateToPose action smoke passed"

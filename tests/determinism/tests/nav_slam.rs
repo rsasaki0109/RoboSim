@@ -337,3 +337,28 @@ fn elevation_map_replay_is_bit_identical() {
     };
     assert_eq!(run(), run());
 }
+
+#[test]
+fn terrain_layer_replay_is_bit_identical() {
+    let run = || {
+        let origin = Pose2d::new(-2.0, -2.0, 0.0);
+        let grid = OccupancyGrid::new(40, 40, 0.1, origin).unwrap();
+        let mut costmap = Costmap::from_occupancy(&grid, &CostmapConfig::default()).unwrap();
+        let mut elevation =
+            ElevationMap::new(40, 40, 0.1, origin, ElevationConfig::default()).unwrap();
+        let mut points = Vec::new();
+        for i in 0..40 {
+            for j in 0..40 {
+                let x = -1.9 + i as f64 * 0.1;
+                let z = -1.9 + j as f64 * 0.1;
+                let y = if i > 20 { (i as f64 - 20.0) * 0.2 } else { 0.0 };
+                points.push(Vec3::new(x, y, z));
+            }
+        }
+        elevation.integrate(&points);
+        rne_nav::apply_terrain_layer(&mut costmap, &elevation, &rne_nav::TerrainConfig::default())
+            .unwrap();
+        costmap.costs().to_vec()
+    };
+    assert_eq!(run(), run());
+}

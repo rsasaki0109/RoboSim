@@ -54,21 +54,27 @@ ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
   "{pose: {header: {frame_id: map}, pose: {position: {x: 2.0}, orientation: {w: 1.0}}}}"
 ```
 
-## Bridge-side NavigateToPose action server
+## Bridge-side Nav2 servers
 
-`nav_node.py` also exposes its own Nav2-compatible action server, so RNE can act
-as the action provider without an external Nav2 stack:
+`nav_node.py` is a `rclpy.lifecycle.LifecycleNode` and exposes the Nav2-facing
+servers, so RNE can act as the provider without an external Nav2 stack:
 
-```bash
-ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
-  "{pose: {header: {frame_id: map}, pose: {position: {x: 1.0}, orientation: {w: 1.0}}}}" --feedback
-```
+| Interface | Type |
+| --- | --- |
+| `/navigate_to_pose` | `nav2_msgs/action/NavigateToPose` (feedback + spin recovery) |
+| `/compute_path_to_pose` | `nav2_msgs/action/ComputePathToPose` |
+| `/follow_path` | `nav2_msgs/action/FollowPath` |
+| `/follow_waypoints` | `nav2_msgs/action/FollowWaypoints` |
+| `/spin` | `nav2_msgs/action/Spin` |
+| `/backup` | `nav2_msgs/action/BackUp` |
+| `/load_map` | `nav2_msgs/srv/LoadMap` |
 
-The server publishes the straight-line plan on `/plan`, streams
-`distance_remaining` / `number_of_recoveries` feedback, and drives the base with
-a heading controller. If progress stalls it runs a **spin recovery** (mirroring
-the Rust `RecoverySequence`) before resuming. `nav2_action_smoke.sh` starts the
-node, sends a goal, and confirms `error_code: 0` with the base at the goal.
+Each server publishes the straight-line plan on `/plan`, streams its feedback,
+and drives the base with the heading controller. When progress stalls the
+navigation actions run a **spin recovery** (mirroring the Rust
+`RecoverySequence`) before resuming. `nav2_action_smoke.sh` starts the node,
+checks every server, then sends `NavigateToPose`, `ComputePathToPose`, `Spin`,
+and `BackUp` goals and confirms each succeeds.
 
 ## Frames and QoS
 
