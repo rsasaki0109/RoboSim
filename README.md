@@ -372,6 +372,52 @@ cargo run -p motion_planning_media --example 102_motion_planning_media -- --smok
 
 See [joint-space motion planning](docs/architecture/011_joint_motion_planning.md).
 
+### Native articulated dynamics
+
+`rne_dynamics` is the backend-neutral, deterministic articulated-body dynamics
+layer that model-based legged and mobile-manipulation control builds on: spatial
+algebra, the composite-rigid-body mass matrix, recursive Newton-Euler inverse
+dynamics with gravity and velocity bias, deterministic forward dynamics, the
+center of mass, and the center-of-mass Jacobian. Fixed- and floating-base trees
+are supported, and the Go2 diagnostics example checks the equation of motion on
+a real 18-DoF quadruped.
+
+```bash
+cargo run -p dynamics_diagnostics --example 103_dynamics_diagnostics
+```
+
+See [articulated-body dynamics](docs/architecture/012_dynamics.md).
+
+### Native legged walking templates
+
+`rne_legged` is the deterministic, backend-free template layer for legged
+walking: the Linear Inverted Pendulum Model, Divergent Component of Motion and
+capture point, closed-form capture-point foot placement, Kajita-style ZMP
+preview control, footstep plans with smooth double-support transitions, and a
+full center-of-mass walking pattern. It turns a footstep request into a
+replayable trajectory without a physics backend or renderer.
+
+```bash
+cargo run -p legged_pattern --example 104_legged_pattern
+```
+
+See [legged walking templates](docs/architecture/013_legged_templates.md).
+
+### Native whole-body control
+
+`rne_wbc` realizes task-space objectives as joint torques on a floating-base
+articulated model: a deterministic weighted inverse-dynamics solve over joint
+accelerations and contact wrenches, with the floating-base equations of motion
+and contact no-slip rows, friction-cone projection, and torque recovery from
+`rne_dynamics`. The Go2 example supports the exact body weight through four foot
+contacts with a base-residual below `1e-8`.
+
+```bash
+cargo run -p whole_body_control --example 105_whole_body_control
+```
+
+See [whole-body control](docs/architecture/014_whole_body_control.md).
+
 ## Architecture
 
 The workspace is split by responsibility:
@@ -379,6 +425,9 @@ The workspace is split by responsibility:
 - `rne_core`, `rne_math`, `rne_ecs`: schedules, time, events, diagnostics, ECS, and spatial math.
 - `rne_world`, `rne_robot`, `rne_sensor`, `rne_ai`, `rne_data`: world/entity conventions, robot control, sensors, learning interfaces, and typed data streams.
 - `rne_planning`: backend-neutral joint-space planning scene, goal constraints, planners, and pipeline.
+- `rne_dynamics`: backend-neutral articulated-body dynamics: mass matrix, inverse dynamics, center of mass, and Jacobians.
+- `rne_legged`: backend-neutral legged walking templates: LIPM/DCM, capture-point foot placement, ZMP preview control, and footstep plans.
+- `rne_wbc`: backend-neutral whole-body control: weighted inverse dynamics, contact and friction handling, and joint torque recovery.
 - `rne_physics` and `rne_physics_rapier`: backend-neutral traits and the Rapier implementation.
 - `rne_render` and `rne_render_wgpu`: renderer traits and the optional wgpu backend.
 - `rne_asset`, `rne_plugin`, `rne_traffic`: assets, plugin interfaces, and backend-neutral traffic.

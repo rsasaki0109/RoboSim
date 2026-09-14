@@ -370,6 +370,21 @@ The measured locomotion frontier (Go2 foot-clearance/parkour wall, G1
 sustained-turn and 60 Hz solver-stability walls) and the next campaign are
 recorded in [PLAN_LEGGED_LOCOMOTION_FRONTIER.md](PLAN_LEGGED_LOCOMOTION_FRONTIER.md).
 
+## v0.16 goal: model-based legged control
+
+Scripted joint-space gaits hit their steering and disturbance-rejection ceiling.
+The next campaign builds the deterministic model-based stack those gaits cannot
+express (ZMP/DCM, whole-body control, centroidal MPC), starting from a native
+dynamics foundation so no control algorithm depends on a physics backend.
+
+| Phase | Area | Deliverable | Status |
+|-------|------|-------------|--------|
+| A | Native dynamics | `rne_dynamics` spatial algebra, CRBA mass matrix, recursive Newton-Euler inverse/forward dynamics, floating base, center of mass and Jacobian, analytic tests, and a floating-base Go2 example | Done (`crates/rne_dynamics`, example 103, `docs/architecture/012_dynamics.md`) |
+| B | Gait template | LIPM/ZMP/DCM templates, capture-point foot placement, and ZMP preview-control walking patterns | Done (`crates/rne_legged`, example 104, `docs/architecture/013_legged_templates.md`); terrain costmap consumption moves to Phase D |
+| C | Whole-body control | Hierarchical-QP / inverse-dynamics whole-body control with contact and friction constraints | Partial (`crates/rne_wbc`, example 105, `docs/architecture/014_whole_body_control.md`): weighted inverse dynamics, contact no-slip, friction projection, and torque recovery are done; hard-inequality QP and closed-loop scheduling remain |
+| D | Footstep planning | Discrete footstep planner over elevation and cost maps | Planned |
+| E | Centroidal / DDP | Centroidal-momentum MPC and multi-contact DDP built on analytical derivatives | Planned |
+
 Official robot-model integration has started with Unitree Go2: the upstream
 BSD-3-Clause URDF/meshes are vendored with provenance, COLLADA visuals are
 reproducibly converted for RNE's mesh loader, and example 38 generates a real

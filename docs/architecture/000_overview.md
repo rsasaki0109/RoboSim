@@ -67,3 +67,6 @@ See also:
 - [Web viewer boundary](007_web_viewer.md)
 - [Traffic domain](010_traffic_domain.md)
 - [Joint-space motion planning](011_joint_motion_planning.md)
+- [Articulated-body dynamics](012_dynamics.md)
+- [Legged walking templates](013_legged_templates.md)
+- [Whole-body control](014_whole_body_control.md)

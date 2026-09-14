@@ -6,6 +6,45 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- `rne_wbc`: a backend-neutral whole-body controller. It solves a weighted
+  inverse-dynamics problem over joint accelerations and contact wrenches with
+  the floating-base equations of motion and contact no-slip rows, an optional
+  center-of-mass task and joint posture task, column-equilibrated normal
+  equations, Coulomb friction-cone projection, and torque recovery with optional
+  limits. It builds on new `rne_dynamics` support: `link_motions` (world-frame
+  link motion and bias acceleration) and `frame_jacobian` (a base-twist
+  consistent spatial Jacobian), with `com_jacobian` moved onto the same
+  convention. Unit tests cover friction projection, weight support, and
+  determinism; `examples/105_whole_body_control` runs the controller on the
+  floating-base 12-DoF Unitree Go2 (`docs/architecture/014_whole_body_control.md`).
+
+- `rne_legged`: a backend-neutral legged walking template layer. It provides the
+  Linear Inverted Pendulum Model and Divergent Component of Motion
+  (`capture_point`, `dcm_step`, `propagate_constant_zmp`), closed-form
+  capture-point foot placement (`footstep_from_dcm`), a deterministic
+  Kajita-style ZMP preview controller (`ZmpPreviewController`) that solves the
+  discrete Riccati equation and derives preview gains, footstep plans with
+  smooth double-support transitions and start/finish weight shifts
+  (`plan_straight_walk`, `FootstepPlan`, `ZmpSegment`), and full center-of-mass
+  walking patterns (`plan_walking_pattern`). Unit tests cover the analytic
+  capture-point and DCM closed forms, footstep/DCM inversion, preview
+  stabilization and tracking, and deterministic bounded patterns.
+  `examples/104_legged_pattern` plans an eight-step walk and demonstrates
+  capture-point push recovery (`docs/architecture/013_legged_templates.md`).
+
+- `rne_dynamics`: a backend-neutral articulated-body dynamics crate. It derives a
+  spatial-algebra tree model from the `rne_robot` link/joint graph and provides
+  the composite-rigid-body mass matrix (`mass_matrix`), recursive Newton-Euler
+  inverse dynamics (`rnea`) with gravity/velocity bias (`non_linear_effects`,
+  `gravity_torque`), deterministic forward dynamics (`forward_dynamics`), the
+  center of mass (`center_of_mass`), and the center-of-mass Jacobian
+  (`com_jacobian`). Fixed- and floating-base trees are supported; the floating
+  base uses the body-frame spatial twist convention. Analytic unit tests cover
+  the two-link closed forms, `rnea` linearity in `qdd`, mass-matrix symmetry and
+  definiteness, the floating spatial inertia and gravity wrench, and energy
+  conservation of a torque-free double pendulum. `examples/103_dynamics_diagnostics`
+  runs the same layer on the floating-base 12-DoF Unitree Go2 (`docs/architecture/012_dynamics.md`).
+
 - `rne.unitree_g1.joint_locomotion.v1`: a joint-space Unitree G1 locomotion
   episode with a 12-leg-joint residual action and the OSS projected-gravity /
   gait-clock observation and velocity-tracking / air-time reward recipe, plus a
