@@ -5,6 +5,13 @@ Publishes:
 - `/clock` from simulation time
 - `/points` as `sensor_msgs/PointCloud2`
 - `/tf` as `tf2_msgs/TFMessage`
+- `/odom` as `nav_msgs/Odometry`
+- `/scan` as `sensor_msgs/LaserScan`
+- `/map` as `nav_msgs/OccupancyGrid`
+- `/plan` as `nav_msgs/Path`
+
+Subscribes:
+- `/cmd_vel` as `geometry_msgs/Twist`
 
 Exposes `simulation_interfaces` services, action, and parameters when running
 with `rne_py`. Without bindings, publishes one synthetic frame for smoke testing.
@@ -12,16 +19,19 @@ with `rne_py`. Without bindings, publishes one synthetic frame for smoke testing
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from typing import TYPE_CHECKING
 
 import rclpy
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
 from rosgraph_msgs.msg import Clock
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import LaserScan, PointCloud2
 from simulation_interfaces.action import SimulateSteps
 from simulation_interfaces.msg import Result, SimulationState
 from simulation_interfaces.srv import (
@@ -33,7 +43,12 @@ from simulation_interfaces.srv import (
 from tf2_msgs.msg import TFMessage
 
 from ros_convert import (
+    command_from_twist,
     make_clock_message,
+    make_laserscan,
+    make_occupancy_grid,
+    make_odometry,
+    make_path,
     make_pointcloud2,
     make_tf_message,
     make_transform_stamped,
@@ -62,6 +77,14 @@ class RneBridgeNode(Node):
         self.clock_pub = self.create_publisher(Clock, "/clock", 10)
         self.cloud_pub = self.create_publisher(PointCloud2, "/points", 10)
         self.tf_pub = self.create_publisher(TFMessage, "/tf", 10)
+        self.odom_pub = self.create_publisher(Odometry, "/odom", 10)
+        self.scan_pub = self.create_publisher(LaserScan, "/scan", 10)
+        self.map_pub = self.create_publisher(OccupancyGrid, "/map", 10)
+        self.plan_pub = self.create_publisher(Path, "/plan", 10)
+        self.command: tuple[float, float] = (0.0, 0.0)
+        self.create_subscription(Twist, "/cmd_vel", self.handle_cmd_vel, 10)
+        self.map_spec = self._synthetic_map_spec()
+        self.plan = self._synthetic_path()
         self.use_rne_sim = rne_py is not None
         self.callback_group = ReentrantCallbackGroup()
         if self.use_rne_sim:
@@ -75,6 +98,30 @@ class RneBridgeNode(Node):
     @property
     def wheel_velocity(self) -> float:
         return float(self.get_parameter("wheel_velocity_rad_s").value)
+
+    def handle_cmd_vel(self, message: Twist) -> None:
+        """Stores the latest `/cmd_vel` command for the odometry twist."""
+        self.command = command_from_twist(message)
+
+    @staticmethod
+    def _synthetic_map_spec() -> tuple[int, int, float, tuple[float, float, float], list[int]]:
+        """Builds a small walled occupancy grid for smoke testing."""
+        width = height = 20
+        resolution = 0.5
+        origin = (-5.0, -5.0, 0.0)
+        data = [0] * (width * height)
+        for x in range(width):
+            data[x] = 100
+            data[(height - 1) * width + x] = 100
+        for y in range(height):
+            data[y * width] = 100
+            data[y * width + width - 1] = 100
+        return width, height, resolution, origin, data
+
+    @staticmethod
+    def _synthetic_path() -> list[tuple[float, float, float]]:
+        """Builds a short straight plan for smoke testing."""
+        return [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)]
 
     def _register_simulation_interfaces(self) -> None:
         self.create_service(
@@ -128,6 +175,21 @@ class RneBridgeNode(Node):
             ]
         )
         self.tf_pub.publish(tf)
+
+        base_pose = (base_xyz[0], base_xyz[1], 0.0)
+        linear_m_s, angular_rad_s = self.command
+        self.odom_pub.publish(
+            make_odometry(base_pose, linear_m_s, angular_rad_s, "odom", "base_link", sim_ticks)
+        )
+        ranges = [math.hypot(point[0], point[1]) for point in points]
+        self.scan_pub.publish(
+            make_laserscan(ranges, 0.0, 0.1, 0.05, 30.0, "lidar", sim_ticks)
+        )
+        width, height, resolution, origin, data = self.map_spec
+        self.map_pub.publish(
+            make_occupancy_grid(width, height, resolution, origin, data, "map", sim_ticks)
+        )
+        self.plan_pub.publish(make_path(self.plan, "map", sim_ticks))
 
     def _observation_frame(self) -> tuple[tuple[float, float, float], list[tuple[float, float, float]]]:
         obs = self.bridge.observation

@@ -2482,6 +2482,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "multi_robot_avoidance"
+version = "0.2.0"
+dependencies = [
+ "rne_math",
+ "rne_nav",
+]
+
+[[package]]
 name = "multi_robot_collision"
 version = "0.2.0"
 dependencies = [
@@ -2535,6 +2543,50 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "nav_occupancy_grid"
+version = "0.2.0"
+dependencies = [
+ "rne_ecs",
+ "rne_math",
+ "rne_nav",
+]
+
+[[package]]
+name = "nav_planning"
+version = "0.2.0"
+dependencies = [
+ "rne_math",
+ "rne_nav",
+]
+
+[[package]]
+name = "nav_slam_mapping"
+version = "0.2.0"
+dependencies = [
+ "rne_ecs",
+ "rne_math",
+ "rne_nav",
+ "rne_slam",
+]
+
+[[package]]
+name = "nav_slam_physics"
+version = "0.2.0"
+dependencies = [
+ "rne_core",
+ "rne_data",
+ "rne_ecs",
+ "rne_math",
+ "rne_nav",
+ "rne_physics",
+ "rne_physics_rapier",
+ "rne_robot",
+ "rne_sensor",
+ "rne_slam",
+ "rne_world",
 ]
 
 [[package]]
@@ -3628,6 +3680,7 @@ dependencies = [
  "rne_core",
  "rne_data",
  "rne_math",
+ "rne_nav",
  "rne_sensor",
  "rne_world",
 ]
@@ -3794,9 +3847,11 @@ dependencies = [
  "rne_core",
  "rne_ecs",
  "rne_math",
+ "rne_nav",
  "rne_physics",
  "rne_physics_rapier",
  "rne_robot",
+ "rne_slam",
  "rne_world",
 ]
 
@@ -3921,6 +3976,19 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+]
+
+[[package]]
+name = "rne_nav"
+version = "0.2.0"
+dependencies = [
+ "approx",
+ "bevy_ecs",
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4200,6 +4268,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rne_slam"
+version = "0.2.0"
+dependencies = [
+ "approx",
+ "bevy_ecs",
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "rne_nav",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "rne_sumo"
 version = "0.2.0"
 dependencies = [
@@ -4259,6 +4341,16 @@ dependencies = [
  "rne_ecs",
  "rne_math",
  "serde",
+]
+
+[[package]]
+name = "robot_kinematics"
+version = "0.2.0"
+dependencies = [
+ "rne_ecs",
+ "rne_math",
+ "rne_robot",
+ "rne_urdf_import",
 ]
 
 [[package]]

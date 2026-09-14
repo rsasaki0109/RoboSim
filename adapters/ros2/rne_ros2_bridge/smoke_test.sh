@@ -45,6 +45,9 @@ echo "Running convert unit tests..."
 python3 test_ros_convert.py
 python3 test_sim_control.py
 
+echo "Running navigation mapping round-trip..."
+python3 test_nav_roundtrip.py
+
 echo "Running synthetic bridge smoke (no rne_py)..."
 python3 run_node.py
 
@@ -82,10 +85,14 @@ if [[ "$SERVICE_READY" -ne 1 ]]; then
 fi
 
 sleep 0.2
-for topic in /clock /points /tf; do
+for topic in /clock /points /tf /odom /scan /map /plan; do
   echo "Checking ${topic}..."
   ros2 topic echo "$topic" --once
 done
+
+echo "Checking /cmd_vel subscription..."
+ros2 topic info /cmd_vel
+ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.5}, angular: {z: 0.1}}"
 
 echo "Checking get_simulation_state service..."
 timeout 20 ros2 service call /get_simulation_state simulation_interfaces/srv/GetSimulationState "{}"

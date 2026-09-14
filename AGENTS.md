@@ -30,6 +30,8 @@ ROS2 is an adapter only. Do not add ROS2, rclrs, rclcpp, DDS, or ROS message dep
 - `crates/rne_render_wgpu`: wgpu renderer
 - `crates/rne_asset`: asset database and import pipeline
 - `crates/rne_data`: typed DataBus, stream IDs, frame payloads
+- `crates/rne_nav`: backend-neutral occupancy grids, costmaps, tiled maps, plan/control, multi-robot avoidance, and timestamped transform tree
+- `crates/rne_slam`: deterministic 2D scan matching, online occupancy SLAM, and Monte Carlo localization
 - `crates/rne_ai`: agent, observation, action, reward, policy traits
 - `crates/rne_accelerator_contract`: vendor-neutral manifest, runtime, and accelerator evidence readers
 - `crates/rne_plugin`: plugin manifest and loading interfaces
@@ -124,6 +126,8 @@ Allowed dependencies:
 - `rne_sensor` may depend on `rne_physics`, `rne_render`, `rne_data`.
 - `rne_render_wgpu` may depend on `rne_render` and wgpu.
 - `rne_traffic` may depend on `rne_core`, `rne_ecs`, `rne_math`, and `rne_world`.
+- `rne_nav` may depend on `rne_core`, `rne_ecs`, `rne_math`, and `rne_world`.
+- `rne_slam` may depend on `rne_nav`, `rne_core`, `rne_ecs`, and `rne_math`.
 - `rne_accelerator_contract` may depend on `rne_ai`; vendor runtime dependencies remain in adapters.
 - Offline importers such as `rne_plateau` may depend on `rne_traffic`.
 - `adapters/*` may depend on external ecosystems such as ROS2.
@@ -136,6 +140,10 @@ Forbidden:
 - `rne_sensor` must not require a renderer unless the specific sensor is camera-like.
 - `rne_traffic` must not depend on a renderer, physics backend, geospatial importer,
   robotics adapter, or external traffic simulator.
+- `rne_nav` must not depend on a renderer, physics backend, ROS 2, or external
+  navigation/SLAM stack; the ROS 2 adapter maps its types without changing them.
+- `rne_slam` must not depend on a renderer, physics backend, ROS 2, or external
+  SLAM stack; it builds on `rne_nav` types without changing them.
 
 ## Pull Request Definition of Done
 

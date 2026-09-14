@@ -11,8 +11,13 @@ This directory contains optional adapters between Robot Native Engine and extern
 
 ## Crates
 
-- `rne_adapter_ros2`: `/clock`, TF, PointCloud2 mapping helpers (Rust)
-- `rne_ros2_bridge`: Python `rclpy` runtime node publishing `/clock`, `/points`, `/tf`
+- `rne_adapter_ros2`: `/clock`, TF, PointCloud2, and navigation (`Odometry`,
+  `OccupancyGrid`, `Path`, `Twist`) mapping helpers (Rust)
+- `rne_ros2_bridge`: Python `rclpy` runtime node publishing `/clock`, `/points`,
+  `/tf`, `/odom`, `/scan`, `/map`, `/plan` and subscribing `/cmd_vel`
+- `rne_ros2_bridge/nav_node.py`: Nav2-facing node (no `simulation_interfaces`)
+  that integrates `/cmd_vel` and publishes `/odom`, `/tf`, `/scan`, `/map`,
+  `/plan`, `/joint_states`; `map_file` loads an RNE SLAM map
 - `rne_ros2_node`: Native `rclrs` runtime node (same topics, headless `rne_ai` sim)
 
 URDF import: `crates/rne_urdf_import`

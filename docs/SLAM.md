@@ -1,0 +1,106 @@
+# 2D SLAM
+
+`rne_slam` is the deterministic, ROS-free online SLAM front-end. It builds on
+`rne_nav` and turns a stream of `LaserScan2d` plus drifting odometry into a
+corrected trajectory and an occupancy map. There is no renderer, physics
+backend, `tf2`, or external SLAM dependency.
+
+Phases 3a (front-end and online mapping) and 3b (pose-graph optimization and
+loop closure) are implemented.
+
+## Pipeline
+
+For each scan:
+
+1. **Predict** — the base pose is advanced by the odometry delta
+   `previous_odom⁻¹ · odom`. The first scan seeds the map at the odometry pose.
+2. **Match** — scan endpoints (downsampled to `SlamConfig::max_beams`) are
+   scored against a `LikelihoodField` built from the map so far. A
+   coarse-to-fine correlative search over `(x, y, yaw)` picks the best pose.
+3. **Integrate** — the corrected pose plus `sensor_from_base` gives the sensor
+   pose, and `rne_nav::integrate_scan` updates the occupancy grid.
+4. **Record** — the corrected pose becomes a pose-graph node, connected to the
+   previous node by an odometry edge.
+5. **Loop close** — on a match, historical nodes are ranked by proximity to the
+   current pose; the closest are matched and a high-scoring revisit adds a
+   loop-closure edge and re-optimizes the graph. Two robust gates reject
+   outliers: the matched pose must stay within
+   `loop_max_translation_residual_m` / `loop_max_rotation_residual_rad` of the
+   odometry prediction, and after optimization the loop edge must still satisfy
+   the same bounds or it is rolled back.
+
+`Slam2d::process(scan, odom_pose, sensor_from_base)` returns a `SlamUpdate` with
+the corrected pose, whether matching applied, the match score, the number of
+loop closures added, and the integration report. The live pose stays
+scan-matched; the pose graph is refined in the background.
+
+## Likelihood field
+
+`LikelihoodField::from_occupancy(grid, config)` runs a chamfer distance transform
+from obstacle cells and stores `exp(-d² / (2σ²))` clipped at
+`max_distance_m`. Endpoints on an obstacle score near `1.0`, giving the matcher
+a smooth basin to descend.
+
+## Scan matching
+
+`ScanMatcher::match_scan(field, points_sensor, sensor_from_base, initial_base)`
+searches a linear and angular window, narrowing one coarse step per level. The
+search order is fixed, so ties and results are deterministic. A match is
+rejected when fewer than `min_valid_beams` endpoints land inside the field.
+Setting `ScanMatchConfig::coarse_downsample_factor > 1` evaluates the first level
+against a max-pooled `LikelihoodField` (multi-resolution match), widening the
+basin before the fine levels refine it.
+
+## Pose graph
+
+`PoseGraph` stores poses as nodes and relative-pose constraints as edges.
+`PoseGraphEdge::odometry` and `PoseGraphEdge::loop_closure` build the two edge
+kinds, each carrying diagonal information. `PoseGraph::optimize(iterations,
+damping, anchor)` runs Gauss-Newton with an additive `(x, y, yaw)` perturbation
+model and a Cholesky solve, anchoring one node and fixing every node
+disconnected from it. `PoseGraph::optimize_robust` adds a Huber kernel that
+down-weights edges whose residual exceeds a threshold, so one grossly wrong loop
+closure cannot drag the trajectory.
+
+The residual is `e = m⁻¹ ∘ q_from⁻¹ ∘ q_to`, with
+
+```
+J_from = [[-cosθ, -sinθ,  d·sinθ],      J_to = [[ cosθ,  sinθ, 0],
+          [ sinθ, -cosθ, -d·cosθ],              [-sinθ,  cosθ, 0],
+          [ 0,     0,    -1     ]]              [ 0,     0,    1]]
+```
+
+where `θ = q_from.yaw + m.yaw` and `d = q_from - q_to`. A finite-difference unit
+test pins these Jacobians so the solver cannot silently regress.
+
+## Localization (AMCL)
+
+`Amcl` is a deterministic Monte Carlo localization filter over a prior map. It
+predicts the particle cloud from the odometry delta with motion noise, weights
+each particle by the mean likelihood of its transformed scan endpoints, and
+resamples (systematic, deterministic) when the effective sample size falls below
+half. `Amcl::update(scan, odom, sensor_from_base)` returns the weighted-mean
+estimate; the estimate converges near truth and is bit-identical across runs.
+
+## ECS glue
+- `SlamState` wraps a `Slam2d` estimator as a resource.
+- `PendingSlamScans` queues `(scan, odom_pose, sensor_from_base)`.
+- `slam_step(world)` drains the queue and returns a `SlamStepReport`.
+
+## Determinism
+
+Odometry prediction, beam order, search order, candidate ranking, and map
+updates are all index-ordered with no wall-clock time or random state, so a
+recorded scan/odometry sequence reproduces the same map and trajectory hash.
+`tests/determinism/tests/nav_slam.rs` runs mapping, planning, DWA, and SLAM
+twice and compares exact poses and a stable FNV-1a hash of the occupancy grid.
+
+## Limits
+
+- Loop closure is pairwise against the likelihood field; there is no robust
+  back-end with switchable constraints or outlier rejection yet.
+- The matcher is correlative and brute-force within its window; a
+  multi-resolution pyramid and descriptor-based place recognition are later
+  optimizations.
+- The map is a single-resolution dense grid; pose-graph optimization does not
+  yet re-integrate the map after the trajectory changes.

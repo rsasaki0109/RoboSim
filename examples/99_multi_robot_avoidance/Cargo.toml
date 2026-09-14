@@ -1,0 +1,15 @@
+[package]
+name = "multi_robot_avoidance"
+version = "0.2.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rne_math = { workspace = true }
+rne_nav = { workspace = true }
+
+[[example]]
+name = "99_multi_robot_avoidance"
+path = "main.rs"
