@@ -80,7 +80,15 @@ fn main() {
 
     let hold = ComTask::hold(com);
     let standing = controller
-        .solve(&model, &q, &qd, &contacts, Some(&hold), Some(&posture))
+        .solve(
+            &model,
+            &q,
+            &qd,
+            &contacts,
+            Some(&hold),
+            None,
+            Some(&posture),
+        )
         .expect("standing solve");
     let vertical_force: f64 = standing
         .contact_forces_world_n
@@ -114,6 +122,7 @@ fn main() {
             &qd,
             &contacts,
             Some(&accelerate),
+            None,
             Some(&posture),
         )
         .expect("accelerating solve");
@@ -131,6 +140,7 @@ fn main() {
             &qd,
             &contacts,
             Some(&accelerate),
+            None,
             Some(&posture),
         )
         .expect("accelerating solve");
