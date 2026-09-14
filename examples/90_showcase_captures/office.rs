@@ -152,7 +152,7 @@ fn rollout(capture: bool, expected_steps: Option<u64>) -> Result<Rollout> {
     })
 }
 
-fn phase_name(observation: OfficeAgvDeskPlaceObservation) -> String {
+pub(crate) fn phase_name(observation: OfficeAgvDeskPlaceObservation) -> String {
     if observation.desk_place_complete {
         "desk-place-complete".into()
     } else if observation.cargo_loaded && observation.desk_delivery_complete {
@@ -166,7 +166,7 @@ fn phase_name(observation: OfficeAgvDeskPlaceObservation) -> String {
     }
 }
 
-fn render_scene(
+pub(crate) fn render_scene(
     scenario: &OfficeAgvDeskPlaceScenario,
     observation: OfficeAgvDeskPlaceObservation,
 ) -> RenderScene {
