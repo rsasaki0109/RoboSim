@@ -54,6 +54,22 @@ ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
   "{pose: {header: {frame_id: map}, pose: {position: {x: 2.0}, orientation: {w: 1.0}}}}"
 ```
 
+## Bridge-side NavigateToPose action server
+
+`nav_node.py` also exposes its own Nav2-compatible action server, so RNE can act
+as the action provider without an external Nav2 stack:
+
+```bash
+ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
+  "{pose: {header: {frame_id: map}, pose: {position: {x: 1.0}, orientation: {w: 1.0}}}}" --feedback
+```
+
+The server publishes the straight-line plan on `/plan`, streams
+`distance_remaining` / `number_of_recoveries` feedback, and drives the base with
+a heading controller. If progress stalls it runs a **spin recovery** (mirroring
+the Rust `RecoverySequence`) before resuming. `nav2_action_smoke.sh` starts the
+node, sends a goal, and confirms `error_code: 0` with the base at the goal.
+
 ## Frames and QoS
 
 - `/tf` publishes `map → odom → base_footprint → base_link → lidar` with yaw

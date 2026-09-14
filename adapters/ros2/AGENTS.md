@@ -17,7 +17,8 @@ This directory contains optional adapters between Robot Native Engine and extern
   `/tf`, `/odom`, `/scan`, `/map`, `/plan` and subscribing `/cmd_vel`
 - `rne_ros2_bridge/nav_node.py`: Nav2-facing node (no `simulation_interfaces`)
   that integrates `/cmd_vel` and publishes `/odom`, `/tf`, `/scan`, `/map`,
-  `/plan`, `/joint_states`; `map_file` loads an RNE SLAM map
+  `/plan`, `/joint_states`; `map_file` loads an RNE SLAM map; when `nav2_msgs` is
+  available it also serves `/navigate_to_pose` with feedback and a spin recovery
 - `rne_ros2_node`: Native `rclrs` runtime node (same topics, headless `rne_ai` sim)
 
 URDF import: `crates/rne_urdf_import`

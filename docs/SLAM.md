@@ -82,6 +82,19 @@ resamples (systematic, deterministic) when the effective sample size falls below
 half. `Amcl::update(scan, odom, sensor_from_base)` returns the weighted-mean
 estimate; the estimate converges near truth and is bit-identical across runs.
 
+## 3D point-cloud ICP
+
+`Icp3d::align(source, target, initial, config)` registers a 3D source cloud onto
+a target cloud and returns the rigid `Transform3` (target ← source). It pairs
+each (strided) source point with its brute-force nearest target point within
+`max_correspondence_distance_m`, then recovers the incremental transform with
+Horn's closed-form quaternion method. The largest eigenvector of the 4x4 Horn
+matrix is found by power iteration after a Gershgorin shift, so the algebraically
+largest eigenvector is selected deterministically even when the most negative
+eigenvalue has a larger magnitude. `IcpResult` reports the transform, iteration
+and correspondence counts, convergence, and the mean residual. This is the 3D
+front-end used with the `rne_nav` elevation map for LiDAR/point-cloud mapping.
+
 ## ECS glue
 - `SlamState` wraps a `Slam2d` estimator as a resource.
 - `PendingSlamScans` queues `(scan, odom_pose, sensor_from_base)`.

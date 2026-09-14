@@ -1,0 +1,16 @@
+[package]
+name = "nav_elevation_icp"
+version = "0.2.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rne_math = { workspace = true }
+rne_nav = { workspace = true }
+rne_slam = { workspace = true }
+
+[[example]]
+name = "100_nav_elevation_icp"
+path = "main.rs"

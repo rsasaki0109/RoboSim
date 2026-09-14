@@ -137,6 +137,7 @@ members = [
   "examples/97_nav_slam_mapping",
   "examples/98_nav_slam_physics",
   "examples/99_multi_robot_avoidance",
+  "examples/100_nav_elevation_icp",
   "tests/determinism",
   "tests/dynamics",
   "tests/mobility_benchmark",

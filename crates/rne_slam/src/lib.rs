@@ -11,6 +11,7 @@
 
 #![deny(missing_docs)]
 
+pub mod icp;
 pub mod likelihood;
 pub mod localization;
 pub mod pose_graph;
@@ -19,6 +20,7 @@ pub mod scan_match;
 pub mod slam;
 pub mod systems;
 
+pub use icp::{Icp3d, IcpConfig, IcpError, IcpResult};
 pub use likelihood::{LikelihoodConfig, LikelihoodField};
 pub use localization::{Amcl, AmclConfig, AmclUpdate, Particle};
 pub use pose_graph::{PoseGraph, PoseGraphEdge, PoseGraphError};
