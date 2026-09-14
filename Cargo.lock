@@ -1616,11 +1616,8 @@ dependencies = [
 name = "go2_jump"
 version = "0.2.0"
 dependencies = [
- "png",
  "rne_ai",
  "rne_math",
- "rne_render",
- "rne_render_wgpu",
 ]
 
 [[package]]
