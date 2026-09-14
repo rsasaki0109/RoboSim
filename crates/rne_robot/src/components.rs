@@ -118,6 +118,45 @@ pub struct Actuator {
     pub limits: crate::actuator::ActuatorLimits,
 }
 
+/// Category of a device attached to a link.
+///
+/// Mirrors the role-based split Choreonoid uses for its `Device` hierarchy
+/// without depending on any concrete sensor, actuator, or renderer type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceKind {
+    /// A sensing device such as an IMU, lidar, camera, or encoder.
+    Sensor,
+    /// A driving device such as a motor or servo.
+    Actuator,
+    /// A controller or policy host bound to a link.
+    Controller,
+    /// Any other link-attached device.
+    Other,
+}
+
+/// A device attached to a robot link.
+///
+/// The device is its own entity and points back at the host link. Prefer
+/// [`crate::device::spawn_device`] and [`crate::device::attach_device`] so the
+/// link's [`LinkDevices`] index stays consistent.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct Device {
+    /// Host link entity.
+    pub link: Entity,
+    /// Device name.
+    pub name: String,
+    /// Device category.
+    pub kind: DeviceKind,
+}
+
+/// Index of device entities attached to a link.
+///
+/// Maintained by [`crate::device`] helpers; treat the vector as append-only
+/// from those helpers and read it with [`crate::device::devices_of_link`].
+#[derive(Component, Clone, Debug, Default, PartialEq)]
+pub struct LinkDevices(pub Vec<Entity>);
+
 /// Failure applied to the backend-neutral steering-actuator response.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SteeringActuatorFailureMode {

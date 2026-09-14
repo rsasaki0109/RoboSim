@@ -1,0 +1,17 @@
+[package]
+name = "robot_kinematics"
+version = "0.2.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rne_ecs = { workspace = true }
+rne_math = { workspace = true }
+rne_robot = { workspace = true }
+rne_urdf_import = { workspace = true }
+
+[[example]]
+name = "94_robot_kinematics"
+path = "main.rs"

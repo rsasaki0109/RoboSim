@@ -73,7 +73,7 @@ pub struct RosQuaternion {
 }
 
 /// `geometry_msgs/Vector3` compatible vector.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RosVector3 {
     /// X component.
     pub x: f64,
@@ -167,4 +167,108 @@ pub struct RosImage {
     pub step: u32,
     /// Raw image bytes.
     pub data: Vec<u8>,
+}
+
+/// `geometry_msgs/Point` compatible point.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RosPoint {
+    /// X coordinate.
+    pub x: f64,
+    /// Y coordinate.
+    pub y: f64,
+    /// Z coordinate.
+    pub z: f64,
+}
+
+/// `geometry_msgs/Pose` compatible planar pose.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RosPose {
+    /// Position.
+    pub position: RosPoint,
+    /// Orientation.
+    pub orientation: RosQuaternion,
+}
+
+/// `geometry_msgs/PoseWithCovariance` compatible pose with covariance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RosPoseWithCovariance {
+    /// Pose.
+    pub pose: RosPose,
+    /// Row-major 6x6 covariance.
+    pub covariance: [f64; 36],
+}
+
+/// `geometry_msgs/Twist` compatible velocity.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RosTwist {
+    /// Linear velocity.
+    pub linear: RosVector3,
+    /// Angular velocity.
+    pub angular: RosVector3,
+}
+
+/// `geometry_msgs/TwistWithCovariance` compatible velocity with covariance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RosTwistWithCovariance {
+    /// Twist.
+    pub twist: RosTwist,
+    /// Row-major 6x6 covariance.
+    pub covariance: [f64; 36],
+}
+
+/// `nav_msgs/Odometry` compatible odometry message.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RosOdometry {
+    /// Message header.
+    pub header: RosHeader,
+    /// Child frame identifier (typically `base_link`).
+    pub child_frame_id: String,
+    /// Estimated pose.
+    pub pose: RosPoseWithCovariance,
+    /// Estimated velocity.
+    pub twist: RosTwistWithCovariance,
+}
+
+/// `nav_msgs/MapMetaData` compatible occupancy grid metadata.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RosMapMetaData {
+    /// Time the map was loaded.
+    pub map_load_time: RosTime,
+    /// Cell size in meters.
+    pub resolution: f32,
+    /// Grid width in cells.
+    pub width: u32,
+    /// Grid height in cells.
+    pub height: u32,
+    /// Pose of cell `(0, 0)`'s center in the map frame.
+    pub origin: RosPose,
+}
+
+/// `nav_msgs/OccupancyGrid` compatible occupancy grid.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RosOccupancyGrid {
+    /// Message header.
+    pub header: RosHeader,
+    /// Grid metadata.
+    pub info: RosMapMetaData,
+    /// Row-major cell values: `-1` unknown, `0` free, `100` occupied.
+    pub data: Vec<i8>,
+}
+
+/// `geometry_msgs/PoseStamped` compatible stamped pose.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RosPoseStamped {
+    /// Message header.
+    pub header: RosHeader,
+    /// Pose.
+    pub pose: RosPose,
+}
+
+/// `nav_msgs/Path` compatible path message.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RosPath {
+    /// Message header.
+    pub header: RosHeader,
+    /// Ordered poses.
+    pub poses: Vec<RosPoseStamped>,
 }

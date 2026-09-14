@@ -60,6 +60,41 @@ pub fn to_ros_transform_from_matrix(matrix: Mat4) -> RosTransform {
     }
 }
 
+/// Converts a dynamic transform buffer into a ROS TF message.
+///
+/// Uses the most recent sample of every edge, sorted by frame ids so the
+/// message is deterministic.
+pub fn to_ros_tf_message_from_buffer(
+    buffer: &rne_nav::TfBuffer,
+    sim_time: SimTime,
+) -> RosTfMessage {
+    let transforms = buffer
+        .latest_transforms()
+        .into_iter()
+        .map(|sample| RosTransformStamped {
+            header: RosHeader {
+                stamp: crate::clock::to_ros_time(sim_time),
+                frame_id: sample.parent.as_str().to_string(),
+            },
+            child_frame_id: sample.child.as_str().to_string(),
+            transform: RosTransform {
+                translation: RosVector3 {
+                    x: sample.transform.translation.x,
+                    y: sample.transform.translation.y,
+                    z: sample.transform.translation.z,
+                },
+                rotation: RosQuaternion {
+                    x: sample.transform.rotation.x,
+                    y: sample.transform.rotation.y,
+                    z: sample.transform.rotation.z,
+                    w: sample.transform.rotation.w,
+                },
+            },
+        })
+        .collect();
+    RosTfMessage { transforms }
+}
+
 fn to_ros_quaternion(rotation: Quat) -> RosQuaternion {
     RosQuaternion {
         x: rotation.x,
@@ -111,5 +146,37 @@ mod tests {
             Quat::IDENTITY,
         ));
         assert_relative_eq!(transform.translation.y, 1.5);
+    }
+
+    #[test]
+    fn tf_message_from_buffer_uses_latest_samples() {
+        use rne_nav::{StampedTransform, TfBuffer};
+
+        let mut buffer = TfBuffer::new();
+        buffer
+            .set_transform(StampedTransform::new(
+                "odom",
+                "base_link",
+                0.0,
+                rne_math::Transform3::from_translation_rotation(Vec3::ZERO, Quat::IDENTITY),
+            ))
+            .unwrap();
+        buffer
+            .set_transform(StampedTransform::new(
+                "odom",
+                "base_link",
+                1.0,
+                rne_math::Transform3::from_translation_rotation(
+                    Vec3::new(2.0, 0.0, 0.0),
+                    Quat::IDENTITY,
+                ),
+            ))
+            .unwrap();
+
+        let tf = to_ros_tf_message_from_buffer(&buffer, SimTime::from_ticks(1_000_000_000));
+        assert_eq!(tf.transforms.len(), 1);
+        assert_eq!(tf.transforms[0].header.frame_id, "odom");
+        assert_eq!(tf.transforms[0].child_frame_id, "base_link");
+        assert_relative_eq!(tf.transforms[0].transform.translation.x, 2.0);
     }
 }

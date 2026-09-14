@@ -1,0 +1,20 @@
+[package]
+name = "rne_slam"
+description = "Deterministic backend-neutral 2D scan matching and online occupancy SLAM"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bevy_ecs = { workspace = true }
+rne_core = { workspace = true }
+rne_ecs = { workspace = true }
+rne_math = { workspace = true }
+rne_nav = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"

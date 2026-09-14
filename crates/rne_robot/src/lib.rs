@@ -5,27 +5,52 @@
 pub mod actuator;
 pub mod commands;
 pub mod components;
+pub mod controller_io;
+pub mod device;
 pub mod diff_drive;
 pub mod joint;
+pub mod kinematics;
+pub mod motion;
+pub mod self_collision;
 pub mod systems;
 
 pub use actuator::{ActuatorLimits, ActuatorTarget, ControlMode};
 pub use commands::{ActuatorCommand, ActuatorCommandBuffer, ActuatorCommandEntry};
 pub use components::{
     AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
-    DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
-    JointLimits, Link, LongitudinalDrivePathState, LongitudinalMobilityPlantSpec,
-    LongitudinalMobilityPlantState, MultirotorFlight, PassiveCasterSpec,
-    PwmMotorCommandFrontendSpec, PwmMotorCommandPolarity, RigidRoadPatchSpec, RigidRoadProfileSpec,
-    Robot, RobotId, SteeringActuatorFailureMode, SteeringActuatorSpec, SteeringActuatorState,
-    SuspensionStrutSpec, TransmissionSpec, VehicleDynamics, WheelAssemblySpec, WheelStationSpec,
-    WheelSteeringState,
+    DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Device, DeviceKind,
+    Joint, JointKind, JointLimits, Link, LinkDevices, LongitudinalDrivePathState,
+    LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState, MultirotorFlight,
+    PassiveCasterSpec, PwmMotorCommandFrontendSpec, PwmMotorCommandPolarity, RigidRoadPatchSpec,
+    RigidRoadProfileSpec, Robot, RobotId, SteeringActuatorFailureMode, SteeringActuatorSpec,
+    SteeringActuatorState, SuspensionStrutSpec, TransmissionSpec, VehicleDynamics,
+    WheelAssemblySpec, WheelStationSpec, WheelSteeringState,
+};
+pub use controller_io::{
+    apply_controller_output, build_controller_io, step_controller, Controller,
+    ControllerApplyReport, ControllerCommand, ControllerIoError, ControllerIoFrame,
+    ControllerJointState, ControllerOutput,
+};
+pub use device::{
+    attach_device, detach_device, device_link, devices_of_kind, devices_of_link, spawn_device,
+    DeviceError,
 };
 pub use diff_drive::{
     spawn_diff_drive_robot, DiffDriveComponent, DiffDriveConfig, DiffDriveDriveMode,
     DiffDriveSpawned, DifferentialDrive,
 };
 pub use joint::validate_joint_limits;
+pub use kinematics::{
+    ForwardKinematics, IkOptions, IkSolution, Jacobian, KinematicModel, KinematicsError,
+};
+pub use motion::{
+    body_motion_from_world, BodyMotion, BodyMotionSample, JointInterpolation, JointKeyframe,
+    JointTrack, MotionError,
+};
+pub use self_collision::{
+    check_self_collisions, CollisionPrimitive, SelfCollisionChecker, SelfCollisionPair,
+    SelfCollisionReport,
+};
 pub use systems::{
     ackermann_kinematics, aggregate_wheel_contact_patch, apply_actuator_commands,
     combined_slip_tire_wrench, command_ackermann_drive, command_multirotor,
