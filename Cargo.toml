@@ -15,6 +15,9 @@ members = [
   "crates/rne_plugin_example_velocity_servo",
   "crates/rne_plugin_legacy_v2_fixture",
   "crates/rne_deformable",
+  "crates/rne_dynamics",
+  "crates/rne_legged",
+  "crates/rne_wbc",
   "crates/rne_robot",
   "crates/rne_nav",
   "crates/rne_slam",
@@ -141,6 +144,10 @@ members = [
   "examples/100_nav_elevation_icp",
   "examples/101_motion_planning",
   "examples/102_motion_planning_media",
+  "examples/103_dynamics_diagnostics",
+  "examples/104_legged_pattern",
+  "examples/105_whole_body_control",
+  "examples/106_go2_jump",
   "tests/determinism",
   "tests/dynamics",
   "tests/mobility_benchmark",
@@ -181,6 +188,9 @@ rne_assets = { version = "=0.2.0", path = "crates/rne_assets" }
 rne_core = { version = "=0.2.0", path = "crates/rne_core" }
 rne_data = { version = "=0.2.0", path = "crates/rne_data" }
 rne_deformable = { version = "=0.2.0", path = "crates/rne_deformable" }
+rne_dynamics = { version = "=0.2.0", path = "crates/rne_dynamics" }
+rne_legged = { version = "=0.2.0", path = "crates/rne_legged" }
+rne_wbc = { version = "=0.2.0", path = "crates/rne_wbc" }
 rne_ecs = { version = "=0.2.0", path = "crates/rne_ecs" }
 rne_fuzz_smoke = { version = "=0.2.0", path = "tests/fuzz_smoke" }
 rne_log = { version = "=0.2.0", path = "crates/rne_log" }

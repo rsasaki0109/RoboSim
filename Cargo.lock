@@ -1032,6 +1032,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
+name = "dynamics_diagnostics"
+version = "0.2.0"
+dependencies = [
+ "rne_dynamics",
+ "rne_ecs",
+ "rne_math",
+ "rne_robot",
+ "rne_urdf_import",
+]
+
+[[package]]
 name = "earcutr"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1602,6 +1613,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "go2_jump"
+version = "0.2.0"
+dependencies = [
+ "png",
+ "rne_ai",
+ "rne_math",
+ "rne_render",
+ "rne_render_wgpu",
+]
+
+[[package]]
 name = "go2_learned_sprint"
 version = "0.2.0"
 dependencies = [
@@ -2147,6 +2169,13 @@ name = "lebe"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
+
+[[package]]
+name = "legged_pattern"
+version = "0.2.0"
+dependencies = [
+ "rne_legged",
+]
 
 [[package]]
 name = "libc"
@@ -3891,6 +3920,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rne_dynamics"
+version = "0.2.0"
+dependencies = [
+ "approx",
+ "rne_ecs",
+ "rne_math",
+ "rne_physics",
+ "rne_robot",
+ "rne_world",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "rne_dynamics_tests"
 version = "0.2.0"
 dependencies = [
@@ -3954,6 +3996,16 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rne_legged"
+version = "0.2.0"
+dependencies = [
+ "approx",
+ "rne_math",
+ "serde",
  "thiserror 2.0.18",
 ]
 
@@ -4379,6 +4431,21 @@ dependencies = [
  "rne_robot",
  "rne_world",
  "roxmltree",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rne_wbc"
+version = "0.2.0"
+dependencies = [
+ "approx",
+ "rne_dynamics",
+ "rne_ecs",
+ "rne_math",
+ "rne_physics",
+ "rne_robot",
+ "rne_world",
+ "serde",
  "thiserror 2.0.18",
 ]
 
@@ -5711,6 +5778,19 @@ dependencies = [
  "js-sys",
  "log",
  "web-sys",
+]
+
+[[package]]
+name = "whole_body_control"
+version = "0.2.0"
+dependencies = [
+ "rne_dynamics",
+ "rne_ecs",
+ "rne_math",
+ "rne_robot",
+ "rne_urdf_import",
+ "rne_wbc",
+ "rne_world",
 ]
 
 [[package]]

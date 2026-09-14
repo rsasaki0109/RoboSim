@@ -22,6 +22,9 @@ ROS2 is an adapter only. Do not add ROS2, rclrs, rclcpp, DDS, or ROS message dep
 - `crates/rne_ecs`: ECS wrapper and shared entity conventions
 - `crates/rne_world`: world entity, scene index, frame graph
 - `crates/rne_robot`: robot/link/joint/actuator components and systems
+- `crates/rne_dynamics`: backend-neutral articulated-body dynamics (CRBA mass matrix, recursive Newton-Euler inverse dynamics, floating base, center of mass and Jacobians)
+- `crates/rne_legged`: backend-neutral legged walking templates (LIPM/DCM, capture-point foot placement, ZMP preview control, footstep plans)
+- `crates/rne_wbc`: backend-neutral whole-body control (weighted inverse dynamics, contact and friction handling, joint torque recovery)
 - `crates/rne_physics`: physics backend traits only
 - `crates/rne_physics_rapier`: Rapier implementation
 - `crates/rne_physics_analytic`: deterministic collision-free analytic backend
@@ -123,6 +126,9 @@ Allowed dependencies:
 - `rne_world` may depend on `rne_ecs`, `rne_core`, `rne_math`.
 - `rne_robot` may depend on `rne_world`, `rne_ecs`, `rne_math`, `rne_core`.
 - `rne_physics` may depend on `rne_robot`, `rne_world`, `rne_ecs`, `rne_math`.
+- `rne_dynamics` may depend on `rne_physics`, `rne_robot`, `rne_world`, `rne_ecs`, `rne_math`.
+- `rne_legged` may depend on `rne_dynamics`, `rne_robot`, `rne_world`, `rne_ecs`, `rne_math`.
+- `rne_wbc` may depend on `rne_dynamics`, `rne_robot`, `rne_world`, `rne_ecs`, `rne_math`.
 - `rne_physics_rapier` may depend on `rne_physics` and Rapier.
 - `rne_sensor` may depend on `rne_physics`, `rne_render`, `rne_data`.
 - `rne_render_wgpu` may depend on `rne_render` and wgpu.
@@ -139,6 +145,15 @@ Forbidden:
 - Core crates must not depend on `adapters/*`.
 - Core crates must not depend on ROS2.
 - `rne_robot` must not depend on Rapier, MuJoCo, PhysX, or Bullet.
+- `rne_dynamics` must not depend on a physics backend, a renderer, ROS 2, or an
+  external dynamics library (Pinocchio, RBDL, Crocoddyl); it builds on
+  `rne_robot` and `rne_physics` model components without changing them.
+- `rne_legged` must not depend on a renderer, physics backend, ROS 2, or an
+  external planning/control stack; it provides deterministic template planners
+  that a physics backend or policy layer can consume.
+- `rne_wbc` must not depend on a renderer, physics backend, ROS 2, or an
+  external control stack; it builds on `rne_dynamics` and `rne_robot` types
+  without changing them.
 - `rne_sensor` must not require a renderer unless the specific sensor is camera-like.
 - `rne_traffic` must not depend on a renderer, physics backend, geospatial importer,
   robotics adapter, or external traffic simulator.

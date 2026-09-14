@@ -130,3 +130,20 @@ replaces it with the OSS joint-space contract.
 - **Next:** a GPU PPO path (or a Rust-native optimizer over a low-dimensional
   phase-conditioned policy) is required before a 100M-step campaign is
   practical. This is the critical path to genuine walking.
+
+### Theme E — open-loop dynamic push-off probe (measured negative)
+
+`examples/106_go2_jump` tests whether a scripted crouch plus a saturated
+knee-extension torque can make the Go2 leave the ground. It is a headless
+measurement with `--scan` (torque sweep) and `--trace` (per-step telemetry).
+
+- **Result:** with the knees held and the hips/thighs free, a +23.7 N·m
+  knee-extension burst extends the stance by ~0.21 m while the lowest foot stays
+  planted at ~0.02 m; `airborne_steps` is zero for every scanned combination.
+  Adding thigh torque reaches a higher apex (up to +0.45 m) but as a pitch-up
+  rear on the planted feet, not a hop, and the body still returns upright.
+- **Conclusion:** a true liftoff needs a closed-loop, contact-force-driven
+  push-off (and a flight-phase controller), not an open-loop torque profile.
+  Consistent with the base contact-schedule/closing wall, this keeps Theme B
+  (foot placement) and a whole-body jump trajectory as the prerequisites for
+  any parkour capture.
