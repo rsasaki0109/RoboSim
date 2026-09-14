@@ -358,10 +358,10 @@ No MoveIt or ROS dependency is added to core.
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/motion-planning.png">
-    <img src="docs/media/motion-planning.gif" alt="The mm_minimal URDF arm driven by rne_planning: RRT-Connect swings the arm around a red spherical obstacle, leaving a cyan end-effector trail, while straight joint interpolation is blocked" width="820">
+    <img src="docs/media/motion-planning.gif" alt="The OpenArm v2 7-DOF arm driven by rne_planning: RRT-Connect swings the dark arm and gripper around a red spherical obstacle, leaving a cyan end-effector trail, while straight joint interpolation is blocked" width="820">
   </picture>
   <br>
-  <sub>The checked-in <code>mm_minimal</code> URDF arm, planned by RRT-Connect and rendered by the real wgpu renderer. A collision object blocks straight joint interpolation; the cyan trail traces the collision-free end-effector detour. <a href="examples/102_motion_planning_media/main.rs">capture source</a> · <a href="docs/architecture/011_joint_motion_planning.md">architecture</a></sub>
+  <sub>The checked-in RNE-converted <b>OpenArm v2 left arm</b> (7-DOF, GLB meshes), planned by RRT-Connect and rendered by the real wgpu renderer. A collision object blocks straight joint interpolation; the cyan trail traces the collision-free end-effector detour. <a href="examples/102_motion_planning_media/main.rs">capture source</a> · <a href="docs/architecture/011_joint_motion_planning.md">architecture</a></sub>
 </p>
 
 ```bash

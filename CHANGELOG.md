@@ -88,9 +88,10 @@ All notable changes to Robot Native Engine are documented in this file.
   deterministic.
 
 - README motion-planning media: `examples/102_motion_planning_media` loads the
-  checked-in `mm_minimal` URDF arm, plans a collision-free swing around a
-  collision object with RRT-Connect, and plays the trajectory through the real
-  wgpu renderer to write `docs/media/motion-planning.{gif,png}`. `--smoke` runs
+  checked-in RNE-converted OpenArm v2 left arm (7-DOF, GLB meshes), plans a
+  collision-free swing around a collision object with RRT-Connect, and plays the
+  trajectory through the real wgpu renderer to write
+  `docs/media/motion-planning.{gif,png}`. `--smoke` runs
   the planner headlessly and asserts straight joint interpolation is blocked
   while RRT-Connect is feasible. The README "Native motion planning" section
   embeds the capture.
