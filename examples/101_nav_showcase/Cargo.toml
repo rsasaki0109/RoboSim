@@ -1,0 +1,17 @@
+[package]
+name = "nav_showcase"
+version = "0.2.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+image = "0.25"
+rne_math = { workspace = true }
+rne_nav = { workspace = true }
+rne_slam = { workspace = true }
+
+[[example]]
+name = "101_nav_showcase"
+path = "main.rs"

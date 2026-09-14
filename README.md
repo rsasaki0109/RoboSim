@@ -128,6 +128,48 @@ RNE_SKIP_GPU=1 cargo run -p vehicle_dynamics_compare --example 49_vehicle_dynami
 Model equations, measured errors, and acceptance tests are in
 [Vehicle dynamics](docs/VEHICLE_DYNAMICS.md).
 
+## Navigation, SLAM, and multi-robot
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/nav-slam.png">
+    <img src="docs/media/nav-slam.gif" alt="Online 2D SLAM growing an occupancy map from synthetic LiDAR while the corrected trajectory closes a loop" width="720">
+  </picture>
+  <br>
+  <sub>Online 2D SLAM: the ROS-free <code>rne_slam</code> front-end matches each scan, grows the occupancy map, and closes a loop on the return trip.</sub>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/nav-multi-robot.png">
+    <img src="docs/media/nav-multi-robot.gif" alt="Three robots crossing a shared plane, each yielding to the others with the sampling sense-and-avoid planner" width="400">
+  </picture>
+  <img src="docs/media/nav-elevation.png" alt="2.5D elevation map shaded by slope with non-traversable cells marked in red" width="400">
+  <br>
+  <sub>Three robots cross without collision (<code>avoid_velocities</code>)&nbsp;·&nbsp;A 2.5D elevation map shades slope and flags non-traversable cells.</sub>
+</p>
+
+`rne_nav` and `rne_slam` are the deterministic, ROS-free navigation core: occupancy
+grids and costmaps, a timestamped transform tree, A*/Dijkstra planning, pure-pursuit
+and DWA control, multi-robot sense-and-avoid, drive actuators with limits, an
+odometry/IMU/GPS EKF, 2.5D elevation and terrain layering, 3D ICP, and online 2D SLAM
+with pose-graph loop closure and AMCL. A ROS 2 adapter maps the same types to
+`nav_msgs`/`sensor_msgs`/`tf2` and exposes Nav2 action servers, so the algorithms stay
+independent of the transport. Every scenario replays bit-for-bit.
+
+```bash
+# Regenerate these navigation visuals (GPU-free; ffmpeg for the GIFs)
+cargo run -p nav_showcase --example 101_nav_showcase
+
+cargo run -p nav_slam_mapping --example 97_nav_slam_mapping
+cargo run -p nav_slam_physics --example 98_nav_slam_physics
+cargo run -p multi_robot_avoidance --example 99_multi_robot_avoidance
+cargo run -p nav_elevation_icp --example 100_nav_elevation_icp
+```
+
+Data structures, algorithms, and limits are in
+[Navigation](docs/NAVIGATION.md) and [SLAM](docs/SLAM.md).
+
 ## G1 locomotion
 
 <p align="center">

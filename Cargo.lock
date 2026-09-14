@@ -2572,6 +2572,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nav_showcase"
+version = "0.2.0"
+dependencies = [
+ "image",
+ "rne_math",
+ "rne_nav",
+ "rne_slam",
+]
+
+[[package]]
 name = "nav_slam_mapping"
 version = "0.2.0"
 dependencies = [
