@@ -63,6 +63,8 @@ pub struct WholeBodyConfig {
     pub com_weight: f64,
     /// Weight on the posture task.
     pub posture_weight: f64,
+    /// Weight on the base-attitude task.
+    pub angular_weight: f64,
     /// Tikhonov weight on the contact forces (pulls them toward zero).
     pub force_regularization: f64,
     /// Tikhonov weight on the joint accelerations (pulls them toward zero).
@@ -80,6 +82,7 @@ impl Default for WholeBodyConfig {
             contact_weight: 1.0e6,
             com_weight: 1.0e2,
             posture_weight: 1.0,
+            angular_weight: 1.0e4,
             force_regularization: 1.0e-4,
             acceleration_regularization: 1.0e-4,
             solver_regularization: 1.0e-9,
@@ -127,6 +130,16 @@ pub struct PostureTask {
     pub velocity_gain_s_inv: f64,
 }
 
+/// Base-orientation task commanding the floating-base angular acceleration.
+///
+/// The three rows set the base angular acceleration in the base body frame, so
+/// a leveling controller can drive the body upright during a maneuver.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BaseAttitudeTask {
+    /// Desired base angular acceleration in the base body frame, in rad/s².
+    pub desired_angular_acceleration_rad_s2: Vec3,
+}
+
 /// Result of one whole-body control solve.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WholeBodySolution {
@@ -168,6 +181,7 @@ impl WholeBodyController {
     /// `contacts` are the active point contacts. `com_task` and `posture_task`
     /// are optional; at least one task plus the dynamics and contact rows make
     /// the problem well-posed.
+    #[allow(clippy::too_many_arguments)]
     #[allow(clippy::needless_range_loop)]
     pub fn solve(
         &self,
@@ -176,6 +190,7 @@ impl WholeBodyController {
         qd: &[f64],
         contacts: &[ContactPoint],
         com_task: Option<&ComTask>,
+        base_attitude_task: Option<&BaseAttitudeTask>,
         posture_task: Option<&PostureTask>,
     ) -> Result<WholeBodySolution, WbcError> {
         if model.base_dof() != 6 {
@@ -292,6 +307,17 @@ impl WholeBodyController {
                 }
                 let target = desired[component] - com_bias[component];
                 push_row(&mut rows, &mut rhs, coefficients, target, scale);
+            }
+        }
+
+        // Base attitude task: command the base angular acceleration.
+        if let Some(task) = base_attitude_task {
+            let scale = self.config.angular_weight.sqrt();
+            let desired = task.desired_angular_acceleration_rad_s2.to_array();
+            for component in 0..3 {
+                let mut coefficients = vec![0.0; cols];
+                coefficients[3 + component] = 1.0;
+                push_row(&mut rows, &mut rhs, coefficients, desired[component], scale);
             }
         }
 
@@ -567,6 +593,7 @@ mod tests {
                 &contacts,
                 Some(&ComTask::hold(Vec3::ZERO)),
                 None,
+                None,
             )
             .expect("solve");
 
@@ -608,6 +635,7 @@ mod tests {
                 &contacts,
                 Some(&ComTask::hold(Vec3::ZERO)),
                 None,
+                None,
             )
             .expect("solve");
         let second = controller
@@ -617,6 +645,7 @@ mod tests {
                 &[0.0; 6],
                 &contacts,
                 Some(&ComTask::hold(Vec3::ZERO)),
+                None,
                 None,
             )
             .expect("solve");
@@ -628,7 +657,7 @@ mod tests {
         let (_world, model, base) = floating_body();
         let controller = WholeBodyController::new(WholeBodyConfig::default());
         assert_eq!(
-            controller.solve(&model, &[0.0; 6], &[0.0; 6], &[], None, None),
+            controller.solve(&model, &[0.0; 6], &[0.0; 6], &[], None, None, None),
             Err(WbcError::NoContacts)
         );
         let contacts = vec![ContactPoint::new(base, Vec3::ZERO, 0.8)];
@@ -638,7 +667,7 @@ mod tests {
         };
         let controller = WholeBodyController::new(bad_limits);
         assert!(matches!(
-            controller.solve(&model, &[0.0; 6], &[0.0; 6], &contacts, None, None),
+            controller.solve(&model, &[0.0; 6], &[0.0; 6], &contacts, None, None, None),
             Err(WbcError::TorqueLimitDimension { .. })
         ));
     }

@@ -26,5 +26,6 @@ pub mod controller;
 
 pub use contact::{ContactPoint, FrictionCone};
 pub use controller::{
-    ComTask, PostureTask, WbcError, WholeBodyConfig, WholeBodyController, WholeBodySolution,
+    BaseAttitudeTask, ComTask, PostureTask, WbcError, WholeBodyConfig, WholeBodyController,
+    WholeBodySolution,
 };

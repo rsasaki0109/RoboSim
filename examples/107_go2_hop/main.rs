@@ -15,7 +15,9 @@ use rne_ai::{
 use rne_dynamics::{center_of_mass, ArticulatedModel};
 use rne_math::Vec3;
 use rne_robot::{FloatingBase, KinematicModel, Robot, Transform3};
-use rne_wbc::{ComTask, ContactPoint, PostureTask, WholeBodyConfig, WholeBodyController};
+use rne_wbc::{
+    BaseAttitudeTask, ComTask, ContactPoint, PostureTask, WholeBodyConfig, WholeBodyController,
+};
 
 const SOLE_OFFSET_LOCAL_M: Vec3 = Vec3::new(0.0, 0.0, -0.02);
 const LEG_PREFIXES: [&str; 4] = ["FL", "FR", "RL", "RR"];
@@ -38,6 +40,8 @@ const TUCK_THIGH_RAD: f64 = 0.95;
 const TUCK_CALF_RAD: f64 = -1.7;
 
 const PUSH_ACCEL_M_S2: f64 = 20.0;
+const ATTITUDE_GAIN: f64 = -40.0;
+const ATTITUDE_RATE_GAIN: f64 = 8.0;
 const AIRBORNE_FOOT_HEIGHT_M: f64 = 0.04;
 
 /// The floating-base model and the joint link names in degree-of-freedom order.
@@ -200,6 +204,7 @@ fn main() {
     let crouch_y_m = sim.observe().base_y_m;
 
     let controller = WholeBodyController::new(WholeBodyConfig {
+        com_weight: 1.0e5,
         torque_limits_nm: Some(hop.torque_limits.clone()),
         ..WholeBodyConfig::default()
     });
@@ -229,6 +234,27 @@ fn main() {
             position_gain_s_inv2: 4.0,
             velocity_gain_s_inv: 1.0,
         };
+        let base_pose = sim.named_transform("base").expect("base pose");
+        let up_world = (base_pose.rotation * Vec3::Y).normalize_or_zero();
+        let tilt_axis_world = Vec3::Y.cross(up_world);
+        let sin_angle = tilt_axis_world.length();
+        let tilt_angle = up_world.y.clamp(-1.0, 1.0).acos();
+        let axis_body = if sin_angle > 1.0e-6 {
+            base_pose.rotation.inverse() * (tilt_axis_world / sin_angle)
+        } else {
+            Vec3::ZERO
+        };
+        let observation = sim.observe();
+        let omega_body = base_pose.rotation.inverse()
+            * Vec3::new(
+                observation.base_angular_velocity_x_rad_s,
+                observation.base_angular_velocity_y_rad_s,
+                observation.base_angular_velocity_z_rad_s,
+            );
+        let attitude = BaseAttitudeTask {
+            desired_angular_acceleration_rad_s2: axis_body * (ATTITUDE_GAIN * tilt_angle)
+                - omega_body * ATTITUDE_RATE_GAIN,
+        };
         let solution = controller
             .solve(
                 &hop.model,
@@ -236,6 +262,7 @@ fn main() {
                 &qd,
                 &contacts,
                 Some(&com_task),
+                Some(&attitude),
                 Some(&posture),
             )
             .expect("wbc solve");
