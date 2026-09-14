@@ -31,6 +31,9 @@ path planning and scan matching; those arrive in later phases.
 | `ElevationMap` | 2.5D per-cell min/max/mean height map with slope and traversability queries |
 | `apply_terrain_layer` | Folds elevation slope/step into a costmap as lethal and graded costs |
 | `NavSatTransform` | Geographic datum ↔ local map projection (`navsat_transform`) |
+| `VoxelLayer` | Sparse 3D obstacle voxels from depth/3D LiDAR projected onto the costmap |
+| `KeepoutZone` / `SpeedFilter` | Lethal keepout regions and slow zones |
+| `TrafficCoordinator` | Reservation-based multi-robot cell leasing and deadlock resolution |
 | `NavMap` / `PendingScans` / `TfTree` | ECS resources |
 | `integrate_pending_scans` | ECS system that drains the scan queue and refreshes the costmap |
 | `NavGoal` | Planar goal component for future planners |
@@ -186,6 +189,23 @@ to `(-pi, pi]` and the covariance is re-symmetrized after every update.
 through a `NavSatTransform` (an equirectangular datum-to-ENU conversion, the RNE
 `navsat_transform`) before fusing it, and `map_from_odom(fused, odom)` yields the
 `map → odom` transform to publish under `tf`.
+
+## Perception layers
+
+`VoxelLayer` accumulates 3D points inside a height band into a sparse voxel set
+(`BTreeSet`, deterministic) and projects the occupied columns onto a `Costmap`
+(lethal) or `OccupancyGrid`; this is the depth-camera / 3D-LiDAR obstacle layer.
+`KeepoutZone` marks a rectangle in the costmap plane lethal, and `SpeedFilter`
+returns the tightest speed cap for a pose from a list of slow zones. All three
+compose with `Costmap::apply_cost`, so they layer over occupancy and terrain.
+
+## Multi-robot coordination
+
+`TrafficCoordinator` serializes robots through shared cells. `request(robot,
+coords, now)` grants a lease for `TrafficConfig::claim_horizon_s` only when no
+other robot holds an unexpired claim; `expire`/`release` free leases. When two
+robots wait on each other, `resolve_deadlock(waiting, now)` grants the
+highest-priority (lowest-id) robot and evicts only lower-priority blockers.
 
 ## Determinism
 

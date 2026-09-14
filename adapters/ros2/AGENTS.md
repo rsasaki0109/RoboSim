@@ -20,7 +20,10 @@ This directory contains optional adapters between Robot Native Engine and extern
   `/tf`, `/scan`, `/map`, `/plan`, `/joint_states`; `map_file` loads an RNE SLAM
   map; when `nav2_msgs` is available it also serves `/navigate_to_pose`,
   `/compute_path_to_pose`, `/follow_path`, `/follow_waypoints`, `/spin`,
-  `/backup`, and the `/load_map` service, with feedback and a spin recovery
+  `/backup`, and the `/load_map` service, with feedback and a spin recovery;
+  also publishes `/dynamic_joint_states` and serves
+  `/joint_trajectory_controller/follow_joint_trajectory` when `control_msgs` is
+  available
 - `rne_ros2_node`: Native `rclrs` runtime node (same topics, headless `rne_ai` sim)
 
 URDF import: `crates/rne_urdf_import`
