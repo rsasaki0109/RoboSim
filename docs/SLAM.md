@@ -116,6 +116,15 @@ elevation map from every keyframe. `process(scan, odom_delta, sensor_from_base)`
 returns a `Slam3dUpdate`; `graph()`, `elevation()`, `keyframe_count()`, and
 `loop_closures()` expose the state.
 
+## Global relocalization
+
+`GlobalRelocalizer` scores candidate `(x, y, yaw)` poses by the mean likelihood
+of the scan endpoints under a `LikelihoodField` built from a prior map. A coarse
+grid search over the map bounds is followed by `refine_levels` of local
+refinement; the best pose is returned when its score clears `min_score`. It
+needs no odometry, so it recovers from a kidnapped robot or an unlocalized
+start, and the fixed search order makes the estimate reproducible.
+
 ## ECS glue
 - `SlamState` wraps a `Slam2d` estimator as a resource.
 - `PendingSlamScans` queues `(scan, odom_pose, sensor_from_base)`.

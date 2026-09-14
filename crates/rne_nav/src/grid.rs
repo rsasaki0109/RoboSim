@@ -85,6 +85,25 @@ impl OccupancyGrid {
         })
     }
 
+    /// Restores a grid from raw fixed-point log-odds values.
+    ///
+    /// The value count must equal `width * height`; values outside the storage
+    /// clamp are accepted as-is so a map round-trips exactly.
+    pub fn from_log_odds(
+        width: usize,
+        height: usize,
+        resolution_m: f64,
+        origin: Pose2d,
+        log_odds: Vec<i16>,
+    ) -> Result<Self, GridError> {
+        let mut grid = Self::new(width, height, resolution_m, origin)?;
+        if log_odds.len() != width * height {
+            return Err(GridError::InvalidSize);
+        }
+        grid.log_odds = log_odds;
+        Ok(grid)
+    }
+
     /// Grid width in cells.
     pub fn width(&self) -> usize {
         self.width

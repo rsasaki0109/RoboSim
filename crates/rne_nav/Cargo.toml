@@ -13,6 +13,7 @@ rne_core = { workspace = true }
 rne_ecs = { workspace = true }
 rne_math = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
