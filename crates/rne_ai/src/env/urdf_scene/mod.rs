@@ -599,6 +599,17 @@ impl UrdfSceneSim {
         &self.world
     }
 
+    /// Returns the ECS world mutably.
+    ///
+    /// Mutating simulation components (for example inserting
+    /// [`rne_robot::FloatingBase`] or temporarily changing a link's local
+    /// `Transform3`) can desynchronize the physics backend from the ECS
+    /// snapshot. Callers must restore any component they change before the next
+    /// step.
+    pub fn world_mut(&mut self) -> &mut World {
+        &mut self.world
+    }
+
     /// Returns the completed simulation time used to timestamp sensor samples.
     pub fn sim_time(&self) -> SimTime {
         self.sim_time
@@ -2233,6 +2244,15 @@ pub fn unitree_g1_dex3_scene_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn world_mut_exposes_the_ecs_world() {
+        let mut sim =
+            UrdfSceneSim::from_scene_path(&cart_minimal_scene_path()).expect("spawn cart");
+        let before = sim.world().iter_entities().count();
+        let _ = sim.world_mut().spawn_empty();
+        assert!(sim.world().iter_entities().count() > before);
+    }
 
     #[test]
     fn observation_exposes_finite_base_orientation_and_velocity() {

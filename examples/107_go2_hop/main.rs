@@ -1,29 +1,21 @@
-//! Experimental closed-loop force control for a Unitree Go2 hop.
+//! Closed-loop whole-body jump for the floating-base Unitree Go2.
 //!
-//! State machine: crouch -> force-controlled push-off -> ballistic flight ->
-//! landing. During the push-off the controller treats the body as one mass,
-//! commands a per-foot vertical force from the desired center-of-mass
-//! acceleration, and maps that force to joint torques through the leg Jacobian
-//! taken from the simulator's own kinematic model.
-//!
-//! Status: does **not** achieve liftoff. Independent per-leg Jacobian-transpose
-//! force control ignores the floating-base coupling: the body pitches (up to
-//! ~1.9 rad) instead of rising, and once the joint torques saturate there is no
-//! attitude authority left. A correct hop needs the whole-body inverse dynamics
-//! (`rne_wbc`) run against a floating-base model built from the simulator's own
-//! world; `UrdfSceneSim` currently exposes `world()` but not `world_mut()`, so
-//! that model cannot be constructed in place yet. Kept as the measured
-//! starting point for the next attempt.
+//! State machine: crouch -> whole-body push-off -> ballistic flight -> landing.
+//! During the push-off `rne_wbc` solves for the joint accelerations, contact
+//! wrenches, and joint torques that realize a target center-of-mass
+//! acceleration while keeping the four feet fixed, using a floating-base model
+//! built from the simulator's own world. Flight uses position control.
 //!
 //! Run with `cargo run -p go2_hop --example 107_go2_hop`.
 
+use glam::EulerRot;
 use rne_ai::{
     unitree_go2_dynamic_scene_path, UrdfJointPositionTarget, UrdfJointTorqueTarget, UrdfSceneSim,
 };
-use rne_ecs::{Entity, World};
+use rne_dynamics::{center_of_mass, ArticulatedModel};
 use rne_math::Vec3;
-use rne_physics::RigidBody;
-use rne_robot::{KinematicModel, Robot};
+use rne_robot::{FloatingBase, KinematicModel, Robot, Transform3};
+use rne_wbc::{ComTask, ContactPoint, PostureTask, WholeBodyConfig, WholeBodyController};
 
 const SOLE_OFFSET_LOCAL_M: Vec3 = Vec3::new(0.0, 0.0, -0.02);
 const LEG_PREFIXES: [&str; 4] = ["FL", "FR", "RL", "RR"];
@@ -37,7 +29,6 @@ const LAND_STEPS: u64 = 150;
 const POSITION_STIFFNESS: f64 = 420.0;
 const POSITION_DAMPING: f64 = 28.0;
 const TORQUE_LIMIT_NM: f64 = 23.7;
-const SPEED_LIMIT_RAD_S: f64 = 30.1;
 
 const STAND_THIGH_RAD: f64 = 0.8;
 const STAND_CALF_RAD: f64 = -1.5;
@@ -46,69 +37,78 @@ const CROUCH_CALF_RAD: f64 = -2.1;
 const TUCK_THIGH_RAD: f64 = 0.95;
 const TUCK_CALF_RAD: f64 = -1.7;
 
-const GRAVITY_M_S2: f64 = 9.81;
-const PUSH_ACCEL_M_S2: f64 = 30.0;
-const PITCH_GAIN: f64 = -8.0;
-const TORQUE_SIGN: f64 = 1.0;
+const PUSH_ACCEL_M_S2: f64 = 20.0;
 const AIRBORNE_FOOT_HEIGHT_M: f64 = 0.04;
 
-/// Static mapping from degree-of-freedom index to actuated child-link name.
-struct LegMap {
-    robot: Entity,
+/// The floating-base model and the joint link names in degree-of-freedom order.
+struct HopModel {
+    model: ArticulatedModel,
     joint_links: Vec<String>,
-    leg_dofs: Vec<[usize; 3]>,
+    foot_names: Vec<String>,
+    torque_limits: Vec<f64>,
 }
 
-impl LegMap {
-    fn build(world: &World) -> Self {
+impl HopModel {
+    fn build(sim: &mut UrdfSceneSim) -> Self {
+        let world = sim.world_mut();
         let robot = world
             .iter_entities()
             .find_map(|entity| entity.get::<Robot>().map(|_| entity.id()))
             .expect("robot entity");
-        let kinematic = KinematicModel::from_robot(world, robot).expect("kinematic model");
-        let joints = kinematic.movable_joint_entities();
-        let joint_links: Vec<String> = joints
+        let base = world.get::<Robot>(robot).expect("robot").base_link;
+        let saved = world.get::<Transform3>(base).copied().unwrap_or_default();
+        world
+            .entity_mut(base)
+            .insert((FloatingBase, Transform3::IDENTITY));
+        let model = ArticulatedModel::from_robot(&*world, robot).expect("floating model");
+        world.entity_mut(base).insert(saved);
+
+        let kinematics = KinematicModel::from_robot(world, robot).expect("kinematic model");
+        let joint_links: Vec<String> = kinematics
+            .movable_joint_entities()
             .iter()
             .map(|joint| {
-                let child = kinematic.joint_child_link(*joint).expect("child link");
-                let index = kinematic.link_index(child).expect("link index");
-                kinematic.link_name(index).expect("link name").to_string()
+                let child = kinematics.joint_child_link(*joint).expect("child");
+                let index = kinematics.link_index(child).expect("index");
+                kinematics.link_name(index).expect("name").to_string()
             })
             .collect();
-        let leg_dofs = LEG_PREFIXES
+        let foot_names = LEG_PREFIXES
             .iter()
-            .map(|prefix| {
-                let mut dofs = [0_usize; 3];
-                for (slot, suffix) in ["hip", "thigh", "calf"].iter().enumerate() {
-                    let name = format!("{prefix}_{suffix}");
-                    dofs[slot] = joint_links
-                        .iter()
-                        .position(|candidate| candidate == &name)
-                        .unwrap_or_else(|| panic!("missing joint link {name}"));
-                }
-                dofs
-            })
+            .map(|prefix| format!("{prefix}_foot"))
             .collect();
+        let torque_limits = vec![TORQUE_LIMIT_NM; joint_links.len()];
         Self {
-            robot,
+            model,
             joint_links,
-            leg_dofs,
+            foot_names,
+            torque_limits,
         }
     }
 
-    fn mass_kg(&self, world: &World) -> f64 {
-        let kinematic = KinematicModel::from_robot(world, self.robot).expect("kinematic model");
-        (0..kinematic.link_count())
-            .filter_map(|index| kinematic.link_entity(index))
-            .filter_map(|entity| world.get::<RigidBody>(entity).map(|body| body.mass_kg))
-            .sum()
+    /// Builds the generalized configuration from the simulator state.
+    fn q(&self, sim: &UrdfSceneSim) -> Vec<f64> {
+        let base = sim.named_transform("base").expect("base pose");
+        let (yaw, pitch, roll) = base.rotation.to_euler(EulerRot::ZYX);
+        let mut q = vec![0.0; self.model.nv()];
+        q[0] = base.translation.x;
+        q[1] = base.translation.y;
+        q[2] = base.translation.z;
+        q[3] = roll;
+        q[4] = pitch;
+        q[5] = yaw;
+        for (dof, link) in self.joint_links.iter().enumerate() {
+            q[6 + dof] = sim.named_joint_position(link).unwrap_or(0.0);
+        }
+        q
     }
 
-    fn joint_positions(&self, sim: &UrdfSceneSim) -> Vec<f64> {
-        self.joint_links
-            .iter()
-            .map(|link| sim.named_joint_position(link).unwrap_or(0.0))
-            .collect()
+    fn qd(&self, sim: &UrdfSceneSim) -> Vec<f64> {
+        let mut qd = vec![0.0; self.model.nv()];
+        for (dof, link) in self.joint_links.iter().enumerate() {
+            qd[6 + dof] = sim.named_joint_velocity(link).unwrap_or(0.0);
+        }
+        qd
     }
 }
 
@@ -168,12 +168,6 @@ fn tilt_rad(sim: &UrdfSceneSim, up_reference: Vec3) -> f64 {
     up.y.clamp(-1.0, 1.0).acos()
 }
 
-fn pitch_rad(sim: &UrdfSceneSim) -> f64 {
-    let pose = sim.named_transform("base").expect("base pose");
-    let forward = pose.rotation * Vec3::X;
-    forward.y.atan2(forward.x)
-}
-
 fn min_foot_height_m(sim: &UrdfSceneSim) -> f64 {
     LEG_PREFIXES
         .iter()
@@ -182,63 +176,10 @@ fn min_foot_height_m(sim: &UrdfSceneSim) -> f64 {
         .fold(f64::INFINITY, f64::min)
 }
 
-/// One tick of force control. Returns the total commanded vertical force, in N.
-fn push_tick(
-    map: &LegMap,
-    mass_kg: f64,
-    sim: &mut UrdfSceneSim,
-    accel_y_m_s2: f64,
-    pitch_rad: f64,
-) -> f64 {
-    let per_foot_force = mass_kg * (accel_y_m_s2 + GRAVITY_M_S2) / 4.0;
-    let torques: Vec<f64> = {
-        let kinematic =
-            KinematicModel::from_robot(sim.world(), map.robot).expect("kinematic model");
-        let q = map.joint_positions(sim);
-        let mut torques = vec![0.0; map.joint_links.len()];
-        for (leg, prefix) in LEG_PREFIXES.iter().enumerate() {
-            let foot = kinematic
-                .link_entity_by_name(&format!("{prefix}_foot"))
-                .expect("foot link");
-            let jacobian = kinematic
-                .jacobian(&q, foot, SOLE_OFFSET_LOCAL_M)
-                .expect("jacobian");
-            let scale = 1.0 + PITCH_GAIN * pitch_rad * if leg < 2 { 1.0 } else { -1.0 };
-            let force = Vec3::new(0.0, per_foot_force * scale, 0.0);
-            for &dof in &map.leg_dofs[leg] {
-                let torque = TORQUE_SIGN
-                    * -(jacobian.get(0, dof) * force.x
-                        + jacobian.get(1, dof) * force.y
-                        + jacobian.get(2, dof) * force.z);
-                torques[dof] = torque.clamp(-TORQUE_LIMIT_NM, TORQUE_LIMIT_NM);
-            }
-        }
-        torques
-    };
-
-    let torque_targets: Vec<UrdfJointTorqueTarget<'_>> = map
-        .joint_links
-        .iter()
-        .zip(&torques)
-        .map(|(link, torque)| UrdfJointTorqueTarget {
-            link_name: link.as_str(),
-            torque_nm: *torque,
-            max_velocity_rad_s: SPEED_LIMIT_RAD_S,
-        })
-        .collect();
-    sim.step_joint_torques(&torque_targets);
-    per_foot_force * 4.0
-}
-
 fn main() {
     let mut sim =
         UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path()).expect("load dynamic Go2");
-    let map = LegMap::build(sim.world());
-    let mass_kg = map.mass_kg(sim.world());
-    println!(
-        "go2 hop: joints={} mass={mass_kg:.2} kg",
-        map.joint_links.len()
-    );
+    let hop = HopModel::build(&mut sim);
 
     sim.configure_position_motors(POSITION_STIFFNESS, POSITION_DAMPING, TORQUE_LIMIT_NM);
     let stand = targets(STAND_THIGH_RAD, STAND_CALF_RAD);
@@ -250,10 +191,7 @@ fn main() {
         let pose = sim.named_transform("base").expect("base pose");
         (pose.rotation.inverse() * Vec3::Y).normalize_or_zero()
     };
-    println!(
-        "baseline_y={baseline_y_m:.3} m pitch0={:.3}",
-        pitch_rad(&sim)
-    );
+    println!("baseline_y={baseline_y_m:.3} m");
 
     let crouch = targets(CROUCH_THIGH_RAD, CROUCH_CALF_RAD);
     for _ in 0..CROUCH_STEPS {
@@ -261,14 +199,58 @@ fn main() {
     }
     let crouch_y_m = sim.observe().base_y_m;
 
+    let controller = WholeBodyController::new(WholeBodyConfig {
+        torque_limits_nm: Some(hop.torque_limits.clone()),
+        ..WholeBodyConfig::default()
+    });
+
     let mut apex_y_m = f64::MIN;
     let mut max_tilt_rad = 0.0_f64;
     let mut airborne_steps = 0_u64;
     let mut landed = false;
+    let mut last_com_accel = Vec3::ZERO;
 
     for _ in 0..PUSH_STEPS_MAX {
-        let pitch = pitch_rad(&sim);
-        push_tick(&map, mass_kg, &mut sim, PUSH_ACCEL_M_S2, pitch);
+        let q = hop.q(&sim);
+        let qd = hop.qd(&sim);
+        let com = center_of_mass(&hop.model, &q).expect("com");
+        let contacts: Vec<ContactPoint> = hop
+            .foot_names
+            .iter()
+            .filter_map(|name| hop.model.kinematic().link_entity_by_name(name))
+            .map(|link| ContactPoint::new(link, SOLE_OFFSET_LOCAL_M, 0.6))
+            .collect();
+        let mut com_task = ComTask::hold(com);
+        com_task.desired_acceleration_m_s2 = Vec3::new(0.0, PUSH_ACCEL_M_S2, 0.0);
+        com_task.position_gain_s_inv2 = 0.0;
+        com_task.velocity_gain_s_inv = 4.0;
+        let posture = PostureTask {
+            desired_joint_positions: q[6..].to_vec(),
+            position_gain_s_inv2: 4.0,
+            velocity_gain_s_inv: 1.0,
+        };
+        let solution = controller
+            .solve(
+                &hop.model,
+                &q,
+                &qd,
+                &contacts,
+                Some(&com_task),
+                Some(&posture),
+            )
+            .expect("wbc solve");
+        last_com_accel = solution.com_acceleration_m_s2;
+        let torques: Vec<UrdfJointTorqueTarget<'_>> = hop
+            .joint_links
+            .iter()
+            .zip(&solution.joint_torque_nm)
+            .map(|(link, torque)| UrdfJointTorqueTarget {
+                link_name: link.as_str(),
+                torque_nm: *torque,
+                max_velocity_rad_s: 30.1,
+            })
+            .collect();
+        sim.step_joint_torques(&torques);
         apex_y_m = apex_y_m.max(sim.observe().base_y_m);
         max_tilt_rad = max_tilt_rad.max(tilt_rad(&sim, up_reference));
         if min_foot_height_m(&sim) > AIRBORNE_FOOT_HEIGHT_M {
@@ -299,8 +281,8 @@ fn main() {
 
     let jump_height_m = apex_y_m - baseline_y_m;
     println!(
-        "crouch_y={crouch_y_m:.3} apex_y={apex_y_m:.3} jump_height={jump_height_m:.3} airborne_steps={airborne_steps} landed={landed} final_y={:.3} max_tilt={max_tilt_rad:.3}",
-        final_observation.base_y_m,
+        "crouch_y={crouch_y_m:.3} apex_y={apex_y_m:.3} jump_height={jump_height_m:.3} airborne_steps={airborne_steps} landed={landed} final_y={:.3} max_tilt={max_tilt_rad:.3} com_accel=({:.2},{:.2},{:.2})",
+        final_observation.base_y_m, last_com_accel.x, last_com_accel.y, last_com_accel.z,
     );
     if airborne_steps == 0 {
         println!("no liftoff yet");

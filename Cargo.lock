@@ -1618,10 +1618,10 @@ version = "0.2.0"
 dependencies = [
  "glam",
  "rne_ai",
- "rne_ecs",
+ "rne_dynamics",
  "rne_math",
- "rne_physics",
  "rne_robot",
+ "rne_wbc",
 ]
 
 [[package]]
