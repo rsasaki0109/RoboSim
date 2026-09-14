@@ -2689,7 +2689,7 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
             report.to_json_pretty().unwrap(),
         )
         .unwrap();
-        let release_name = "rne-0.2.0-x86_64-unknown-linux-gnu.tar.gz";
+        let release_name = "rne-0.3.0-x86_64-unknown-linux-gnu.tar.gz";
         fs::write(temp.path().join(release_name), b"official release archive").unwrap();
         fs::write(temp.path().join("submission.json"), b"candidate bytes").unwrap();
         fs::write(temp.path().join("stdout.txt"), b"passed\n").unwrap();
@@ -2709,7 +2709,7 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
             "repository": "https://github.com/external-owner/gazebo",
             "revision": "1111111111111111111111111111111111111111",
             "author_assistance": false,
-            "release_tag": "v0.2.0",
+            "release_tag": "v0.3.0",
             "release_target": "x86_64-unknown-linux-gnu",
             "operating_system": "linux",
             "architecture": "x86_64",
@@ -2734,7 +2734,7 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
         let manifest_text = format!(
             r#"
 schema_version = 9
-release_version = "0.2.0"
+release_version = "0.3.0"
 project_owner = "project-owner"
 minimum_stability_days = 183
 minimum_external_projects = 2
@@ -3071,7 +3071,7 @@ report = {{ path = "process-conformance-report-v1.json", sha256 = "{}" }}
             &root,
             &path,
             &manifest,
-            CivilDate::parse("2026-08-20").unwrap(),
+            CivilDate::parse("2026-09-15").unwrap(),
         )
         .unwrap();
         assert!(!report.eligible);
@@ -3103,7 +3103,7 @@ report = {{ path = "process-conformance-report-v1.json", sha256 = "{}" }}
             &root,
             &path,
             &manifest,
-            CivilDate::parse("2026-08-20").unwrap(),
+            CivilDate::parse("2026-09-15").unwrap(),
         )
         .unwrap();
         let mut actual = serde_json::to_string_pretty(&report).unwrap();

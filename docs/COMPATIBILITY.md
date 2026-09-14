@@ -1,9 +1,11 @@
 # Compatibility and migration policy
 
 This policy applies to Robot Native Engine 0.x. Release `0.1.0` remains the
-historical compatibility baseline. Release `0.2.0` is the first product-proof
-minor: it may add versioned evidence contracts, but it must not silently
-reinterpret artifacts accepted by their retained 0.1 readers.
+historical compatibility baseline. Release `0.2.0` was the first product-proof
+minor. Release `0.3.0` retargets the Rust API baseline to absorb breaking
+changes merged into `main` after the `0.2.0` freeze and promotes `rne_nav`,
+`rne_slam`, and `rne_planning` to public, semver-checked crates; it must not
+silently reinterpret artifacts accepted by their retained 0.2 readers.
 
 ## Supported toolchains and platforms
 
@@ -36,7 +38,7 @@ documented migration notes.
   must remain memory-safe and must produce actionable errors.
 
 `release/rust-api-baseline.toml` freezes the baseline commit and tree,
-`cargo-semver-checks` 0.49.0, and the exact manifest path of all 31 publishable
+`cargo-semver-checks` 0.49.0, and the exact manifest path of all 34 publishable
 crates. Every CI shard compares against that revision with patch rules; it does
 not retarget to the pull-request base or `HEAD^`. A missing baseline commit,
 tree mismatch, package omission, or manifest move fails closed. The baseline
@@ -46,7 +48,7 @@ Patch releases must not retarget the baseline. A deliberate pre-1.0 baseline
 change requires a minor version, migration notes, an ADR, and a final passing
 comparison against the prior baseline before the registry changes. Workspace
 CI rejects changes to an already-present registry relative to the pull-request
-base or push parent while the release remains 0.2.0. Rustdoc runs with warnings
+base or push parent while the release remains 0.3.0. Rustdoc runs with warnings
 denied, and public libraries deny missing documentation.
 
 The v0.3 interchangeable-dynamics milestone extends the pre-1.0 exhaustive

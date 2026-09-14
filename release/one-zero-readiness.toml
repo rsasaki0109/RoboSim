@@ -14,7 +14,7 @@ schema_version = 9
 # Schema v9 makes one independently reproduced installed flagship run an
 # explicit gate and binds its archive, proof bundle, candidate, logs, and
 # maintainer verification report.
-release_version = "0.2.0"
+release_version = "0.3.0"
 project_owner = "rsasaki0109"
 minimum_stability_days = 183
 minimum_external_projects = 2
@@ -24,12 +24,12 @@ blocker_registry = "release/blockers.toml"
 required_platforms = ["linux_x86_64", "windows_x86_64"]
 accelerator_adapter = []
 installed_flagship_reproduction = []
-compatibility_report = { path = "evidence/compatibility-report-v1.json", sha256 = "sha256:1a0570a265f3f9c42a0ac34aac3bab7cb9612bdb54d017f384daa40a1808066a" }
+compatibility_report = { path = "evidence/compatibility-report-v1.json", sha256 = "sha256:78570e3436f1eb35d127c9c760c28476cc30edc7f3c4a6cbfbebb1c5b256fff3" }
 
 [candidate]
-revision = "9e1ea8cb2dab8f468cf7bc51fac8bd381359acc4"
-tree = "5d888b77e0d4785fa57c9edd10ce1292089fab5a"
-since = "2026-08-20"
+revision = "d0139576c232fed66d2f0b97ea7b01b0773b83b8"
+tree = "6269a96cdc26c3ddd6f22ad097e4c14af21600ae"
+since = "2026-09-15"
 
 # These fields remain intentionally empty until maintainers make and publish
 # a concrete compatibility-support commitment.

@@ -35,7 +35,7 @@ use std::{
 
 const HERO_CONTACT_SHEET_FRAMES: [usize; 9] = [0, 6, 12, 18, 24, 30, 36, 42, 47];
 const DEFAULT_BEHAVIOR_SEED_RANGE: &str = "0..10";
-pub(crate) const RELEASE_VERSION: &str = "0.2.0";
+pub(crate) const RELEASE_VERSION: &str = "0.3.0";
 const RELEASE_MSRV: &str = "1.88.0";
 const SUPPLY_CHAIN_POLICY_DATE: &str = "2026-08-12";
 const CARGO_DENY_VERSION: &str = "0.20.2";
@@ -65,11 +65,13 @@ const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
     "rne_log",
     "rne_math",
     "rne_mjcf",
+    "rne_nav",
     "rne_openscenario",
     "rne_physics",
     "rne_physics_conformance",
     "rne_physics_analytic",
     "rne_physics_rapier",
+    "rne_planning",
     "rne_plateau",
     "rne_plugin_sdk",
     "rne_plugin",
@@ -79,6 +81,7 @@ const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
     "rne_robot",
     "rne_sdf",
     "rne_sensor",
+    "rne_slam",
     "rne_sumo",
     "rne_traci",
     "rne_traffic",
@@ -1130,7 +1133,7 @@ fn validate_release_metadata(metadata: &serde_json::Value) -> anyhow::Result<()>
             };
             if expected_public.contains(dependency_name) {
                 anyhow::ensure!(
-                    dependency["req"].as_str() == Some("=0.2.0"),
+                    dependency["req"].as_str() == Some(format!("={RELEASE_VERSION}").as_str()),
                     "{name} -> {dependency_name} must use exact requirement ={RELEASE_VERSION}"
                 );
             }

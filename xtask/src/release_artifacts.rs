@@ -4098,8 +4098,8 @@ mod tests {
                 target_ms: 15 * 60 * 1_000,
             },
             release_archive: SubmissionArtifact {
-                url: "https://example.invalid/rne-0.2.0-windows.zip".to_string(),
-                file_name: "rne-0.2.0-windows.zip".to_string(),
+                url: "https://example.invalid/rne-0.3.0-windows.zip".to_string(),
+                file_name: "rne-0.3.0-windows.zip".to_string(),
                 size_bytes: 7,
                 sha256: sha256_hex(b"archive"),
             },
@@ -4128,7 +4128,7 @@ mod tests {
     #[test]
     fn staged_external_flagship_report_rebinds_every_retained_input() {
         let directory = tempfile::tempdir().expect("external flagship evidence");
-        let archive = directory.path().join("rne-0.2.0-windows.zip");
+        let archive = directory.path().join("rne-0.3.0-windows.zip");
         let proof_bundle = directory.path().join("proof.zip");
         let candidate_path = directory.path().join("candidate.json");
         let stdout = directory.path().join("stdout.txt");
@@ -4342,7 +4342,7 @@ mod tests {
     #[test]
     fn installed_flagship_proof_rehashes_every_declared_artifact() {
         let directory = tempfile::tempdir().expect("temporary proof");
-        let bundle_root = directory.path().join("rne-0.2.0-test-target");
+        let bundle_root = directory.path().join("rne-0.3.0-test-target");
         fs::create_dir_all(bundle_root.join("bin")).expect("bundle bin");
         fs::write(bundle_root.join("release-report.json"), b"release\n").expect("release report");
         let producer = bundle_root.join("bin").join(if cfg!(windows) {
@@ -5145,7 +5145,7 @@ mod tests {
     #[test]
     fn release_workflow_accepts_the_current_release_series() {
         let workflow = format!(
-            "on:\n  push:\n    tags: [\"v0.2.*\"]\nenv:\n  RELEASE_VERSION: \"{RELEASE_VERSION}\"\n"
+            "on:\n  push:\n    tags: [\"v0.3.*\"]\nenv:\n  RELEASE_VERSION: \"{RELEASE_VERSION}\"\n"
         );
         validate_release_workflow_text(&workflow).unwrap();
     }
@@ -5190,12 +5190,12 @@ mod tests {
             "on:\n  push:\n    tags: [\"v0.1.*\"]\nenv:\n  RELEASE_VERSION: \"{RELEASE_VERSION}\"\n"
         );
         let error = validate_release_workflow_text(&workflow).unwrap_err();
-        assert!(error.to_string().contains("v0.2.*"));
+        assert!(error.to_string().contains("v0.3.*"));
     }
 
     #[test]
     fn release_workflow_rejects_a_stale_declared_version() {
-        let workflow = "on:\n  push:\n    tags: [\"v0.2.*\"]\nenv:\n  RELEASE_VERSION: \"0.1.0\"\n";
+        let workflow = "on:\n  push:\n    tags: [\"v0.3.*\"]\nenv:\n  RELEASE_VERSION: \"0.1.0\"\n";
         let error = validate_release_workflow_text(workflow).unwrap_err();
         assert!(error.to_string().contains(RELEASE_VERSION));
     }

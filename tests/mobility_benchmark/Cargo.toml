@@ -1,6 +1,6 @@
 [package]
 name = "rne_mobility_benchmark"
-version = "0.2.0"
+version = "0.3.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -33,7 +33,7 @@ rne_ecs = { workspace = true }
 rne_log = { workspace = true }
 rne_math = { workspace = true }
 rne_physics = { workspace = true }
-rne_physics_mujoco = { version = "=0.2.0", path = "../../crates/rne_physics_mujoco", optional = true }
+rne_physics_mujoco = { version = "=0.3.0", path = "../../crates/rne_physics_mujoco", optional = true }
 rne_physics_rapier = { workspace = true }
 rne_robot = { workspace = true }
 rne_sensor = { workspace = true }

@@ -587,8 +587,8 @@ mod tests {
                 tag: format!("v{RELEASE_VERSION}"),
                 target: "x86_64-pc-windows-msvc".to_string(),
                 archive: Artifact {
-                    url: "https://github.com/rsasaki0109/RoboSim/releases/download/v0.2.0/rne-0.2.0-x86_64-pc-windows-msvc.zip".to_string(),
-                    file_name: "rne-0.2.0-x86_64-pc-windows-msvc.zip".to_string(),
+                    url: "https://github.com/rsasaki0109/RoboSim/releases/download/v0.3.0/rne-0.3.0-x86_64-pc-windows-msvc.zip".to_string(),
+                    file_name: "rne-0.3.0-x86_64-pc-windows-msvc.zip".to_string(),
                     size_bytes: 7,
                     sha256: sha256_bytes(b"archive"),
                 },
@@ -640,7 +640,7 @@ mod tests {
         assert!(validate_candidate(&nonzero, &"a".repeat(40)).is_err());
         let mut unofficial = candidate();
         unofficial.release.archive.url =
-            "https://example.invalid/rne-0.2.0-x86_64-pc-windows-msvc.zip".to_string();
+            "https://example.invalid/rne-0.3.0-x86_64-pc-windows-msvc.zip".to_string();
         assert!(validate_candidate(&unofficial, &"a".repeat(40)).is_err());
     }
 
@@ -700,7 +700,7 @@ mod tests {
             ),
             RunMetadata::new("run-1", "external.task", 9, 10, 3, 2),
             BuildMetadata::new(
-                "0.2.0",
+                "0.3.0",
                 "0123456789abcdef",
                 "release",
                 "x86_64-pc-windows-msvc",
@@ -774,7 +774,7 @@ mod tests {
 
         let release_archive = directory
             .path()
-            .join("rne-0.2.0-x86_64-pc-windows-msvc.zip");
+            .join("rne-0.3.0-x86_64-pc-windows-msvc.zip");
         fs::write(&release_archive, b"archive").unwrap();
         let output = directory.path().join("maintainer-report.json");
         let mut args = vec![

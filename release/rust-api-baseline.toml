@@ -1,7 +1,7 @@
 schema_version = 1
-release_version = "0.2.0"
-baseline_revision = "9e1ea8cb2dab8f468cf7bc51fac8bd381359acc4"
-baseline_tree = "5d888b77e0d4785fa57c9edd10ce1292089fab5a"
+release_version = "0.3.0"
+baseline_revision = "d0139576c232fed66d2f0b97ea7b01b0773b83b8"
+baseline_tree = "6269a96cdc26c3ddd6f22ad097e4c14af21600ae"
 cargo_semver_checks_version = "0.49.0"
 
 [[package]]
@@ -53,6 +53,10 @@ name = "rne_mjcf"
 manifest_path = "crates/rne_mjcf/Cargo.toml"
 
 [[package]]
+name = "rne_nav"
+manifest_path = "crates/rne_nav/Cargo.toml"
+
+[[package]]
 name = "rne_openscenario"
 manifest_path = "crates/rne_openscenario/Cargo.toml"
 
@@ -71,6 +75,10 @@ manifest_path = "crates/rne_physics_analytic/Cargo.toml"
 [[package]]
 name = "rne_physics_rapier"
 manifest_path = "crates/rne_physics_rapier/Cargo.toml"
+
+[[package]]
+name = "rne_planning"
+manifest_path = "crates/rne_planning/Cargo.toml"
 
 [[package]]
 name = "rne_plateau"
@@ -107,6 +115,10 @@ manifest_path = "crates/rne_sdf/Cargo.toml"
 [[package]]
 name = "rne_sensor"
 manifest_path = "crates/rne_sensor/Cargo.toml"
+
+[[package]]
+name = "rne_slam"
+manifest_path = "crates/rne_slam/Cargo.toml"
 
 [[package]]
 name = "rne_sumo"
