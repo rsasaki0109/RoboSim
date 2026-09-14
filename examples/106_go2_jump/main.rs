@@ -276,9 +276,7 @@ fn main() {
         return;
     }
     if scan {
-        for (crouch_thigh, crouch_calf) in
-            [(1.25_f64, -2.25_f64), (1.10, -2.00), (0.95, -1.75)]
-        {
+        for (crouch_thigh, crouch_calf) in [(1.25_f64, -2.25_f64), (1.10, -2.00), (0.95, -1.75)] {
             for pitch_gain in [0.0_f64, -40.0, 40.0, -80.0, 80.0] {
                 let outcome = run_jump(crouch_thigh, crouch_calf, 23.7, 0.0, pitch_gain);
                 println!(
