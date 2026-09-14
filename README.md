@@ -358,15 +358,16 @@ No MoveIt or ROS dependency is added to core.
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/motion-planning.png">
-    <img src="docs/media/motion-planning.gif" alt="A planar two-link arm planned around a red spherical obstacle, with the blocked straight-line end-effector path and collision-free RRT-Connect, RRT*, informed RRT*, PRM, and BIT*-style paths in workspace and joint space" width="820">
+    <img src="docs/media/motion-planning.gif" alt="The mm_minimal URDF arm driven by rne_planning: RRT-Connect swings the arm around a red spherical obstacle, leaving a cyan end-effector trail, while straight joint interpolation is blocked" width="820">
   </picture>
   <br>
-  <sub>Real <code>rne_planning</code> output: straight joint interpolation is blocked by the obstacle, while five sampling planners find collision-free detours in workspace and joint space. <a href="tools/generate_motion_planning_media.py">generator</a> · <a href="examples/102_motion_planning_media/main.rs">source</a> · <a href="docs/architecture/011_joint_motion_planning.md">architecture</a></sub>
+  <sub>The checked-in <code>mm_minimal</code> URDF arm, planned by RRT-Connect and rendered by the real wgpu renderer. A collision object blocks straight joint interpolation; the cyan trail traces the collision-free end-effector detour. <a href="examples/102_motion_planning_media/main.rs">capture source</a> · <a href="docs/architecture/011_joint_motion_planning.md">architecture</a></sub>
 </p>
 
 ```bash
 cargo run -p motion_planning --example 101_motion_planning
-cargo run -p motion_planning_media --example 102_motion_planning_media
+cargo run --release -p motion_planning_media --example 102_motion_planning_media
+cargo run -p motion_planning_media --example 102_motion_planning_media -- --smoke
 ```
 
 See [joint-space motion planning](docs/architecture/011_joint_motion_planning.md).

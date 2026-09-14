@@ -87,11 +87,13 @@ All notable changes to Robot Native Engine are documented in this file.
   searches with Dijkstra (`prm`). Sampling and edge choice are seeded and
   deterministic.
 
-- README motion-planning media: `examples/102_motion_planning_media` emits the
-  real planner output for a planar 2R arm and
-  `tools/generate_motion_planning_media.py` renders `docs/media/motion-planning.{png,gif}`
-  (workspace and joint-space paths, plus an RRT-Connect arm animation). The
-  README "Native motion planning" section embeds the figure.
+- README motion-planning media: `examples/102_motion_planning_media` loads the
+  checked-in `mm_minimal` URDF arm, plans a collision-free swing around a
+  collision object with RRT-Connect, and plays the trajectory through the real
+  wgpu renderer to write `docs/media/motion-planning.{gif,png}`. `--smoke` runs
+  the planner headlessly and asserts straight joint interpolation is blocked
+  while RRT-Connect is feasible. The README "Native motion planning" section
+  embeds the capture.
 
 - `rne_planning` batch informed planning: `BitStarPlanner` (`bit_star`) samples
   in batches, connects each batch to a growing roadmap with collision-checked

@@ -170,11 +170,13 @@ to smooth it, and falls back to the global plan if the refinement is infeasible.
 
 ## Demo media
 
-`examples/102_motion_planning_media` emits the real planner output for a planar
-2R arm and `tools/generate_motion_planning_media.py` renders
-`docs/media/motion-planning.png` (workspace and joint-space paths) and
-`docs/media/motion-planning.gif` (an RRT-Connect arm animation). The README
-"Native motion planning" section embeds both.
+`examples/102_motion_planning_media` loads the checked-in `mm_minimal` URDF arm,
+plans a collision-free swing around a collision object with RRT-Connect, and
+plays the trajectory through the wgpu renderer. It writes
+`docs/media/motion-planning.gif` and `docs/media/motion-planning.png` directly
+(no external generator); `-- --smoke` runs the planner headlessly and asserts the
+obstacle blocks straight joint interpolation while RRT-Connect stays feasible.
+The README "Native motion planning" section embeds both.
 
 ## MoveIt coverage
 

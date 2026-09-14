@@ -2466,12 +2466,15 @@ dependencies = [
 name = "motion_planning_media"
 version = "0.2.0"
 dependencies = [
+ "png",
+ "rne_ai",
  "rne_ecs",
  "rne_math",
- "rne_physics",
  "rne_planning",
+ "rne_render",
+ "rne_render_wgpu",
  "rne_robot",
- "serde_json",
+ "rne_urdf_import",
 ]
 
 [[package]]
