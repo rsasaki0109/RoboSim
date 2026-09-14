@@ -83,6 +83,13 @@ fn tilt_rad(sim: &UrdfSceneSim, up_reference: Vec3) -> f64 {
     up.y.clamp(-1.0, 1.0).acos()
 }
 
+/// Signed fore-aft pitch of the body, in radians (positive is nose-up).
+fn pitch_error_rad(sim: &UrdfSceneSim) -> f64 {
+    let pose = sim.named_transform("base").expect("base pose");
+    let forward = pose.rotation * Vec3::X;
+    forward.y.atan2(forward.x)
+}
+
 /// Lowest foot-link height in the world, in meters.
 fn min_foot_height_m(sim: &UrdfSceneSim) -> f64 {
     PREFIXES
@@ -94,7 +101,13 @@ fn min_foot_height_m(sim: &UrdfSceneSim) -> f64 {
 
 const AIRBORNE_FOOT_HEIGHT_M: f64 = 0.04;
 
-fn run_jump(calf_torque_nm: f64, thigh_torque_nm: f64) -> JumpOutcome {
+fn run_jump(
+    crouch_thigh: f64,
+    crouch_calf: f64,
+    calf_torque_nm: f64,
+    thigh_torque_nm: f64,
+    pitch_gain: f64,
+) -> JumpOutcome {
     let mut sim =
         UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path()).expect("load dynamic Go2");
     sim.configure_position_motors(POSITION_STIFFNESS, POSITION_DAMPING, TORQUE_LIMIT_NM);
@@ -109,7 +122,7 @@ fn run_jump(calf_torque_nm: f64, thigh_torque_nm: f64) -> JumpOutcome {
         (pose.rotation.inverse() * Vec3::Y).normalize_or_zero()
     };
 
-    let crouch = targets(CROUCH_THIGH_RAD, CROUCH_CALF_RAD);
+    let crouch = targets(crouch_thigh, crouch_calf);
     for _ in 0..CROUCH_STEPS {
         sim.step_joint_position_targets(&crouch);
     }
@@ -145,7 +158,13 @@ fn run_jump(calf_torque_nm: f64, thigh_torque_nm: f64) -> JumpOutcome {
     let mut landed = false;
     let mut max_tilt_rad = 0.0_f64;
     for _ in 0..LAUNCH_STEPS {
-        sim.step_joint_torques(&launch_torques);
+        let correction = pitch_gain * pitch_error_rad(&sim);
+        let mut torques = launch_torques.clone();
+        torques[1].torque_nm += correction;
+        torques[4].torque_nm += correction;
+        torques[7].torque_nm -= correction;
+        torques[10].torque_nm -= correction;
+        sim.step_joint_torques(&torques);
         apex_y_m = apex_y_m.max(sim.observe().base_y_m);
         max_tilt_rad = max_tilt_rad.max(tilt_rad(&sim, up_reference));
         if min_foot_height_m(&sim) > AIRBORNE_FOOT_HEIGHT_M {
@@ -257,17 +276,18 @@ fn main() {
         return;
     }
     if scan {
-        for calf in [23.7, 15.0, 8.0] {
-            for thigh in [0.0, -23.7, -12.0, 12.0] {
-                let outcome = run_jump(calf, thigh);
+        for (crouch_thigh, crouch_calf) in
+            [(1.25_f64, -2.25_f64), (1.10, -2.00), (0.95, -1.75)]
+        {
+            for pitch_gain in [0.0_f64, -40.0, 40.0, -80.0, 80.0] {
+                let outcome = run_jump(crouch_thigh, crouch_calf, 23.7, 0.0, pitch_gain);
                 println!(
-                    "scan calf={calf:+.1} thigh={thigh:+.1}: height={:+.3} apex={:.3} airborne={} landed={} final_y={:.3} final_tilt={:.3} max_tilt={:.3}",
+                    "scan crouch=({crouch_thigh:+.2},{crouch_calf:+.2}) pitch_gain={pitch_gain:+.0}: height={:+.3} apex={:.3} airborne={} landed={} final_y={:.3} max_tilt={:.3}",
                     outcome.apex_y_m - outcome.baseline_y_m,
                     outcome.apex_y_m,
                     outcome.airborne_steps,
                     outcome.landed,
                     outcome.final_y_m,
-                    outcome.final_tilt_rad,
                     outcome.max_tilt_rad,
                 );
             }
@@ -275,7 +295,7 @@ fn main() {
         return;
     }
 
-    let outcome = run_jump(TORQUE_LIMIT_NM, 0.0);
+    let outcome = run_jump(CROUCH_THIGH_RAD, CROUCH_CALF_RAD, TORQUE_LIMIT_NM, 0.0, 0.0);
     let extension_m = outcome.apex_y_m - outcome.crouch_y_m;
     println!(
         "go2 push-off probe: baseline={:.3} crouch={:.3} apex={:.3} extension={:.3} final={:.3} final_tilt={:.3} rad max_tilt={:.3} rad airborne_steps={}",
