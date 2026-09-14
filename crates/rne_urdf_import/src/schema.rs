@@ -138,8 +138,9 @@ pub struct UrdfJointLimit {
 
 /// Parsed URDF `<mimic>` element (kinematic coupling metadata only).
 ///
-/// Mimic joints are recorded at import time but are **not** wired into the physics backend.
-/// Actuators must drive the leader joint explicitly.
+/// Spawning wires this into `rne_robot::MimicJoint`, so the kinematic model
+/// derives the follower from the leader. It is **not** wired into the physics
+/// backend; actuators must still drive the leader joint explicitly.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UrdfJointMimic {
     /// Name of the joint whose motion is followed.

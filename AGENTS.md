@@ -25,6 +25,7 @@ ROS2 is an adapter only. Do not add ROS2, rclrs, rclcpp, DDS, or ROS message dep
 - `crates/rne_physics`: physics backend traits only
 - `crates/rne_physics_rapier`: Rapier implementation
 - `crates/rne_physics_analytic`: deterministic collision-free analytic backend
+- `crates/rne_planning`: backend-neutral joint-space planning scene, kinematic goal constraints, planners, and planning pipeline
 - `crates/rne_sensor`: sensor traits, specs, outputs, noise models
 - `crates/rne_render`: render traits only
 - `crates/rne_render_wgpu`: wgpu renderer
@@ -127,6 +128,7 @@ Allowed dependencies:
 - `rne_render_wgpu` may depend on `rne_render` and wgpu.
 - `rne_traffic` may depend on `rne_core`, `rne_ecs`, `rne_math`, and `rne_world`.
 - `rne_nav` may depend on `rne_core`, `rne_ecs`, `rne_math`, and `rne_world`.
+- `rne_planning` may depend on `rne_robot`, `rne_ecs`, and `rne_math`.
 - `rne_slam` may depend on `rne_nav`, `rne_core`, `rne_ecs`, and `rne_math`.
 - `rne_accelerator_contract` may depend on `rne_ai`; vendor runtime dependencies remain in adapters.
 - Offline importers such as `rne_plateau` may depend on `rne_traffic`.
@@ -142,6 +144,9 @@ Forbidden:
   robotics adapter, or external traffic simulator.
 - `rne_nav` must not depend on a renderer, physics backend, ROS 2, or external
   navigation/SLAM stack; the ROS 2 adapter maps its types without changing them.
+- `rne_planning` must not depend on a renderer, physics backend, ROS 2, or an
+  external motion-planning library; it builds on `rne_robot` types without
+  changing them.
 - `rne_slam` must not depend on a renderer, physics backend, ROS 2, or external
   SLAM stack; it builds on `rne_nav` types without changing them.
 

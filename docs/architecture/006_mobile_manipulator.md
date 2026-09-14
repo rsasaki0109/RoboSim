@@ -38,6 +38,7 @@ Initial reference robot: **minimal URDF mobile manipulator** (diff base + 2–3 
 | Gripper / contact-rich manipulation | **Partial** (parallel jaw + grasp/transport smoke) |
 | Wrist / head camera from scene assets | Ready (`ImageRgb8` + `ImageDepth` on DataBus; depth in observations; `VisuomotorReachPolicy`) |
 | Arm trajectory / IK | **Partial** (`MmLiftKinematics`, `IkLiftPickPlacePolicy`, direct joint targets; ROS 3-DOF trajectory on `mm_lift`) |
+| Joint-space motion planning | Ready (`rne_planning`: planning scene, goal constraints, joint interpolation and deterministic RRT-Connect, pipeline; native, no MoveIt dependency) |
 | Clutter / navigate-and-place | Ready (`clutter_pick_place`, `mobile_clutter_pick_place` episodes) |
 | ROS `/joint_states`, arm commands | Ready (`mobile_manipulator`: 2-DOF arm + `/arm_joint_trajectory`; `mm_lift`: 3-DOF lift-arm trajectory via `RNE_ROS2_MODE=mm_lift`) |
 
@@ -156,4 +157,5 @@ Keep existing diff-drive + LiDAR CI green. Add:
 
 - [Robot native model](002_robot_native.md)
 - [DataBus](005_data_bus.md)
+- [Joint-space motion planning](011_joint_motion_planning.md)
 - [Roadmap](../ROADMAP.md)

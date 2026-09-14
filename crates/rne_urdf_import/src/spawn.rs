@@ -6,7 +6,7 @@ use crate::schema::{UrdfDocument, UrdfInertial, UrdfJoint, UrdfJointType, UrdfLi
 use rne_ecs::{spawn_named, Entity, World};
 use rne_physics::{CollisionGroups, RigidBody, RigidBodyInertia, RigidBodyType};
 use rne_render::{LinkVisuals, Visual};
-use rne_robot::{Joint, JointKind, JointLimits, Link, Robot, RobotId};
+use rne_robot::{Joint, JointKind, JointLimits, Link, MimicJoint, Robot, RobotId};
 use rne_world::Transform3;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -78,6 +78,9 @@ pub enum UrdfSpawnError {
     /// Referenced link does not exist.
     #[error("unknown link {0}")]
     UnknownLink(String),
+    /// Referenced joint does not exist.
+    #[error("unknown joint {0}")]
+    UnknownJoint(String),
     /// Referenced parent/child relationship is invalid.
     #[error("invalid joint graph: {0}")]
     InvalidGraph(String),
@@ -218,6 +221,23 @@ fn spawn_urdf_robot_with_inertials(
             rne_ecs::Parent(parent),
         ));
         joints.insert(joint.name.clone(), entity);
+    }
+
+    for joint in &urdf.joints {
+        let Some(mimic) = joint.mimic.as_ref() else {
+            continue;
+        };
+        let joint_entity = *joints
+            .get(&joint.name)
+            .ok_or_else(|| UrdfSpawnError::UnknownJoint(joint.name.clone()))?;
+        let source_entity = *joints
+            .get(&mimic.joint)
+            .ok_or_else(|| UrdfSpawnError::UnknownJoint(mimic.joint.clone()))?;
+        world.entity_mut(joint_entity).insert(MimicJoint::new(
+            source_entity,
+            mimic.multiplier,
+            mimic.offset,
+        ));
     }
 
     let mut collider_count = 0;
@@ -440,6 +460,44 @@ mod tests {
         for joint_entity in spawned.joints.values() {
             assert!(world.get::<Joint>(*joint_entity).is_some());
         }
+    }
+
+    #[test]
+    fn spawn_wires_urdf_mimic_to_kinematic_component() {
+        let urdf = parse_urdf(
+            r#"
+            <robot name="mimic_gripper">
+              <link name="base"/>
+              <link name="finger_a"/>
+              <link name="finger_b"/>
+              <joint name="finger_a_joint" type="revolute">
+                <parent link="base"/>
+                <child link="finger_a"/>
+                <axis xyz="0 0 1"/>
+              </joint>
+              <joint name="finger_b_joint" type="revolute">
+                <parent link="base"/>
+                <child link="finger_b"/>
+                <axis xyz="0 0 1"/>
+                <mimic joint="finger_a_joint" multiplier="-1.0" offset="0.05"/>
+              </joint>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        let mut world = World::new();
+        let spawned = spawn_urdf_robot(&mut world, &urdf).unwrap();
+
+        let leader = spawned.joints["finger_a_joint"];
+        let follower = spawned.joints["finger_b_joint"];
+        let mimic = world
+            .get::<MimicJoint>(follower)
+            .copied()
+            .expect("mimic component");
+        assert_eq!(mimic.source, leader);
+        assert_eq!(mimic.multiplier, -1.0);
+        assert_eq!(mimic.offset, 0.05);
+        assert!(world.get::<MimicJoint>(leader).is_none());
     }
 
     #[test]

@@ -9,6 +9,7 @@ members = [
   "crates/rne_physics_rapier",
   "crates/rne_physics_analytic",
   "crates/rne_physics_mujoco",
+  "crates/rne_planning",
   "crates/rne_plugin_sdk",
   "crates/rne_plugin",
   "crates/rne_plugin_example_velocity_servo",
@@ -138,6 +139,8 @@ members = [
   "examples/98_nav_slam_physics",
   "examples/99_multi_robot_avoidance",
   "examples/100_nav_elevation_icp",
+  "examples/101_motion_planning",
+  "examples/102_motion_planning_media",
   "tests/determinism",
   "tests/dynamics",
   "tests/mobility_benchmark",
@@ -189,6 +192,7 @@ rne_physics_conformance = { version = "=0.2.0", path = "crates/rne_physics_confo
 rne_physics_analytic = { version = "=0.2.0", path = "crates/rne_physics_analytic" }
 rne_physics_mujoco = { version = "=0.2.0", path = "crates/rne_physics_mujoco" }
 rne_physics_rapier = { version = "=0.2.0", path = "crates/rne_physics_rapier" }
+rne_planning = { version = "=0.2.0", path = "crates/rne_planning" }
 rne_plateau = { version = "=0.2.0", path = "crates/rne_plateau" }
 rne_plugin_sdk = { version = "=0.2.0", path = "crates/rne_plugin_sdk" }
 rne_plugin = { version = "=0.2.0", path = "crates/rne_plugin" }

@@ -16,7 +16,205 @@ All notable changes to Robot Native Engine are documented in this file.
   three-parameter scripted stepper as the trainable G1 boundary; from-scratch
   walking remains compute-bound on CPU (see `docs/G1_LOCOMOTION.md`).
 
+- `rne_robot::kinematics`: a MoveIt-inspired inverse kinematics solver boundary.
+  `KinematicsSolver` lets solvers be swapped by name, `IkRequest` carries the end
+  link, target pose, seed, and options, `DampedLeastSquaresSolver` wraps the
+  existing solver as the built-in implementation, and `KinematicsSolverRegistry`
+  resolves solvers deterministically while rejecting duplicate or empty names.
+  `RobotState` snapshots named joint positions and velocities in DoF order,
+  computes forward kinematics, and seeds a solver through `solve_ik`.
+
+- `rne_robot::kinematics`: mimic and passive joints. `MimicJoint` mirrors the
+  URDF `<mimic>` tag and is derived from its source joint instead of counting as
+  a degree of freedom; forward kinematics and the geometric Jacobian apply the
+  chain rule (the source column is scaled by the multiplier and summed with the
+  source joint's own contribution). `PassiveJoint` marks a non-actuated joint
+  that keeps its degree of freedom, with `passive_joint_entities`,
+  `mimic_joint_entities`, and `is_mimic_joint` accessors. `rne_urdf_import` now
+  wires a parsed URDF `<mimic>` element into a `MimicJoint` component on the
+  follower joint.
+
+- `rne_robot::self_collision`: MoveIt-inspired collision queries. The new
+  `AllowedCollisionMatrix` skips explicit link pairs on top of structural
+  parent/child exclusion, `signed_distance` gives the pairwise signed distance,
+  and `SelfCollisionChecker::{distance, check_path}` expose `distanceRobot` and
+  `isPathValid` style queries. `CollisionWorld` holds world-space primitives and
+  reports robot-vs-world contacts and distances without a physics backend.
+
+- `rne_planning`: a new backend-neutral joint-space motion-planning crate
+  inspired by MoveIt's architecture but free of MoveIt, ROS, physics-backend, and
+  renderer dependencies. It provides `PlanningScene`, `GoalConstraint`,
+  `MotionPlanRequest` / `MotionPlanResponse`, `RobotTrajectory`, a `MotionPlanner`
+  trait with `PlannerRegistry` and `PlanningPipeline`, and built-in
+  `JointInterpolationPlanner` and deterministic, explicitly seeded
+  `RrtConnectPlanner` implementations. See
+  [ADR 028](docs/adr/028-native-motion-planning.md) and
+  [joint-space motion planning](docs/architecture/011_joint_motion_planning.md).
+
+- `rne_planning` planning request adapters: a `PlanningRequestAdapter` boundary
+  with `FixStartStateBounds` (clamps the start state to joint limits) and
+  `AddTimeParameterization` (retimes trajectories to `JointLimits::max_velocity`
+  and `PlanningOptions::velocity_scaling_factor`). `PlanningPipeline` now runs
+  its adapter chain before and after planning. `time_parameterize_with_acceleration`
+  adds per-joint `PlanningOptions::acceleration_limits`: each segment uses a
+  stop-and-go trapezoidal profile (triangular for short moves) and falls back to
+  piecewise-constant velocity when no acceleration limit is declared.
+
+- `rne_planning` planning groups: `PlanningGroup` names a kinematic chain or an
+  explicit joint set (SRDF analogue) and stores its degree-of-freedom indices.
+  `PlanningScene` stores groups by name, and `MotionPlanRequest::with_group`
+  scopes a plan to one. Sampling, steering, interpolation, and inverse kinematics
+  (`KinematicModel::inverse_kinematics_active`, reduced active-column Jacobian)
+  are restricted to the group while inactive joints hold their start value.
+  `KinematicModel::chain_joints` and `dof_index_of_joint` expose the chain graph.
+
+- `rne_robot::kinematics` inverse-kinematics robustness and metrics:
+  `KinematicsSolver::search_position_ik` adds deterministic, seeded random
+  restarts (the MoveIt `searchPositionIK` analogue) that respect an active-joint
+  mask, `KinematicModel::manipulability` reports `sqrt(det(J J^T))`, and
+  `joint_limit_distance` reports the nearest finite joint bound. `rne_planning`
+  exposes the restart budget as `PlanningOptions::ik_restarts`.
+
+- `rne_planning` constraints: `GoalConstraint::Orientation` adds an
+  orientation-only goal, resolved by driving only the orientation Jacobian rows
+  (`IkOptions::solve_position` / `solve_orientation`). `PathConstraint`
+  (orientation or position of an end link) is checked at every sampled
+  configuration through `PlanningScene::is_motion_valid_with`, and every built-in
+  planner honors it via `MotionPlanRequest::with_path_constraint`.
+
+- `rne_planning` roadmap planning: `PrmPlanner` samples collision-free
+  configurations, connects nearest neighbours with collision-checked edges, and
+  searches with Dijkstra (`prm`). Sampling and edge choice are seeded and
+  deterministic.
+
+- README motion-planning media: `examples/102_motion_planning_media` emits the
+  real planner output for a planar 2R arm and
+  `tools/generate_motion_planning_media.py` renders `docs/media/motion-planning.{png,gif}`
+  (workspace and joint-space paths, plus an RRT-Connect arm animation). The
+  README "Native motion planning" section embeds the figure.
+
+- `rne_planning` batch informed planning: `BitStarPlanner` (`bit_star`) samples
+  in batches, connects each batch to a growing roadmap with collision-checked
+  edges, runs A* after every batch, and switches to informed ellipsoid sampling
+  once a solution exists (a BIT*-style batch informed planner).
+
+- `rne_planning` informed sampling: `InformedRrtStarPlanner`
+  (`informed_rrt_star`) starts as RRT* and, once a solution is found, restricts
+  sampling to the informed ellipsoid of configurations that could still improve
+  the best cost (the OMPL informed-sampling idea). Deterministic for a seed.
+
+- `rne_robot::self_collision` voxel maps: `VoxelGridObject` is an Octomap-style
+  dense occupancy grid built from a bitmap or a point cloud (`from_points`).
+  Occupied voxels are tested as cuboids against robot spheres, capsules, and
+  cuboids and block line-of-sight segments. `CollisionWorld::{add_voxel_grid,
+  remove_voxel_grid, voxel_grid}` manage them, and
+  `PlanningScene::add_occupancy_map` accepts a point cloud.
+
+- `rne_robot::self_collision` mesh collision: `MeshCollisionObject` adds
+  triangle geometry to a `CollisionWorld` (`add_mesh_object` /
+  `remove_mesh_object` / `mesh_object`). Meshes are tested against robot spheres
+  and capsules with exact point/segment-to-triangle distance, against world
+  segments with ray/triangle intersection, and against cuboids via the mesh AABB.
+  `PlanningScene::add_mesh_collision_object` forwards it to planning.
+
+- `rne_robot::kinematics` analytic IK: `AnalyticTwoLinkSolver`
+  (`analytic_two_link`) detects a planar two-revolute chain and solves both
+  elbow configurations in closed form (an IKFast-style plugin), returning
+  `NotConverged` for any other structure. `KinematicsSolverRegistry` now exposes
+  three built-in solvers by name.
+
+- `rne_robot::kinematics` floating base: a `FloatingBase` marker on a robot's
+  base link prepends six degrees of freedom `(x, y, z, roll, pitch, yaw)` to the
+  kinematic model. `base_dof`, `movable_dof_names`, `joint_limits`, forward
+  kinematics, the Jacobian, active-mask IK, clamping, and `RobotState` all
+  account for the base, so a mobile manipulator can plan base and arm together.
+
+- `rne_planning` STOMP planner: `StompPlanner` (`stomp`) is a stochastic
+  trajectory optimizer that draws seeded noisy rollouts, weights them by a
+  softmax of their smoothness-plus-obstacle cost, and moves to the cost-weighted
+  average with fixed endpoints, returning the best trajectory seen.
+
+- `rne_planning` hybrid planner: `HybridPlanner` (`hybrid`) runs the global
+  RRT-Connect planner and then refines the trajectory with the CHOMP-inspired
+  optimizer, mirroring MoveIt's hybrid planning while staying deterministic.
+
+- `rne_robot::kinematics` second solver: `JacobianTransposeSolver`
+  (`jacobian_transpose`) adds a stable `dq = gain * J^T e` solver with a
+  backtracking line search and active-mask support. `KinematicsSolverRegistry`'s
+  built-ins now expose damped least squares and Jacobian transpose by name.
+
+- `rne_planning` workspace-bounds adapters: `PlanningScene::set_workspace_bounds`
+  defines a workspace box; `FixWorkspaceBounds` clamps a position/pose goal into
+  it and `ValidateWorkspaceBounds` rejects an out-of-bounds goal. The default
+  pipeline now includes `FixWorkspaceBounds`.
+
+- `rne_planning` trajectory optimization: `optimize_trajectory` /
+  `trajectory_cost` implement a deterministic, CHOMP-inspired optimizer that
+  lowers a smoothness plus obstacle-clearance cost with finite-difference
+  gradients, a backtracking step, fixed endpoints, and joint limits.
+
+- `rne_planning` visibility constraint: `PathConstraint::Visibility` requires a
+  sensor link (its local `+X` axis) to point at a target within a tolerance with
+  an unobstructed line of sight. `segment_intersects_primitive`,
+  `SelfCollisionChecker::segment_blocked`, `CollisionWorld::segment_blocked`, and
+  `PlanningScene::line_of_sight_clear` provide the occlusion test against links,
+  attached bodies, and world objects.
+
+- `rne_planning` circular Cartesian motion: `circular_waypoints` builds the arc
+  through a start, via, and goal pose (Pilz `CIRC` analogue) with orientation
+  slerped along the arc. The result feeds `CartesianPathPlanner`; collinear
+  points are rejected.
+
+- `rne_planning` SRDF import: `parse_srdf` reads `<group>` chain and joint
+  elements into `SrdfGroup` values and `PlanningScene::apply_srdf` resolves them
+  against the kinematic model, so planning groups can be loaded from an SRDF file
+  (other SRDF elements are ignored). `KinematicModel` gained name and joint-link
+  lookup helpers.
+
+- `rne_planning` planning adapters: `FixStartStateCollision` perturbs a colliding
+  start state toward a nearby valid one with seeded attempts, and
+  `SimplifyTrajectory` removes redundant waypoints whose shortcut is collision
+  free. `PlanningPipeline::with_builtins` now runs fix-bounds, fix-collision,
+  simplify, then time parameterization.
+
+- `rne_planning` constraint sampling: `ConstraintSampler` draws a collision-free
+  configuration satisfying a `GoalConstraint` (MoveIt `ConstraintSampler`
+  analogue). Joint goals are embedded and validated; pose/position/orientation
+  goals use seeded random-restart inverse kinematics and reject colliding
+  solutions.
+
+- `rne_robot::self_collision` named collision objects: `CollisionWorldObject`
+  carries a name and `CollisionWorld::{add_named_object, remove_object, object,
+  object_name}` implement the MoveIt `CollisionObject`/`World` add, lookup, and
+  remove operations. `PlanningScene::{add_collision_object, remove_collision_object}`
+  forward them to planning.
+
+- `rne_robot::self_collision` attached bodies: `SelfCollisionChecker::attach_body`
+  adds MoveIt `AttachedBody`-style geometry to a link with optional `touch_links`,
+  tested against other links, other attached bodies, and (through
+  `link_primitives`) world objects. `SelfCollisionPair` reports the attached body
+  name, and `PlanningScene::attach_body` / `detach_body` expose it to planning.
+
+- `rne_planning` Cartesian motion: `CartesianPathPlanner` /
+  `compute_cartesian_path` follow end-link pose waypoints with inverse
+  kinematics and report the completed `fraction`, mirroring MoveIt's
+  `computeCartesianPath` and the Pilz `LIN` motion. Position-only or full-pose
+  interpolation is selectable, and each sub-step is collision checked.
+
+- `rne_planning` optimal planning: `RrtStarPlanner` adds deterministic,
+  asymptotically optimal sampling with cheapest-parent selection and exact
+  cost-propagation rewiring, registered as `rrt_star`.
+
+- `examples/101_motion_planning`: a runnable headless demo of the planning
+  pipeline, both built-in planners, and a robot-vs-world distance query.
+
 ### Fixed
+
+- `rne_planning` trajectory optimizers no longer return trajectories that are
+  less feasible than their seed. `optimize_trajectory` is feasibility-gated
+  (`trajectory_is_feasible`), `HybridPlanner` falls back to its collision-free
+  RRT-Connect plan when the CHOMP refinement is infeasible, and `StompPlanner`
+  returns `NoPath` instead of a colliding trajectory.
 
 - Gate the SO101 end-effector link priority list (`gripper_link` /
   `wrist_link` / `forearm_link`) added for SO101 mobile-manipulator support so

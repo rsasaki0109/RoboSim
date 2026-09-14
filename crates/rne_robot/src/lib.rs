@@ -20,12 +20,12 @@ pub use commands::{ActuatorCommand, ActuatorCommandBuffer, ActuatorCommandEntry}
 pub use components::{
     AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
     DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Device, DeviceKind,
-    Joint, JointKind, JointLimits, Link, LinkDevices, LongitudinalDrivePathState,
-    LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState, MultirotorFlight,
-    PassiveCasterSpec, PwmMotorCommandFrontendSpec, PwmMotorCommandPolarity, RigidRoadPatchSpec,
-    RigidRoadProfileSpec, Robot, RobotId, SteeringActuatorFailureMode, SteeringActuatorSpec,
-    SteeringActuatorState, SuspensionStrutSpec, TransmissionSpec, VehicleDynamics,
-    WheelAssemblySpec, WheelStationSpec, WheelSteeringState,
+    FloatingBase, Joint, JointKind, JointLimits, Link, LinkDevices, LongitudinalDrivePathState,
+    LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState, MimicJoint, MultirotorFlight,
+    PassiveCasterSpec, PassiveJoint, PwmMotorCommandFrontendSpec, PwmMotorCommandPolarity,
+    RigidRoadPatchSpec, RigidRoadProfileSpec, Robot, RobotId, SteeringActuatorFailureMode,
+    SteeringActuatorSpec, SteeringActuatorState, SuspensionStrutSpec, TransmissionSpec,
+    VehicleDynamics, WheelAssemblySpec, WheelStationSpec, WheelSteeringState,
 };
 pub use controller_io::{
     apply_controller_output, build_controller_io, step_controller, Controller,
@@ -42,19 +42,29 @@ pub use diff_drive::{
 };
 pub use joint::validate_joint_limits;
 pub use kinematics::{
-    ForwardKinematics, IkOptions, IkSolution, Jacobian, KinematicModel, KinematicsError,
+    AnalyticTwoLinkSolver, DampedLeastSquaresSolver, ForwardKinematics, IkOptions, IkRequest,
+    IkSolution, Jacobian, JacobianTransposeSolver, KinematicModel, KinematicsError,
+    KinematicsSolver, KinematicsSolverRegistry, RobotState, ANALYTIC_TWO_LINK_SOLVER,
+    DAMPED_LEAST_SQUARES_SOLVER, JACOBIAN_TRANSPOSE_SOLVER,
 };
 pub use motion::{
     body_motion_from_world, BodyMotion, BodyMotionSample, JointInterpolation, JointKeyframe,
     JointTrack, MotionError,
 };
+pub use rne_physics::ColliderShape;
+pub use rne_world::Transform3;
 pub use ros2_control::{
     DiffDriveCommand, DiffDriveControllerConfig, DiffDriveWheelController, JointCommand,
     JointTrajectory, JointTrajectoryPoint, Ros2ControlError,
 };
 pub use self_collision::{
-    check_self_collisions, CollisionPrimitive, SelfCollisionChecker, SelfCollisionPair,
-    SelfCollisionReport,
+    check_self_collisions, segment_intersects_primitive, signed_distance,
+    signed_distance_primitive_mesh, signed_distance_primitive_voxels, AllowedCollisionMatrix,
+    AttachedBody, CollisionPairDistance, CollisionPrimitive, CollisionWorld, CollisionWorldObject,
+    MeshCollisionObject, PathCollisionConfig, PathCollisionReport, PathCollisionSample,
+    SelfCollisionChecker, SelfCollisionDistanceReport, SelfCollisionPair, SelfCollisionReport,
+    VoxelGridObject, WorldCollisionDistance, WorldCollisionDistanceReport, WorldCollisionPair,
+    WorldCollisionReport,
 };
 pub use systems::{
     ackermann_kinematics, aggregate_wheel_contact_patch, apply_actuator_commands,

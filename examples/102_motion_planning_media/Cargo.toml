@@ -1,0 +1,19 @@
+[package]
+name = "motion_planning_media"
+version = "0.2.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rne_ecs = { workspace = true }
+rne_math = { workspace = true }
+rne_physics = { workspace = true }
+rne_planning = { workspace = true }
+rne_robot = { workspace = true }
+serde_json = { workspace = true }
+
+[[example]]
+name = "102_motion_planning_media"
+path = "main.rs"
