@@ -8,8 +8,9 @@
 //! rounded primitive use an exact point / segment to box distance.
 //!
 //! Pairs that are structurally adjacent (same link, or connected within
-//! [`SelfCollisionChecker::min_link_distance`] joints) are skipped, mirroring
-//! the usual "ignore parent/child contact" behavior of robot models. Explicit
+//! [`SelfCollisionChecker::from_robot_with_min_link_distance`]'s
+//! `min_link_distance` joints) are skipped, mirroring the usual "ignore
+//! parent/child contact" behavior of robot models. Explicit
 //! [`CollisionGroups`] are honored using the same mask semantics as the physics
 //! backends.
 
