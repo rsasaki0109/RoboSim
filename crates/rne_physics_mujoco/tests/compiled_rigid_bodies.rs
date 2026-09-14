@@ -269,6 +269,7 @@ fn preflight_accepts_supported_articulation_before_native_model_creation() {
         axis: Vec3::Z,
         anchor_parent_m: Vec3::ZERO,
         anchor_child_m: Vec3::Y,
+        relative_rotation: Quat::IDENTITY,
         lower_rad: None,
         upper_rad: None,
     });

@@ -16,6 +16,25 @@ All notable changes to Robot Native Engine are documented in this file.
   three-parameter scripted stepper as the trainable G1 boundary; from-scratch
   walking remains compute-bound on CPU (see `docs/G1_LOCOMOTION.md`).
 
+### Fixed
+
+- Gate the SO101 end-effector link priority list (`gripper_link` /
+  `wrist_link` / `forearm_link`) added for SO101 mobile-manipulator support so
+  it only applies to SO101 robots. The ungated list unintentionally retargeted
+  `mm_mobile_lift`'s end effector from `forearm_link` to `wrist_link` (its
+  URDF has no `gripper_link`), shifting per-step reward shaping and pushing
+  the flagship cross-backend `total_reward_delta` check from 0.7067 past its
+  registered 0.75 budget to 0.8850. Non-SO101 robots now resolve
+  `forearm_link` exactly as before `62109ff`.
+
+- Add the missing `relative_rotation` field to a `RevoluteJointDesc`
+  initializer in `crates/rne_physics_mujoco/tests/compiled_rigid_bodies.rs`.
+  `62109ff` added `relative_rotation: Quat` to `RevoluteJointDesc` and
+  `PrismaticJointDesc` and updated other call sites, but missed this one,
+  which only compiles under the `mujoco` feature and so was not caught by the
+  default CI lanes. This broke the `mujoco`-feature build (and the MuJoCo
+  physics backend workflow) on `main` since `62109ff`.
+
 ### Changed
 
 - Re-freeze `release/python-api-v1.json` (24 to 28 exports) to cover the two Python-facing
