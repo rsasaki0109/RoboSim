@@ -231,6 +231,20 @@ All notable changes to Robot Native Engine are documented in this file.
   published set is the minimal fix; promoting them to published crates is
   deferred to a future release bump.
 
+- Fix two broken `rustdoc` intra-doc links that `xtask release-check`'s
+  `cargo doc --workspace -D warnings` step had never reached before (it
+  aborted earlier on the `publish = false` issue above).
+  `crates/rne_robot/src/self_collision.rs` (`#261`) linked to a nonexistent
+  `SelfCollisionChecker::min_link_distance` field; `min_link_distance` is a
+  constructor parameter of `SelfCollisionChecker::from_robot_with_min_link_distance`,
+  which the link now points to. `crates/rne_slam/src/slam3d.rs` (`#265`) used
+  a redundant explicit link target for `IcpOdometry`, which is already in
+  scope via `use`; shortened to the plain `[`IcpOdometry`]` form used
+  elsewhere in the crate. A third link in `crates/rne_robot/src/kinematics.rs`
+  that this PR originally also fixed has since been rewritten by `#270`
+  (native motion planning) and is no longer broken on `main`, so that change
+  is dropped here.
+
 - Gate the SO101 end-effector link priority list (`gripper_link` /
   `wrist_link` / `forearm_link`) added for SO101 mobile-manipulator support so
   it only applies to SO101 robots. The ungated list unintentionally retargeted

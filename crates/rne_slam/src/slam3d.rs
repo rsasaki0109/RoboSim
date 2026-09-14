@@ -1,6 +1,6 @@
 //! 3D SLAM back-end: keyframes, ICP loop closure, and elevation re-integration.
 //!
-//! [`Slam3d`] wraps [`IcpOdometry`](crate::odometry3d::IcpOdometry) as the front
+//! [`Slam3d`] wraps [`IcpOdometry`] as the front
 //! end and adds the mapping back-end:
 //!
 //! * keyframes are added when the robot has moved far enough,
