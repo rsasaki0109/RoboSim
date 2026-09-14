@@ -91,6 +91,16 @@ The Rust-side mapping that mirrors this is `rne_robot::DiffDriveWheelController`
 plus `JointTrajectory` interpolation. `nav2_action_smoke.sh` sends a wheel
 trajectory goal and checks it succeeds.
 
+## Simulation control
+
+`run_node.py` implements the `simulation_interfaces` control plane:
+`ResetSimulation`, `GetSimulationState`, `SetSimulationState`, `StepSimulation`,
+and the `SimulateSteps` action, plus the Gazebo-compatible entity services
+`SpawnEntity`, `DeleteEntity`, `GetEntities`, `GetEntityInfo`,
+`GetEntityState`, and `SetEntityState` over an in-process registry. A
+`real_time_factor` parameter scales the wall-clock pacing of the fixed-step
+loop. `world_control_smoke.sh` verifies the entity services end to end.
+
 ## Frames and QoS
 
 - `/tf` publishes `map → odom → base_footprint → base_link → lidar` with yaw

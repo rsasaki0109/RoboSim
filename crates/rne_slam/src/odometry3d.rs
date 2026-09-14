@@ -92,6 +92,11 @@ impl IcpOdometry {
         self.pose
     }
 
+    /// Overrides the estimated pose (used after a loop-closure correction).
+    pub fn set_pose(&mut self, pose: Transform3) {
+        self.pose = pose;
+    }
+
     /// Number of points in the downsampled map.
     pub fn map_len(&self) -> usize {
         self.map_points.len()

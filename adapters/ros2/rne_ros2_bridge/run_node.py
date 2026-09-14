@@ -33,11 +33,22 @@ from rclpy.node import Node
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import LaserScan, PointCloud2
 from simulation_interfaces.action import SimulateSteps
-from simulation_interfaces.msg import Result, SimulationState
+from simulation_interfaces.msg import (
+    EntityInfo,
+    EntityState,
+    Result,
+    SimulationState,
+)
 from simulation_interfaces.srv import (
+    DeleteEntity,
+    GetEntities,
+    GetEntityInfo,
+    GetEntityState,
     GetSimulationState,
     ResetSimulation,
+    SetEntityState,
     SetSimulationState,
+    SpawnEntity,
     StepSimulation,
 )
 from tf2_msgs.msg import TFMessage
@@ -74,6 +85,7 @@ class RneBridgeNode(Node):
     def __init__(self) -> None:
         super().__init__("rne_bridge")
         self.declare_parameter("wheel_velocity_rad_s", 6.0)
+        self.declare_parameter("real_time_factor", 1.0)
         self.clock_pub = self.create_publisher(Clock, "/clock", 10)
         self.cloud_pub = self.create_publisher(PointCloud2, "/points", 10)
         self.tf_pub = self.create_publisher(TFMessage, "/tf", 10)
@@ -87,6 +99,11 @@ class RneBridgeNode(Node):
         self.plan = self._synthetic_path()
         self.use_rne_sim = rne_py is not None
         self.callback_group = ReentrantCallbackGroup()
+        self.real_time_factor = float(self.get_parameter("real_time_factor").value)
+        self.entities: dict[str, EntityState] = {}
+        self.entity_info: dict[str, EntityInfo] = {}
+        self._seed_entities()
+        self._register_entity_interfaces()
         if self.use_rne_sim:
             self.bridge = BridgeSim.new(rne_py.DiffDriveSim())
             self._register_simulation_interfaces()
@@ -122,6 +139,124 @@ class RneBridgeNode(Node):
     def _synthetic_path() -> list[tuple[float, float, float]]:
         """Builds a short straight plan for smoke testing."""
         return [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)]
+
+    def _seed_entities(self) -> None:
+        """Registers the diff-drive base as the initial entity."""
+        state = EntityState()
+        state.header.frame_id = "world"
+        self.entities["base_link"] = state
+        self.entity_info["base_link"] = EntityInfo(
+            description="RNE differential-drive base", tags=[]
+        )
+
+    def _register_entity_interfaces(self) -> None:
+        """Registers Gazebo-compatible entity spawn/delete/query services."""
+        self.create_service(SpawnEntity, "/spawn_entity", self.handle_spawn_entity)
+        self.create_service(DeleteEntity, "/delete_entity", self.handle_delete_entity)
+        self.create_service(GetEntities, "/get_entities", self.handle_get_entities)
+        self.create_service(GetEntityInfo, "/get_entity_info", self.handle_get_entity_info)
+        self.create_service(GetEntityState, "/get_entity_state", self.handle_get_entity_state)
+        self.create_service(SetEntityState, "/set_entity_state", self.handle_set_entity_state)
+
+    @staticmethod
+    def _success() -> Result:
+        return Result(result=Result.RESULT_OK, error_message="")
+
+    @staticmethod
+    def _failure(code: int, message: str) -> Result:
+        return Result(result=code, error_message=message)
+
+    def handle_spawn_entity(
+        self, request: SpawnEntity.Request, response: SpawnEntity.Response
+    ) -> SpawnEntity.Response:
+        """Adds an entity to the registry, honoring `allow_renaming`."""
+        name = request.name or f"entity_{len(self.entities)}"
+        if name in self.entities:
+            if not request.allow_renaming:
+                response.result = self._failure(
+                    Result.RESULT_OPERATION_FAILED, f"entity {name} already exists"
+                )
+                return response
+            suffix = 1
+            while f"{name}_{suffix}" in self.entities:
+                suffix += 1
+            name = f"{name}_{suffix}"
+        state = EntityState()
+        state.header.frame_id = "world"
+        state.pose = request.initial_pose.pose
+        self.entities[name] = state
+        self.entity_info[name] = EntityInfo(
+            description=request.uri or "spawned entity", tags=[]
+        )
+        response.entity_name = name
+        response.result = self._success()
+        return response
+
+    def handle_delete_entity(
+        self, request: DeleteEntity.Request, response: DeleteEntity.Response
+    ) -> DeleteEntity.Response:
+        """Removes an entity from the registry."""
+        if request.entity not in self.entities:
+            response.result = self._failure(
+                Result.RESULT_NOT_FOUND, f"entity {request.entity} not found"
+            )
+            return response
+        del self.entities[request.entity]
+        self.entity_info.pop(request.entity, None)
+        response.result = self._success()
+        return response
+
+    def handle_get_entities(
+        self, request: GetEntities.Request, response: GetEntities.Response
+    ) -> GetEntities.Response:
+        """Lists entities, optionally filtered by a name substring."""
+        pattern = request.filters.filter
+        response.entities = sorted(
+            name for name in self.entities if not pattern or pattern in name
+        )
+        response.result = self._success()
+        return response
+
+    def handle_get_entity_info(
+        self, request: GetEntityInfo.Request, response: GetEntityInfo.Response
+    ) -> GetEntityInfo.Response:
+        """Returns static info for an entity."""
+        info = self.entity_info.get(request.entity)
+        if info is None:
+            response.result = self._failure(
+                Result.RESULT_NOT_FOUND, f"entity {request.entity} not found"
+            )
+            return response
+        response.info = info
+        response.result = self._success()
+        return response
+
+    def handle_get_entity_state(
+        self, request: GetEntityState.Request, response: GetEntityState.Response
+    ) -> GetEntityState.Response:
+        """Returns the pose/twist of an entity."""
+        state = self.entities.get(request.entity)
+        if state is None:
+            response.result = self._failure(
+                Result.RESULT_NOT_FOUND, f"entity {request.entity} not found"
+            )
+            return response
+        response.state = state
+        response.result = self._success()
+        return response
+
+    def handle_set_entity_state(
+        self, request: SetEntityState.Request, response: SetEntityState.Response
+    ) -> SetEntityState.Response:
+        """Updates the pose/twist of an entity."""
+        if request.entity not in self.entities:
+            response.result = self._failure(
+                Result.RESULT_NOT_FOUND, f"entity {request.entity} not found"
+            )
+            return response
+        self.entities[request.entity] = request.state
+        response.result = self._success()
+        return response
 
     def _register_simulation_interfaces(self) -> None:
         self.create_service(
@@ -294,7 +429,7 @@ def main() -> None:
             if step % 60 == 59 and node.use_rne_sim:
                 obs = node.bridge.observation
                 node.get_logger().info(f"step {step + 1}: base_x={obs.base_x:.2f} m")
-            time.sleep(0.001)
+            time.sleep(0.001 / max(node.real_time_factor, 1.0e-6))
 
         if node.use_rne_sim:
             obs = node.bridge.observation

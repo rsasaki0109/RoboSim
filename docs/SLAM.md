@@ -107,6 +107,15 @@ collapses points to one centroid per voxel in deterministic (`BTreeMap`) order.
 convergence, and whether ICP was applied. Feed the corrected pose into
 `rne_nav::ElevationMap` for 3D/outdoor mapping.
 
+`Slam3d` is the back-end on top: it adds keyframes when the robot moves beyond
+`keyframe_translation_m` / `keyframe_rotation_rad`, keeps a 2.5D `(x, z, yaw)`
+pose graph (world Y is up), and on a revisit within `loop_search_radius_m`
+verifies the match with `Icp3d`. A low-residual match adds a loop-closure edge,
+re-optimizes with the Huber kernel, syncs the keyframe poses, and rebuilds the
+elevation map from every keyframe. `process(scan, odom_delta, sensor_from_base)`
+returns a `Slam3dUpdate`; `graph()`, `elevation()`, `keyframe_count()`, and
+`loop_closures()` expose the state.
+
 ## ECS glue
 - `SlamState` wraps a `Slam2d` estimator as a resource.
 - `PendingSlamScans` queues `(scan, odom_pose, sensor_from_base)`.

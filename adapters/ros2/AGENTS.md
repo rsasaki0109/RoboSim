@@ -14,7 +14,9 @@ This directory contains optional adapters between Robot Native Engine and extern
 - `rne_adapter_ros2`: `/clock`, TF, PointCloud2, and navigation (`Odometry`,
   `OccupancyGrid`, `Path`, `Twist`) mapping helpers (Rust)
 - `rne_ros2_bridge`: Python `rclpy` runtime node publishing `/clock`, `/points`,
-  `/tf`, `/odom`, `/scan`, `/map`, `/plan` and subscribing `/cmd_vel`
+  `/tf`, `/odom`, `/scan`, `/map`, `/plan` and subscribing `/cmd_vel`;
+  `simulation_interfaces` state/step services plus Gazebo-compatible entity
+  spawn/delete/query services and a real-time-factor parameter
 - `rne_ros2_bridge/nav_node.py`: Nav2-facing `LifecycleNode` (no
   `simulation_interfaces`) that integrates `/cmd_vel` and publishes `/odom`,
   `/tf`, `/scan`, `/map`, `/plan`, `/joint_states`; `map_file` loads an RNE SLAM
