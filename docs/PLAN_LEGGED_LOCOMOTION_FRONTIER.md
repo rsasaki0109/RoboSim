@@ -142,6 +142,13 @@ measurement with `--scan` (torque sweep) and `--trace` (per-step telemetry).
   planted at ~0.02 m; `airborne_steps` is zero for every scanned combination.
   Adding thigh torque reaches a higher apex (up to +0.45 m) but as a pitch-up
   rear on the planted feet, not a hop, and the body still returns upright.
+- **Follow-up scan:** shallower crouches (thigh 0.95 / calf -1.75) reach a
+  +0.27 m apex with only 0.21 rad tilt, and a front/rear differential thigh
+  torque on the measured pitch holds tilt down to 0.16 rad, but the lowest
+  foot still stays planted in every combination: the stance simply extends to
+  full leg length, so there is no surplus upward momentum. The next attempt
+  must command a *force* (centroidal) profile rather than a joint torque and
+  map it through the leg Jacobian with an attitude task.
 - **Conclusion:** a true liftoff needs a closed-loop, contact-force-driven
   push-off (and a flight-phase controller), not an open-loop torque profile.
   Consistent with the base contact-schedule/closing wall, this keeps Theme B
