@@ -37,12 +37,52 @@ fixed:                 child = parent * origin
 Jacobian (linear xyz, angular xyz) for the chain from the base to the target
 link.
 
+## Mimic and passive joints
+
+`MimicJoint { source, multiplier, offset }` mirrors the URDF `<mimic>` tag: the
+joint's displacement is `multiplier * source.position + offset`. A mimic joint
+is not an independent degree of freedom — `KinematicModel::dof`,
+`movable_joint_entities`, and `joint_limits` exclude it, and forward kinematics
+derives its displacement from the source. The geometric Jacobian applies the
+chain rule: the mimic joint's screw contribution is scaled by `multiplier` and
+accumulated into the source column. `mimic_joint_entities` and
+`is_mimic_joint` expose the relationship.
+
+`PassiveJoint` marks a joint that keeps its degree of freedom but is not
+actuated; `KinematicModel::passive_joint_entities` lists them so callers can
+exclude them from a planning group or controller.
+
+`FloatingBase` on the base link prepends six DoF `(x, y, z, roll, pitch, yaw)`
+to the model. `KinematicModel::base_dof` reports the count, and forward
+kinematics, the Jacobian, joint limits, sampling, clamping, and `RobotState`
+all include the base so a mobile manipulator can be planned as one vector.
+
 ## Inverse kinematics
 
 `KinematicModel::inverse_kinematics(target, end_link, initial, options)` is a
 damped least-squares solver. It clamps to joint limits each iteration and can
 solve position only or full pose (`IkOptions::solve_orientation`). The result
 reports the iteration count and residual position/orientation error.
+
+## Solver boundary and robot state
+
+`KinematicsSolver` is the MoveIt `KinematicsBase` analogue: a swappable inverse
+kinematics solver that receives the model per call, so one solver serves any
+robot. The built-in `DampedLeastSquaresSolver`
+(`DAMPED_LEAST_SQUARES_SOLVER`) wraps the algorithm above, and
+`JacobianTransposeSolver` (`JACOBIAN_TRANSPOSE_SOLVER`) is a second selectable
+solver using `dq = gain * J^T e` with a backtracking line search, and
+`AnalyticTwoLinkSolver` (`ANALYTIC_TWO_LINK_SOLVER`) is a closed-form solver for
+a planar two-revolute chain (an IKFast-style analytic plugin).
+`KinematicsSolverRegistry` addresses solvers by name in insertion order while
+rejecting empty or duplicate names; `KinematicsSolver::search_position_ik`
+adds seeded random restarts. `IkRequest` carries the end link, target pose,
+seed, options, and an optional active-joint mask.
+
+`RobotState` mirrors MoveIt's `RobotState`: `RobotState::from_world` snapshots
+the current joint positions and velocities in degree-of-freedom order, exposes
+named read/write accessors, computes forward kinematics, and seeds a solver
+through `RobotState::solve_ik`.
 
 ## Self-collision
 
@@ -60,6 +100,30 @@ pairs directly from `Collider` components:
 
 `SelfCollisionReport` lists every overlapping pair and its penetration depth.
 Infinite plane colliders are ignored.
+
+`SelfCollisionChecker::attach_body` adds a collision body rigidly fixed to a
+link (the MoveIt `AttachedBody` analogue) with optional `touch_links`. Attached
+bodies are tested against other links, other attached bodies, and world objects,
+so a grasped payload participates in planning and distance queries.
+
+`segment_intersects_primitive` reports whether a line segment is occluded by a
+sphere, capsule, or cuboid, and `SelfCollisionChecker::segment_blocked` /
+`CollisionWorld::segment_blocked` apply it to robot links, attached bodies, and
+world objects for line-of-sight queries.
+
+`AllowedCollisionMatrix` is the MoveIt ACM analogue: explicit link pairs can be
+skipped on top of the structural parent/child exclusion.
+`SelfCollisionChecker::distance` returns the closest checked pair and its signed
+distance (`distanceRobot`), while `SelfCollisionChecker::check_path` samples a
+joint-space path and reports the first colliding configuration
+(`isPathValid`). `signed_distance` exposes the pairwise signed distance, and
+`CollisionWorld` holds world-space primitives tested against the robot's links
+with `check` and `distance`. Objects can be named and managed with
+`add_named_object`, `object`, and `remove_object` (the MoveIt `CollisionObject`
+analogue). `MeshCollisionObject` adds triangle meshes (`add_mesh_object`), tested
+against spheres/capsules with exact triangle distances and against segments with
+ray/triangle intersection. `VoxelGridObject` adds an Octomap-style occupancy grid
+(`add_voxel_grid` or `from_points`), tested as cuboids against the robot.
 
 ## Link devices
 

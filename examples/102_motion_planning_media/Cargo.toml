@@ -1,0 +1,22 @@
+[package]
+name = "motion_planning_media"
+version = "0.2.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+png = { workspace = true }
+rne_ai = { workspace = true }
+rne_ecs = { workspace = true }
+rne_math = { workspace = true }
+rne_planning = { workspace = true }
+rne_render = { workspace = true }
+rne_render_wgpu = { workspace = true, features = ["viewer"] }
+rne_robot = { workspace = true }
+rne_urdf_import = { workspace = true }
+
+[[example]]
+name = "102_motion_planning_media"
+path = "main.rs"

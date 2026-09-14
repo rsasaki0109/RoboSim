@@ -2452,6 +2452,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "motion_planning"
+version = "0.2.0"
+dependencies = [
+ "rne_ecs",
+ "rne_math",
+ "rne_planning",
+ "rne_robot",
+ "rne_urdf_import",
+]
+
+[[package]]
+name = "motion_planning_media"
+version = "0.2.0"
+dependencies = [
+ "png",
+ "rne_ai",
+ "rne_ecs",
+ "rne_math",
+ "rne_planning",
+ "rne_render",
+ "rne_render_wgpu",
+ "rne_robot",
+ "rne_urdf_import",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4100,6 +4126,21 @@ dependencies = [
  "rne_math",
  "rne_physics",
  "rne_world",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rne_planning"
+version = "0.2.0"
+dependencies = [
+ "approx",
+ "bevy_ecs",
+ "rne_ecs",
+ "rne_math",
+ "rne_physics",
+ "rne_robot",
+ "rne_world",
+ "roxmltree",
  "thiserror 2.0.18",
 ]
 

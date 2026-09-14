@@ -345,12 +345,40 @@ cargo run -p deformable_cable --example 43_deformable_cable
 cargo run -p deformable_cloth --example 44_deformable_cloth
 ```
 
+### Native motion planning
+
+`rne_planning` is a deterministic, MoveIt-inspired joint-space planning layer
+built on the generic `rne_robot` kinematic model and collision checker: planning
+scene and SRDF groups, goal and path constraints, a planner registry and
+pipeline, PTP/LIN/CIRC motions, RRT-Connect, RRT*, informed RRT*, PRM,
+BIT\*-style, CHOMP and STOMP trajectory optimization, hybrid planning, and
+request adapters with velocity- and acceleration-limited time parameterization.
+No MoveIt or ROS dependency is added to core.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/motion-planning.png">
+    <img src="docs/media/motion-planning.gif" alt="The OpenArm v2 7-DOF arm driven by rne_planning: RRT-Connect swings the dark arm and gripper around a red spherical obstacle, leaving a cyan end-effector trail, while straight joint interpolation is blocked" width="820">
+  </picture>
+  <br>
+  <sub>The checked-in RNE-converted <b>OpenArm v2 left arm</b> (7-DOF, GLB meshes), planned by RRT-Connect and rendered by the real wgpu renderer. A collision object blocks straight joint interpolation; the cyan trail traces the collision-free end-effector detour. <a href="examples/102_motion_planning_media/main.rs">capture source</a> · <a href="docs/architecture/011_joint_motion_planning.md">architecture</a></sub>
+</p>
+
+```bash
+cargo run -p motion_planning --example 101_motion_planning
+cargo run --release -p motion_planning_media --example 102_motion_planning_media
+cargo run -p motion_planning_media --example 102_motion_planning_media -- --smoke
+```
+
+See [joint-space motion planning](docs/architecture/011_joint_motion_planning.md).
+
 ## Architecture
 
 The workspace is split by responsibility:
 
 - `rne_core`, `rne_math`, `rne_ecs`: schedules, time, events, diagnostics, ECS, and spatial math.
 - `rne_world`, `rne_robot`, `rne_sensor`, `rne_ai`, `rne_data`: world/entity conventions, robot control, sensors, learning interfaces, and typed data streams.
+- `rne_planning`: backend-neutral joint-space planning scene, goal constraints, planners, and pipeline.
 - `rne_physics` and `rne_physics_rapier`: backend-neutral traits and the Rapier implementation.
 - `rne_render` and `rne_render_wgpu`: renderer traits and the optional wgpu backend.
 - `rne_asset`, `rne_plugin`, `rne_traffic`: assets, plugin interfaces, and backend-neutral traffic.

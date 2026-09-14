@@ -101,6 +101,49 @@ pub struct Joint {
     pub velocity: f64,
 }
 
+/// Marker enabling a 6-DoF floating base on a robot's base link.
+///
+/// When present, the base pose is prepended to the kinematic model's
+/// degree-of-freedom vector as `(x, y, z, roll, pitch, yaw)` using fixed-axis
+/// roll-pitch-yaw (`Rz * Ry * Rx`), so a mobile manipulator can plan its base
+/// and arm together.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct FloatingBase;
+
+/// Constraint tying a joint's displacement to another joint.
+///
+/// A mimic joint is not an independent degree of freedom: its position is
+/// `multiplier * source.position + offset`, matching the URDF `<mimic>` tag.
+/// The kinematic model evaluates it from the source joint and excludes it from
+/// [`crate::kinematics::KinematicModel::dof`].
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct MimicJoint {
+    /// Joint entity whose position drives this joint.
+    pub source: Entity,
+    /// Scale applied to the source position.
+    pub multiplier: f64,
+    /// Constant offset added to the scaled source position.
+    pub offset: f64,
+}
+
+impl MimicJoint {
+    /// Creates a mimic constraint.
+    pub fn new(source: Entity, multiplier: f64, offset: f64) -> Self {
+        Self {
+            source,
+            multiplier,
+            offset,
+        }
+    }
+}
+
+/// Marker for a joint that is present in the model but not actuated.
+///
+/// Passive joints still contribute a degree of freedom; the marker lets callers
+/// exclude them from a planning group or controller without changing the model.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct PassiveJoint;
+
 /// Actuator driving a joint or wheel.
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct Actuator {
