@@ -4,9 +4,11 @@
 //! FNV-1a hash) so that mapping, planning, and scan-matching cannot silently
 //! introduce ordering or floating-point nondeterminism.
 
+use rne_math::Vec3;
 use rne_nav::{
-    plan_path, Costmap, CostmapConfig, DwaConfig, DwaOutcome, DwaPlanner, FrameId, GridCoord,
-    LaserScan2d, OccupancyGrid, Path2d, Pose2d, PurePursuitConfig,
+    plan_path, Costmap, CostmapConfig, DwaConfig, DwaOutcome, DwaPlanner, EkfConfig, EkfFusion,
+    ElevationConfig, ElevationMap, FrameId, GridCoord, LaserScan2d, OccupancyGrid, Path2d, Pose2d,
+    PurePursuitConfig, RecoveryAction, RecoveryOutcome, RecoverySequence, VelocityCommand2d,
 };
 use rne_slam::{Slam2d, SlamConfig};
 use std::f64::consts::TAU;
@@ -215,4 +217,123 @@ fn costmap_inflation_is_deterministic() {
     assert_eq!(first.costs(), second.costs());
     assert!(first.lethal_count() > 0);
     assert!(first.cost_at(GridCoord { x: 120, y: 80 }).is_some());
+}
+
+#[test]
+fn drive_actuator_replay_is_bit_identical() {
+    use rne_nav::{DifferentialDrive, DriveFault, DriveKind, DriveLimits, MobileBase};
+
+    let run = || {
+        let mut base = MobileBase::new(
+            DriveKind::Differential(DifferentialDrive {
+                wheel_radius_m: 0.05,
+                track_width_m: 0.3,
+            }),
+            DriveLimits::default(),
+        )
+        .unwrap();
+        let mut trace = Vec::new();
+        for step in 0..50 {
+            let desired = VelocityCommand2d::new(0.5, 0.3 * (step as f64 * 0.1).sin());
+            let output = base.command(desired, 0.1).unwrap();
+            trace.push((
+                output.command.linear_m_s.to_bits(),
+                output.command.angular_rad_s.to_bits(),
+                output.fault == DriveFault::Saturated,
+            ));
+        }
+        trace
+    };
+    assert_eq!(run(), run());
+}
+
+#[test]
+fn recovery_sequence_replay_is_bit_identical() {
+    let run = || {
+        let mut grid = OccupancyGrid::new(40, 40, 0.1, Pose2d::new(-2.0, -2.0, 0.0)).unwrap();
+        grid.apply_occupied(GridCoord { x: 20, y: 20 }, 5.0);
+        let mut sequence = RecoverySequence::new(&[
+            RecoveryAction::ClearCostmap { radius_m: 0.5 },
+            RecoveryAction::Spin {
+                target_yaw_rad: 0.5,
+                angular_rad_s: 1.0,
+            },
+            RecoveryAction::Wait { duration_s: 0.2 },
+        ])
+        .unwrap();
+        let mut trace = Vec::new();
+        for _ in 0..40 {
+            match sequence.step(&mut grid, Pose2d::IDENTITY, 0.1).unwrap() {
+                RecoveryOutcome::Running(command) => trace.push((
+                    0_u8,
+                    command.linear_m_s.to_bits(),
+                    command.angular_rad_s.to_bits(),
+                )),
+                RecoveryOutcome::Succeeded => trace.push((1, 0, 0)),
+                RecoveryOutcome::Exhausted => trace.push((2, 0, 0)),
+            }
+        }
+        (grid_hash(&grid), trace)
+    };
+    assert_eq!(run(), run());
+}
+
+#[test]
+fn ekf_fusion_replay_is_bit_identical() {
+    let run = || {
+        let mut filter = EkfFusion::with_initial_state(
+            EkfConfig::default(),
+            Pose2d::new(0.0, 0.0, 0.0),
+            VelocityCommand2d::new(0.4, 0.1),
+        )
+        .unwrap();
+        for step in 0..40 {
+            filter.predict(0.05).unwrap();
+            filter.update_odometry(0.4, 0.1, 0.01, 0.01).unwrap();
+            if step % 5 == 0 {
+                filter
+                    .update_position(0.02 * step as f64, 0.0, 0.01)
+                    .unwrap();
+            }
+        }
+        filter
+            .state()
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(run(), run());
+}
+
+#[test]
+fn elevation_map_replay_is_bit_identical() {
+    let run = || {
+        let mut map = ElevationMap::new(
+            40,
+            40,
+            0.1,
+            Pose2d::new(-2.0, -2.0, 0.0),
+            ElevationConfig::default(),
+        )
+        .unwrap();
+        let mut points = Vec::new();
+        for i in 0..40 {
+            for j in 0..40 {
+                let x = -1.9 + i as f64 * 0.1;
+                let z = -1.9 + j as f64 * 0.1;
+                let y = if i > 20 {
+                    (i as f64 - 20.0) * 0.02
+                } else {
+                    0.0
+                };
+                points.push(Vec3::new(x, y, z));
+            }
+        }
+        map.integrate(&points);
+        map.cells()
+            .iter()
+            .map(|cell| (cell.count, cell.min_y_m.to_bits(), cell.mean_y_m.to_bits()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(run(), run());
 }

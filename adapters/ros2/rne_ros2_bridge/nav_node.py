@@ -15,6 +15,10 @@ Publishes:
 Subscribes:
 - `/cmd_vel` (`geometry_msgs/Twist`)
 
+Actions (when `nav2_msgs` is available):
+- `/navigate_to_pose` (`nav2_msgs/action/NavigateToPose`) with feedback and a
+  spin recovery when progress stalls.
+
 The base pose is integrated from `/cmd_vel` with a planar differential-drive
 model, and a synthetic walled room provides the scan. Run it with:
 
@@ -28,6 +32,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 
 import rclpy
 from geometry_msgs.msg import Twist
@@ -37,6 +42,14 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import JointState, LaserScan
 from tf2_msgs.msg import TFMessage
+
+try:
+    from nav2_msgs.action import NavigateToPose
+    from rclpy.action import ActionServer, CancelResponse, GoalResponse
+
+    HAS_ACTION = True
+except ImportError:  # pragma: no cover - nav2_msgs is optional
+    HAS_ACTION = False
 
 from ros_convert import (
     command_from_twist,
@@ -91,6 +104,28 @@ class RneNavBridge(Node):
         self.range_max_m = float(self.get_parameter("range_max_m").value)
         self.map_spec = self._load_map_spec() or self._synthetic_map_spec()
         self.plan = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)]
+        self.goal_active = False
+        self.goal_tolerance_m = 0.15
+        self.max_linear_m_s = 0.6
+        self.max_angular_rad_s = 1.5
+        self.k_yaw = 1.5
+        self.slow_radius_m = 0.5
+        self.stall_ticks = 20
+        self.recovery_spin_s = 1.0
+        self.recovery_spin_rad_s = 1.0
+        self.action_server = None
+        if HAS_ACTION:
+            self.action_server = ActionServer(
+                self,
+                NavigateToPose,
+                "navigate_to_pose",
+                execute_callback=self.execute_navigate,
+                goal_callback=self.handle_goal,
+                cancel_callback=self.handle_cancel,
+            )
+            self.get_logger().info("navigate_to_pose action server ready")
+        else:
+            self.get_logger().warn("nav2_msgs unavailable; action server disabled")
         self.create_timer(self.dt_s, self.tick)
         self.get_logger().info("RNE nav bridge ready; publish /cmd_vel to drive")
 
@@ -99,13 +134,21 @@ class RneNavBridge(Node):
         self.linear_m_s, self.angular_rad_s = command_from_twist(message)
 
     def tick(self) -> None:
-        """Integrate one step and publish the navigation frame."""
-        self.x_m += self.linear_m_s * math.cos(self.yaw_rad) * self.dt_s
-        self.y_m += self.linear_m_s * math.sin(self.yaw_rad) * self.dt_s
-        self.yaw_rad += self.angular_rad_s * self.dt_s
+        """Integrate one `/cmd_vel` step and publish the navigation frame."""
+        if self.goal_active:
+            return
+        self.step_base(self.linear_m_s, self.angular_rad_s)
+
+    def step_base(self, linear_m_s: float, angular_rad_s: float) -> None:
+        """Integrates one control step and publishes the navigation frame."""
+        self.linear_m_s = linear_m_s
+        self.angular_rad_s = angular_rad_s
+        self.x_m += linear_m_s * math.cos(self.yaw_rad) * self.dt_s
+        self.y_m += linear_m_s * math.sin(self.yaw_rad) * self.dt_s
+        self.yaw_rad += angular_rad_s * self.dt_s
         half_track = self.track_width_m * 0.5
-        left_rate = (self.linear_m_s - self.angular_rad_s * half_track) / self.wheel_radius_m
-        right_rate = (self.linear_m_s + self.angular_rad_s * half_track) / self.wheel_radius_m
+        left_rate = (linear_m_s - angular_rad_s * half_track) / self.wheel_radius_m
+        right_rate = (linear_m_s + angular_rad_s * half_track) / self.wheel_radius_m
         self.left_angle_rad += left_rate * self.dt_s
         self.right_angle_rad += right_rate * self.dt_s
         self.sim_ticks += int(self.dt_s * 1_000_000_000)
@@ -170,6 +213,91 @@ class RneNavBridge(Node):
                 ticks,
             )
         )
+
+    def handle_goal(self, goal_request: object) -> object:
+        """Accepts every NavigateToPose goal."""
+        self.get_logger().info("accepted navigate_to_pose goal")
+        return GoalResponse.ACCEPT
+
+    def handle_cancel(self, goal_handle: object) -> object:
+        """Accepts every cancellation request."""
+        return CancelResponse.ACCEPT
+
+    def execute_navigate(self, goal_handle: object) -> object:
+        """Drives to a goal with feedback and a spin recovery on stall."""
+        position = goal_handle.request.pose.pose.position
+        target_x, target_y = float(position.x), float(position.y)
+        self.plan = [(0.0, 0.0, 0.0), (target_x, target_y, 0.0)]
+        self.goal_active = True
+        feedback = NavigateToPose.Feedback()
+        result = NavigateToPose.Result()
+        best_distance = float("inf")
+        stall = 0
+        recoveries = 0
+        spin_remaining_s = 0.0
+        self.get_logger().info(f"navigating to ({target_x:.2f}, {target_y:.2f})")
+        try:
+            while rclpy.ok():
+                if goal_handle.is_cancel_requested:
+                    self.step_base(0.0, 0.0)
+                    goal_handle.canceled()
+                    result.error_code = 1
+                    result.error_msg = "canceled"
+                    return result
+
+                dx = target_x - self.x_m
+                dy = target_y - self.y_m
+                distance = math.hypot(dx, dy)
+                if distance <= self.goal_tolerance_m:
+                    self.step_base(0.0, 0.0)
+                    goal_handle.succeed()
+                    result.error_code = 0
+                    result.error_msg = ""
+                    self.get_logger().info(
+                        f"reached goal; recoveries={recoveries} error={distance:.3f} m"
+                    )
+                    return result
+
+                if distance < best_distance - 0.01:
+                    best_distance = distance
+                    stall = 0
+                else:
+                    stall += 1
+
+                if spin_remaining_s > 0.0:
+                    self.step_base(0.0, self.recovery_spin_rad_s)
+                    spin_remaining_s -= self.dt_s
+                elif stall >= self.stall_ticks:
+                    stall = 0
+                    recoveries += 1
+                    spin_remaining_s = self.recovery_spin_s
+                    self.get_logger().warn(f"progress stalled; recovery spin {recoveries}")
+                    self.step_base(0.0, self.recovery_spin_rad_s)
+                else:
+                    heading = math.atan2(dy, dx)
+                    error = math.atan2(
+                        math.sin(heading - self.yaw_rad),
+                        math.cos(heading - self.yaw_rad),
+                    )
+                    angular = max(
+                        -self.max_angular_rad_s,
+                        min(self.max_angular_rad_s, self.k_yaw * error),
+                    )
+                    linear = self.max_linear_m_s if abs(error) < 0.6 else 0.0
+                    if distance < self.slow_radius_m:
+                        linear *= max(0.0, distance / self.slow_radius_m)
+                    self.step_base(linear, angular)
+
+                feedback.distance_remaining = float(distance)
+                feedback.number_of_recoveries = recoveries
+                goal_handle.publish_feedback(feedback)
+                time.sleep(self.dt_s)
+        finally:
+            self.goal_active = False
+
+        result.error_code = -1
+        result.error_msg = "shutdown"
+        return result
 
     @staticmethod
     def _beam_angles() -> list[float]:
