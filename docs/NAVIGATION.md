@@ -35,6 +35,7 @@ path planning and scan matching; those arrive in later phases.
 | `KeepoutZone` / `SpeedFilter` | Lethal keepout regions and slow zones |
 | `TrafficCoordinator` | Reservation-based multi-robot cell leasing and deadlock resolution |
 | `save_map` / `load_map` | Versioned `.rne.map` occupancy-map serialization |
+| `merge_maps` | Fuses two axis-aligned occupancy maps over their union |
 | `ObstacleTracker` | Constant-velocity tracking of moving obstacles |
 | `select_predictive_command` | Collision-free command selection against predicted obstacle motion |
 | `NavMap` / `PendingScans` / `TfTree` | ECS resources |
@@ -217,6 +218,15 @@ highest-priority (lowest-id) robot and evicts only lower-priority blockers.
 origin, and the fixed-point log-odds array; `from_map_json` / `load_map` validate
 the format tag and version before restoring the grid bit-for-bit with
 `OccupancyGrid::from_log_odds`. Unknown formats and versions are rejected.
+
+## Map merging
+
+`merge_maps(a, b)` fuses two axis-aligned occupancy grids into one spanning their
+union. Overlapping cells sum their fixed-point log-odds (clamped to the storage
+limits), so evidence from both sessions accumulates; cells covered by only one map
+keep that map's value. Different resolutions or a non-zero origin yaw are
+rejected. This is the map-side counterpart of combining pose graphs across
+sessions.
 
 ## Dynamic obstacles
 

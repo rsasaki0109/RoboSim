@@ -11,6 +11,7 @@
 
 #![deny(missing_docs)]
 
+pub mod graph_io;
 pub mod icp;
 pub mod likelihood;
 pub mod localization;
@@ -23,6 +24,10 @@ pub mod slam;
 pub mod slam3d;
 pub mod systems;
 
+pub use graph_io::{
+    combine_graphs, from_graph_json, load_graph, save_graph, to_graph_json, GraphIoError,
+    RNE_POSE_GRAPH_FORMAT, RNE_POSE_GRAPH_VERSION,
+};
 pub use icp::{Icp3d, IcpConfig, IcpError, IcpResult};
 pub use likelihood::{LikelihoodConfig, LikelihoodField};
 pub use localization::{Amcl, AmclConfig, AmclUpdate, Particle};

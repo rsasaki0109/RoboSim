@@ -31,6 +31,7 @@ pub mod fusion;
 pub mod grid;
 pub mod layers;
 pub mod map_io;
+pub mod map_merge;
 pub mod navsat;
 pub mod path;
 pub mod planner;
@@ -70,6 +71,7 @@ pub use layers::{KeepoutZone, SpeedFilter, SpeedLimitZone, VoxelConfig, VoxelLay
 pub use map_io::{
     from_map_json, load_map, save_map, to_map_json, MapIoError, RNE_MAP_FORMAT, RNE_MAP_VERSION,
 };
+pub use map_merge::{merge_maps, MapMergeError};
 pub use navsat::{NavSatError, NavSatTransform, EARTH_RADIUS_M};
 pub use path::{ClosestPoint, Path2d, PathError};
 pub use planner::{plan_path, GlobalPlannerConfig, PlanError};

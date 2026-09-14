@@ -116,6 +116,15 @@ elevation map from every keyframe. `process(scan, odom_delta, sensor_from_base)`
 returns a `Slam3dUpdate`; `graph()`, `elevation()`, `keyframe_count()`, and
 `loop_closures()` expose the state.
 
+## Pose-graph persistence
+
+`to_graph_json` / `save_graph` write a pose graph as versioned `.rne.posegraph`
+JSON (`RNE_POSE_GRAPH_FORMAT`, `RNE_POSE_GRAPH_VERSION`) carrying every node and
+edge; `from_graph_json` / `load_graph` validate the format tag and version and
+reject edges that reference missing nodes. `combine_graphs(base, other)` appends a
+second session's nodes and edges after the first with offset indices — the
+back-end primitive for multi-session mapping.
+
 ## Global relocalization
 
 `GlobalRelocalizer` scores candidate `(x, y, yaw)` poses by the mean likelihood
