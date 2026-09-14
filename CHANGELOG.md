@@ -231,6 +231,12 @@ All notable changes to Robot Native Engine are documented in this file.
   published set is the minimal fix; promoting them to published crates is
   deferred to a future release bump.
 
+- Mark `rne_planning` `publish = false` for the same reason as `rne_nav` and
+  `rne_slam` above. `#270` (native motion planning) added `rne_planning`
+  without declaring publish status while this PR was in flight, reintroducing
+  the same `publishable package set differs` failure the previous entry just
+  fixed.
+
 - Fix two broken `rustdoc` intra-doc links that `xtask release-check`'s
   `cargo doc --workspace -D warnings` step had never reached before (it
   aborted earlier on the `publish = false` issue above).
