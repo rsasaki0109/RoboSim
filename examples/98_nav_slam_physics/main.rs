@@ -10,7 +10,10 @@
 use rne_core::SimDuration;
 use rne_data::PointCloud;
 use rne_math::{Hertz, Quat, Vec3};
-use rne_nav::{GridCoord, LaserScan2d, OccupancyGrid, Pose2d};
+use rne_nav::{
+    Costmap, CostmapConfig, ElevationConfig, ElevationMap, GridCoord, LaserScan2d, OccupancyGrid,
+    Pose2d, VoxelConfig, VoxelLayer,
+};
 use rne_physics::{
     Collider, ColliderShape, PhysicsBackend, PhysicsWorldDesc, RigidBody, RigidBodyType,
 };
@@ -79,6 +82,18 @@ fn main() {
     let mut last_truth = truth;
     let mut last_odom = odom;
 
+    // The 3D sensor-to-navigation path: the same LiDAR returns feed a sparse
+    // voxel obstacle layer and a 2.5D elevation map.
+    let mut voxel_layer = VoxelLayer::new(VoxelConfig::default()).unwrap();
+    let mut elevation = ElevationMap::new(
+        240,
+        160,
+        0.05,
+        Pose2d::new(-6.0, -4.0, 0.0),
+        ElevationConfig::default(),
+    )
+    .unwrap();
+
     for step in route {
         set_base_pose(&mut world, base, truth);
         step_physics(&mut backend, &mut world, physics_world, dt).expect("step");
@@ -90,6 +105,15 @@ fn main() {
             ));
         let cloud = sample_lidar(&backend, physics_world, &lidar_world, &spec);
         let scan = cloud_to_scan(&cloud, &base_transform(truth), &spec, scans as f64 * 0.05);
+
+        let lidar_math = math_transform(&lidar_world);
+        let world_points: Vec<Vec3> = cloud
+            .points_m
+            .iter()
+            .map(|point| lidar_math.transform_point(*point))
+            .collect();
+        voxel_layer.integrate(&world_points);
+        elevation.integrate(&world_points);
 
         // Process the scan with the odometry at acquisition time, then advance.
         last_truth = truth;
@@ -135,6 +159,24 @@ fn main() {
         "loop closures       = {loop_closures}, map occupied cells = {}",
         count_occupied(slam.grid())
     );
+
+    let layer_grid = OccupancyGrid::new(240, 160, 0.05, Pose2d::new(-6.0, -4.0, 0.0)).unwrap();
+    let mut layer_costmap =
+        Costmap::from_occupancy(&layer_grid, &CostmapConfig::default()).unwrap();
+    let obstacle_cells = voxel_layer.to_costmap_layer(&mut layer_costmap);
+    let known_cells = elevation
+        .cells()
+        .iter()
+        .filter(|cell| cell.is_known())
+        .count();
+    println!(
+        "3D sensor->nav: {} voxels, {} elevation cells, {} obstacle cells",
+        voxel_layer.len(),
+        known_cells,
+        obstacle_cells
+    );
+    assert!(!voxel_layer.is_empty());
+    assert!(known_cells > 0);
     println!("\nSLAM occupancy map from simulated LiDAR ('#' occupied, '.' free):");
     print!("{}", render(slam.grid(), 72, 24));
 

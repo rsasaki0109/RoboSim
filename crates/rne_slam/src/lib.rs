@@ -19,6 +19,7 @@ pub mod pose_graph;
 pub mod resources;
 pub mod scan_match;
 pub mod slam;
+pub mod slam3d;
 pub mod systems;
 
 pub use icp::{Icp3d, IcpConfig, IcpError, IcpResult};
@@ -29,4 +30,8 @@ pub use pose_graph::{PoseGraph, PoseGraphEdge, PoseGraphError};
 pub use resources::{PendingSlamScans, SlamScanInput, SlamState};
 pub use scan_match::{scan_points_2d, ScanMatchConfig, ScanMatchResult, ScanMatcher};
 pub use slam::{closure_consistent, Slam2d, SlamConfig, SlamUpdate};
+pub use slam3d::{
+    pose2d_to_transform3, pose3_to_pose2d, Slam3d, Slam3dConfig, Slam3dUpdate,
+    SlamError as Slam3dError,
+};
 pub use systems::{slam_step, SlamStepReport};
