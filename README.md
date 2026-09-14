@@ -132,24 +132,11 @@ Model equations, measured errors, and acceptance tests are in
 
 <p align="center">
   <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/nav-slam.png">
-    <img src="docs/media/nav-slam.gif" alt="3D view of an online 2D SLAM map as a height field, with the corrected trajectory closing a loop around the room" width="720">
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-nav.png">
+    <img src="docs/media/showcase-nav.gif" alt="A mobile AGV driving through a PBR office environment along a planned route to a docking goal, with its driven trajectory trailing behind" width="820">
   </picture>
   <br>
-  <sub>Online 2D SLAM in 3D: the ROS-free <code>rne_slam</code> front-end matches each scan, raises the occupancy map as walls, and closes a loop on the return trip.</sub>
-</p>
-
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/nav-multi-robot.png">
-    <img src="docs/media/nav-multi-robot.gif" alt="Three robots as 3D boxes crossing a shared ground plane, each yielding to the others with the sampling sense-and-avoid planner" width="400">
-  </picture>
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/nav-elevation.png">
-    <img src="docs/media/nav-elevation.gif" alt="3D 2.5D elevation surface shaded by height and slope, orbiting above the map" width="400">
-  </picture>
-  <br>
-  <sub>Three robots cross without collision (<code>avoid_velocities</code>)&nbsp;·&nbsp;A 2.5D elevation surface, shaded by height and slope.</sub>
+  <sub>Office AGV navigation in the PBR office scene: the planned route (amber), the driven trajectory (cyan), and the docking goal (green).</sub>
 </p>
 
 `rne_nav` and `rne_slam` are the deterministic, ROS-free navigation core: occupancy
@@ -161,8 +148,8 @@ with pose-graph loop closure and AMCL. A ROS 2 adapter maps the same types to
 independent of the transport. Every scenario replays bit-for-bit.
 
 ```bash
-# Regenerate these navigation visuals (GPU-free software 3D; ffmpeg for the GIFs)
-cargo run -p nav_showcase --example 101_nav_showcase
+# Capture the office navigation showcase (shared GPU showcase pipeline)
+WGPU_BACKEND=vulkan cargo run --release -p showcase_captures --example 90_showcase_captures -- --capture --environment nav
 
 cargo run -p nav_slam_mapping --example 97_nav_slam_mapping
 cargo run -p nav_slam_physics --example 98_nav_slam_physics

@@ -14,6 +14,7 @@
 
 mod factory;
 mod media;
+mod nav;
 mod office;
 mod openarm;
 mod ssl;
@@ -49,6 +50,7 @@ fn run() -> Result<()> {
             Environment::OpenArm => openarm::run(&repo_root, capture)?,
             Environment::Factory => factory::run(&repo_root, capture)?,
             Environment::Office => office::run(&repo_root, capture)?,
+            Environment::Nav => nav::run(&repo_root, capture)?,
             Environment::Ssl => ssl::run(&repo_root, capture)?,
         };
         println!(
@@ -69,6 +71,7 @@ enum Environment {
     OpenArm,
     Factory,
     Office,
+    Nav,
     Ssl,
 }
 
@@ -83,9 +86,10 @@ fn parse_environment(value: &str) -> Result<Vec<Environment>> {
         "openarm" => Ok(vec![Environment::OpenArm]),
         "factory" => Ok(vec![Environment::Factory]),
         "office" => Ok(vec![Environment::Office]),
+        "nav" => Ok(vec![Environment::Nav]),
         "ssl" => Ok(vec![Environment::Ssl]),
         other => bail!(
-            "unknown --environment {other:?}; expected all|openarm|tsukuba|factory|office|ssl"
+            "unknown --environment {other:?}; expected all|openarm|tsukuba|factory|office|nav|ssl"
         ),
     }
 }
