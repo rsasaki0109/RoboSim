@@ -133,20 +133,23 @@ Model equations, measured errors, and acceptance tests are in
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/nav-slam.png">
-    <img src="docs/media/nav-slam.gif" alt="Online 2D SLAM growing an occupancy map from synthetic LiDAR while the corrected trajectory closes a loop" width="720">
+    <img src="docs/media/nav-slam.gif" alt="3D view of an online 2D SLAM map as a height field, with the corrected trajectory closing a loop around the room" width="720">
   </picture>
   <br>
-  <sub>Online 2D SLAM: the ROS-free <code>rne_slam</code> front-end matches each scan, grows the occupancy map, and closes a loop on the return trip.</sub>
+  <sub>Online 2D SLAM in 3D: the ROS-free <code>rne_slam</code> front-end matches each scan, raises the occupancy map as walls, and closes a loop on the return trip.</sub>
 </p>
 
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/nav-multi-robot.png">
-    <img src="docs/media/nav-multi-robot.gif" alt="Three robots crossing a shared plane, each yielding to the others with the sampling sense-and-avoid planner" width="400">
+    <img src="docs/media/nav-multi-robot.gif" alt="Three robots as 3D boxes crossing a shared ground plane, each yielding to the others with the sampling sense-and-avoid planner" width="400">
   </picture>
-  <img src="docs/media/nav-elevation.png" alt="2.5D elevation map shaded by slope with non-traversable cells marked in red" width="400">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/nav-elevation.png">
+    <img src="docs/media/nav-elevation.gif" alt="3D 2.5D elevation surface shaded by height and slope, orbiting above the map" width="400">
+  </picture>
   <br>
-  <sub>Three robots cross without collision (<code>avoid_velocities</code>)&nbsp;·&nbsp;A 2.5D elevation map shades slope and flags non-traversable cells.</sub>
+  <sub>Three robots cross without collision (<code>avoid_velocities</code>)&nbsp;·&nbsp;A 2.5D elevation surface, shaded by height and slope.</sub>
 </p>
 
 `rne_nav` and `rne_slam` are the deterministic, ROS-free navigation core: occupancy
@@ -158,7 +161,7 @@ with pose-graph loop closure and AMCL. A ROS 2 adapter maps the same types to
 independent of the transport. Every scenario replays bit-for-bit.
 
 ```bash
-# Regenerate these navigation visuals (GPU-free; ffmpeg for the GIFs)
+# Regenerate these navigation visuals (GPU-free software 3D; ffmpeg for the GIFs)
 cargo run -p nav_showcase --example 101_nav_showcase
 
 cargo run -p nav_slam_mapping --example 97_nav_slam_mapping
