@@ -133,3 +133,24 @@ tracks the ZMP within 7 mm.
   and, later, a learned residual policy can consume.
 - The open gap to a walking robot is now a control and contact problem, not a
   gait-shape problem.
+
+## Centroidal control for dynamic maneuvers
+
+Walking templates assume a permanently supporting contact and a fixed center-of-mass
+height. Dynamic maneuvers (push-off, flight, landing) break both assumptions, so the
+same crate exposes a centroidal (single-rigid-body) layer, following the open-source
+centroidal controllers in `yxyang/cajun` and `go2-convex-mpc`:
+
+- `CentroidalModel`, `CentroidalState`, and `CentroidalTarget` describe the reduced
+  body and the desired center-of-mass and angular accelerations;
+- `distribute_contact_forces` solves a weighted least-squares distribution of the
+  desired net wrench across the active `GroundContact` points and projects each force
+  into its Coulomb friction cone;
+- `raibert_foot_placement` and `SwingTrajectory` (minimal-jerk quintic with apex)
+  place and drive the swing feet;
+- `flight_apex_height_m` and `flight_duration_s` bound the ballistic flight phase.
+
+This is the abstraction a jump controller needs: during flight there are no contacts,
+and the center of mass follows a ballistic arc that the landing controller must
+capture. It is a reduced-order layer only; realizing the forces as joint torques is
+the whole-body controller's job (`rne_wbc`).

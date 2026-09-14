@@ -19,6 +19,7 @@
 
 #![deny(missing_docs)]
 
+pub mod centroidal;
 pub mod error;
 pub mod footstep;
 pub mod horizontal;
@@ -26,6 +27,11 @@ pub mod lipm;
 pub mod pattern;
 pub mod preview;
 
+pub use centroidal::{
+    distribute_contact_forces, flight_apex_height_m, flight_duration_s, raibert_foot_placement,
+    CentroidalModel, CentroidalState, CentroidalTarget, ContactAllocationConfig,
+    ContactForceSolution, GroundContact, SwingTrajectory,
+};
 pub use error::LeggedError;
 pub use footstep::{
     plan_straight_walk, FootSide, Footstep, FootstepPlan, GaitSchedule, StraightWalkRequest,
