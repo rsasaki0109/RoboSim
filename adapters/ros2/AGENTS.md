@@ -15,10 +15,12 @@ This directory contains optional adapters between Robot Native Engine and extern
   `OccupancyGrid`, `Path`, `Twist`) mapping helpers (Rust)
 - `rne_ros2_bridge`: Python `rclpy` runtime node publishing `/clock`, `/points`,
   `/tf`, `/odom`, `/scan`, `/map`, `/plan` and subscribing `/cmd_vel`
-- `rne_ros2_bridge/nav_node.py`: Nav2-facing node (no `simulation_interfaces`)
-  that integrates `/cmd_vel` and publishes `/odom`, `/tf`, `/scan`, `/map`,
-  `/plan`, `/joint_states`; `map_file` loads an RNE SLAM map; when `nav2_msgs` is
-  available it also serves `/navigate_to_pose` with feedback and a spin recovery
+- `rne_ros2_bridge/nav_node.py`: Nav2-facing `LifecycleNode` (no
+  `simulation_interfaces`) that integrates `/cmd_vel` and publishes `/odom`,
+  `/tf`, `/scan`, `/map`, `/plan`, `/joint_states`; `map_file` loads an RNE SLAM
+  map; when `nav2_msgs` is available it also serves `/navigate_to_pose`,
+  `/compute_path_to_pose`, `/follow_path`, `/follow_waypoints`, `/spin`,
+  `/backup`, and the `/load_map` service, with feedback and a spin recovery
 - `rne_ros2_node`: Native `rclrs` runtime node (same topics, headless `rne_ai` sim)
 
 URDF import: `crates/rne_urdf_import`

@@ -27,6 +27,7 @@ pub mod dwa;
 pub mod elevation;
 pub mod fusion;
 pub mod grid;
+pub mod navsat;
 pub mod path;
 pub mod planner;
 pub mod points;
@@ -35,6 +36,7 @@ pub mod recovery;
 pub mod resources;
 pub mod scan;
 pub mod systems;
+pub mod terrain;
 pub mod tf;
 pub mod tile;
 
@@ -51,8 +53,11 @@ pub use drive::{
 };
 pub use dwa::{DwaConfig, DwaError, DwaOutcome, DwaPlanner};
 pub use elevation::{ElevationCell, ElevationConfig, ElevationMap, ElevationReport};
-pub use fusion::{wrap_angle, EkfConfig, EkfFusion, FusionError};
+pub use fusion::{
+    map_from_odom, wrap_angle, EkfConfig, EkfFusion, FusionError, PoseWithCovariance2d,
+};
 pub use grid::{GridCoord, GridError, OccupancyGrid};
+pub use navsat::{NavSatError, NavSatTransform, EARTH_RADIUS_M};
 pub use path::{ClosestPoint, Path2d, PathError};
 pub use planner::{plan_path, GlobalPlannerConfig, PlanError};
 pub use points::integrate_point_cloud;
@@ -64,5 +69,6 @@ pub use recovery::{
 pub use resources::{NavMap, PendingScan, PendingScans, TfTree};
 pub use scan::{integrate_scan, LaserScan2d, ScanIntegrationConfig, ScanIntegrationReport};
 pub use systems::integrate_pending_scans;
+pub use terrain::{apply_terrain_layer, TerrainConfig, TerrainReport};
 pub use tf::{FrameId, StampedTransform, TfBuffer, TfError};
 pub use tile::TiledOccupancyGrid;

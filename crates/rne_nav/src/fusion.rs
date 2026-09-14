@@ -14,10 +14,20 @@
 //! numbers, so a recorded sequence of measurements replays bit-for-bit.
 
 use crate::control::VelocityCommand2d;
+use crate::navsat::NavSatTransform;
 use crate::pose2d::Pose2d;
 use serde::{Deserialize, Serialize};
 
 const STATE_DIM: usize = 5;
+
+/// A planar pose with its `[x, y, yaw]` covariance.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PoseWithCovariance2d {
+    /// The fused pose.
+    pub pose: Pose2d,
+    /// Row-major 3x3 covariance in `[x, y, yaw]` order.
+    pub covariance: [[f64; 3]; 3],
+}
 
 /// Covariance tuning for [`EkfFusion`].
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -152,6 +162,30 @@ impl EkfFusion {
     /// The current fused velocity estimate.
     pub fn velocity(&self) -> VelocityCommand2d {
         VelocityCommand2d::new(self.state[3], self.state[4])
+    }
+
+    /// The fused pose with its `[x, y, yaw]` covariance sub-block.
+    pub fn pose_with_covariance(&self) -> PoseWithCovariance2d {
+        PoseWithCovariance2d {
+            pose: self.pose(),
+            covariance: [
+                [
+                    self.covariance[0][0],
+                    self.covariance[0][1],
+                    self.covariance[0][2],
+                ],
+                [
+                    self.covariance[1][0],
+                    self.covariance[1][1],
+                    self.covariance[1][2],
+                ],
+                [
+                    self.covariance[2][0],
+                    self.covariance[2][1],
+                    self.covariance[2][2],
+                ],
+            ],
+        }
     }
 
     /// The full state vector `[x, y, yaw, v, yaw_rate]`.
@@ -336,6 +370,21 @@ impl EkfFusion {
         Ok(())
     }
 
+    /// Fuses a geographic fix by projecting it through a NavSat transform.
+    pub fn update_navsat(
+        &mut self,
+        navsat: &NavSatTransform,
+        latitude_rad: f64,
+        longitude_rad: f64,
+        altitude_m: f64,
+        variance_m2: f64,
+    ) -> Result<(), FusionError> {
+        let point = navsat
+            .datum_to_map(latitude_rad, longitude_rad, altitude_m)
+            .map_err(|_| FusionError::NonFiniteInput)?;
+        self.update_position(point.x, point.y, variance_m2)
+    }
+
     fn symmetrize(&mut self) {
         for i in 0..STATE_DIM {
             for j in (i + 1)..STATE_DIM {
@@ -345,6 +394,14 @@ impl EkfFusion {
             }
         }
     }
+}
+
+/// Computes the `map -> odom` transform from a fused map pose and an odom pose.
+///
+/// Publishing this as the `map -> odom` edge places the drifting odom frame
+/// under the corrected map frame, as `robot_localization` does.
+pub fn map_from_odom(fused_pose: Pose2d, odom_pose: Pose2d) -> Pose2d {
+    fused_pose.compose(odom_pose.inverse())
 }
 
 /// Wraps an angle to `(-pi, pi]`.
@@ -494,5 +551,39 @@ mod tests {
         let b = run();
         assert_eq!(a.state(), b.state());
         assert_eq!(a.covariance(), b.covariance());
+    }
+
+    #[test]
+    fn pose_with_covariance_exposes_the_planar_block() {
+        let mut filter = EkfFusion::new(EkfConfig::default()).unwrap();
+        filter.predict(0.1).unwrap();
+        let estimate = filter.pose_with_covariance();
+        assert_eq!(estimate.pose.x_m, filter.state()[0]);
+        assert_eq!(estimate.covariance[0][0], filter.covariance()[0][0]);
+        assert!(estimate.covariance[2][2] > 0.0);
+    }
+
+    #[test]
+    fn fuses_a_geographic_fix_through_navsat() {
+        let navsat = NavSatTransform::new(0.0, 0.0, 0.0).unwrap();
+        let mut filter = EkfFusion::new(EkfConfig::default()).unwrap();
+        // 1e-5 rad east/north is about 63.7 m.
+        filter
+            .update_navsat(&navsat, 1.0e-5, 1.0e-5, 0.0, 0.0004)
+            .unwrap();
+        let pose = filter.pose();
+        assert!(pose.x_m > 0.0 && pose.y_m > 0.0);
+        assert!((pose.x_m - pose.y_m).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn map_from_odom_composes_back_to_the_fused_pose() {
+        let fused = Pose2d::new(3.0, -1.0, 0.8);
+        let odom = Pose2d::new(2.7, -0.9, 0.75);
+        let map_from_odom_pose = map_from_odom(fused, odom);
+        let recomposed = map_from_odom_pose.compose(odom);
+        assert_relative_eq!(recomposed.x_m, fused.x_m, epsilon = 1e-12);
+        assert_relative_eq!(recomposed.y_m, fused.y_m, epsilon = 1e-12);
+        assert_relative_eq!(recomposed.yaw_rad, fused.yaw_rad, epsilon = 1e-12);
     }
 }

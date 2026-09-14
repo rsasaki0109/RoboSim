@@ -77,9 +77,10 @@ python3 run_node.py
 
 `nav_smoke.sh` starts `nav_node.py` and verifies every navigation topic plus a
 `/cmd_vel`-driven odometry update. `nav2_integration.sh` additionally launches
-Nav2 and verifies a `NavigateToPose` goal is reached. `nav2_action_smoke.sh`
-verifies the bridge's own `/navigate_to_pose` action server (feedback plus a spin
-recovery) reaches a goal. `slam_map_smoke.sh` generates an RNE SLAM map and
+Nav2 and verifies a `NavigateToPose` goal is reached. `nav2_action_smoke.sh` verifies the bridge's own Nav2 servers
+(`/navigate_to_pose`, `/compute_path_to_pose`, `/follow_path`,
+`/follow_waypoints`, `/spin`, `/backup`, `/load_map`) reach their goals.
+`slam_map_smoke.sh` generates an RNE SLAM map and
 checks `nav_node.py` republishes it on `/map`.
 See `docs/ROS2_NAV2.md`.
 
