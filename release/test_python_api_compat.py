@@ -19,7 +19,7 @@ class PythonApiCompatibilityTests(unittest.TestCase):
         contract = api.read_contract(fixture)
         self.assertEqual(contract["kind"], api.CONTRACT_KIND)
         self.assertEqual(contract["schema_version"], api.CONTRACT_SCHEMA_VERSION)
-        self.assertEqual(len(contract["exports"]), 24)
+        self.assertEqual(len(contract["exports"]), 28)
         self.assertEqual(api.digest(contract), api.digest(copy.deepcopy(contract)))
 
     def test_unknown_field_and_noncanonical_order_fail_closed(self) -> None:

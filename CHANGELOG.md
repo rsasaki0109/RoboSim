@@ -18,6 +18,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Re-freeze `release/python-api-v1.json` (24 to 28 exports) to cover the two Python-facing
+  changes already shipped in the G1 joint-space RL / SO101 mobile manipulator commit: the four
+  new `rne_py.UnitreeG1JointLocomotionEpisode`, `UnitreeG1JointStepResult`, `UnitreeG1JointBatch`,
+  and `UnitreeG1JointBatchStep` bindings, and the `MobileManipulatorAction` constructor's six new
+  trailing SO101 arm/jaw velocity keyword arguments. Pure contract re-freeze: no Rust source
+  changed, no existing export's kind/methods/properties changed, and the constructor extension is
+  backward compatible (new keywords are appended with defaults).
+
 - Add a typed CLI construction path for physical tire application requests. It binds an exact
   identified profile to the steady, longitudinal-relaxation, and lateral-relaxation manifests,
   validates their identities, and computes the request digest without manual hash transcription.

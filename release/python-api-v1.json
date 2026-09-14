@@ -154,7 +154,7 @@
     {
       "name": "MobileManipulatorAction",
       "kind": "class",
-      "text_signature": "(left_wheel_velocity_rad_s=0.0, right_wheel_velocity_rad_s=0.0, shoulder_velocity_rad_s=0.0, elbow_velocity_rad_s=0.0, gripper_velocity_rad_s=0.0, gripper_velocity_m_s=0.0, lift_velocity_m_s=0.0, lift_joint_target=None, wrist_yaw_target_rad=None)",
+      "text_signature": "(left_wheel_velocity_rad_s=0.0, right_wheel_velocity_rad_s=0.0, shoulder_velocity_rad_s=0.0, elbow_velocity_rad_s=0.0, gripper_velocity_rad_s=0.0, gripper_velocity_m_s=0.0, lift_velocity_m_s=0.0, lift_joint_target=None, wrist_yaw_target_rad=None, shoulder_pan_velocity_rad_s=0.0, shoulder_lift_velocity_rad_s=0.0, elbow_flex_velocity_rad_s=0.0, wrist_flex_velocity_rad_s=0.0, wrist_roll_velocity_rad_s=0.0, so101_gripper_velocity_rad_s=0.0)",
       "value": null,
       "methods": [],
       "properties": [
@@ -391,6 +391,87 @@
       "value": 1,
       "methods": [],
       "properties": []
+    },
+    {
+      "name": "UnitreeG1JointBatch",
+      "kind": "class",
+      "text_signature": "(num_envs=8, seed=1, command_forward_m_s=0.4, command_yaw_rate_rad_s=0.0, max_steps=500)",
+      "value": null,
+      "methods": [
+        {
+          "name": "base_x",
+          "text_signature": "($self)"
+        },
+        {
+          "name": "reset",
+          "text_signature": "($self)"
+        },
+        {
+          "name": "step",
+          "text_signature": "($self, actions, repeat=1)"
+        },
+        {
+          "name": "task_spec_json",
+          "text_signature": "($self)"
+        }
+      ],
+      "properties": [
+        "num_envs"
+      ]
+    },
+    {
+      "name": "UnitreeG1JointBatchStep",
+      "kind": "class",
+      "text_signature": null,
+      "value": null,
+      "methods": [],
+      "properties": [
+        "episode_indices",
+        "observations",
+        "rewards",
+        "terminated",
+        "truncated"
+      ]
+    },
+    {
+      "name": "UnitreeG1JointLocomotionEpisode",
+      "kind": "class",
+      "text_signature": "(max_steps=500, seed=1, command_forward_m_s=0.4, command_yaw_rate_rad_s=0.0)",
+      "value": null,
+      "methods": [
+        {
+          "name": "reset",
+          "text_signature": "($self)"
+        },
+        {
+          "name": "step",
+          "text_signature": "($self, leg_action)"
+        },
+        {
+          "name": "task_spec_json",
+          "text_signature": "($self)"
+        }
+      ],
+      "properties": [
+        "base_x_m",
+        "base_y_m",
+        "base_z_m",
+        "step_in_episode"
+      ]
+    },
+    {
+      "name": "UnitreeG1JointStepResult",
+      "kind": "class",
+      "text_signature": null,
+      "value": null,
+      "methods": [],
+      "properties": [
+        "done",
+        "observation",
+        "reward",
+        "terminated",
+        "truncated"
+      ]
     },
     {
       "name": "UnitreeGo2GaitEpisode",
