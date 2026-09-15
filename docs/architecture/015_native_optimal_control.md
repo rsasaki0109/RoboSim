@@ -113,15 +113,17 @@ external optimal-control/dynamics library.
   the rigid-contact models; `ContactImplicitArticulatedDynamics` removes the
   schedule for a compliant model but does not yet choose between discrete
   contact modes.
+- **Compliant-contact plan transfer.** Planning the Go2 jump against
+  `ContactImplicitArticulatedDynamics` instead of the rigid
+  `ContactSequenceDynamics` does not yet help the transfer to the simulator.
+  Across normal stiffness (`5e4` to `2e5` N/m) and penetration exponents (1, 2)
+  the executed jump is weaker and the peak base lean grows (up to `2.9` rad,
+  against `0.73` rad for the rigid plan): the compliant plan leans on base
+  rotation that the whole-body tracker cannot realize inside the actuator torque
+  budget. The model is a foundation, not a fix, for the jump.
 - **Analytical derivatives.** Richardson-extrapolated central differences fixed
   the conditioning of the jump, but a Pinocchio-equivalent analytical
   RNEA/CRBA derivative layer would be faster and more accurate.
-
-- **Search over contact sequences.** The phase schedule is still caller-provided;
-  automatic contact-sequence discovery is not implemented.
-- **Analytical derivatives.** Central differences are correct but slow; a
-  Pinocchio-equivalent analytical RNEA/CRBA derivative layer is the natural
-  `rne_dynamics` extension.
 - **Inequality constraints.** Box (control) constraints are implemented, and
   joint velocity limits are enforced softly with `ActuatorLimitCost`; hard state
   bounds, the friction cone, and general nonlinear inequality constraints are
