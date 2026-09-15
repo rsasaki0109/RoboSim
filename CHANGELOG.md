@@ -28,6 +28,14 @@ All notable changes to Robot Native Engine are documented in this file.
   it reduces the peak planned joint speed from `44.0` to `31.0` rad/s. The
   plan still does not transfer to the simulator, which isolates the remaining
   blocker to the planner/plant model mismatch rather than actuator bandwidth.
+- `examples/109_go2_jump_sim --debug-fk` compares the planner's URDF forward
+  kinematics with the plant's articulation frames. The base and the chain
+  through the calf match to machine precision, but the Go2 foot link sits
+  `0.138` m from the calf instead of the URDF's `0.213` m and has no joint
+  descriptor, because `rne_urdf_import` excludes fixed-only children from the
+  physics multibody. This 0.075 m frame error is the root cause of the failed
+  plan-to-sim jump transfer; the ladder, the sole contacts, and the whole-body
+  contact forces are all built on the wrong foot frame.
 
 - `rne_oc` control-limited DDP: `DdpConfig::control_lower`/`control_upper` project
   the feedforward onto the control box and zero the feedback on saturated

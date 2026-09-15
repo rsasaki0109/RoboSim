@@ -51,6 +51,16 @@
 //! landed model never reaches the planned takeoff velocity) rather than in
 //! actuator bandwidth.
 //!
+//! `--debug-fk` compares the planner's URDF forward kinematics with the plant's
+//! articulation frames at one state. The base and the chain through the calf
+//! match to machine precision, but the foot link sits **0.138 m** from the calf
+//! instead of the URDF's 0.213 m and carries no joint descriptor: `rne_urdf_import`
+//! excludes fixed-only children (the foot, calf shells) from the physics
+//! multibody, so the plant's foot frame never matches the planner's. Every sole
+//! contact, the liftoff gate, and the whole-body contact forces are therefore
+//! built on a frame 0.075 m away from the real one, which is the root cause of
+//! the failed transfer and not a controller gain.
+//!
 //! Run with `cargo run --release -p go2_jump_sim --example 109_go2_jump_sim`.
 
 use glam::EulerRot;
@@ -278,6 +288,49 @@ fn main() {
             .sum();
         (joint_links, leg_dofs, mass, kinematic)
     };
+    // Diagnostic: the planner uses the URDF forward kinematics while the plant
+    // is a Rapier articulation. Compare the two link frames at one state.
+    if std::env::args().any(|a| a == "--debug-fk") {
+        let q_full = read_state(&sim, &model, &joint_names);
+        let fk = model
+            .kinematic()
+            .forward_kinematics(&q_full[..model.nv()])
+            .expect("forward kinematics");
+        let transforms = fk.transforms();
+        for name in ["base", "FL_hip", "FL_thigh", "FL_calf", "FL_foot"] {
+            let entity = model.kinematic().link_entity_by_name(name).expect(name);
+            let index = model.kinematic().link_index(entity).expect("index");
+            let plan = transforms[index].translation;
+            let observed = sim.named_transform(name).map(|t| t.translation);
+            println!(
+                "  {name:9} plan=({:+.4},{:+.4},{:+.4}) sim={observed:?}",
+                plan.x, plan.y, plan.z
+            );
+        }
+        for name in ["FL_calf", "FL_foot"] {
+            let entity = sim
+                .world()
+                .iter_entities()
+                .find(|e| {
+                    sim.world()
+                        .get::<rne_ecs::Name>(e.id())
+                        .is_some_and(|n| n.0 == name)
+                })
+                .map(|e| e.id());
+            if let Some(e) = entity {
+                println!(
+                    "  {name:9} fixed_joint={} revolute_joint={} multibody={}",
+                    sim.world().get::<rne_physics::FixedJointDesc>(e).is_some(),
+                    sim.world()
+                        .get::<rne_physics::RevoluteJointDesc>(e)
+                        .is_some(),
+                    sim.world().get::<rne_physics::MultibodyLink>(e).is_some(),
+                );
+            }
+        }
+        return;
+    }
+
     let plan_index_of = |name: &str| joint_names.iter().position(|candidate| candidate == name);
     let _ = &plan_index_of;
 
