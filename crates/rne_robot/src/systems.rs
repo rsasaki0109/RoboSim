@@ -4,11 +4,12 @@ use crate::actuator::ControlMode;
 use crate::commands::{ActuatorCommand, ActuatorCommandBuffer};
 use crate::components::{
     AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
-    DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Joint, JointKind,
-    LongitudinalDrivePathState, LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState,
-    MultirotorFlight, PwmMotorCommandFrontendSpec, PwmMotorCommandPolarity, RigidRoadPatchSpec,
-    RigidRoadProfileSpec, SteeringActuatorFailureMode, SteeringActuatorSpec, SteeringActuatorState,
-    SuspensionStrutSpec, TransmissionSpec, VehicleDynamics, WheelAssemblySpec, WheelStationSpec,
+    DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, DrivenAxle, Joint,
+    JointKind, LongitudinalDrivePathState, LongitudinalLoadTransferSpec,
+    LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState, MultirotorFlight,
+    PwmMotorCommandFrontendSpec, PwmMotorCommandPolarity, RigidRoadPatchSpec, RigidRoadProfileSpec,
+    SteeringActuatorFailureMode, SteeringActuatorSpec, SteeringActuatorState, SuspensionStrutSpec,
+    TransmissionSpec, VehicleDynamics, WheelAssemblySpec, WheelStationSpec,
 };
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
@@ -2005,6 +2006,54 @@ pub fn evaluate_combined_slip_tire(
     })
 }
 
+/// Numerical floor applied to a load-transfer-derived per-wheel normal load
+/// before it reaches the tire patch, in newtons.
+///
+/// The tire law requires a strictly positive contact load. An analytically
+/// unloaded axle (wheel lift) is clamped to zero for reporting and physical
+/// interpretation, but the patch itself is floored just above zero so the
+/// step still evaluates: the resulting tire force is negligible at this
+/// floor, not physically meaningful.
+const MINIMUM_DRIVEN_WHEEL_NORMAL_LOAD_N: f64 = 1.0e-6;
+
+/// Derives the per-driven-wheel normal load from an analytic longitudinal
+/// weight-transfer model, or returns the plant's constant static load when
+/// `transfer` is `None`.
+///
+/// Implements `delta_F_z = m * a_x * h_cg / L`, applied to the driven axle's
+/// static total load and split evenly across `spec.driven_wheel_count`
+/// identical wheels. `chassis_acceleration_m_s2` already reflects the
+/// plant's road grade and aerodynamic drag (see
+/// [`evaluate_longitudinal_mobility_plant`]), so grade is accounted for
+/// without a separate term here. The result is clamped to non-negative
+/// before the wheel split, so a wheel never carries negative load; it is not
+/// floored to a strictly positive value here (see
+/// [`MINIMUM_DRIVEN_WHEEL_NORMAL_LOAD_N`] for the caller-side patch floor).
+///
+/// This is a rigid-body, no-suspension model with longitudinal transfer
+/// only: no lateral/cornering transfer, and no measured-vehicle calibration.
+fn resolve_driven_wheel_normal_load_n(
+    spec: LongitudinalMobilityPlantSpec,
+    transfer: Option<LongitudinalLoadTransferSpec>,
+    chassis_acceleration_m_s2: f64,
+) -> f64 {
+    let Some(transfer) = transfer else {
+        return spec.normal_load_per_driven_wheel_n;
+    };
+    let static_axle_load_n =
+        spec.normal_load_per_driven_wheel_n * f64::from(spec.driven_wheel_count);
+    let transfer_n = spec.vehicle_mass_kg * chassis_acceleration_m_s2 * transfer.cg_height_m
+        / transfer.wheelbase_m;
+    let signed_transfer_n = match transfer.driven_axle {
+        // Forward acceleration shifts load onto the rear axle.
+        DrivenAxle::Rear => transfer_n,
+        // Forward acceleration shifts load off the front axle.
+        DrivenAxle::Front => -transfer_n,
+    };
+    let dynamic_axle_load_n = (static_axle_load_n + signed_transfer_n).max(0.0);
+    dynamic_axle_load_n / f64::from(spec.driven_wheel_count)
+}
+
 /// Advances a coupled straight-line motor-to-road plant by one fixed step.
 ///
 /// The representative wheel obeys
@@ -2012,6 +2061,15 @@ pub fn evaluate_combined_slip_tire(
 /// The chassis obeys longitudinal force balance from every identical driven tire,
 /// aerodynamic drag, and road grade. Wheel and chassis velocities are both dynamic
 /// states, so traction and braking slip emerge rather than being prescribed.
+///
+/// When `spec.longitudinal_load_transfer` is set, the driven wheel's normal
+/// load is derived from the chassis acceleration completed on the *previous*
+/// step (`state.previous_chassis_acceleration_m_s2`) rather than held at
+/// `spec.normal_load_per_driven_wheel_n`. This mirrors the plant's existing
+/// semi-implicit integration, where contact evidence for a step is always
+/// derived from completed motion, and avoids a circular solve within one
+/// step. When the spec is absent, the plant is bit-for-bit identical to
+/// before this field existed.
 pub fn evaluate_longitudinal_mobility_plant(
     spec: LongitudinalMobilityPlantSpec,
     state: LongitudinalMobilityPlantState,
@@ -2029,6 +2087,7 @@ pub fn evaluate_longitudinal_mobility_plant(
         || !state.motor_state.current_a.is_finite()
         || !state.tire_state.longitudinal_slip_ratio.is_finite()
         || !state.tire_state.lateral_slip_tangent.is_finite()
+        || !state.previous_chassis_acceleration_m_s2.is_finite()
     {
         return Err(MobilityPlantEvaluationError::InvalidInput);
     }
@@ -2036,6 +2095,11 @@ pub fn evaluate_longitudinal_mobility_plant(
         return Err(MobilityPlantEvaluationError::InvalidTimeStep);
     }
 
+    let driven_wheel_normal_load_n = resolve_driven_wheel_normal_load_n(
+        spec,
+        spec.longitudinal_load_transfer,
+        state.previous_chassis_acceleration_m_s2,
+    );
     let drive = evaluate_longitudinal_drive_path(
         spec,
         LongitudinalDrivePathState {
@@ -2050,7 +2114,7 @@ pub fn evaluate_longitudinal_mobility_plant(
                 point_world_m: Vec3::ZERO,
                 normal_road_to_wheel_world: Vec3::Y,
                 wheel_relative_to_road_world_m_s: Vec3::X * state.velocity_m_s,
-                normal_load_n: spec.normal_load_per_driven_wheel_n,
+                normal_load_n: driven_wheel_normal_load_n.max(MINIMUM_DRIVEN_WHEEL_NORMAL_LOAD_N),
             }),
             forward_world: Vec3::X,
             lateral_world: Vec3::Z,
@@ -2075,11 +2139,13 @@ pub fn evaluate_longitudinal_mobility_plant(
         wheel_velocity_rad_s: drive.state.wheel_velocity_rad_s,
         motor_state: drive.state.motor_state,
         tire_state: drive.state.tire_state,
+        previous_chassis_acceleration_m_s2: chassis_acceleration_m_s2,
     };
     if !next_state.position_m.is_finite()
         || !next_state.velocity_m_s.is_finite()
         || !next_state.wheel_position_rad.is_finite()
         || !next_state.wheel_velocity_rad_s.is_finite()
+        || !next_state.previous_chassis_acceleration_m_s2.is_finite()
     {
         return Err(MobilityPlantEvaluationError::InvalidInput);
     }
@@ -7026,6 +7092,7 @@ mod tests {
                 reference_load_n: 490.3325,
                 ..CombinedSlipTireSpec::default()
             },
+            longitudinal_load_transfer: None,
         }
     }
 
@@ -7232,5 +7299,273 @@ mod tests {
         assert!((forward.velocity_m_s + reverse.velocity_m_s).abs() < 1.0e-9);
         assert!((forward.velocity_m_s - finer.velocity_m_s).abs() < 0.15);
         assert!((forward.position_m - finer.position_m).abs() < 0.15);
+    }
+
+    fn load_transfer_geometry(driven_axle: DrivenAxle) -> LongitudinalLoadTransferSpec {
+        LongitudinalLoadTransferSpec {
+            wheelbase_m: 1.2,
+            cg_height_m: 0.35,
+            driven_axle,
+        }
+    }
+
+    /// Reference implementation of the plant's pre-load-transfer integration
+    /// loop, copied verbatim from `evaluate_longitudinal_mobility_plant`
+    /// before load transfer existed (constant `normal_load_per_driven_wheel_n`
+    /// fed to the drive path every step). Used only to prove that an absent
+    /// `longitudinal_load_transfer` reproduces the old behavior bit-for-bit,
+    /// independent of the production function's internals.
+    fn reference_step_without_load_transfer(
+        spec: LongitudinalMobilityPlantSpec,
+        state: LongitudinalMobilityPlantState,
+        command_voltage_v: f64,
+        dt_s: f64,
+    ) -> LongitudinalMobilityPlantState {
+        let drive = evaluate_longitudinal_drive_path(
+            spec,
+            LongitudinalDrivePathState {
+                wheel_position_rad: state.wheel_position_rad,
+                wheel_velocity_rad_s: state.wheel_velocity_rad_s,
+                motor_state: state.motor_state,
+                tire_state: state.tire_state,
+            },
+            LongitudinalDrivePathInput {
+                carrier_patch: Some(WheelContactPatch {
+                    wheel_entity: Entity::PLACEHOLDER,
+                    point_world_m: Vec3::ZERO,
+                    normal_road_to_wheel_world: Vec3::Y,
+                    wheel_relative_to_road_world_m_s: Vec3::X * state.velocity_m_s,
+                    normal_load_n: spec.normal_load_per_driven_wheel_n,
+                }),
+                forward_world: Vec3::X,
+                lateral_world: Vec3::Z,
+                command_voltage_v,
+            },
+            dt_s,
+        )
+        .unwrap();
+        let aerodynamic_force_n =
+            -spec.aerodynamic_drag_n_s2_m2 * state.velocity_m_s * state.velocity_m_s.abs();
+        let grade_resistance_force_n = spec.vehicle_mass_kg * 9.806_65 * spec.road_grade_rad.sin();
+        let chassis_acceleration_m_s2 = (f64::from(spec.driven_wheel_count)
+            * drive.tire.longitudinal_force_n
+            + aerodynamic_force_n
+            - grade_resistance_force_n)
+            / spec.vehicle_mass_kg;
+        let velocity_m_s = state.velocity_m_s + chassis_acceleration_m_s2 * dt_s;
+        LongitudinalMobilityPlantState {
+            position_m: state.position_m + velocity_m_s * dt_s,
+            velocity_m_s,
+            wheel_position_rad: drive.state.wheel_position_rad,
+            wheel_velocity_rad_s: drive.state.wheel_velocity_rad_s,
+            motor_state: drive.state.motor_state,
+            tire_state: drive.state.tire_state,
+            previous_chassis_acceleration_m_s2: chassis_acceleration_m_s2,
+        }
+    }
+
+    #[test]
+    fn longitudinal_plant_without_load_transfer_matches_pre_change_trajectory_bit_for_bit() {
+        let spec = longitudinal_plant_spec(1.0);
+        assert!(spec.longitudinal_load_transfer.is_none());
+
+        let mut reference_state = LongitudinalMobilityPlantState::default();
+        let mut actual_state = LongitudinalMobilityPlantState::default();
+        for _ in 0..1_500 {
+            reference_state =
+                reference_step_without_load_transfer(spec, reference_state, 24.0, 0.001);
+            actual_state = evaluate_longitudinal_mobility_plant(spec, actual_state, 24.0, 0.001)
+                .unwrap()
+                .state;
+            assert_eq!(actual_state, reference_state);
+        }
+        // The transient covers a hard-acceleration phase, so
+        // `previous_chassis_acceleration_m_s2` is meaningfully nonzero by the
+        // end -- proving the absent-spec path never lets it influence load.
+        assert!(actual_state.previous_chassis_acceleration_m_s2.abs() > 1.0e-6);
+    }
+
+    #[test]
+    fn load_transfer_present_with_zero_acceleration_matches_static_load() {
+        let spec = longitudinal_plant_spec(1.0);
+        for driven_axle in [DrivenAxle::Front, DrivenAxle::Rear] {
+            let load_n = resolve_driven_wheel_normal_load_n(
+                spec,
+                Some(load_transfer_geometry(driven_axle)),
+                0.0,
+            );
+            assert_eq!(load_n, spec.normal_load_per_driven_wheel_n);
+        }
+    }
+
+    #[test]
+    fn load_transfer_shifts_load_by_braking_or_accelerating_and_conserves_total() {
+        let spec = longitudinal_plant_spec(1.0);
+        let rear = load_transfer_geometry(DrivenAxle::Rear);
+        let front = load_transfer_geometry(DrivenAxle::Front);
+        let static_per_wheel_n = spec.normal_load_per_driven_wheel_n;
+
+        // Braking (negative a_x): a rear-driven wheel loses load, a
+        // front-driven wheel gains it.
+        let braking_rear_n = resolve_driven_wheel_normal_load_n(spec, Some(rear), -4.0);
+        let braking_front_n = resolve_driven_wheel_normal_load_n(spec, Some(front), -4.0);
+        assert!(braking_rear_n < static_per_wheel_n);
+        assert!(braking_front_n > static_per_wheel_n);
+
+        // Accelerating (positive a_x): the reverse.
+        let accel_rear_n = resolve_driven_wheel_normal_load_n(spec, Some(rear), 4.0);
+        let accel_front_n = resolve_driven_wheel_normal_load_n(spec, Some(front), 4.0);
+        assert!(accel_rear_n > static_per_wheel_n);
+        assert!(accel_front_n < static_per_wheel_n);
+
+        // The front and rear deltas are equal and opposite for the same
+        // acceleration: whatever one axle gains, the other loses, so the
+        // vehicle's total normal load is conserved.
+        let rear_delta_n = accel_rear_n - static_per_wheel_n;
+        let front_delta_n = accel_front_n - static_per_wheel_n;
+        assert!((rear_delta_n + front_delta_n).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn load_transfer_clamps_unloaded_axle_to_zero_not_negative() {
+        let spec = longitudinal_plant_spec(1.0);
+        let rear = load_transfer_geometry(DrivenAxle::Rear);
+        // A deceleration large enough that the analytic transfer alone
+        // demands more load than the rear axle statically carries.
+        let load_n = resolve_driven_wheel_normal_load_n(spec, Some(rear), -1_000.0);
+        assert_eq!(load_n, 0.0);
+    }
+
+    #[test]
+    fn load_transfer_spec_validation_rejects_bad_geometry() {
+        let valid = load_transfer_geometry(DrivenAxle::Rear);
+        assert!(valid.is_valid());
+        assert!(!LongitudinalLoadTransferSpec {
+            wheelbase_m: 0.0,
+            ..valid
+        }
+        .is_valid());
+        assert!(!LongitudinalLoadTransferSpec {
+            wheelbase_m: -1.0,
+            ..valid
+        }
+        .is_valid());
+        assert!(!LongitudinalLoadTransferSpec {
+            wheelbase_m: f64::NAN,
+            ..valid
+        }
+        .is_valid());
+        assert!(!LongitudinalLoadTransferSpec {
+            wheelbase_m: f64::INFINITY,
+            ..valid
+        }
+        .is_valid());
+        assert!(!LongitudinalLoadTransferSpec {
+            cg_height_m: -0.01,
+            ..valid
+        }
+        .is_valid());
+        assert!(!LongitudinalLoadTransferSpec {
+            cg_height_m: f64::NAN,
+            ..valid
+        }
+        .is_valid());
+
+        let invalid_plant_spec = LongitudinalMobilityPlantSpec {
+            longitudinal_load_transfer: Some(LongitudinalLoadTransferSpec {
+                wheelbase_m: 0.0,
+                ..valid
+            }),
+            ..longitudinal_plant_spec(1.0)
+        };
+        assert!(!invalid_plant_spec.is_valid());
+        let error = evaluate_longitudinal_mobility_plant(
+            invalid_plant_spec,
+            LongitudinalMobilityPlantState::default(),
+            1.0,
+            0.001,
+        )
+        .unwrap_err();
+        assert_eq!(error, MobilityPlantEvaluationError::InvalidSpec);
+    }
+
+    #[test]
+    fn longitudinal_plant_with_load_transfer_is_deterministic() {
+        let spec = LongitudinalMobilityPlantSpec {
+            longitudinal_load_transfer: Some(load_transfer_geometry(DrivenAxle::Rear)),
+            ..longitudinal_plant_spec(1.0)
+        };
+        let forward = run_longitudinal_plant(
+            spec,
+            LongitudinalMobilityPlantState::default(),
+            24.0,
+            0.001,
+            2_000,
+        )
+        .0;
+        let replay = run_longitudinal_plant(
+            spec,
+            LongitudinalMobilityPlantState::default(),
+            24.0,
+            0.001,
+            2_000,
+        )
+        .0;
+        assert_eq!(forward, replay);
+    }
+
+    #[test]
+    fn load_transfer_changes_tire_force_during_hard_acceleration_transient() {
+        let base_spec = longitudinal_plant_spec(1.0);
+        let transfer = load_transfer_geometry(DrivenAxle::Rear);
+        let spec_with_transfer = LongitudinalMobilityPlantSpec {
+            longitudinal_load_transfer: Some(transfer),
+            ..base_spec
+        };
+
+        // Warm up a physically realistic hard-acceleration state (nonzero
+        // wheel spin, relaxed slip, and motor current) with the baseline
+        // (no-transfer) plant, then branch both plants from that one shared
+        // state for a single step. This isolates the load-transfer effect
+        // from the chaotic divergence a multi-step rollout would introduce.
+        let (warmed_up_state, _) = run_longitudinal_plant(
+            base_spec,
+            LongitudinalMobilityPlantState::default(),
+            24.0,
+            0.001,
+            200,
+        );
+        assert!(warmed_up_state.previous_chassis_acceleration_m_s2.abs() > 0.5);
+
+        let without_transfer =
+            evaluate_longitudinal_mobility_plant(base_spec, warmed_up_state, 24.0, 0.001).unwrap();
+        let with_transfer =
+            evaluate_longitudinal_mobility_plant(spec_with_transfer, warmed_up_state, 24.0, 0.001)
+                .unwrap();
+
+        let expected_load_n = resolve_driven_wheel_normal_load_n(
+            spec_with_transfer,
+            Some(transfer),
+            warmed_up_state.previous_chassis_acceleration_m_s2,
+        );
+        assert!(expected_load_n > base_spec.normal_load_per_driven_wheel_n);
+
+        // If load stayed constant (the bug this slice fixes), these two
+        // peak forces -- and thus the resulting drive force -- would be
+        // bit-for-bit identical, since both plants share the same tire
+        // spec, motor, wheel state, and command voltage.
+        assert!(
+            with_transfer.tire.longitudinal_peak_force_n
+                > without_transfer.tire.longitudinal_peak_force_n,
+            "with={} without={}",
+            with_transfer.tire.longitudinal_peak_force_n,
+            without_transfer.tire.longitudinal_peak_force_n
+        );
+        assert_ne!(
+            with_transfer.tire.longitudinal_force_n, without_transfer.tire.longitudinal_force_n,
+            "with={} without={}",
+            with_transfer.tire.longitudinal_force_n, without_transfer.tire.longitudinal_force_n
+        );
+        assert_ne!(with_transfer.state, without_transfer.state);
     }
 }

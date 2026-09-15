@@ -1771,6 +1771,7 @@ fn plant_spec() -> LongitudinalMobilityPlantSpec {
             reference_load_n: static_load_n,
             ..CombinedSlipTireSpec::default()
         },
+        longitudinal_load_transfer: None,
     }
 }
 

@@ -939,6 +939,48 @@ pub struct CombinedSlipTireState {
     pub lateral_slip_tangent: f64,
 }
 
+/// Which axle a [`LongitudinalMobilityPlantSpec`]'s driven wheel(s) represent.
+///
+/// This only sets the sign of longitudinal weight transfer: forward
+/// acceleration always loads the rear axle and unloads the front axle, and
+/// braking does the reverse, regardless of which axle is driven.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DrivenAxle {
+    /// The plant's driven wheel(s) are on the front axle.
+    Front,
+    /// The plant's driven wheel(s) are on the rear axle.
+    Rear,
+}
+
+/// Rigid-body longitudinal weight-transfer geometry for a
+/// [`LongitudinalMobilityPlantSpec`].
+///
+/// This is an analytic model of the classic single-track weight-transfer
+/// relation `delta_F_z = m * a_x * h_cg / L` (see Milliken & Milliken, *Race
+/// Car Vehicle Dynamics*, SAE, 1995, ch. 2), not a suspension model: there is
+/// no spring/damper dynamics, no lateral or cornering transfer, and it has
+/// not been validated against measured vehicle data. It is opt-in; a plant
+/// without this spec keeps its original constant per-wheel load.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LongitudinalLoadTransferSpec {
+    /// Distance between the front and rear axle contact points in meters.
+    pub wheelbase_m: f64,
+    /// Height of the vehicle center of gravity above the road plane in meters.
+    pub cg_height_m: f64,
+    /// Axle carrying the plant's driven wheel(s).
+    pub driven_axle: DrivenAxle,
+}
+
+impl LongitudinalLoadTransferSpec {
+    /// Returns whether the geometry is finite and physically positive.
+    pub fn is_valid(&self) -> bool {
+        self.wheelbase_m.is_finite()
+            && self.wheelbase_m > 0.0
+            && self.cg_height_m.is_finite()
+            && self.cg_height_m >= 0.0
+    }
+}
+
 /// Parameters for a coupled one-dimensional motor-to-road mobility plant.
 ///
 /// One representative driven wheel is simulated and its longitudinal tire
@@ -952,7 +994,12 @@ pub struct LongitudinalMobilityPlantSpec {
     pub vehicle_mass_kg: f64,
     /// Number of identical driven wheel/motor paths.
     pub driven_wheel_count: u32,
-    /// Completed normal load carried by each driven wheel in newtons.
+    /// Static normal load carried by each driven wheel in newtons.
+    ///
+    /// Used directly when [`Self::longitudinal_load_transfer`] is absent.
+    /// When present, `normal_load_per_driven_wheel_n * driven_wheel_count`
+    /// is instead the static (zero-acceleration) total load on the driven
+    /// axle, which the load-transfer model perturbs per step.
     pub normal_load_per_driven_wheel_n: f64,
     /// Constant road grade, positive uphill, in radians.
     pub road_grade_rad: f64,
@@ -968,6 +1015,14 @@ pub struct LongitudinalMobilityPlantSpec {
     pub wheel: WheelAssemblySpec,
     /// Transient combined-slip tire model; lateral input remains zero in this plant.
     pub tire: CombinedSlipTireSpec,
+    /// Optional analytic longitudinal weight-transfer geometry.
+    ///
+    /// Absent by default (`None`), which keeps this plant bit-for-bit
+    /// identical to its original constant-load behavior. When present, the
+    /// driven wheel's normal load is derived per step from the plant's own
+    /// longitudinal acceleration instead of held constant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub longitudinal_load_transfer: Option<LongitudinalLoadTransferSpec>,
 }
 
 impl LongitudinalMobilityPlantSpec {
@@ -988,6 +1043,9 @@ impl LongitudinalMobilityPlantSpec {
             && self.transmission.is_valid()
             && self.wheel.is_valid()
             && self.tire.is_valid()
+            && self
+                .longitudinal_load_transfer
+                .is_none_or(|transfer| transfer.is_valid())
     }
 }
 
@@ -1023,6 +1081,14 @@ pub struct LongitudinalMobilityPlantState {
     pub motor_state: DcMotorState,
     /// Relaxed tire-slip state for the representative tire.
     pub tire_state: CombinedSlipTireState,
+    /// Chassis longitudinal acceleration completed on the previous step, in
+    /// meters per second squared.
+    ///
+    /// Feeds [`LongitudinalLoadTransferSpec`] one step lagged, matching this
+    /// plant's existing semi-implicit integration: contact evidence, and
+    /// therefore load transfer, is always derived from completed motion.
+    /// Zero at rest, so the first step of a fresh plant sees the static load.
+    pub previous_chassis_acceleration_m_s2: f64,
 }
 
 /// Deterministic kinematic Ackermann drive state and safety limits.

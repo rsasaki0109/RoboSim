@@ -56,6 +56,23 @@ All notable changes to Robot Native Engine are documented in this file.
   precision. This is the first model-based jump generated end-to-end by the
   native dynamics/optimal-control stack.
 
+- `rne_robot`: optional analytic longitudinal load transfer for
+  `LongitudinalMobilityPlantSpec`. The reduced longitudinal mobility plant
+  previously fed the tire a static `normal_load_per_driven_wheel_n`, so
+  `CombinedSlipTireSpec::load_sensitivity_per_load_ratio` never moved from its
+  reference-load value inside that plant. A new opt-in
+  `longitudinal_load_transfer: Option<LongitudinalLoadTransferSpec>` (fields
+  `wheelbase_m`, `cg_height_m`, `driven_axle`) instead derives the driven
+  wheel's per-step normal load from the plant's own longitudinal acceleration
+  via the classic rigid-body relation `delta_F_z = m * a_x * h_cg / L`, split
+  across `driven_wheel_count` and clamped non-negative for wheel lift. This is
+  an analytic model only -- no suspension dynamics, no lateral/cornering
+  transfer, and no measured-vehicle validation. It is longitudinal-only and
+  bit-for-bit identical to prior plant behavior when absent, which existing
+  serialized specs and physical-qualification evidence (PR #253-#257) depend
+  on. See
+  [`MOBILITY_LONGITUDINAL_BENCHMARK_V1.md`](docs/MOBILITY_LONGITUDINAL_BENCHMARK_V1.md).
+
 - `rne_dynamics` impulsive contact reset: `impulse_velocity` solves the impulse
   KKT system to reset joint velocities when new contacts are established.
   `rne_oc` gains an FDDP warm start (`DdpConfig::keep_gaps_open`) that opens
