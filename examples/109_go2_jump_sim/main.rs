@@ -66,6 +66,12 @@
 //! `--land-kd` (touchdown catch), `--vel-weight`, and `--kp`/`--kd`/
 //! `--lookahead` (position stance).
 //!
+//! `--mpc` replans the jump every `--mpc-period` nodes (default 5) from the
+//! measured state, warm-starting from the previous solution and using
+//! `--mpc-iters` (default 40) iterations, instead of executing one open-loop
+//! plan. It does not yet remove the forward pitch: the pitch comes from the
+//! whole-body solve, so replanning around it does not change it.
+//!
 //! `--gif` renders the live jump to `docs/media/go2-jump.gif`: the frames come
 //! from the same headless simulation the metrics report, so the GIF shows the
 //! real jump (requires a GPU; set `RNE_SKIP_GPU` to skip the capture).
@@ -80,8 +86,8 @@ use rne_dynamics::{center_of_mass, ArticulatedModel, ContactSpec};
 use rne_ecs::World;
 use rne_math::{Quat, Vec3};
 use rne_oc::{
-    solve, ActuatorLimitCost, ContactPhase, ContactSequenceDynamics, DdpConfig, PhaseCostSchedule,
-    QuadraticCost,
+    solve, ActuatorLimitCost, ContactPhase, ContactSequenceDynamics, DdpConfig, DdpSolution,
+    PhaseCostSchedule, QuadraticCost,
 };
 use rne_render::{
     Camera, MeshRenderCache, RenderBackend, RenderScene, RenderSceneItem, VisualShape,
@@ -219,6 +225,68 @@ fn min_foot_height_m(sim: &UrdfSceneSim) -> f64 {
         .fold(f64::INFINITY, f64::min)
 }
 
+fn jump_running_cost(
+    nv: usize,
+    control_dim: usize,
+    joint_names: &[String],
+    absolute_node: usize,
+    control_weight: f64,
+    start_y: f64,
+) -> QuadraticCost {
+    let zero = vec![0.0; 2 * nv];
+    let mut weights = vec![0.0; 2 * nv];
+    let mut reference = vec![0.0; 2 * nv];
+    if absolute_node < CROUCH_STEPS {
+        weights[1] = 200.0;
+        reference[1] = start_y - 0.09;
+    }
+    for (dof, name) in joint_names.iter().enumerate() {
+        if absolute_node < CROUCH_STEPS {
+            weights[6 + dof] = 5.0;
+            reference[6 + dof] = crouch_angle(name);
+        } else {
+            weights[6 + dof] = 2.0;
+            reference[6 + dof] = stand_angle(name);
+        }
+    }
+    let mut cost = QuadraticCost::new(weights, vec![control_weight; control_dim], zero);
+    cost.state_reference = reference;
+    cost.running_scale = 1.0;
+    cost
+}
+
+fn jump_terminal_cost(
+    nv: usize,
+    control_dim: usize,
+    start_y: f64,
+    target_apex: f64,
+) -> QuadraticCost {
+    let zero = vec![0.0; 2 * nv];
+    let mut terminal_weights = vec![0.0; 2 * nv];
+    terminal_weights[1] = 2.0e3;
+    for dof in 0..nv {
+        terminal_weights[nv + dof] = 50.0;
+    }
+    let mut terminal = QuadraticCost::new(zero.clone(), vec![0.0; control_dim], terminal_weights);
+    let mut terminal_reference = vec![0.0; 2 * nv];
+    terminal_reference[1] = start_y + target_apex;
+    terminal.state_reference = terminal_reference;
+    terminal
+}
+
+fn plan_com_velocity(plan_com: &[Vec3], index: usize) -> Vec3 {
+    let next = (index + 1).min(plan_com.len() - 1);
+    let previous = index.min(plan_com.len() - 1);
+    (plan_com[next] - plan_com[previous]) / STEP_TIME_S
+}
+
+fn plan_com_acceleration(plan_com: &[Vec3], index: usize) -> Vec3 {
+    let next = (index + 1).min(plan_com.len() - 1);
+    let previous = index.saturating_sub(1);
+    (plan_com[next] - plan_com[index.min(plan_com.len() - 1)] * 2.0 + plan_com[previous])
+        / (STEP_TIME_S * STEP_TIME_S)
+}
+
 #[allow(clippy::needless_range_loop)]
 fn main() {
     let model = build_model();
@@ -244,6 +312,13 @@ fn main() {
     let velocity_weight = argument_value("--vel-weight")
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(ACTUATOR_VELOCITY_WEIGHT);
+    let mpc = std::env::args().any(|argument| argument == "--mpc");
+    let mpc_period = argument_value("--mpc-period")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(5);
+    let mpc_iterations = argument_value("--mpc-iters")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(40);
     let attitude_kp = argument_value("--att-kp")
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(WBC_ATTITUDE_KP);
@@ -439,39 +514,10 @@ fn main() {
     ];
     let dynamics = ContactSequenceDynamics::new(&model, STEP_TIME_S, &phases);
 
-    let control_weights = vec![control_weight; control_dim];
-    let zero = vec![0.0; 2 * nv];
-    let mut running = Vec::with_capacity(horizon);
-    for node in 0..horizon {
-        let mut weights = vec![0.0; 2 * nv];
-        let mut reference = vec![0.0; 2 * nv];
-        if node < CROUCH_STEPS {
-            weights[1] = 200.0;
-            reference[1] = start_y - 0.09;
-        }
-        for (dof, name) in joint_names.iter().enumerate() {
-            if node < CROUCH_STEPS {
-                weights[6 + dof] = 5.0;
-                reference[6 + dof] = crouch_angle(name);
-            } else {
-                weights[6 + dof] = 2.0;
-                reference[6 + dof] = stand_angle(name);
-            }
-        }
-        let mut cost = QuadraticCost::new(weights, control_weights.clone(), zero.clone());
-        cost.state_reference = reference;
-        cost.running_scale = 1.0;
-        running.push(cost);
-    }
-    let mut terminal_weights = vec![0.0; 2 * nv];
-    terminal_weights[1] = 2.0e3;
-    for dof in 0..nv {
-        terminal_weights[nv + dof] = 50.0;
-    }
-    let mut terminal = QuadraticCost::new(zero.clone(), vec![0.0; control_dim], terminal_weights);
-    let mut terminal_reference = vec![0.0; 2 * nv];
-    terminal_reference[1] = start_y + target_apex;
-    terminal.state_reference = terminal_reference;
+    let running: Vec<QuadraticCost> = (0..horizon)
+        .map(|node| jump_running_cost(nv, control_dim, &joint_names, node, control_weight, start_y))
+        .collect();
+    let terminal = jump_terminal_cost(nv, control_dim, start_y, target_apex);
     let velocity_limits: Vec<f64> = model
         .kinematic()
         .joint_limits()
@@ -480,7 +526,7 @@ fn main() {
         .collect();
     let cost = ActuatorLimitCost::new(
         PhaseCostSchedule { running, terminal },
-        velocity_limits,
+        velocity_limits.clone(),
         velocity_weight,
         nv,
         0,
@@ -532,16 +578,87 @@ fn main() {
         .iter()
         .map(|state| center_of_mass(&model, &state[..nv]).expect("plan com"))
         .collect();
-    let plan_com_velocity = |index: usize| -> Vec3 {
-        let next = (index + 1).min(solution.states.len() - 1);
-        let previous = index;
-        (plan_com[next] - plan_com[previous]) / STEP_TIME_S
+    let total_stance = CROUCH_STEPS + PUSH_STEPS;
+    let solve_plan = |start_state: &[f64],
+                      start_node: usize,
+                      warm: Option<(&DdpSolution, usize)>|
+     -> (DdpSolution, Vec<Vec3>) {
+        let ground_steps = total_stance.saturating_sub(start_node);
+        let horizon_now = ground_steps + FLIGHT_STEPS;
+        let mut phases = Vec::new();
+        if ground_steps > 0 {
+            phases.push(ContactPhase {
+                contacts: contacts.clone(),
+                steps: ground_steps,
+            });
+        }
+        phases.push(ContactPhase {
+            contacts: Vec::new(),
+            steps: FLIGHT_STEPS,
+        });
+        let dynamics_now = ContactSequenceDynamics::new(&model, STEP_TIME_S, &phases);
+        let running_now: Vec<QuadraticCost> = (0..horizon_now)
+            .map(|index| {
+                jump_running_cost(
+                    nv,
+                    control_dim,
+                    &joint_names,
+                    start_node + index,
+                    control_weight,
+                    start_y,
+                )
+            })
+            .collect();
+        let terminal_now = jump_terminal_cost(nv, control_dim, start_y, target_apex);
+        let cost_now = ActuatorLimitCost::new(
+            PhaseCostSchedule {
+                running: running_now,
+                terminal: terminal_now,
+            },
+            velocity_limits.clone(),
+            velocity_weight,
+            nv,
+            0,
+        );
+        let mut states_now = vec![start_state.to_vec(); horizon_now + 1];
+        states_now[0] = start_state.to_vec();
+        let mut controls_now = vec![vec![0.0; control_dim]; horizon_now];
+        if let Some((warm_solution, warm_start)) = warm {
+            for index in 0..horizon_now {
+                let offset = start_node + index - warm_start;
+                let state_index = offset + 1;
+                if state_index < warm_solution.states.len() {
+                    states_now[index + 1] = warm_solution.states[state_index].clone();
+                }
+                if offset < warm_solution.controls.len() {
+                    controls_now[index] = warm_solution.controls[offset].clone();
+                }
+            }
+        }
+        let config_now = DdpConfig {
+            max_iterations: mpc_iterations,
+            tolerance: 1.0e-8,
+            keep_gaps_open: true,
+            control_lower: Some(vec![-TORQUE_LIMIT_NM; control_dim]),
+            control_upper: Some(vec![TORQUE_LIMIT_NM; control_dim]),
+            ..DdpConfig::default()
+        };
+        let solved = solve(
+            &dynamics_now,
+            &cost_now,
+            &states_now,
+            &controls_now,
+            &config_now,
+        )
+        .expect("mpc");
+        let com: Vec<Vec3> = solved
+            .states
+            .iter()
+            .map(|state| center_of_mass(&model, &state[..nv]).expect("mpc com"))
+            .collect();
+        (solved, com)
     };
-    let plan_com_acceleration = |index: usize| -> Vec3 {
-        let next = (index + 1).min(solution.states.len() - 1);
-        let previous = index.saturating_sub(1);
-        (plan_com[next] - plan_com[index] * 2.0 + plan_com[previous]) / (STEP_TIME_S * STEP_TIME_S)
-    };
+
     let wbc_controller = WholeBodyController::new(WholeBodyConfig {
         com_weight: 1.0e5,
         posture_weight,
@@ -559,9 +676,36 @@ fn main() {
         let pose = sim.named_transform("base").expect("base");
         (pose.rotation.inverse() * Vec3::Y).normalize_or_zero()
     };
+    let mut current_plan: Option<(DdpSolution, Vec<Vec3>, usize)> = None;
+    let mut last_replan = usize::MAX;
     for node in 0..horizon {
-        let state = &solution.states[node];
-        let torque = &solution.controls[node];
+        if mpc && node <= total_stance && (node == 0 || node - last_replan >= mpc_period) {
+            let measured = read_state(&sim, &model, &joint_names);
+            let warm = current_plan
+                .as_ref()
+                .map(|(solved, _, start)| (solved, *start));
+            let (solved, com) = solve_plan(&measured, node, warm);
+            current_plan = Some((solved, com, node));
+            last_replan = node;
+        }
+        let (plan_states, plan_controls, plan_com_now, plan_start) = match &current_plan {
+            Some((solved, com, start)) => (
+                solved.states.as_slice(),
+                solved.controls.as_slice(),
+                com.as_slice(),
+                *start,
+            ),
+            None => (
+                solution.states.as_slice(),
+                solution.controls.as_slice(),
+                plan_com.as_slice(),
+                0,
+            ),
+        };
+        let plan_node = (node - plan_start).min(plan_states.len() - 1);
+        let control_node = (node - plan_start).min(plan_controls.len() - 1);
+        let state = &plan_states[plan_node];
+        let torque = &plan_controls[control_node];
         let actual_y = sim.observe().base_y_m;
         let actual_vy = (actual_y - previous_y) / STEP_TIME_S;
         previous_y = actual_y;
@@ -606,9 +750,9 @@ fn main() {
                 .map(|link| ContactPoint::new(link, SOLE_OFFSET_LOCAL_M, 0.6))
                 .collect();
             let com_task = ComTask {
-                desired_position_m: plan_com[node],
-                desired_velocity_m_s: plan_com_velocity(node),
-                desired_acceleration_m_s2: plan_com_acceleration(node) * com_ff,
+                desired_position_m: plan_com_now[plan_node],
+                desired_velocity_m_s: plan_com_velocity(plan_com_now, plan_node),
+                desired_acceleration_m_s2: plan_com_acceleration(plan_com_now, plan_node) * com_ff,
                 position_gain_s_inv2: wbc_kp,
                 velocity_gain_s_inv: wbc_kd,
             };
@@ -671,7 +815,7 @@ fn main() {
                     "  node {node:02}: base_y={:.4} sim_com={:.4} plan_com_y={:.4} min_foot={:.4} tilt={stance_tilt:.3} (wbc)",
                     sim.observe().base_y_m,
                     center_of_mass(&model, q).expect("com").y,
-                    plan_com[node].y,
+                    plan_com_now[plan_node].y,
                     min_foot_height_m(&sim),
                 );
             }
