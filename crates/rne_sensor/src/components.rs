@@ -300,6 +300,41 @@ pub struct SensorState {
     pub frame_count: u64,
 }
 
+/// Opt-in deterministic capture-time jitter for typed feedback frontends.
+///
+/// Attach this component to a typed feedback sensor entity
+/// ([`ImuFeedbackSensor`], [`IncrementalEncoderSensor`],
+/// [`MotorElectricalFeedbackSensor`] or [`JointFeedbackSensor`]) to perturb each
+/// capture instant away from its nominal schedule. Every capture draws a bounded,
+/// seeded delay in `[0, maximum_delay_ticks]` from a stream derived from the world
+/// seed, [`Self::seed`], the sensor stream id and the sample sequence, so replaying
+/// the same run reproduces the same jittered timestamps.
+///
+/// Acquisition cannot complete before its nominal instant, so the delay is
+/// non-negative and the existing `sample_phase_error_ticks` payload field reports
+/// the total offset (jitter plus tick discretization). The draw is saturated to
+/// `period - 1` ticks so the nominal schedule stays strictly increasing; a period
+/// of one tick therefore disables jitter.
+///
+/// An absent component, or `maximum_delay_ticks == 0`, reproduces the nominal
+/// schedule bit-for-bit, which keeps every existing serialized artifact, golden
+/// file and evidence chain valid.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SensorSamplingJitter {
+    /// Inclusive upper bound on the per-capture delay, in simulation ticks.
+    pub maximum_delay_ticks: u64,
+    /// Sensor-local jitter seed mixed with the world seed and stream id.
+    pub seed: u64,
+}
+
+impl SensorSamplingJitter {
+    /// Returns true when this configuration would not delay any capture.
+    pub fn is_ideal(&self) -> bool {
+        self.maximum_delay_ticks == 0
+    }
+}
+
 /// Finite-counter behavior after the signed hardware range is exceeded.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

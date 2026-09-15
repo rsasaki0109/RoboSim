@@ -7,7 +7,7 @@ use crate::components::{
     IncrementalEncoderSensor, IncrementalEncoderSensorState, JointFeedbackFault,
     JointFeedbackSensor, JointFeedbackSensorState, MotorElectricalFeedbackFault,
     MotorElectricalFeedbackSensor, MotorElectricalFeedbackSensorState, Sensor, SensorKind,
-    SensorState,
+    SensorSamplingJitter, SensorState,
 };
 use crate::imu::{
     sample_imu_stateful_diagnostic_with_kinematics, sample_imu_stateful_with_kinematics,
@@ -16,7 +16,7 @@ use crate::imu::{
 use crate::lidar::sample_lidar_at_entity_keyed;
 use crate::noise::{motor_electrical_gaussian, SensorNoiseKey};
 use crate::wheel_encoder::sample_wheel_encoder;
-use rne_core::{SimDuration, SimTime};
+use rne_core::{mix64, KeyedRandom, SimDuration, SimTime};
 use rne_data::{
     DataBus, Frame, FramePayload, ImuFeedback, ImuFeedbackStatus, IncrementalEncoderFeedback,
     IncrementalEncoderStatus, JointCommandFeedback, JointCommandMode, JointCoordinateFeedback,
@@ -50,6 +50,35 @@ pub struct SensorSampleContext<'a, B: PhysicsBackend> {
 
 /// Stream-id offset for paired depth frames published beside RGB camera streams.
 pub const CAMERA_DEPTH_STREAM_OFFSET: u64 = 50;
+
+/// Domain tag separating sampling-jitter draws from every noise and fault stream.
+const SAMPLING_JITTER_DOMAIN_V1: u64 = 0x3154_4954_4A49_4E52;
+
+/// Draws the bounded capture delay for one attempt of a typed feedback frontend.
+///
+/// Returns zero when the entity carries no [`SensorSamplingJitter`] or when jitter
+/// is disabled. The delay is deterministic in `(root_seed, jitter.seed, stream_id,
+/// sequence)` and is saturated to `period_ticks - 1` so the nominal schedule stays
+/// strictly increasing; a period of one tick therefore disables jitter.
+fn sampling_jitter_delay_ticks(
+    world: &World,
+    sensor_entity: Entity,
+    root_seed: u64,
+    stream_id: u64,
+    sequence: u64,
+    period_ticks: u64,
+) -> u64 {
+    let Some(jitter) = world.get::<SensorSamplingJitter>(sensor_entity).copied() else {
+        return 0;
+    };
+    if jitter.maximum_delay_ticks == 0 || period_ticks <= 1 {
+        return 0;
+    }
+    let maximum = jitter.maximum_delay_ticks.min(period_ticks - 1);
+    let random = KeyedRandom::new(root_seed, SAMPLING_JITTER_DOMAIN_V1 ^ mix64(jitter.seed));
+    let unit = random.sample_unit_f64(stream_id, sequence, 0);
+    ((unit * (maximum as f64 + 1.0)) as u64).min(maximum)
+}
 
 /// Samples all enabled sensors and publishes frames to the DataBus.
 pub fn sample_sensors<B: PhysicsBackend>(
@@ -354,9 +383,6 @@ pub fn sample_imu_feedback_sensors(
             .ok_or(ImuFeedbackError::ScheduleOverflow {
                 sensor_entity_index: sensor_entity.index(),
             })?;
-        if sim_time.ticks() < scheduled_capture_ticks {
-            continue;
-        }
         let sequence =
             state
                 .attempted_sequence
@@ -364,6 +390,22 @@ pub fn sample_imu_feedback_sensors(
                 .ok_or(ImuFeedbackError::ScheduleOverflow {
                     sensor_entity_index: sensor_entity.index(),
                 })?;
+        let jitter_delay_ticks = sampling_jitter_delay_ticks(
+            world,
+            sensor_entity,
+            world_seed,
+            sensor.stream_id.0,
+            sequence,
+            sensor.period().ticks(),
+        );
+        let capture_ticks = scheduled_capture_ticks
+            .checked_add(jitter_delay_ticks)
+            .ok_or(ImuFeedbackError::ScheduleOverflow {
+                sensor_entity_index: sensor_entity.index(),
+            })?;
+        if sim_time.ticks() < capture_ticks {
+            continue;
+        }
         let diagnostic = sample_imu_stateful_diagnostic_with_kinematics(
             world,
             sensor_entity,
@@ -511,6 +553,10 @@ pub fn sample_incremental_encoder_sensors(
         })
         .collect();
     sensors.sort_unstable_by_key(|(entity, _)| entity.index());
+    let world_seed = world
+        .get_resource::<WorldRandom>()
+        .map(WorldRandom::seed)
+        .unwrap_or(0);
 
     let mut pending = Vec::new();
     for (sensor_entity, sensor) in sensors {
@@ -534,14 +580,27 @@ pub fn sample_incremental_encoder_sensors(
             .ok_or(IncrementalEncoderError::ScheduleOverflow {
                 sensor_entity_index: sensor_entity.index(),
             })?;
-        if sim_time.ticks() < scheduled_capture_ticks {
-            continue;
-        }
         let sequence = state.attempted_sequence.checked_add(1).ok_or(
             IncrementalEncoderError::ScheduleOverflow {
                 sensor_entity_index: sensor_entity.index(),
             },
         )?;
+        let jitter_delay_ticks = sampling_jitter_delay_ticks(
+            world,
+            sensor_entity,
+            world_seed,
+            sensor.stream_id.0,
+            sequence,
+            sensor.period().ticks(),
+        );
+        let capture_ticks = scheduled_capture_ticks
+            .checked_add(jitter_delay_ticks)
+            .ok_or(IncrementalEncoderError::ScheduleOverflow {
+                sensor_entity_index: sensor_entity.index(),
+            })?;
+        if sim_time.ticks() < capture_ticks {
+            continue;
+        }
         let position_rad = completed_encoder_position(world, &sensor, sensor_entity)?;
         let ideal_count = encoder_ideal_count(position_rad, &sensor, sensor_entity)?;
         let (raw_count, saturated) = finite_encoder_count(ideal_count, &sensor);
@@ -871,14 +930,27 @@ pub fn sample_motor_electrical_feedback_sensors(
             .ok_or(MotorElectricalFeedbackError::ScheduleOverflow {
                 sensor_entity_index: sensor_entity.index(),
             })?;
-        if sim_time.ticks() < scheduled_capture_ticks {
-            continue;
-        }
         let sequence = state.attempted_sequence.checked_add(1).ok_or(
             MotorElectricalFeedbackError::ScheduleOverflow {
                 sensor_entity_index: sensor_entity.index(),
             },
         )?;
+        let jitter_delay_ticks = sampling_jitter_delay_ticks(
+            world,
+            sensor_entity,
+            world_seed,
+            sensor.stream_id.0,
+            sequence,
+            sensor.period().ticks(),
+        );
+        let capture_ticks = scheduled_capture_ticks
+            .checked_add(jitter_delay_ticks)
+            .ok_or(MotorElectricalFeedbackError::ScheduleOverflow {
+                sensor_entity_index: sensor_entity.index(),
+            })?;
+        if sim_time.ticks() < capture_ticks {
+            continue;
+        }
         let telemetry = world
             .get::<DcMotorCompletedTelemetry>(sensor.spec.motor_entity)
             .copied()
@@ -1087,6 +1159,10 @@ pub fn sample_joint_feedback_sensors(
         })
         .collect();
     sensors.sort_unstable_by_key(|(entity, _)| entity.index());
+    let world_seed = world
+        .get_resource::<WorldRandom>()
+        .map(WorldRandom::seed)
+        .unwrap_or(0);
 
     let mut pending = Vec::new();
     for (sensor_entity, sensor) in sensors {
@@ -1110,14 +1186,27 @@ pub fn sample_joint_feedback_sensors(
             .ok_or(JointFeedbackError::ScheduleOverflow {
                 sensor_entity_index: sensor_entity.index(),
             })?;
-        if sim_time.ticks() < scheduled_capture_ticks {
-            continue;
-        }
         let sequence = state.attempted_sequence.checked_add(1).ok_or(
             JointFeedbackError::ScheduleOverflow {
                 sensor_entity_index: sensor_entity.index(),
             },
         )?;
+        let jitter_delay_ticks = sampling_jitter_delay_ticks(
+            world,
+            sensor_entity,
+            world_seed,
+            sensor.stream_id.0,
+            sequence,
+            sensor.period().ticks(),
+        );
+        let capture_ticks = scheduled_capture_ticks
+            .checked_add(jitter_delay_ticks)
+            .ok_or(JointFeedbackError::ScheduleOverflow {
+                sensor_entity_index: sensor_entity.index(),
+            })?;
+        if sim_time.ticks() < capture_ticks {
+            continue;
+        }
         let mut payload = build_joint_feedback(world, &sensor, scheduled_capture_ticks, sim_time)?;
         if matches!(
             sensor.fault,
@@ -2613,5 +2702,208 @@ mod tests {
             .unwrap()
             .payload;
         assert_ne!(first.current_a, next.current_a);
+    }
+
+    #[test]
+    fn sampling_jitter_is_absent_or_disabled_by_default() {
+        let mut world = World::new();
+        let entity = spawn_named(&mut world, "plain_sensor");
+        assert_eq!(
+            sampling_jitter_delay_ticks(&world, entity, 99, 7, 1, 500),
+            0
+        );
+
+        world.entity_mut(entity).insert(SensorSamplingJitter {
+            maximum_delay_ticks: 0,
+            seed: 123,
+        });
+        assert_eq!(
+            sampling_jitter_delay_ticks(&world, entity, 99, 7, 1, 500),
+            0
+        );
+
+        world.entity_mut(entity).insert(SensorSamplingJitter {
+            maximum_delay_ticks: 5,
+            seed: 123,
+        });
+        assert_eq!(sampling_jitter_delay_ticks(&world, entity, 99, 7, 1, 1), 0);
+    }
+
+    #[test]
+    fn sampling_jitter_delay_is_bounded_reproducible_and_seeded() {
+        let mut world = World::new();
+        let entity = spawn_named(&mut world, "jittered_sensor");
+        world.entity_mut(entity).insert(SensorSamplingJitter {
+            maximum_delay_ticks: 1_000,
+            seed: 3,
+        });
+
+        let first: Vec<u64> = (1..=64)
+            .map(|sequence| sampling_jitter_delay_ticks(&world, entity, 99, 7, sequence, 500))
+            .collect();
+        assert!(first.iter().all(|&delay| delay <= 499));
+        assert!(first.iter().any(|&delay| delay > 0));
+
+        let second: Vec<u64> = (1..=64)
+            .map(|sequence| sampling_jitter_delay_ticks(&world, entity, 99, 7, sequence, 500))
+            .collect();
+        assert_eq!(first, second);
+
+        world.entity_mut(entity).insert(SensorSamplingJitter {
+            maximum_delay_ticks: 1_000,
+            seed: 4,
+        });
+        let reseeded: Vec<u64> = (1..=64)
+            .map(|sequence| sampling_jitter_delay_ticks(&world, entity, 99, 7, sequence, 500))
+            .collect();
+        assert_ne!(first, reseeded);
+    }
+
+    #[test]
+    fn imu_feedback_capture_advances_with_sampling_jitter() {
+        let (mut world, _, sensor, stream, mut bus) = imu_feedback_fixture(ImuFeedbackFault::None);
+        world.entity_mut(sensor).insert(SensorSamplingJitter {
+            maximum_delay_ticks: 400,
+            seed: 7,
+        });
+        let root_seed = world
+            .get_resource::<WorldRandom>()
+            .map(WorldRandom::seed)
+            .unwrap_or(0);
+        let delay = sampling_jitter_delay_ticks(&world, sensor, root_seed, stream.0, 1, 1_000);
+        assert!(delay <= 400);
+
+        let nominal_ticks = 5;
+        assert_eq!(
+            sample_imu_feedback_sensors(
+                &mut world,
+                SimTime::from_ticks(nominal_ticks + delay - 1),
+                &mut bus,
+            )
+            .unwrap(),
+            0
+        );
+        sample_imu_feedback_sensors(
+            &mut world,
+            SimTime::from_ticks(nominal_ticks + delay),
+            &mut bus,
+        )
+        .unwrap();
+        let frame = bus
+            .latest::<ImuFeedback>(stream)
+            .expect("jittered IMU frame");
+        assert_eq!(frame.capture_time.ticks(), nominal_ticks + delay);
+        assert_eq!(frame.payload.scheduled_capture_ticks, nominal_ticks);
+        assert_eq!(frame.payload.sample_phase_error_ticks, delay);
+    }
+
+    #[test]
+    fn incremental_encoder_capture_advances_with_sampling_jitter() {
+        let (mut world, _, sensor, stream, mut bus) = incremental_encoder_fixture(
+            IncrementalEncoderFault::None,
+            IncrementalEncoderOverflowBehavior::Wrap,
+        );
+        world.entity_mut(sensor).insert(SensorSamplingJitter {
+            maximum_delay_ticks: 500,
+            seed: 11,
+        });
+        let period_ticks = 1_000_000_000;
+        let delay = sampling_jitter_delay_ticks(&world, sensor, 0, stream.0, 1, period_ticks);
+        assert!(delay <= 500);
+
+        let nominal_ticks = 5;
+        assert_eq!(
+            sample_incremental_encoder_sensors(
+                &mut world,
+                SimTime::from_ticks(nominal_ticks + delay - 1),
+                &mut bus,
+            )
+            .unwrap(),
+            0
+        );
+        sample_incremental_encoder_sensors(
+            &mut world,
+            SimTime::from_ticks(nominal_ticks + delay),
+            &mut bus,
+        )
+        .unwrap();
+        let frame = bus
+            .latest::<IncrementalEncoderFeedback>(stream)
+            .expect("jittered encoder frame");
+        assert_eq!(frame.capture_time.ticks(), nominal_ticks + delay);
+        assert_eq!(frame.payload.scheduled_capture_ticks, nominal_ticks);
+        assert_eq!(frame.payload.sample_phase_error_ticks, delay);
+    }
+
+    #[test]
+    fn joint_feedback_capture_advances_with_sampling_jitter() {
+        let (mut world, _, sensor, stream, mut bus) =
+            joint_feedback_fixture(JointFeedbackFault::None);
+        world.entity_mut(sensor).insert(SensorSamplingJitter {
+            maximum_delay_ticks: 400,
+            seed: 13,
+        });
+        let period_ticks = 1_000_000;
+        let delay = sampling_jitter_delay_ticks(&world, sensor, 0, stream.0, 1, period_ticks);
+        assert!(delay <= 400);
+
+        let nominal_ticks = 5;
+        assert_eq!(
+            sample_joint_feedback_sensors(
+                &mut world,
+                SimTime::from_ticks(nominal_ticks + delay - 1),
+                &mut bus,
+            )
+            .unwrap(),
+            0
+        );
+        sample_joint_feedback_sensors(
+            &mut world,
+            SimTime::from_ticks(nominal_ticks + delay),
+            &mut bus,
+        )
+        .unwrap();
+        let frame = bus
+            .latest::<JointFeedback>(stream)
+            .expect("jittered joint frame");
+        assert_eq!(frame.capture_time.ticks(), nominal_ticks + delay);
+        assert_eq!(frame.payload.scheduled_capture_ticks, nominal_ticks);
+        assert_eq!(frame.payload.sample_phase_error_ticks, delay);
+    }
+
+    #[test]
+    fn motor_feedback_capture_advances_with_sampling_jitter() {
+        let (mut world, _, sensor, stream, mut bus) =
+            motor_feedback_fixture(MotorElectricalFeedbackFault::None);
+        world.entity_mut(sensor).insert(SensorSamplingJitter {
+            maximum_delay_ticks: 9,
+            seed: 17,
+        });
+        let period_ticks = 10;
+        let delay = sampling_jitter_delay_ticks(&world, sensor, 0, stream.0, 1, period_ticks);
+        assert!(delay <= 9);
+
+        let nominal_ticks = 5;
+        assert_eq!(
+            sample_motor_electrical_feedback_sensors(
+                &mut world,
+                SimTime::from_ticks(nominal_ticks + delay - 1),
+                &mut bus,
+            )
+            .unwrap(),
+            0
+        );
+        sample_motor_electrical_feedback_sensors(
+            &mut world,
+            SimTime::from_ticks(nominal_ticks + delay),
+            &mut bus,
+        )
+        .unwrap();
+        let frame = bus
+            .latest::<MotorElectricalFeedback>(stream)
+            .expect("jittered motor frame");
+        assert_eq!(frame.capture_time.ticks(), nominal_ticks + delay);
+        assert_eq!(frame.payload.scheduled_capture_ticks, nominal_ticks);
+        assert_eq!(frame.payload.sample_phase_error_ticks, delay);
     }
 }

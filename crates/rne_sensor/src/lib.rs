@@ -25,7 +25,7 @@ pub use components::{
     JointFeedbackChannelSpec, JointFeedbackFault, JointFeedbackSensor, JointFeedbackSensorState,
     LidarMaterial, MotorElectricalFeedbackFault, MotorElectricalFeedbackSensor,
     MotorElectricalFeedbackSensorState, MotorElectricalFeedbackSpec, Sensor, SensorKind,
-    SensorState,
+    SensorSamplingJitter, SensorState,
 };
 pub use imu::{
     sample_imu, sample_imu_keyed, sample_imu_stateful, sample_imu_stateful_diagnostic,
