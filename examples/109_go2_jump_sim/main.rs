@@ -318,13 +318,15 @@ fn main() {
                 })
                 .map(|e| e.id());
             if let Some(e) = entity {
+                let body = sim.world().get::<rne_physics::RigidBody>(e);
                 println!(
-                    "  {name:9} fixed_joint={} revolute_joint={} multibody={}",
+                    "  {name:9} fixed_joint={} revolute_joint={} multibody={} body={:?}",
                     sim.world().get::<rne_physics::FixedJointDesc>(e).is_some(),
                     sim.world()
                         .get::<rne_physics::RevoluteJointDesc>(e)
                         .is_some(),
                     sim.world().get::<rne_physics::MultibodyLink>(e).is_some(),
+                    body.map(|b| b.body_type),
                 );
             }
         }
