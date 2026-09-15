@@ -564,6 +564,111 @@ pub fn link_motions(
     Ok(motions)
 }
 
+/// A point contact active during a dynamics step.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ContactSpec {
+    /// Link that owns the contact point.
+    pub link: rne_ecs::Entity,
+    /// Contact position in the link frame, in meters.
+    pub point_local_m: Vec3,
+}
+
+/// Contact compliance added to the constrained-dynamics KKT diagonal.
+///
+/// This keeps the system solvable when the active points are linearly
+/// dependent (several feet that do not independently constrain the body) at the
+/// cost of a small, bounded contact acceleration.
+pub const CONTACT_REGULARIZATION: f64 = 1.0e-9;
+
+/// Constrained forward dynamics with rigid point contacts.
+///
+/// Solves the KKT system
+///
+/// ```text
+/// [ M  -Jᵀ ] [ qdd ]   [ tau - h ]
+/// [ J   0  ] [  λ  ] = [ -Jdot qd ]
+/// ```
+///
+/// where the contact Jacobian `J` stacks the linear Jacobians of the active
+/// points and `-Jdot qd` is their bias acceleration. Returns the joint
+/// acceleration and the contact force (Lagrange multiplier) at each point, so
+/// the contacts neither accelerate nor separate.
+#[allow(clippy::needless_range_loop)]
+pub fn constrained_forward_dynamics(
+    model: &ArticulatedModel,
+    q: &[f64],
+    qd: &[f64],
+    tau: &[f64],
+    contacts: &[ContactSpec],
+) -> Result<(Vec<f64>, Vec<Vec3>), DynamicsError> {
+    validate(model, q, "q")?;
+    validate(model, qd, "qd")?;
+    validate(model, tau, "tau")?;
+    let nv = model.nv();
+    let nc = contacts.len();
+    let size = nv + 3 * nc;
+
+    let mass = mass_matrix(model, q)?;
+    let bias = non_linear_effects(model, q, qd)?;
+    let motions = link_motions(model, q, qd)?;
+
+    let mut jacobian = vec![vec![0.0; nv]; 3 * nc];
+    let mut contact_bias = vec![0.0; 3 * nc];
+    for (contact, spec) in contacts.iter().enumerate() {
+        let link_index = model
+            .kinematic
+            .link_index(spec.link)
+            .ok_or(DynamicsError::MissingDofOwner(contact))?;
+        let jac = frame_jacobian(model, q, spec.link, spec.point_local_m)?;
+        for row in 0..3 {
+            for column in 0..nv {
+                jacobian[3 * contact + row][column] = jac.get(row, column);
+            }
+        }
+        let point_bias = motions[link_index].point_bias_acceleration_m_s2(spec.point_local_m);
+        contact_bias[3 * contact] = point_bias.x;
+        contact_bias[3 * contact + 1] = point_bias.y;
+        contact_bias[3 * contact + 2] = point_bias.z;
+    }
+
+    let mut matrix = DenseMatrix::zeros(size, size);
+    let mut rhs = vec![0.0; size];
+    for row in 0..nv {
+        for column in 0..nv {
+            matrix.set(row, column, mass.get(row, column));
+        }
+        rhs[row] = tau[row] - bias[row];
+    }
+    for contact in 0..nc {
+        for component in 0..3 {
+            let row = 3 * contact + component;
+            for column in 0..nv {
+                let value = jacobian[row][column];
+                matrix.set(column, nv + row, -value);
+                matrix.set(nv + row, column, value);
+            }
+            // Contact compliance regularizes redundant contacts (for example
+            // several feet that do not independently constrain the body).
+            matrix.set(nv + row, nv + row, -CONTACT_REGULARIZATION);
+            rhs[nv + row] = -contact_bias[row];
+        }
+    }
+
+    let solution = matrix
+        .solve(&rhs)
+        .ok_or(DynamicsError::SingularMassMatrix)?;
+    let joint_acceleration = solution[..nv].to_vec();
+    let mut forces = Vec::with_capacity(nc);
+    for contact in 0..nc {
+        forces.push(Vec3::new(
+            solution[nv + 3 * contact],
+            solution[nv + 3 * contact + 1],
+            solution[nv + 3 * contact + 2],
+        ));
+    }
+    Ok((joint_acceleration, forces))
+}
+
 fn mat6_transpose(matrix: &Mat6) -> Mat6 {
     let mut out = mat6_zero();
     for row in 0..6 {
@@ -876,6 +981,50 @@ mod tests {
         let final_energy = energy(&q, &qd);
         let relative = ((final_energy - initial) / initial.abs()).abs();
         assert!(relative < 1.0e-6, "energy drift {relative}");
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn constrained_dynamics_keeps_contacts_stationary() {
+        let (world, robot) = floating_body_world(3.0, Vec3::ZERO, [0.1, 0.1, 0.1]);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let base = world
+            .get::<Robot>(robot)
+            .expect("robot component")
+            .base_link;
+        let contacts = [
+            ContactSpec {
+                link: base,
+                point_local_m: Vec3::new(0.1, -0.2, 0.0),
+            },
+            ContactSpec {
+                link: base,
+                point_local_m: Vec3::new(-0.1, -0.2, 0.0),
+            },
+        ];
+        let q = vec![0.0; 6];
+        let qd = vec![0.0; 6];
+        let tau = vec![0.0; 6];
+        let (qdd, forces) =
+            constrained_forward_dynamics(&model, &q, &qd, &tau, &contacts).expect("dynamics");
+        assert!(qdd.iter().all(|value| value.abs() < 1.0e-6));
+        let total_vertical: f64 = forces.iter().map(|force| force.y).sum();
+        assert_relative_eq!(total_vertical, 3.0 * 9.81, epsilon = 0.5);
+
+        let motions = link_motions(&model, &q, &qd).expect("motions");
+        for spec in &contacts {
+            let jac = frame_jacobian(&model, &q, spec.link, spec.point_local_m).expect("jacobian");
+            let link_index = model.kinematic.link_index(spec.link).expect("index");
+            let bias = motions[link_index].point_bias_acceleration_m_s2(spec.point_local_m);
+            let bias = [bias.x, bias.y, bias.z];
+            for row in 0..3 {
+                let acceleration: f64 = (0..6)
+                    .map(|column| jac.get(row, column) * qdd[column])
+                    .sum::<f64>()
+                    + bias[row];
+                assert!(acceleration.abs() < 1.0e-6, "contact accel {acceleration}");
+            }
+        }
     }
 
     #[test]
