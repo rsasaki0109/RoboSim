@@ -21,6 +21,14 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `weld_fixed_children` URDF articulation option. When enabled, links reachable
+  only through fixed joints (for example the Unitree Go2 foot and calf shells)
+  join the reduced-coordinate multibody instead of becoming free rigid bodies
+  that fall off the robot. It defaults to off for bit-identical legacy
+  behavior; the mass-matched jump robot opts in. With the flag on, the Go2 foot
+  frame matches the planner's URDF forward kinematics and the optimized jump
+  lifts off (0.144 m whole-body-control jump height) for the first time.
+
 - `rne_oc` control-limited DDP: `DdpConfig::control_lower`/`control_upper` project
   the feedforward onto the control box and zero the feedback on saturated
   coordinates. `examples/108_go2_jump_opt` now produces an

@@ -216,6 +216,11 @@ pub struct UrdfRobotAsset {
     /// non-identity joint `rpy` (e.g. SO101) must opt in.
     #[serde(default)]
     pub use_joint_origin_rpy: bool,
+    /// When true, links reachable only through fixed joints (for example a
+    /// foot welded to the calf) join the physics multibody instead of becoming
+    /// free rigid bodies. Defaults to false for bit-identical legacy behavior.
+    #[serde(default)]
+    pub weld_fixed_children: bool,
 }
 
 /// Unit-bearing passive-dynamics override for one URDF joint.
@@ -293,6 +298,7 @@ impl UrdfRobotAsset {
             base_body_type: self.base_body_type.into(),
             multibody: self.multibody,
             use_joint_origin_rpy: self.use_joint_origin_rpy,
+            weld_fixed_children: self.weld_fixed_children,
             ..UrdfArticulationConfig::default()
         }
     }

@@ -24,6 +24,16 @@ When `UrdfSpawnConfig.mesh_assets_root` is `None`, mesh `<collision>` elements a
 | `continuous` | yes | `Continuous` | revolute motor (no limits) |
 | `prismatic` | yes | `Prismatic` | `PrismaticJointDesc` + motor (linear limits parsed only) |
 
+### Fixed-only children in a multibody
+
+When `multibody = true`, `UrdfArticulationConfig::weld_fixed_children` controls
+links reachable **only** through fixed joints (for example the Unitree Go2 foot
+and calf shells). With the flag on (the asset default is off), those links join
+the reduced-coordinate multibody and their fixed joints are wired as welds, so
+the plant's link frames match the URDF forward kinematics. With the flag off
+they are left out of the articulation scope and become **free rigid bodies**
+that fall under gravity; assets must opt in explicitly.
+
 ### `<limit lower upper velocity effort>`
 
 Stored on `UrdfJoint.limit` as `UrdfJointLimit` (`lower`, `upper`, `max_velocity_rad_s`, `max_effort_nm`). Units follow URDF convention: radians / rad/s / N·m for revolute joints; meters / m/s / N for prismatic.
