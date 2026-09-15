@@ -1647,6 +1647,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "go2_jump_sim"
+version = "0.2.0"
+dependencies = [
+ "glam",
+ "rne_ai",
+ "rne_dynamics",
+ "rne_ecs",
+ "rne_math",
+ "rne_oc",
+ "rne_robot",
+ "rne_urdf_import",
+ "rne_world",
+]
+
+[[package]]
 name = "go2_learned_sprint"
 version = "0.3.0"
 dependencies = [
