@@ -25,20 +25,25 @@
 //! robot lands nose-first.** The pitch is not from the pose — a static crouch
 //! and a position-controlled push both stay level (tilt < 0.02 rad) — and the
 //! plan itself stays upright (`base_x` within 5 cm, `base_pitch` within 0.17
-//! rad). It is the whole-body center-of-mass task: while the four feet are
-//! planted it satisfies the planned center of mass with a pitched base, and
-//! `BaseAttitudeTask` (which only commands the base angular acceleration) has
-//! almost no authority against it — raising its weight from 1e4 to 1e8 changes
-//! the peak lean by less than 0.01 rad. Shrinking the jump hides the landing
-//! but not the pitch, so the taller plan is kept and the attitude formulation
-//! is the open problem.
+//! rad). It is **torque saturation**: the whole-body solve satisfies the
+//! commanded base angular acceleration (`qdd_base` equals the attitude target
+//! to two decimals) but the required torques exceed ±23.7 Nm
+//! (`torque_saturated=true`, a floating-base wrench residual of order 1e3 N),
+//! so the plant realizes a different acceleration and the base pitches.
+//! `BaseAttitudeTask` has no spare authority because the center-of-mass task
+//! already spends it: raising `angular_weight` from 1e4 to 1e8 moves the peak
+//! lean by less than 0.01 rad. The plan launches by extending the legs fast
+//! (thigh 0.80 -> 0.63, calf -1.44 -> -1.19 over five steps) and the joint
+//! torques to track that are at the actuator limit, so a position playback
+//! stays level but never leaves the ground. Making the solve torque-aware (a
+//! constrained whole-body QP) is the next step.
 //!
 //! The example still owns the **landing**: the flight plan ends near the apex,
 //! so it catches the touchdown with stiff position motors and settles into the
 //! stand (`landed=true`, end height 0.332 m, settled tilt 0.006 rad). The catch
 //! is open-loop and only holds a small jump, so the pitched 0.30 plan tumbles
-//! on touchdown. A closed-loop landing controller and a base-attitude task with
-//! real authority are the next steps.
+//! on touchdown. A torque-aware whole-body solve and a closed-loop landing
+//! controller are the next steps.
 //!
 //! The whole-body stance feed has one further subtlety: it must pass the
 //! *measured* joint velocities to the solver (feeding zeros over-drives the
