@@ -195,7 +195,7 @@ fn main() {
             .map(|prefix| {
                 let mut dofs = [0_usize; 3];
                 for (slot, suffix) in ["hip", "thigh", "calf"].iter().enumerate() {
-                    let name = format!("{}{}", &prefix[..2], format!("_{suffix}"));
+                    let name = format!("{}_{}", &prefix[..2], suffix);
                     dofs[slot] = joint_links
                         .iter()
                         .position(|candidate| candidate == &name)
