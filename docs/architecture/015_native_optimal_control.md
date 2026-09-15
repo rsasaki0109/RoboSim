@@ -32,7 +32,9 @@ The first slice owns:
   analogue);
 - a diagonal `QuadraticCost` with analytic derivatives, split into running and
   terminal parts;
-- `dynamics_derivatives`, central-difference Jacobians of the dynamics;
+- `dynamics_derivatives`, Richardson-extrapolated central-difference Jacobians
+  of the dynamics (`O(epsilon^4)` accuracy), which markedly improves the gradient
+  quality through contact-rich rollouts;
 - `solve`, a deterministic DDP with Levenberg–Marquardt regularization on the
   control Hessian and a backtracking line search that only accepts feasible
   rollouts that reduce the cost; setting `keep_gaps_open` switches it to an FDDP
@@ -83,16 +85,19 @@ external optimal-control/dynamics library.
   rollout and polishes with standard DDP, so the returned trajectory satisfies
   the dynamics to `1e-3`.
 - `examples/108_go2_jump_opt` optimizes a Unitree **Go2 jump** over a fixed
-  stance → flight contact sequence with FDDP: the floating base reaches a
-  **0.32 m apex**, ends at the target with near-zero velocity, keeps torques
-  within ±4.84 Nm, and satisfies the contact dynamics to machine precision.
+  crouch → push → flight contact sequence with per-phase action costs and FDDP:
+  the floating base reaches a **0.327 m apex**, ends at the target with
+  near-zero velocity, the joints stay in a natural range (`[-3.38, 1.59]` rad,
+  no winding), and the contact dynamics are satisfied to machine precision. The
+  unconstrained solve uses up to 57.5 Nm, so control-limit constraints are what
+  separate this plan from an actuator-realizable one.
 
 ## Limitations and follow-ups
 
-- **Conditioning of the jump.** With per-phase costs in place the solver still
-  does not converge a crouch-then-push jump from the standing pose when
-  dynamics derivatives are central differences; the search stalls with open
-  gaps. Analytical derivatives are the leading candidate to fix this.
+- **Control and state limits.** The jump now converges, but the unconstrained
+  solution demands ~57.5 Nm against a 23.7 Nm actuator. Box constraints
+  (Box-FDDP / control-limited DDP) are the next required tier for an
+  actuator-realizable plan.
 
 - **Search over contact sequences.** The phase schedule is still caller-provided;
   automatic contact-sequence discovery is not implemented.

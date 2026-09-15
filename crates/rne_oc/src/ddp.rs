@@ -259,7 +259,12 @@ pub struct DynamicsDerivatives {
     pub fu: Vec<Vec<f64>>,
 }
 
-/// Central-difference derivatives of the dynamics.
+/// Central-difference derivatives of the dynamics, Richardson-extrapolated.
+///
+/// Two central differences at steps `epsilon` and `2 epsilon` are combined as
+/// `(4 d1 - d2) / 3`, cancelling the leading `O(epsilon^2)` term and leaving
+/// `O(epsilon^4)` accuracy. This markedly improves the gradient quality through
+/// contact-rich rollouts at the cost of four dynamics evaluations per column.
 pub fn dynamics_derivatives(
     dynamics: &dyn ShootingDynamics,
     node: usize,
@@ -271,26 +276,39 @@ pub fn dynamics_derivatives(
     let nu = dynamics.control_dim();
     let mut fx = vec![vec![0.0; nx]; nx];
     let mut fu = vec![vec![0.0; nu]; nx];
+
+    let extrapolate = |d1: f64, d2: f64| (4.0 * d1 - d2) / 3.0;
+
     for column in 0..nx {
-        let mut plus = state.to_vec();
-        let mut minus = state.to_vec();
-        plus[column] += epsilon;
-        minus[column] -= epsilon;
-        let f_plus = dynamics.step_at(node, &plus, control)?;
-        let f_minus = dynamics.step_at(node, &minus, control)?;
+        let sample = |delta: f64| -> Result<Vec<f64>, OcError> {
+            let mut shifted = state.to_vec();
+            shifted[column] += delta;
+            dynamics.step_at(node, &shifted, control)
+        };
+        let plus1 = sample(epsilon)?;
+        let minus1 = sample(-epsilon)?;
+        let plus2 = sample(2.0 * epsilon)?;
+        let minus2 = sample(-2.0 * epsilon)?;
         for row in 0..nx {
-            fx[row][column] = (f_plus[row] - f_minus[row]) / (2.0 * epsilon);
+            let d1 = (plus1[row] - minus1[row]) / (2.0 * epsilon);
+            let d2 = (plus2[row] - minus2[row]) / (4.0 * epsilon);
+            fx[row][column] = extrapolate(d1, d2);
         }
     }
     for column in 0..nu {
-        let mut plus = control.to_vec();
-        let mut minus = control.to_vec();
-        plus[column] += epsilon;
-        minus[column] -= epsilon;
-        let f_plus = dynamics.step_at(node, state, &plus)?;
-        let f_minus = dynamics.step_at(node, state, &minus)?;
+        let sample = |delta: f64| -> Result<Vec<f64>, OcError> {
+            let mut shifted = control.to_vec();
+            shifted[column] += delta;
+            dynamics.step_at(node, state, &shifted)
+        };
+        let plus1 = sample(epsilon)?;
+        let minus1 = sample(-epsilon)?;
+        let plus2 = sample(2.0 * epsilon)?;
+        let minus2 = sample(-2.0 * epsilon)?;
         for row in 0..nx {
-            fu[row][column] = (f_plus[row] - f_minus[row]) / (2.0 * epsilon);
+            let d1 = (plus1[row] - minus1[row]) / (2.0 * epsilon);
+            let d2 = (plus2[row] - minus2[row]) / (4.0 * epsilon);
+            fu[row][column] = extrapolate(d1, d2);
         }
     }
     Ok(DynamicsDerivatives { fx, fu })
@@ -658,6 +676,30 @@ mod tests {
             }
         }
         assert!(max_gap < 1.0e-3, "unclosed gap {max_gap}");
+    }
+
+    struct SineDynamics;
+
+    impl DiscreteDynamics for SineDynamics {
+        fn state_dim(&self) -> usize {
+            1
+        }
+
+        fn control_dim(&self) -> usize {
+            1
+        }
+
+        fn step(&self, state: &[f64], control: &[f64]) -> Result<Vec<f64>, OcError> {
+            Ok(vec![state[0].sin() + control[0]])
+        }
+    }
+
+    #[test]
+    fn richardson_derivatives_match_analytic() {
+        let derivatives =
+            dynamics_derivatives(&SineDynamics, 0, &[0.7], &[0.3], 1.0e-4).expect("derivatives");
+        assert!((derivatives.fx[0][0] - 0.7_f64.cos()).abs() < 1.0e-9);
+        assert!((derivatives.fu[0][0] - 1.0).abs() < 1.0e-9);
     }
 
     #[test]

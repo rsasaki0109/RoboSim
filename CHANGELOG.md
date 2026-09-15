@@ -21,6 +21,12 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_oc` Richardson-extrapolated dynamics Jacobians (`O(epsilon^4)`), which
+  fixed the conditioning of the phased Go2 jump: `examples/108_go2_jump_opt` now
+  converges a crouch→push→flight jump reaching a 0.327 m apex with a feasible
+  (gap-free) trajectory and natural joint angles. The unconstrained solve uses
+  ~57.5 Nm, so control-limit constraints are the next requirement.
+
 - `rne_oc` action models: `CostModel` is now node-aware and `PhaseCostSchedule`
   gives each phase of a contact sequence its own quadratic running cost, the
   Crocoddyl action-model analogue. Controllers can pull toward a crouch during
