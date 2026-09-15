@@ -32,6 +32,12 @@ pub struct UrdfArticulationConfig {
     /// bit-identically; OnShape-style URDFs with non-identity joint `rpy`
     /// (e.g. SO101) must opt in.
     pub use_joint_origin_rpy: bool,
+    /// When true, links reachable only through fixed joints (for example a
+    /// foot welded to the calf) are pulled into the physics multibody and
+    /// welded to their parent. Defaults to false, which leaves them out of the
+    /// scope of reduced-coordinate multibody joints and turns them into free
+    /// rigid bodies.
+    pub weld_fixed_children: bool,
 }
 
 impl Default for UrdfArticulationConfig {
@@ -41,6 +47,7 @@ impl Default for UrdfArticulationConfig {
             motor_max_force: 50.0,
             multibody: false,
             use_joint_origin_rpy: false,
+            weld_fixed_children: false,
         }
     }
 }
@@ -93,7 +100,7 @@ fn attach_urdf_articulation_impl(
     config: UrdfArticulationConfig,
 ) -> Result<UrdfArticulationAttached, UrdfSpawnError> {
     let multibody_links = if config.multibody {
-        multibody_link_names(urdf, spawned)
+        multibody_link_names(urdf, spawned, config.weld_fixed_children)
     } else {
         HashSet::new()
     };
@@ -253,7 +260,11 @@ fn finite_or_default_allow_zero(value: f64, default: f64) -> f64 {
     }
 }
 
-fn multibody_link_names(urdf: &UrdfRobot, spawned: &SpawnedUrdfRobot) -> HashSet<String> {
+fn multibody_link_names(
+    urdf: &UrdfRobot,
+    spawned: &SpawnedUrdfRobot,
+    weld_fixed_children: bool,
+) -> HashSet<String> {
     let mut names: HashSet<String> = urdf
         .joints
         .iter()
@@ -282,22 +293,24 @@ fn multibody_link_names(urdf: &UrdfRobot, spawned: &SpawnedUrdfRobot) -> HashSet
             names.extend(parents);
             added = true;
         }
-        // Fixed-only children (for example a foot welded to the calf) must be
-        // included as well. Otherwise the wiring loop skips their joints and
-        // leaves them as free rigid bodies that fall off the robot.
-        let children: Vec<String> = urdf
-            .joints
-            .iter()
-            .filter(|joint| {
-                joint.joint_type == UrdfJointType::Fixed
-                    && names.contains(&joint.parent)
-                    && !names.contains(&joint.child)
-            })
-            .map(|joint| joint.child.clone())
-            .collect();
-        if !children.is_empty() {
-            names.extend(children);
-            added = true;
+        // Fixed-only children (for example a foot welded to the calf) are only
+        // meaningful as part of the tree when the asset opts in. Otherwise the
+        // wiring loop skips their joints and leaves them as free rigid bodies.
+        if weld_fixed_children {
+            let children: Vec<String> = urdf
+                .joints
+                .iter()
+                .filter(|joint| {
+                    joint.joint_type == UrdfJointType::Fixed
+                        && names.contains(&joint.parent)
+                        && !names.contains(&joint.child)
+                })
+                .map(|joint| joint.child.clone())
+                .collect();
+            if !children.is_empty() {
+                names.extend(children);
+                added = true;
+            }
         }
         if !added {
             break;
@@ -557,6 +570,7 @@ mod tests {
             &spawned,
             UrdfArticulationConfig {
                 multibody: true,
+                weld_fixed_children: true,
                 ..UrdfArticulationConfig::default()
             },
         )
