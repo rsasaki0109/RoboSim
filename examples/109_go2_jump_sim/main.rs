@@ -37,8 +37,10 @@
 //! versus the plan's 0.135 m even though the link inertias and total mass are
 //! identical), so the controller over-injected. Solving the WBC on the plan's
 //! own model with the simulator state now tracks the planned CoM closely, but
-//! the base still pitches over and does not launch, so attitude stabilization
-//! and the flight-phase controller remain the open work.
+//! the base still does not launch. Tracking the planned joint trajectory with
+//! position motors during flight keeps the base much more level (a 0.65 rad
+//! lean instead of a flip), so the remaining gap is purely the push: the
+//! simulator's stance never reaches the planned takeoff velocity.
 //!
 //! Run with `cargo run --release -p go2_jump_sim --example 109_go2_jump_sim`.
 
@@ -268,6 +270,9 @@ fn main() {
     if position_stance {
         sim.configure_position_motors(stance_kp, stance_kd, TORQUE_LIMIT_NM);
     }
+    if wbc_stance {
+        sim.configure_position_motors(POSITION_STIFFNESS, POSITION_DAMPING, TORQUE_LIMIT_NM);
+    }
     let horizon = CROUCH_STEPS + PUSH_STEPS + FLIGHT_STEPS;
     let phases = [
         ContactPhase {
@@ -392,6 +397,32 @@ fn main() {
             BASE_KP * (state[1] - actual_y) + BASE_KD * (state[nv + 1] - actual_vy);
         let per_foot_force = mass_kg * desired_acceleration / 4.0;
 
+        if wbc_stance && node >= CROUCH_STEPS + PUSH_STEPS {
+            let position_targets: Vec<UrdfJointPositionTarget<'_>> = joint_names
+                .iter()
+                .map(|name| UrdfJointPositionTarget {
+                    link_name: name.as_str(),
+                    position: state[6 + joint_names.iter().position(|n| n == name).unwrap_or(0)],
+                })
+                .collect();
+            sim.step_joint_position_targets(&position_targets);
+            apex_sim_y = apex_sim_y.max(sim.observe().base_y_m);
+            max_min_foot = max_min_foot.max(min_foot_height_m(&sim));
+            let pose = sim.named_transform("base").expect("base");
+            let up = (pose.rotation * up_reference).normalize_or_zero();
+            let tilt = up.y.clamp(-1.0, 1.0).acos();
+            max_tilt = max_tilt.max(tilt);
+            if trace {
+                println!(
+                    "  node {node:02}: base_y={:.4} plan_y={:.4} min_foot={:.4} tilt={:.3} (flight position)",
+                    sim.observe().base_y_m,
+                    state[1],
+                    min_foot_height_m(&sim),
+                    tilt,
+                );
+            }
+            continue;
+        }
         if wbc_stance && node < CROUCH_STEPS + PUSH_STEPS {
             let state_now = read_state(&sim, &model, &joint_names);
             let q = &state_now[..nv];
@@ -553,12 +584,15 @@ fn main() {
             })
             .collect();
         sim.step_joint_torques(&targets);
-        if trace && node < CROUCH_STEPS + PUSH_STEPS && node % 2 == 0 {
+        if trace {
+            let pose = sim.named_transform("base").expect("base");
+            let up = (pose.rotation * up_reference).normalize_or_zero();
             println!(
-                "  node {node:02}: base_y={:.4} plan_y={:.4} tau={:.1}",
+                "  node {node:02}: base_y={:.4} plan_y={:.4} min_foot={:.4} tilt={:.3} (torque)",
                 sim.observe().base_y_m,
                 state[1],
-                torque.iter().fold(0.0_f64, |m, v| m.max(v.abs())),
+                min_foot_height_m(&sim),
+                up.y.clamp(-1.0, 1.0).acos(),
             );
         }
         apex_sim_y = apex_sim_y.max(sim.observe().base_y_m);
