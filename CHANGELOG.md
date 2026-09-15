@@ -54,6 +54,10 @@ All notable changes to Robot Native Engine are documented in this file.
   shows the launch and the base attitude cannot both be served by the 23.7 Nm
   budget: the constrained optimum stays level but never leaves the ground.
 
+- `rne_wbc::PostureTask` optional `desired_joint_velocities` and
+  `desired_joint_accelerations`, so a posture task can track a reference
+  trajectory at the acceleration level instead of only holding a position.
+
 - `rne_oc::ActuatorLimitCost`: a cost-model wrapper that adds a differentiable
   hinge penalty on joint velocity limit violations, so a joint speed bound acts
   as a soft state constraint on top of the existing running/terminal cost.
