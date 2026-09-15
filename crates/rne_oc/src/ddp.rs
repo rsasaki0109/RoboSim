@@ -276,6 +276,8 @@ pub struct DdpConfig {
     pub line_search_steps: usize,
     /// Central-difference step.
     pub epsilon: f64,
+    /// Keep dynamics gaps open in the forward pass (FDDP-style infeasible warm start).
+    pub keep_gaps_open: bool,
 }
 
 impl Default for DdpConfig {
@@ -289,6 +291,7 @@ impl Default for DdpConfig {
             regularization_factor: 2.0,
             line_search_steps: 12,
             epsilon: 1.0e-6,
+            keep_gaps_open: false,
         }
     }
 }
@@ -409,6 +412,17 @@ pub fn solve(
             continue;
         }
 
+        let gaps: Vec<Vec<f64>> = if config.keep_gaps_open {
+            let mut gaps = Vec::with_capacity(horizon);
+            for k in 0..horizon {
+                let predicted = dynamics.step_at(k, &states[k], &controls[k])?;
+                gaps.push(vec_sub(&states[k + 1], &predicted));
+            }
+            gaps
+        } else {
+            Vec::new()
+        };
+
         let mut improved = false;
         for step in 0..config.line_search_steps {
             let alpha = 0.5_f64.powi(step as i32);
@@ -424,13 +438,16 @@ pub fn solve(
                     &mat_vec(&feedback[k], &dx),
                 );
                 let u = vec_add(&controls[k], &du);
-                let next = match dynamics.step_at(k, &candidate_states[k], &u) {
+                let mut next = match dynamics.step_at(k, &candidate_states[k], &u) {
                     Ok(next) => next,
                     Err(_) => {
                         valid = false;
                         break;
                     }
                 };
+                if config.keep_gaps_open {
+                    next = vec_add(&next, &vec_scale(&gaps[k], 1.0 - alpha));
+                }
                 candidate_cost += cost.running(&candidate_states[k], &u);
                 candidate_controls[k] = u;
                 candidate_states[k + 1] = next;
@@ -463,6 +480,20 @@ pub fn solve(
         if converged {
             break;
         }
+    }
+
+    // FDDP uses opened gaps as a warm start. Project the final controls onto a
+    // feasible rollout and polish with standard DDP so the returned trajectory
+    // satisfies the dynamics exactly at a local optimum.
+    if config.keep_gaps_open {
+        let mut feasible = vec![vec![0.0; nx]; horizon + 1];
+        feasible[0] = states[0].clone();
+        for k in 0..horizon {
+            feasible[k + 1] = dynamics.step_at(k, &feasible[k], &controls[k])?;
+        }
+        let mut polish = *config;
+        polish.keep_gaps_open = false;
+        return solve(dynamics, cost, &feasible, &controls, &polish);
     }
 
     Ok(DdpSolution {
@@ -524,6 +555,43 @@ mod tests {
         );
         assert!(final_velocity.abs() < 0.05, "velocity {final_velocity}");
         assert!(solution.cost < 0.01, "cost {}", solution.cost);
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn fddp_converges_from_an_infeasible_initial_trajectory() {
+        let dynamics = DoubleIntegrator { dt: 0.1 };
+        let mut cost = QuadraticCost::new(vec![0.01, 0.01], vec![0.001], vec![200.0, 20.0]);
+        cost.state_reference = vec![1.0, 0.0];
+        cost.running_scale = 0.1;
+        let horizon = 60;
+        let mut states = Vec::new();
+        for k in 0..=horizon {
+            let t = k as f64 / horizon as f64;
+            states.push(vec![t, 0.0]);
+        }
+        let controls = vec![vec![0.0]; horizon];
+        let config = DdpConfig {
+            max_iterations: 300,
+            keep_gaps_open: true,
+            ..DdpConfig::default()
+        };
+        let solution = solve(&dynamics, &cost, &states, &controls, &config).expect("solve");
+        let final_position = solution.states[horizon][0];
+        assert!(
+            (final_position - 1.0).abs() < 0.05,
+            "position {final_position}"
+        );
+        let mut max_gap: f64 = 0.0;
+        for k in 0..horizon {
+            let predicted = dynamics
+                .step(&solution.states[k], &solution.controls[k])
+                .expect("step");
+            for index in 0..2 {
+                max_gap = max_gap.max((solution.states[k + 1][index] - predicted[index]).abs());
+            }
+        }
+        assert!(max_gap < 1.0e-3, "unclosed gap {max_gap}");
     }
 
     #[test]

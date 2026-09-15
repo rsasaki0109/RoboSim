@@ -669,6 +669,80 @@ pub fn constrained_forward_dynamics(
     Ok((joint_acceleration, forces))
 }
 
+/// Impulsive reset of the joint velocities when new contacts are established.
+///
+/// Solves the impulse KKT system
+///
+/// ```text
+/// [ M  -Jᵀ ] [ qd⁺ ]   [ M qd⁻ ]
+/// [ J   0  ] [  Λ  ] = [   0    ]
+/// ```
+///
+/// where `J` stacks the linear Jacobians of the new contacts. Returns the
+/// post-impact velocity `qd⁺` (with the new contact points instantaneously at
+/// rest) and the impulse `Λ` at each point. The configuration is unchanged.
+#[allow(clippy::needless_range_loop)]
+pub fn impulse_velocity(
+    model: &ArticulatedModel,
+    q: &[f64],
+    qd_minus: &[f64],
+    contacts: &[ContactSpec],
+) -> Result<(Vec<f64>, Vec<Vec3>), DynamicsError> {
+    validate(model, q, "q")?;
+    validate(model, qd_minus, "qd")?;
+    let nv = model.nv();
+    let nc = contacts.len();
+    let size = nv + 3 * nc;
+
+    let mass = mass_matrix(model, q)?;
+
+    let mut jacobian = vec![vec![0.0; nv]; 3 * nc];
+    for (contact, spec) in contacts.iter().enumerate() {
+        let jac = frame_jacobian(model, q, spec.link, spec.point_local_m)?;
+        for row in 0..3 {
+            for column in 0..nv {
+                jacobian[3 * contact + row][column] = jac.get(row, column);
+            }
+        }
+    }
+
+    let mut matrix = DenseMatrix::zeros(size, size);
+    let mut rhs = vec![0.0; size];
+    for row in 0..nv {
+        for column in 0..nv {
+            matrix.set(row, column, mass.get(row, column));
+        }
+        rhs[row] = (0..nv)
+            .map(|column| mass.get(row, column) * qd_minus[column])
+            .sum();
+    }
+    for contact in 0..nc {
+        for component in 0..3 {
+            let row = 3 * contact + component;
+            for column in 0..nv {
+                let value = jacobian[row][column];
+                matrix.set(column, nv + row, -value);
+                matrix.set(nv + row, column, value);
+            }
+            matrix.set(nv + row, nv + row, -CONTACT_REGULARIZATION);
+        }
+    }
+
+    let solution = matrix
+        .solve(&rhs)
+        .ok_or(DynamicsError::SingularMassMatrix)?;
+    let post_impact = solution[..nv].to_vec();
+    let mut impulses = Vec::with_capacity(nc);
+    for contact in 0..nc {
+        impulses.push(Vec3::new(
+            solution[nv + 3 * contact],
+            solution[nv + 3 * contact + 1],
+            solution[nv + 3 * contact + 2],
+        ));
+    }
+    Ok((post_impact, impulses))
+}
+
 fn mat6_transpose(matrix: &Mat6) -> Mat6 {
     let mut out = mat6_zero();
     for row in 0..6 {
@@ -981,6 +1055,43 @@ mod tests {
         let final_energy = energy(&q, &qd);
         let relative = ((final_energy - initial) / initial.abs()).abs();
         assert!(relative < 1.0e-6, "energy drift {relative}");
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn impulse_velocity_stops_incoming_contacts() {
+        let (world, robot) = floating_body_world(3.0, Vec3::ZERO, [0.1, 0.1, 0.1]);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let base = world.get::<Robot>(robot).expect("robot").base_link;
+        let contacts = [
+            ContactSpec {
+                link: base,
+                point_local_m: Vec3::new(0.1, -0.2, 0.1),
+            },
+            ContactSpec {
+                link: base,
+                point_local_m: Vec3::new(0.1, -0.2, -0.1),
+            },
+            ContactSpec {
+                link: base,
+                point_local_m: Vec3::new(-0.1, -0.2, 0.0),
+            },
+        ];
+        let q = vec![0.0; 6];
+        let qd_minus = vec![0.0, -2.0, 0.0, 0.0, 0.0, 0.0];
+        let (qd_plus, impulses) =
+            impulse_velocity(&model, &q, &qd_minus, &contacts).expect("impulse");
+        assert!(qd_plus[1] > qd_minus[1], "downward velocity not arrested");
+        assert!(impulses.iter().all(|impulse| impulse.is_finite()));
+        for spec in &contacts {
+            let jac = frame_jacobian(&model, &q, spec.link, spec.point_local_m).expect("jacobian");
+            for row in 0..3 {
+                let velocity: f64 = (0..6)
+                    .map(|column| jac.get(row, column) * qd_plus[column])
+                    .sum();
+                assert!(velocity.abs() < 1.0e-6, "contact velocity {velocity}");
+            }
+        }
     }
 
     #[test]

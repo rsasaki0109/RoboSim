@@ -21,6 +21,14 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_dynamics` impulsive contact reset: `impulse_velocity` solves the impulse
+  KKT system to reset joint velocities when new contacts are established.
+  `rne_oc` gains an FDDP warm start (`DdpConfig::keep_gaps_open`) that opens
+  dynamics gaps early and then polishes with DDP from a feasible rollout, and
+  `ContactSequenceDynamics` now applies the impact reset automatically when a
+  phase adds contacts. Tests cover an infeasible-start FDDP solve and a
+  contact-point velocity arrest.
+
 - `rne_dynamics`: constrained forward dynamics with rigid point contacts.
   `constrained_forward_dynamics` solves the contact KKT system
   (mass matrix, contact Jacobians, and bias accelerations) so active points
