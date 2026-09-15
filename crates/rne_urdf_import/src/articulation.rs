@@ -269,16 +269,39 @@ fn multibody_link_names(urdf: &UrdfRobot, spawned: &SpawnedUrdfRobot) -> HashSet
     }
 
     loop {
+        let mut added = false;
+        // Parents of included links are pulled in so the articulation is a
+        // single connected tree rooted at the base.
         let parents: Vec<String> = urdf
             .joints
             .iter()
             .filter(|joint| names.contains(&joint.child) && !names.contains(&joint.parent))
             .map(|joint| joint.parent.clone())
             .collect();
-        if parents.is_empty() {
+        if !parents.is_empty() {
+            names.extend(parents);
+            added = true;
+        }
+        // Fixed-only children (for example a foot welded to the calf) must be
+        // included as well. Otherwise the wiring loop skips their joints and
+        // leaves them as free rigid bodies that fall off the robot.
+        let children: Vec<String> = urdf
+            .joints
+            .iter()
+            .filter(|joint| {
+                joint.joint_type == UrdfJointType::Fixed
+                    && names.contains(&joint.parent)
+                    && !names.contains(&joint.child)
+            })
+            .map(|joint| joint.child.clone())
+            .collect();
+        if !children.is_empty() {
+            names.extend(children);
+            added = true;
+        }
+        if !added {
             break;
         }
-        names.extend(parents);
     }
     names
 }
@@ -320,7 +343,8 @@ mod tests {
     use rne_core::SimDuration;
     use rne_math::Hertz;
     use rne_physics::{
-        Collider, FixedJointDesc, PhysicsBackend, PhysicsWorldDesc, PrismaticJointDesc,
+        Collider, FixedJointDesc, MultibodyLink, PhysicsBackend, PhysicsWorldDesc,
+        PrismaticJointDesc,
     };
     use rne_physics_rapier::{step_physics, RapierBackend};
     use rne_robot::JointKind;
@@ -511,6 +535,38 @@ mod tests {
         // mm_minimal_arm.urdf attaches gripper_base_link via a fixed joint; it must be
         // wired as a rigid weld (FixedJointDesc) instead of left as a free body.
         let gripper_base = spawned.links["gripper_base_link"];
+        assert!(world.get::<FixedJointDesc>(gripper_base).is_some());
+    }
+
+    #[test]
+    fn multibody_includes_fixed_only_children() {
+        let urdf = parse_urdf(FIXTURE).unwrap();
+        let mut world = World::new();
+        let spawned = spawn_urdf_robot_with_config(
+            &mut world,
+            &urdf,
+            UrdfSpawnConfig {
+                base_body_type: RigidBodyType::Fixed,
+                ..UrdfSpawnConfig::default()
+            },
+        )
+        .unwrap();
+        attach_urdf_articulation(
+            &mut world,
+            &urdf,
+            &spawned,
+            UrdfArticulationConfig {
+                multibody: true,
+                ..UrdfArticulationConfig::default()
+            },
+        )
+        .unwrap();
+
+        // `gripper_base_link` hangs off a fixed joint with no movable
+        // descendant. It must still join the multibody, otherwise the wiring
+        // loop skips its joint and leaves it a free body that falls away.
+        let gripper_base = spawned.links["gripper_base_link"];
+        assert!(world.get::<MultibodyLink>(gripper_base).is_some());
         assert!(world.get::<FixedJointDesc>(gripper_base).is_some());
     }
 
