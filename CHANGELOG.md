@@ -21,6 +21,11 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_oc` action models: `CostModel` is now node-aware and `PhaseCostSchedule`
+  gives each phase of a contact sequence its own quadratic running cost, the
+  Crocoddyl action-model analogue. Controllers can pull toward a crouch during
+  a loading phase and an apex during flight.
+
 - Declared-inertia Go2 jump scene (`assets/scenes/unitree_go2_jump.rne.scene.toml`)
   so the simulator and the optimal-control planner share the same masses, and
   `rne_oc` hardening: dynamics-derivative failures and the FDDP feasible-rollout

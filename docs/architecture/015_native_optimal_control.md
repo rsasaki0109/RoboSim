@@ -26,8 +26,10 @@ Add `rne_oc`, a backend-neutral optimal-control crate.
 
 The first slice owns:
 
-- `DiscreteDynamics` and `CostModel` traits for a shooting problem `x_{k+1} =
-  f(x_k, u_k)`;
+- `DiscreteDynamics`/`ShootingDynamics` and a **node-aware `CostModel`** for a
+  shooting problem `x_{k+1} = f(x_k, u_k)`, plus a `PhaseCostSchedule` that
+  gives each phase its own quadratic reference (the Crocoddyl action-model
+  analogue);
 - a diagonal `QuadraticCost` with analytic derivatives, split into running and
   terminal parts;
 - `dynamics_derivatives`, central-difference Jacobians of the dynamics;
@@ -86,6 +88,11 @@ external optimal-control/dynamics library.
   within ±4.84 Nm, and satisfies the contact dynamics to machine precision.
 
 ## Limitations and follow-ups
+
+- **Conditioning of the jump.** With per-phase costs in place the solver still
+  does not converge a crouch-then-push jump from the standing pose when
+  dynamics derivatives are central differences; the search stalls with open
+  gaps. Analytical derivatives are the leading candidate to fix this.
 
 - **Search over contact sequences.** The phase schedule is still caller-provided;
   automatic contact-sequence discovery is not implemented.
