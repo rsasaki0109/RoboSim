@@ -174,6 +174,8 @@ fn main() {
         max_iterations: 120,
         tolerance: 1.0e-8,
         keep_gaps_open: true,
+        control_lower: Some(vec![-23.7; control_dim]),
+        control_upper: Some(vec![23.7; control_dim]),
         ..DdpConfig::default()
     };
     println!("solving FDDP...");

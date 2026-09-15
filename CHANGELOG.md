@@ -21,6 +21,12 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_oc` control-limited DDP: `DdpConfig::control_lower`/`control_upper` project
+  the feedforward onto the control box and zero the feedback on saturated
+  coordinates. `examples/108_go2_jump_opt` now produces an
+  **actuator-realizable** Go2 jump: a 0.372 m apex with the torque saturated at
+  ±23.7 Nm, gap-free contact dynamics, and natural joint angles.
+
 - `rne_oc` Richardson-extrapolated dynamics Jacobians (`O(epsilon^4)`), which
   fixed the conditioning of the phased Go2 jump: `examples/108_go2_jump_opt` now
   converges a crouch→push→flight jump reaching a 0.327 m apex with a feasible
