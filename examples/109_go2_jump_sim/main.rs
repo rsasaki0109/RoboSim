@@ -19,24 +19,30 @@
 //!
 //! - torque + PD: apex 0.324 m, tilt 0.45 rad, feet skim but do not lift off
 //! - `--position-stance` (`--lookahead`): apex 0.402 m, jump 0.070 m, tilt 0.67
-//! - `--wbc-stance`: apex 0.425 m, jump 0.094 m (plan 0.175 m), tilt 0.64 rad
+//! - `--wbc-stance`: apex 0.438 m, jump 0.106 m (plan 0.250 m), tilt 0.73 rad
 //!
-//! Executing the whole maneuver also includes the **landing**: the flight plan
-//! ends near the apex, so the example catches the touchdown with stiff position
-//! motors and settles into the stand (`landed=true`, end height 0.332 m,
-//! settled tilt 0.006 rad). The catch is open-loop, so it only tolerates a
-//! small jump: the default `--apex 0.21` is the largest whole-body jump that
-//! still lands, and a taller plan pitches over on touchdown. A closed-loop
-//! landing controller is the next step.
+//! **The jump is not clean yet: the base pitches forward about 0.7 rad and the
+//! robot lands nose-first.** The pitch is not from the pose — a static crouch
+//! and a position-controlled push both stay level (tilt < 0.02 rad) — and the
+//! plan itself stays upright (`base_x` within 5 cm, `base_pitch` within 0.17
+//! rad). It is the whole-body center-of-mass task: while the four feet are
+//! planted it satisfies the planned center of mass with a pitched base, and
+//! `BaseAttitudeTask` (which only commands the base angular acceleration) has
+//! almost no authority against it — raising its weight from 1e4 to 1e8 changes
+//! the peak lean by less than 0.01 rad. Shrinking the jump hides the landing
+//! but not the pitch, so the taller plan is kept and the attitude formulation
+//! is the open problem.
 //!
-//! The whole-body stance feed has two subtleties. It must pass the *measured*
-//! joint velocities to the solver (feeding zeros over-drives the center of mass
-//! and inflates the apex while the base pitches far more), and its posture task
-//! must pull toward the *planned* joint angles, not the plant's current ones.
-//! The base attitude still pitches during the crouch: the `BaseAttitudeTask`
-//! only commands the base angular acceleration and is weak against the
-//! center-of-mass task, so a stronger base-attitude formulation (and
-//! re-optimizing the plan for the compliant contact) is the next step.
+//! The example still owns the **landing**: the flight plan ends near the apex,
+//! so it catches the touchdown with stiff position motors and settles into the
+//! stand (`landed=true`, end height 0.332 m, settled tilt 0.006 rad). The catch
+//! is open-loop and only holds a small jump, so the pitched 0.30 plan tumbles
+//! on touchdown. A closed-loop landing controller and a base-attitude task with
+//! real authority are the next steps.
+//!
+//! The whole-body stance feed has one further subtlety: it must pass the
+//! *measured* joint velocities to the solver (feeding zeros over-drives the
+//! center of mass and inflates the apex while the base pitches far more).
 //!
 //! `--vel-weight` wraps the planner cost in `rne_oc::ActuatorLimitCost`, a hinge
 //! penalty that keeps joint speeds near their URDF limits. The default plan
@@ -85,7 +91,7 @@ const STEP_TIME_S: f64 = 1.0 / 60.0;
 const CROUCH_STEPS: usize = 15;
 const PUSH_STEPS: usize = 10;
 const FLIGHT_STEPS: usize = 15;
-const TARGET_APEX_M: f64 = 0.21;
+const TARGET_APEX_M: f64 = 0.30;
 
 const SETTLE_STEPS: u64 = 240;
 const POSITION_STIFFNESS: f64 = 420.0;
@@ -242,6 +248,9 @@ fn main() {
     let com_ff = argument_value("--com-ff")
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(WBC_COM_FF);
+    let posture_weight = argument_value("--posture-weight")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(WholeBodyConfig::default().posture_weight);
     let angular_weight = argument_value("--att-weight")
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(WholeBodyConfig::default().angular_weight);
@@ -521,6 +530,7 @@ fn main() {
     };
     let wbc_controller = WholeBodyController::new(WholeBodyConfig {
         com_weight: 1.0e5,
+        posture_weight,
         angular_weight,
         torque_limits_nm: Some(vec![TORQUE_LIMIT_NM; control_dim]),
         ..WholeBodyConfig::default()
