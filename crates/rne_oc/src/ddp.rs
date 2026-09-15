@@ -33,6 +33,34 @@ pub trait DiscreteDynamics {
     fn step(&self, state: &[f64], control: &[f64]) -> Result<Vec<f64>, OcError>;
 }
 
+/// A node-dependent dynamics model for a shooting problem.
+///
+/// Time-invariant [`DiscreteDynamics`] implement this through a blanket impl;
+/// contact sequences implement it directly so the active contact set can change
+/// along the horizon.
+pub trait ShootingDynamics {
+    /// State dimension.
+    fn state_dim(&self) -> usize;
+    /// Control dimension.
+    fn control_dim(&self) -> usize;
+    /// Advances the state at node `node` by one step.
+    fn step_at(&self, node: usize, state: &[f64], control: &[f64]) -> Result<Vec<f64>, OcError>;
+}
+
+impl<T: DiscreteDynamics + ?Sized> ShootingDynamics for T {
+    fn state_dim(&self) -> usize {
+        DiscreteDynamics::state_dim(self)
+    }
+
+    fn control_dim(&self) -> usize {
+        DiscreteDynamics::control_dim(self)
+    }
+
+    fn step_at(&self, _node: usize, state: &[f64], control: &[f64]) -> Result<Vec<f64>, OcError> {
+        self.step(state, control)
+    }
+}
+
 /// Derivatives of a running cost.
 #[derive(Clone, Debug)]
 pub struct CostDerivatives {
@@ -194,7 +222,8 @@ pub struct DynamicsDerivatives {
 
 /// Central-difference derivatives of the dynamics.
 pub fn dynamics_derivatives(
-    dynamics: &dyn DiscreteDynamics,
+    dynamics: &dyn ShootingDynamics,
+    node: usize,
     state: &[f64],
     control: &[f64],
     epsilon: f64,
@@ -208,8 +237,8 @@ pub fn dynamics_derivatives(
         let mut minus = state.to_vec();
         plus[column] += epsilon;
         minus[column] -= epsilon;
-        let f_plus = dynamics.step(&plus, control)?;
-        let f_minus = dynamics.step(&minus, control)?;
+        let f_plus = dynamics.step_at(node, &plus, control)?;
+        let f_minus = dynamics.step_at(node, &minus, control)?;
         for row in 0..nx {
             fx[row][column] = (f_plus[row] - f_minus[row]) / (2.0 * epsilon);
         }
@@ -219,8 +248,8 @@ pub fn dynamics_derivatives(
         let mut minus = control.to_vec();
         plus[column] += epsilon;
         minus[column] -= epsilon;
-        let f_plus = dynamics.step(state, &plus)?;
-        let f_minus = dynamics.step(state, &minus)?;
+        let f_plus = dynamics.step_at(node, state, &plus)?;
+        let f_minus = dynamics.step_at(node, state, &minus)?;
         for row in 0..nx {
             fu[row][column] = (f_plus[row] - f_minus[row]) / (2.0 * epsilon);
         }
@@ -297,7 +326,7 @@ fn vec_neg(a: &[f64]) -> Vec<f64> {
 
 /// Solves the shooting problem with differential dynamic programming.
 pub fn solve(
-    dynamics: &dyn DiscreteDynamics,
+    dynamics: &dyn ShootingDynamics,
     cost: &dyn CostModel,
     initial_states: &[Vec<f64>],
     initial_controls: &[Vec<f64>],
@@ -338,7 +367,7 @@ pub fn solve(
 
         for k in (0..horizon).rev() {
             let derivatives =
-                dynamics_derivatives(dynamics, &states[k], &controls[k], config.epsilon)?;
+                dynamics_derivatives(dynamics, k, &states[k], &controls[k], config.epsilon)?;
             let fx = derivatives.fx;
             let fu = derivatives.fu;
             let derivative = cost.running_derivatives(&states[k], &controls[k]);
@@ -395,7 +424,7 @@ pub fn solve(
                     &mat_vec(&feedback[k], &dx),
                 );
                 let u = vec_add(&controls[k], &du);
-                let next = match dynamics.step(&candidate_states[k], &u) {
+                let next = match dynamics.step_at(k, &candidate_states[k], &u) {
                     Ok(next) => next,
                     Err(_) => {
                         valid = false;

@@ -14,11 +14,14 @@
 #![deny(missing_docs)]
 
 pub mod articulated;
+pub mod constrained;
 pub mod ddp;
 pub mod matrix;
 
 pub use articulated::ArticulatedDynamics;
+pub use constrained::{ConstrainedArticulatedDynamics, ContactPhase, ContactSequenceDynamics};
 pub use ddp::{
     dynamics_derivatives, solve, CostDerivatives, CostModel, DdpConfig, DdpSolution,
-    DiscreteDynamics, DynamicsDerivatives, OcError, QuadraticCost, TerminalDerivatives,
+    DiscreteDynamics, DynamicsDerivatives, OcError, QuadraticCost, ShootingDynamics,
+    TerminalDerivatives,
 };
