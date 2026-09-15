@@ -1,19 +1,19 @@
 //! Optimizes a Unitree Go2 jump over a fixed contact sequence with the native
-//! FDDP solver.
+//! FDDP solver and Crocoddyl-style per-phase action costs.
 //!
-//! The sequence is stance (four feet) followed by flight (no contacts); the
-//! terminal cost asks for a high base with small velocity, so the optimizer
-//! must find a push-off that launches the floating base to the target apex.
-//! Contact dynamics come from `rne_dynamics::constrained_forward_dynamics` and
-//! the solve uses the FDDP warm start in `rne_oc`.
+//! The sequence is crouch (four feet) -> push (four feet) -> flight (no
+//! contacts). Each phase has its own quadratic reference: the crouch phase
+//! loads the legs, the push phase extends them, and the terminal cost asks for
+//! a target apex with small velocity.
 //!
-//! Run with `cargo run -p go2_jump_opt --example 108_go2_jump_opt`.
+//! Run with `cargo run --release -p go2_jump_opt --example 108_go2_jump_opt`.
 
 use rne_dynamics::{ArticulatedModel, ContactSpec};
 use rne_ecs::World;
-use rne_math::Vec3;
+use rne_math::{Quat, Vec3};
 use rne_oc::{
-    solve, ContactPhase, ContactSequenceDynamics, DdpConfig, QuadraticCost, ShootingDynamics,
+    solve, ContactPhase, ContactSequenceDynamics, DdpConfig, PhaseCostSchedule, QuadraticCost,
+    ShootingDynamics,
 };
 use rne_robot::{FloatingBase, Transform3};
 
@@ -23,10 +23,11 @@ const SOLE_OFFSET_LOCAL_M: Vec3 = Vec3::new(0.0, 0.0, -0.02);
 const FOOT_LINKS: [&str; 4] = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"];
 
 const STEP_TIME_S: f64 = 0.02;
-const STANCE_STEPS: usize = 15;
+const CROUCH_STEPS: usize = 12;
+const PUSH_STEPS: usize = 8;
 const FLIGHT_STEPS: usize = 25;
 const BASE_START_Y_M: f64 = 0.25;
-const TARGET_APEX_Y_M: f64 = 0.55;
+const TARGET_APEX_Y_M: f64 = 0.40;
 
 fn dof_joint_names(model: &ArticulatedModel) -> Vec<String> {
     model
@@ -55,6 +56,16 @@ fn stand_angle(link: &str) -> f64 {
     }
 }
 
+fn crouch_angle(link: &str) -> f64 {
+    if link.ends_with("thigh") {
+        1.15
+    } else if link.ends_with("calf") {
+        -2.05
+    } else {
+        0.0
+    }
+}
+
 fn main() {
     let document = rne_urdf_import::parse_urdf_document(GO2_URDF).expect("parse Go2 URDF");
     let mut world = World::new();
@@ -70,7 +81,7 @@ fn main() {
     world.entity_mut(spawned.base_link).insert((
         Transform3::from_translation_rotation(
             Vec3::ZERO,
-            rne_math::Quat::from_rotation_x(BASE_ROTATION_X_RAD),
+            Quat::from_rotation_x(BASE_ROTATION_X_RAD),
         ),
         FloatingBase,
     ));
@@ -79,18 +90,12 @@ fn main() {
     let control_dim = nv - model.base_dof();
     let joint_names = dof_joint_names(&model);
 
-    // Initial standing configuration.
     let mut initial = vec![0.0; 2 * nv];
     initial[1] = BASE_START_Y_M;
     for (dof, name) in joint_names.iter().enumerate() {
         initial[6 + dof] = stand_angle(name);
     }
-    println!(
-        "go2 jump: nv={nv} control_dim={control_dim} horizon={}",
-        STANCE_STEPS + FLIGHT_STEPS
-    );
 
-    // Fixed contact sequence: stance, then flight.
     let contacts: Vec<ContactSpec> = FOOT_LINKS
         .iter()
         .filter_map(|name| {
@@ -103,11 +108,17 @@ fn main() {
                 })
         })
         .collect();
-    println!("contacts={}", contacts.len());
+    let horizon = CROUCH_STEPS + PUSH_STEPS + FLIGHT_STEPS;
+    println!("go2 jump: nv={nv} control_dim={control_dim} horizon={horizon}");
+
     let phases = [
         ContactPhase {
             contacts: contacts.clone(),
-            steps: STANCE_STEPS,
+            steps: CROUCH_STEPS,
+        },
+        ContactPhase {
+            contacts: contacts.clone(),
+            steps: PUSH_STEPS,
         },
         ContactPhase {
             contacts: Vec::new(),
@@ -116,40 +127,65 @@ fn main() {
     ];
     let dynamics = ContactSequenceDynamics::new(&model, STEP_TIME_S, &phases);
 
-    // Cost: small control effort, terminal base height and velocity.
-    let state_weights = vec![0.0; 2 * nv];
-    let control_weights = vec![1.0e-2; control_dim];
-    let mut terminal_weights = vec![0.0; 2 * nv];
-    terminal_weights[1] = 1.0e3;
-    for dof in 0..nv {
-        terminal_weights[nv + dof] = 20.0;
+    let control_weights = vec![1.0e-3; control_dim];
+    let zero = vec![0.0; 2 * nv];
+    let mut running = Vec::with_capacity(horizon);
+    for node in 0..horizon {
+        let mut weights = vec![0.0; 2 * nv];
+        let mut reference = vec![0.0; 2 * nv];
+        if node < CROUCH_STEPS {
+            weights[1] = 200.0;
+            reference[1] = BASE_START_Y_M - 0.09;
+        }
+        for (dof, name) in joint_names.iter().enumerate() {
+            if node < CROUCH_STEPS {
+                weights[6 + dof] = 5.0;
+                reference[6 + dof] = crouch_angle(name);
+            } else {
+                weights[6 + dof] = 2.0;
+                reference[6 + dof] = stand_angle(name);
+            }
+        }
+        let mut cost = QuadraticCost::new(weights, control_weights.clone(), zero.clone());
+        cost.state_reference = reference;
+        cost.running_scale = 1.0;
+        running.push(cost);
     }
-    let mut cost = QuadraticCost::new(state_weights.clone(), control_weights, terminal_weights);
-    let mut reference = vec![0.0; 2 * nv];
-    reference[1] = TARGET_APEX_Y_M;
-    cost.state_reference = reference;
-    cost.running_scale = STEP_TIME_S;
+    let mut terminal_weights = vec![0.0; 2 * nv];
+    terminal_weights[1] = 2.0e3;
+    for dof in 0..nv {
+        terminal_weights[nv + dof] = 50.0;
+    }
+    let mut terminal = QuadraticCost::new(zero.clone(), vec![0.0; control_dim], terminal_weights);
+    let mut terminal_reference = vec![0.0; 2 * nv];
+    terminal_reference[1] = TARGET_APEX_Y_M;
+    terminal.state_reference = terminal_reference;
+    let cost = PhaseCostSchedule { running, terminal };
 
-    // Infeasible warm start: hold the initial state with zero controls.
-    let states = vec![initial.clone(); STANCE_STEPS + FLIGHT_STEPS + 1];
-    let controls = vec![vec![0.0; control_dim]; STANCE_STEPS + FLIGHT_STEPS];
+    let mut crouch = initial.clone();
+    crouch[1] = BASE_START_Y_M - 0.09;
+    for (dof, name) in joint_names.iter().enumerate() {
+        crouch[6 + dof] = crouch_angle(name);
+    }
+    let mut states = vec![crouch; horizon + 1];
+    states[0] = initial.clone();
+    let controls = vec![vec![0.0; control_dim]; horizon];
     let config = DdpConfig {
         max_iterations: 120,
-        tolerance: 1.0e-7,
+        tolerance: 1.0e-8,
         keep_gaps_open: true,
         ..DdpConfig::default()
     };
     println!("solving FDDP...");
     let solution = solve(&dynamics, &cost, &states, &controls, &config).expect("solve");
 
-    let mut apex_y = f64::MIN;
-    for state in &solution.states {
-        apex_y = apex_y.max(state[1]);
-    }
+    let apex_y = solution
+        .states
+        .iter()
+        .fold(f64::MIN, |maximum, state| maximum.max(state[1]));
     let final_y = solution.states.last().expect("states")[1];
-    // Feasibility: the dynamics gaps must be closed.
     let mut max_gap = 0.0_f64;
-    for node in 0..STANCE_STEPS + FLIGHT_STEPS {
+    for node in 0..horizon {
         let predicted = dynamics
             .step_at(node, &solution.states[node], &solution.controls[node])
             .expect("step");
@@ -162,13 +198,18 @@ fn main() {
         .iter()
         .flatten()
         .fold(0.0_f64, |maximum, value| maximum.max(value.abs()));
-
+    let mut joint_min = f64::MAX;
+    let mut joint_max = f64::MIN;
+    for state in &solution.states {
+        for dof in 0..control_dim {
+            joint_min = joint_min.min(state[6 + dof]);
+            joint_max = joint_max.max(state[6 + dof]);
+        }
+    }
     println!(
-        "cost={:.4} apex_y={apex_y:.3} final_y={final_y:.3} max_gap={max_gap:.2e} max_torque={max_torque:.2} Nm iterations={}",
-        solution.cost, solution.iterations
-    );
-    println!(
-        "jump_height_above_start={:.3} m (target apex {TARGET_APEX_Y_M:.2})",
-        apex_y - BASE_START_Y_M
+        "cost={:.4} apex_y={apex_y:.3} final_y={final_y:.3} jump={:.3} max_gap={max_gap:.2e} max_torque={max_torque:.2} joints=[{joint_min:.2},{joint_max:.2}] iterations={}",
+        solution.cost,
+        apex_y - BASE_START_Y_M,
+        solution.iterations,
     );
 }
