@@ -40,10 +40,16 @@
 //! `--att-weight` (base attitude), `--apex` (plan target), `--vel-weight`,
 //! `--kp`/`--kd`/`--lookahead` (position stance).
 //!
+//! `--gif` renders the live jump to `docs/media/go2-jump.gif`: the frames come
+//! from the same headless simulation the metrics report, so the GIF shows the
+//! real jump (requires a GPU; set `RNE_SKIP_GPU` to skip the capture).
+//!
 //! Run with `cargo run --release -p go2_jump_sim --example 109_go2_jump_sim`.
 
 use glam::EulerRot;
-use rne_ai::{UrdfJointPositionTarget, UrdfJointTorqueTarget, UrdfSceneSim};
+use rne_ai::{
+    build_visual_render_scene, UrdfJointPositionTarget, UrdfJointTorqueTarget, UrdfSceneSim,
+};
 use rne_dynamics::{center_of_mass, ArticulatedModel, ContactSpec};
 use rne_ecs::World;
 use rne_math::{Quat, Vec3};
@@ -51,10 +57,15 @@ use rne_oc::{
     solve, ActuatorLimitCost, ContactPhase, ContactSequenceDynamics, DdpConfig, PhaseCostSchedule,
     QuadraticCost,
 };
+use rne_render::{
+    Camera, MeshRenderCache, RenderBackend, RenderScene, RenderSceneItem, VisualShape,
+};
+use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 use rne_robot::{FloatingBase, KinematicModel, Robot, Transform3};
 use rne_wbc::{
     BaseAttitudeTask, ComTask, ContactPoint, PostureTask, WholeBodyConfig, WholeBodyController,
 };
+use std::path::{Path, PathBuf};
 
 const GO2_URDF: &str = include_str!("../../assets/robots/go2_description/go2_description.rne.urdf");
 const BASE_ROTATION_X_RAD: f64 = -std::f64::consts::FRAC_PI_2;
@@ -82,6 +93,14 @@ const WBC_COM_FF: f64 = 2.0;
 const WBC_ATTITUDE_KP: f64 = -40.0;
 const WBC_ATTITUDE_KD: f64 = 8.0;
 const ACTUATOR_VELOCITY_WEIGHT: f64 = 5.0;
+
+/// GIF capture frame size in pixels.
+const GIF_WIDTH: u32 = 560;
+const GIF_HEIGHT: u32 = 600;
+/// Background color for captured GIF frames.
+const GIF_CLEAR_COLOR: [f32; 4] = [0.035, 0.05, 0.08, 1.0];
+/// Settle frames captured as a lead-in.
+const GIF_LEAD_IN_FRAMES: u64 = 12;
 
 fn dof_joint_names(model: &ArticulatedModel) -> Vec<String> {
     model
@@ -173,6 +192,7 @@ fn min_foot_height_m(sim: &UrdfSceneSim) -> f64 {
 fn main() {
     let model = build_model();
     let trace = std::env::args().any(|argument| argument == "--trace");
+    let gif = std::env::args().any(|argument| argument == "--gif");
     let position_stance = std::env::args().any(|argument| argument == "--position-stance");
     let wbc_stance = std::env::args().any(|argument| argument == "--wbc-stance");
     let stance_kp = argument_value("--kp")
@@ -235,9 +255,31 @@ fn main() {
             position: stand_angle(name),
         })
         .collect();
-    for _ in 0..SETTLE_STEPS {
+    let mut capture = if gif {
+        if std::env::var("RNE_SKIP_GPU").is_ok() {
+            None
+        } else {
+            Some(GifCapture::new(&sim))
+        }
+    } else {
+        None
+    };
+    for step in 0..SETTLE_STEPS {
         sim.step_joint_position_targets(&stand);
+        if let Some(capture) = capture.as_mut() {
+            if step + GIF_LEAD_IN_FRAMES >= SETTLE_STEPS {
+                capture.capture(&sim);
+            }
+        }
     }
+    macro_rules! capture_frame {
+        () => {
+            if let Some(capture) = capture.as_mut() {
+                capture.capture(&sim);
+            }
+        };
+    }
+
     let initial = read_state(&sim, &model, &joint_names);
     let start_y = initial[1];
     println!("stand base_y={start_y:.3} m");
@@ -507,6 +549,7 @@ fn main() {
                     tilt,
                 );
             }
+            capture_frame!();
             continue;
         }
         if wbc_stance && node < CROUCH_STEPS + PUSH_STEPS {
@@ -591,6 +634,7 @@ fn main() {
             let pose = sim.named_transform("base").expect("base");
             let up = (pose.rotation * up_reference).normalize_or_zero();
             max_tilt = max_tilt.max(up.y.clamp(-1.0, 1.0).acos());
+            capture_frame!();
             continue;
         }
 
@@ -644,6 +688,7 @@ fn main() {
             let pose = sim.named_transform("base").expect("base");
             let up = (pose.rotation * up_reference).normalize_or_zero();
             max_tilt = max_tilt.max(up.y.clamp(-1.0, 1.0).acos());
+            capture_frame!();
             continue;
         }
         let targets: Vec<UrdfJointTorqueTarget<'_>> = sim_joint_links
@@ -689,6 +734,22 @@ fn main() {
         let pose = sim.named_transform("base").expect("base");
         let up = (pose.rotation * up_reference).normalize_or_zero();
         max_tilt = max_tilt.max(up.y.clamp(-1.0, 1.0).acos());
+        capture_frame!();
+    }
+    // Hold the landed pose for a few frames so the GIF does not cut off.
+    if let Some(capture) = capture.as_mut() {
+        let hold: Vec<UrdfJointPositionTarget<'_>> = joint_names
+            .iter()
+            .map(|name| UrdfJointPositionTarget {
+                link_name: name.as_str(),
+                position: sim.named_joint_position(name).unwrap_or(0.0),
+            })
+            .collect();
+        for _ in 0..18 {
+            sim.step_joint_position_targets(&hold);
+            capture.capture(&sim);
+        }
+        capture.encode();
     }
     println!(
         "execute: apex_y={apex_sim_y:.3} height={:.3} max_min_foot={max_min_foot:.3} liftoff={} max_tilt={max_tilt:.3}",
@@ -703,4 +764,146 @@ fn argument_value(flag: &str) -> Option<String> {
         .iter()
         .position(|argument| argument == flag)
         .and_then(|index| arguments.get(index + 1).cloned())
+}
+
+/// Renders the live jump simulation to `docs/media/go2-jump.gif`.
+///
+/// The frames come from the same headless simulation the metrics report, so the
+/// GIF shows the real jump and not a replayed or scripted sequence.
+struct GifCapture {
+    backend: WgpuRenderBackend,
+    camera: Camera,
+    mesh_cache: MeshRenderCache,
+    mesh_roots: Vec<PathBuf>,
+    frames_dir: PathBuf,
+    frame: usize,
+}
+
+impl GifCapture {
+    fn new(sim: &UrdfSceneSim) -> Self {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let frames_dir = repo_root.join("docs/media/go2-jump-frames");
+        let _ = std::fs::remove_dir_all(&frames_dir);
+        std::fs::create_dir_all(&frames_dir).expect("create jump frame directory");
+        let backend = WgpuRenderBackend::new().expect("initialize wgpu");
+        let camera = Camera::new(GIF_WIDTH, GIF_HEIGHT, std::f64::consts::FRAC_PI_4);
+        Self {
+            backend,
+            camera,
+            mesh_cache: MeshRenderCache::new(),
+            mesh_roots: sim.mesh_package_roots().to_vec(),
+            frames_dir,
+            frame: 0,
+        }
+    }
+
+    fn capture(&mut self, sim: &UrdfSceneSim) {
+        let mesh_refs: Vec<&Path> = self.mesh_roots.iter().map(PathBuf::as_path).collect();
+        let mut scene = build_visual_render_scene(sim.world());
+        scene
+            .items
+            .retain(|item| !matches!(item.shape, VisualShape::Box { .. }));
+        let observed = sim.observe();
+        append_checker_floor(&mut scene, observed.base_x_m, observed.base_z_m, 0.18);
+        self.mesh_cache
+            .resolve_scene(&mut scene, &mesh_refs)
+            .expect("resolve official Go2 meshes");
+        let orbit = CameraOrbit {
+            focus: Vec3::new(
+                observed.base_x_m,
+                (observed.base_y_m - 0.08).max(0.05),
+                observed.base_z_m,
+            ),
+            yaw_rad: -1.25,
+            pitch_rad: 1.02,
+            distance_m: 2.3,
+        };
+        let output = self
+            .backend
+            .render_scene_camera(
+                &self.camera,
+                &orbit.camera_transform(),
+                &scene,
+                GIF_CLEAR_COLOR,
+            )
+            .expect("render jump frame");
+        write_png(
+            &self.frames_dir.join(format!("frame-{:03}.png", self.frame)),
+            &output.color.rgba8,
+            GIF_WIDTH,
+            GIF_HEIGHT,
+        )
+        .expect("write jump frame");
+        self.frame += 1;
+    }
+
+    fn encode(&self) {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let gif_path = repo_root.join("docs/media/go2-jump.gif");
+        build_gif(&self.frames_dir, &gif_path).expect("encode jump gif");
+        let _ = std::fs::remove_dir_all(&self.frames_dir);
+        println!(
+            "rendered jump media to {} ({} frames)",
+            gif_path.display(),
+            self.frame
+        );
+    }
+}
+
+fn append_checker_floor(scene: &mut RenderScene, center_x_m: f64, center_z_m: f64, tile_m: f64) {
+    let snap = |value: f64| (value / (2.0 * tile_m)).floor() * 2.0 * tile_m;
+    for row in -10..=10 {
+        for column in -10..=10 {
+            let color = if (row + column) & 1 == 0 {
+                [0.11, 0.15, 0.21, 1.0]
+            } else {
+                [0.055, 0.075, 0.11, 1.0]
+            };
+            scene.items.push(RenderSceneItem {
+                transform: rne_math::Transform3 {
+                    translation: Vec3::new(
+                        snap(center_x_m) + column as f64 * tile_m,
+                        -0.008,
+                        snap(center_z_m) + row as f64 * tile_m,
+                    ),
+                    rotation: Quat::IDENTITY,
+                    scale: Vec3::new(tile_m * 0.96, 0.008, tile_m * 0.96),
+                },
+                shape: VisualShape::Box { size_m: Vec3::ONE },
+                color_rgba: color,
+                mesh: None,
+                base_color_texture: None,
+                material: Default::default(),
+            });
+        }
+    }
+}
+
+fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
+    let status = std::process::Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-framerate",
+            "12",
+            "-i",
+            &frames_dir.join("frame-%03d.png").to_string_lossy(),
+            "-vf",
+            "fps=12,scale=560:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=160[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3",
+            &gif_path.to_string_lossy(),
+        ])
+        .status()?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| std::io::Error::other("ffmpeg jump gif encode failed"))
+}
+
+fn write_png(path: &Path, rgba: &[u8], width: u32, height: u32) -> std::io::Result<()> {
+    use png::{BitDepth, ColorType, Encoder};
+    let file = std::fs::File::create(path)?;
+    let mut encoder = Encoder::new(file, width, height);
+    encoder.set_color(ColorType::Rgba);
+    encoder.set_depth(BitDepth::Eight);
+    let mut writer = encoder.write_header()?;
+    writer.write_image_data(rgba).map_err(std::io::Error::other)
 }
