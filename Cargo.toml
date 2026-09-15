@@ -151,6 +151,7 @@ members = [
   "examples/106_go2_jump",
   "examples/107_go2_hop",
   "examples/108_go2_jump_opt",
+  "examples/109_go2_jump_sim",
   "tests/determinism",
   "tests/dynamics",
   "tests/mobility_benchmark",

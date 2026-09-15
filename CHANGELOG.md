@@ -21,6 +21,12 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `examples/109_go2_jump_sim`: plans a Go2 jump from the settled simulator
+  state and replays the joint trajectory with stiff position control. The plan
+  is valid (see example 108) but does not yet transfer: the simulator uses
+  collider-augmented masses and a Rapier contact model, so the feet do not
+  leave the ground. Recorded as the measured plan-to-sim gap.
+
 - `examples/108_go2_jump_opt`: optimizes a Unitree Go2 jump over a fixed
   stance→flight contact sequence with the native FDDP solver. The floating
   base reaches a 0.32 m apex with near-zero terminal velocity, torques stay
