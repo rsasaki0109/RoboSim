@@ -6,16 +6,22 @@
 //! plan starts where the robot actually is. During execution the optimized
 //! torques are augmented with a joint PD term that damps drift.
 //!
-//! Status: the optimizer finds a valid plan (see example 108), but replaying it
-//! on the dynamic simulator does not yet lift off. The simulator's bodies use
-//! collider-augmented masses and a Rapier contact model, so the plan does not
-//! transfer directly; this is the measured plan-to-sim gap and the starting
-//! point for a tracked whole-body execution.
+//! Status: a measurement, not a working jump. Two findings:
+//! * With no posture regularization the FDDP solver returns a non-physical
+//!   solution that swings the joints through several radians to reach the height
+//!   target, so it cannot execute.
+//! * With posture regularization the reachable jump from the standing pose is
+//!   small (~0.04 m): the legs start near full extension, and the optimizer does
+//!   not discover a crouch-then-push schedule. A real jump needs an explicit
+//!   crouch phase (or a better-conditioned cost) and analytical derivatives.
+//!
+//! The scene now uses the declared inertias (matching the planner), so the
+//! remaining gap is the plan, not the mass model.
 //!
 //! Run with `cargo run --release -p go2_jump_sim --example 109_go2_jump_sim`.
 
 use glam::EulerRot;
-use rne_ai::{unitree_go2_dynamic_scene_path, UrdfJointPositionTarget, UrdfSceneSim};
+use rne_ai::{UrdfJointPositionTarget, UrdfSceneSim};
 use rne_dynamics::{ArticulatedModel, ContactSpec};
 use rne_ecs::World;
 use rne_math::{Quat, Vec3};
@@ -55,6 +61,16 @@ fn dof_joint_names(model: &ArticulatedModel) -> Vec<String> {
                 .to_string()
         })
         .collect()
+}
+
+fn crouch_angle(link: &str) -> f64 {
+    if link.ends_with("thigh") {
+        1.15
+    } else if link.ends_with("calf") {
+        -2.05
+    } else {
+        0.0
+    }
 }
 
 fn stand_angle(link: &str) -> f64 {
@@ -136,8 +152,9 @@ fn main() {
         .collect();
 
     // Settle the simulator and plan from where it actually stands.
-    let mut sim =
-        UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path()).expect("load dynamic Go2");
+    let scene = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/scenes/unitree_go2_jump.rne.scene.toml");
+    let mut sim = UrdfSceneSim::from_scene_path(&scene).expect("load jump Go2 scene");
     sim.configure_position_motors(POSITION_STIFFNESS, POSITION_DAMPING, TORQUE_LIMIT_NM);
     let stand: Vec<UrdfJointPositionTarget<'_>> = joint_names
         .iter()
@@ -171,13 +188,16 @@ fn main() {
     for dof in 0..nv {
         terminal_weights[nv + dof] = 20.0;
     }
-    let mut cost = QuadraticCost::new(
-        vec![0.0; 2 * nv],
-        vec![1.0e-2; control_dim],
-        terminal_weights,
-    );
+    let mut state_weights = vec![0.0; 2 * nv];
+    for dof in 0..nv {
+        state_weights[6 + dof] = 0.1;
+    }
+    let mut cost = QuadraticCost::new(state_weights, vec![1.0e-2; control_dim], terminal_weights);
     let mut reference = vec![0.0; 2 * nv];
     reference[1] = start_y + JUMP_HEIGHT_M;
+    for (dof, name) in joint_names.iter().enumerate() {
+        reference[6 + dof] = crouch_angle(name);
+    }
     cost.state_reference = reference;
     cost.running_scale = STEP_TIME_S;
 
@@ -205,6 +225,22 @@ fn main() {
         "plan: apex_y={planned_apex:.3} max_torque={max_torque:.2} Nm iterations={}",
         solution.iterations
     );
+
+    {
+        let mut joint_min = f64::MAX;
+        let mut joint_max = f64::MIN;
+        let mut base_min = f64::MAX;
+        let mut base_max = f64::MIN;
+        for state in &solution.states {
+            base_min = base_min.min(state[1]);
+            base_max = base_max.max(state[1]);
+            for dof in 0..control_dim {
+                joint_min = joint_min.min(state[6 + dof]);
+                joint_max = joint_max.max(state[6 + dof]);
+            }
+        }
+        println!("plan ranges: base_y [{base_min:.3},{base_max:.3}] joints [{joint_min:.3},{joint_max:.3}]");
+    }
 
     // Execute: replay the planned joint trajectory with stiff position control.
     // Position tracking is mass-robust, so the simulator's collider-augmented

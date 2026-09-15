@@ -21,6 +21,11 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- Declared-inertia Go2 jump scene (`assets/scenes/unitree_go2_jump.rne.scene.toml`)
+  so the simulator and the optimal-control planner share the same masses, and
+  `rne_oc` hardening: dynamics-derivative failures and the FDDP feasible-rollout
+  projection are tolerated instead of aborting the solve.
+
 - `examples/109_go2_jump_sim`: plans a Go2 jump from the settled simulator
   state and replays the joint trajectory with stiff position control. The plan
   is valid (see example 108) but does not yet transfer: the simulator uses
