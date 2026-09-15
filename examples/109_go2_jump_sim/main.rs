@@ -7,12 +7,14 @@
 //! masses. Execution applies the feed-forward torque plus a joint PD term, one
 //! planning node per simulation step.
 //!
-//! Status: the **plan is now actuator-realizable** (a 0.28 m apex with the
-//! torque saturated at ±23.7 Nm, gap-free and with natural joints), but
-//! executing it on the simulator still does not lift off — the simulated base
-//! barely moves even with strong joint PD. This points at a plan/simulator
-//! interface gap (torque application, Rapier contact compliance, or the
-//! actuator model) rather than the plan, and needs dedicated debugging.
+//! Status: the plan is actuator-realizable (a 0.28 m apex, torque saturated at
+//! ±23.7 Nm, gap-free), but the open-loop torque plan does not transfer. The
+//! `--trace` instrumentation shows the simulator over-crouches (base 0.222 ->
+//! 0.071 m against a planned ~0.13 m) and then only returns to 0.142 m instead
+//! of launching, so the extension extracts no upward momentum. Torque control
+//! and masses are correct; the gap is the contact/actuator model (rigid-contact
+//! KKT in the planner versus Rapier's compliant contacts) or the lack of a
+//! base-level feedback loop.
 //!
 //! Run with `cargo run --release -p go2_jump_sim --example 109_go2_jump_sim`.
 
@@ -132,6 +134,7 @@ fn min_foot_height_m(sim: &UrdfSceneSim) -> f64 {
 
 fn main() {
     let model = build_model();
+    let trace = std::env::args().any(|argument| argument == "--trace");
     let nv = model.nv();
     let control_dim = nv - model.base_dof();
     let joint_names = dof_joint_names(&model);
@@ -278,6 +281,22 @@ fn main() {
             })
             .collect();
         sim.step_joint_torques(&targets);
+        if trace && node < CROUCH_STEPS + PUSH_STEPS && node % 2 == 0 {
+            let calf = joint_names
+                .iter()
+                .position(|name| name == "FL_calf")
+                .map(|dof| (dof, state[6 + dof]))
+                .unwrap_or((0, 0.0));
+            let command = torque
+                .iter()
+                .fold(0.0_f64, |maximum, value| maximum.max(value.abs()));
+            println!(
+                "  node {node:02}: base_y={:.4} calf={:.3} plan_calf={:.3} max_tau={command:.1}",
+                sim.observe().base_y_m,
+                sim.named_joint_position("FL_calf").unwrap_or(0.0),
+                calf.1,
+            );
+        }
         apex_sim_y = apex_sim_y.max(sim.observe().base_y_m);
         max_min_foot = max_min_foot.max(min_foot_height_m(&sim));
         let pose = sim.named_transform("base").expect("base");
