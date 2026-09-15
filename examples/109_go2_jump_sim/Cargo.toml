@@ -16,6 +16,7 @@ rne_physics = { workspace = true }
 rne_oc = { workspace = true }
 rne_robot = { workspace = true }
 rne_urdf_import = { workspace = true }
+rne_wbc = { workspace = true }
 rne_world = { workspace = true }
 
 [[example]]

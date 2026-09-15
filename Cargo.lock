@@ -1659,6 +1659,7 @@ dependencies = [
  "rne_physics",
  "rne_robot",
  "rne_urdf_import",
+ "rne_wbc",
  "rne_world",
 ]
 
