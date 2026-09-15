@@ -1,7 +1,7 @@
 //! Contact-constrained articulated dynamics and contact sequences.
 
 use crate::ddp::{DiscreteDynamics, OcError, ShootingDynamics};
-use rne_dynamics::{constrained_forward_dynamics, ArticulatedModel, ContactSpec};
+use rne_dynamics::{constrained_forward_dynamics, impulse_velocity, ArticulatedModel, ContactSpec};
 
 fn integrate(
     model: &ArticulatedModel,
@@ -89,6 +89,7 @@ pub struct ContactSequenceDynamics<'a> {
     /// Integration step in seconds.
     pub step_time_s: f64,
     contacts_per_node: Vec<Vec<ContactSpec>>,
+    reset_per_node: Vec<Option<Vec<ContactSpec>>>,
 }
 
 impl<'a> ContactSequenceDynamics<'a> {
@@ -100,10 +101,20 @@ impl<'a> ContactSequenceDynamics<'a> {
                 contacts_per_node.push(phase.contacts.clone());
             }
         }
+        let mut reset_per_node: Vec<Option<Vec<ContactSpec>>> = vec![None; contacts_per_node.len()];
+        for node in 0..contacts_per_node.len().saturating_sub(1) {
+            let current = &contacts_per_node[node];
+            let next = &contacts_per_node[node + 1];
+            let adds = next.iter().any(|contact| !current.contains(contact));
+            if adds && !next.is_empty() {
+                reset_per_node[node] = Some(next.clone());
+            }
+        }
         Self {
             model,
             step_time_s,
             contacts_per_node,
+            reset_per_node,
         }
     }
 
@@ -127,7 +138,15 @@ impl ShootingDynamics for ContactSequenceDynamics<'_> {
             .contacts_per_node
             .get(node)
             .ok_or(OcError::Dimension("contact sequence node"))?;
-        integrate(self.model, self.step_time_s, state, control, contacts)
+        let mut next = integrate(self.model, self.step_time_s, state, control, contacts)?;
+        if let Some(reset) = &self.reset_per_node[node] {
+            let nv = self.model.nv();
+            let (q, qd) = next.split_at(nv);
+            let (post_impact, _) =
+                impulse_velocity(self.model, q, qd, reset).map_err(|_| OcError::Dynamics)?;
+            next[nv..].copy_from_slice(&post_impact);
+        }
+        Ok(next)
     }
 }
 
@@ -203,6 +222,42 @@ mod tests {
         // The base has not fallen.
         assert!(state[1].abs() < 1.0e-6, "base y {}", state[1]);
         assert!(state.iter().all(|value| value.abs() < 1.0e-6));
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn contact_sequence_applies_an_impact_reset() {
+        let (_world, model, base) = floating_body();
+        let phases = [
+            ContactPhase {
+                contacts: Vec::new(),
+                steps: 5,
+            },
+            ContactPhase {
+                contacts: contacts(base),
+                steps: 5,
+            },
+        ];
+        let dynamics = ContactSequenceDynamics::new(&model, 0.01, &phases);
+        let mut state = vec![0.0; 12];
+        state[1] = 0.2;
+        state[7] = -2.0;
+        for node in 0..4 {
+            state = dynamics.step_at(node, &state, &[]).expect("free step");
+        }
+        let incoming = state[7];
+        state = dynamics.step_at(4, &state, &[]).expect("impact step");
+        assert!(state[7] > incoming, "impact did not arrest the fall");
+        let qd = &state[6..];
+        for spec in contacts(base) {
+            let jac =
+                rne_dynamics::frame_jacobian(&model, &state[..6], spec.link, spec.point_local_m)
+                    .expect("jacobian");
+            for row in 0..3 {
+                let velocity: f64 = (0..6).map(|column| jac.get(row, column) * qd[column]).sum();
+                assert!(velocity.abs() < 1.0e-6, "contact velocity {velocity}");
+            }
+        }
     }
 
     #[test]
