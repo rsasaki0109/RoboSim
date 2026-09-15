@@ -21,6 +21,13 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `examples/108_go2_jump_opt`: optimizes a Unitree Go2 jump over a fixed
+  stance→flight contact sequence with the native FDDP solver. The floating
+  base reaches a 0.32 m apex with near-zero terminal velocity, torques stay
+  within ±4.84 Nm, and the contact dynamics are satisfied to machine
+  precision. This is the first model-based jump generated end-to-end by the
+  native dynamics/optimal-control stack.
+
 - `rne_dynamics` impulsive contact reset: `impulse_velocity` solves the impulse
   KKT system to reset joint velocities when new contacts are established.
   `rne_oc` gains an FDDP warm start (`DdpConfig::keep_gaps_open`) that opens

@@ -80,6 +80,10 @@ external optimal-control/dynamics library.
   straight-line guess; the solver then projects the controls onto a feasible
   rollout and polishes with standard DDP, so the returned trajectory satisfies
   the dynamics to `1e-3`.
+- `examples/108_go2_jump_opt` optimizes a Unitree **Go2 jump** over a fixed
+  stance → flight contact sequence with FDDP: the floating base reaches a
+  **0.32 m apex**, ends at the target with near-zero velocity, keeps torques
+  within ±4.84 Nm, and satisfies the contact dynamics to machine precision.
 
 ## Limitations and follow-ups
 

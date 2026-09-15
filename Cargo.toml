@@ -150,6 +150,7 @@ members = [
   "examples/105_whole_body_control",
   "examples/106_go2_jump",
   "examples/107_go2_hop",
+  "examples/108_go2_jump_opt",
   "tests/determinism",
   "tests/dynamics",
   "tests/mobility_benchmark",
