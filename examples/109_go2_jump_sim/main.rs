@@ -8,13 +8,14 @@
 //! planning node per simulation step.
 //!
 //! Status: the plan is actuator-realizable (a 0.28 m apex, torque saturated at
-//! ±23.7 Nm, gap-free), but the open-loop torque plan does not transfer. The
-//! `--trace` instrumentation shows the simulator over-crouches (base 0.222 ->
-//! 0.071 m against a planned ~0.13 m) and then only returns to 0.142 m instead
-//! of launching, so the extension extracts no upward momentum. Torque control
-//! and masses are correct; the gap is the contact/actuator model (rigid-contact
-//! KKT in the planner versus Rapier's compliant contacts) or the lack of a
-//! base-level feedback loop.
+//! ±23.7 Nm, gap-free) but does not transfer to the simulator. A joint-PD plus
+//! a base-height feedback loop both fail for the same reason: the planner's
+//! feed-forward torques produce a *different* joint motion in the simulator
+//! (it over-crouches to 0.07 m against a planned 0.19 m), so the extension
+//! extracts no upward momentum. Torque control and masses are correct, which
+//! isolates the gap to the contact/actuator model (rigid-contact KKT in the
+//! planner versus Rapier's compliant contacts) or to a whole-body tracking
+//! controller rather than joint PD.
 //!
 //! Run with `cargo run --release -p go2_jump_sim --example 109_go2_jump_sim`.
 
@@ -26,7 +27,7 @@ use rne_math::{Quat, Vec3};
 use rne_oc::{
     solve, ContactPhase, ContactSequenceDynamics, DdpConfig, PhaseCostSchedule, QuadraticCost,
 };
-use rne_robot::{FloatingBase, Transform3};
+use rne_robot::{FloatingBase, KinematicModel, Robot, Transform3};
 
 const GO2_URDF: &str = include_str!("../../assets/robots/go2_description/go2_description.rne.urdf");
 const BASE_ROTATION_X_RAD: f64 = -std::f64::consts::FRAC_PI_2;
@@ -43,8 +44,11 @@ const SETTLE_STEPS: u64 = 240;
 const POSITION_STIFFNESS: f64 = 420.0;
 const POSITION_DAMPING: f64 = 28.0;
 const TORQUE_LIMIT_NM: f64 = 23.7;
-const TRACK_KP: f64 = 400.0;
-const TRACK_KD: f64 = 20.0;
+const TRACK_KP: f64 = 120.0;
+const TRACK_KD: f64 = 6.0;
+const BASE_KP: f64 = 120.0;
+const BASE_KD: f64 = 12.0;
+const BASE_SIGN: f64 = 1.0;
 
 fn dof_joint_names(model: &ArticulatedModel) -> Vec<String> {
     model
@@ -169,6 +173,50 @@ fn main() {
     let start_y = initial[1];
     println!("stand base_y={start_y:.3} m");
 
+    // Simulator-side kinematic map for the base-height feedback.
+    let robot = sim
+        .world()
+        .iter_entities()
+        .find_map(|entity| entity.get::<Robot>().map(|_| entity.id()))
+        .expect("robot entity");
+    let (sim_joint_links, sim_leg_dofs, mass_kg) = {
+        let kinematic = KinematicModel::from_robot(sim.world(), robot).expect("sim kinematic");
+        let joint_links: Vec<String> = kinematic
+            .movable_joint_entities()
+            .iter()
+            .map(|joint| {
+                let child = kinematic.joint_child_link(*joint).expect("child");
+                let index = kinematic.link_index(child).expect("index");
+                kinematic.link_name(index).expect("name").to_string()
+            })
+            .collect();
+        let leg_dofs: Vec<[usize; 3]> = FOOT_LINKS
+            .iter()
+            .map(|prefix| {
+                let mut dofs = [0_usize; 3];
+                for (slot, suffix) in ["hip", "thigh", "calf"].iter().enumerate() {
+                    let name = format!("{}{}", &prefix[..2], format!("_{suffix}"));
+                    dofs[slot] = joint_links
+                        .iter()
+                        .position(|candidate| candidate == &name)
+                        .unwrap_or(0);
+                }
+                dofs
+            })
+            .collect();
+        let mass: f64 = (0..kinematic.link_count())
+            .filter_map(|index| kinematic.link_entity(index))
+            .filter_map(|entity| {
+                sim.world()
+                    .get::<rne_physics::RigidBody>(entity)
+                    .map(|body| body.mass_kg)
+            })
+            .sum();
+        (joint_links, leg_dofs, mass)
+    };
+    let plan_index_of = |name: &str| joint_names.iter().position(|candidate| candidate == name);
+    let _ = &plan_index_of;
+
     let horizon = CROUCH_STEPS + PUSH_STEPS + FLIGHT_STEPS;
     let phases = [
         ContactPhase {
@@ -253,10 +301,11 @@ fn main() {
         plan_apex - start_y
     );
 
-    // Execute: feed-forward torque plus joint PD, one node per simulation step.
+    // Execute: feed-forward torque + joint PD + base-height feedback.
     let mut apex_sim_y = f64::MIN;
     let mut max_min_foot = 0.0_f64;
     let mut max_tilt = 0.0_f64;
+    let mut previous_y = sim.observe().base_y_m;
     let up_reference = {
         let pose = sim.named_transform("base").expect("base");
         (pose.rotation.inverse() * Vec3::Y).normalize_or_zero()
@@ -264,15 +313,51 @@ fn main() {
     for node in 0..horizon {
         let state = &solution.states[node];
         let torque = &solution.controls[node];
-        let targets: Vec<UrdfJointTorqueTarget<'_>> = joint_names
+        let actual_y = sim.observe().base_y_m;
+        let actual_vy = (actual_y - previous_y) / STEP_TIME_S;
+        previous_y = actual_y;
+        let desired_acceleration =
+            BASE_KP * (state[1] - actual_y) + BASE_KD * (state[nv + 1] - actual_vy);
+        let per_foot_force = mass_kg * desired_acceleration / 4.0;
+
+        let correction: Vec<f64> = {
+            let kinematic = KinematicModel::from_robot(sim.world(), robot).expect("sim kinematic");
+            let q_sim: Vec<f64> = sim_joint_links
+                .iter()
+                .map(|name| sim.named_joint_position(name).unwrap_or(0.0))
+                .collect();
+            let mut correction = vec![0.0; sim_joint_links.len()];
+            for (leg, prefix) in FOOT_LINKS.iter().enumerate() {
+                let foot = kinematic.link_entity_by_name(prefix).expect("foot");
+                let jacobian = kinematic
+                    .jacobian(&q_sim, foot, SOLE_OFFSET_LOCAL_M)
+                    .expect("jacobian");
+                for &dof in &sim_leg_dofs[leg] {
+                    correction[dof] += BASE_SIGN * jacobian.get(1, dof) * per_foot_force;
+                }
+            }
+            correction
+        };
+
+        let targets: Vec<UrdfJointTorqueTarget<'_>> = sim_joint_links
             .iter()
             .enumerate()
-            .map(|(dof, name)| {
+            .map(|(sim_dof, name)| {
+                let (feedforward, plan_q, plan_v) = plan_index_of(name)
+                    .map(|plan_dof| {
+                        (
+                            torque[plan_dof],
+                            state[6 + plan_dof],
+                            state[nv + 6 + plan_dof],
+                        )
+                    })
+                    .unwrap_or((0.0, 0.0, 0.0));
                 let q = sim.named_joint_position(name).unwrap_or(0.0);
                 let qd = sim.named_joint_velocity(name).unwrap_or(0.0);
-                let command = torque[dof]
-                    + TRACK_KP * (state[6 + dof] - q)
-                    + TRACK_KD * (state[nv + 6 + dof] - qd);
+                let command = feedforward
+                    + TRACK_KP * (plan_q - q)
+                    + TRACK_KD * (plan_v - qd)
+                    + correction[sim_dof];
                 UrdfJointTorqueTarget {
                     link_name: name.as_str(),
                     torque_nm: command.clamp(-TORQUE_LIMIT_NM, TORQUE_LIMIT_NM),
@@ -282,19 +367,11 @@ fn main() {
             .collect();
         sim.step_joint_torques(&targets);
         if trace && node < CROUCH_STEPS + PUSH_STEPS && node % 2 == 0 {
-            let calf = joint_names
-                .iter()
-                .position(|name| name == "FL_calf")
-                .map(|dof| (dof, state[6 + dof]))
-                .unwrap_or((0, 0.0));
-            let command = torque
-                .iter()
-                .fold(0.0_f64, |maximum, value| maximum.max(value.abs()));
             println!(
-                "  node {node:02}: base_y={:.4} calf={:.3} plan_calf={:.3} max_tau={command:.1}",
+                "  node {node:02}: base_y={:.4} plan_y={:.4} tau={:.1}",
                 sim.observe().base_y_m,
-                sim.named_joint_position("FL_calf").unwrap_or(0.0),
-                calf.1,
+                state[1],
+                torque.iter().fold(0.0_f64, |m, v| m.max(v.abs())),
             );
         }
         apex_sim_y = apex_sim_y.max(sim.observe().base_y_m);

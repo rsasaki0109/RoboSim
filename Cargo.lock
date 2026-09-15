@@ -1656,6 +1656,7 @@ dependencies = [
  "rne_ecs",
  "rne_math",
  "rne_oc",
+ "rne_physics",
  "rne_robot",
  "rne_urdf_import",
  "rne_world",
