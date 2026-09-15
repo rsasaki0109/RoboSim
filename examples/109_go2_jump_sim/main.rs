@@ -31,12 +31,14 @@
 //! four feet stay fixed (gains via `--wbc-kp`/`--wbc-kd`). It does inject the
 //! planned energy — with a velocity gain of 20 the base reaches the planned
 //! apex (0.525 m versus a planned 0.503 m) — but the base then pitches over
-//! (about 2 rad) and the feet never leave the ground. The blocking cause is a
-//! center-of-mass convention mismatch: the plan model (base offset
-//! `R_x(-90)`, world-aligned floating frame) reports a standing CoM of 0.135 m
-//! while the simulator floating model reports 0.247 m at the same base height
-//! of 0.222 m, so the controller tracks the wrong reference and over-injects.
-//! Reconciling the two floating-base conventions is the next step.
+//! (about 2 rad) and the feet never leave the ground. The blocker was a model
+//! mismatch: the floating model built from the simulator's own world places the
+//! link frames differently from the plan model (the standing CoM reads 0.247 m
+//! versus the plan's 0.135 m even though the link inertias and total mass are
+//! identical), so the controller over-injected. Solving the WBC on the plan's
+//! own model with the simulator state now tracks the planned CoM closely, but
+//! the base still pitches over and does not launch, so attitude stabilization
+//! and the flight-phase controller remain the open work.
 //!
 //! Run with `cargo run --release -p go2_jump_sim --example 109_go2_jump_sim`.
 
@@ -164,79 +166,6 @@ fn min_foot_height_m(sim: &UrdfSceneSim) -> f64 {
         .fold(f64::INFINITY, f64::min)
 }
 
-/// Floating-base model built from the simulator's own world, used by the WBC.
-struct SimModel {
-    model: ArticulatedModel,
-    joint_links: Vec<String>,
-    foot_names: Vec<String>,
-    torque_limits: Vec<f64>,
-}
-
-impl SimModel {
-    fn build(sim: &mut UrdfSceneSim) -> Self {
-        let world = sim.world_mut();
-        let robot = world
-            .iter_entities()
-            .find_map(|entity| entity.get::<Robot>().map(|_| entity.id()))
-            .expect("robot entity");
-        let base = world.get::<Robot>(robot).expect("robot").base_link;
-        let saved = world.get::<Transform3>(base).copied().unwrap_or_default();
-        world.entity_mut(base).insert((
-            FloatingBase,
-            Transform3::from_translation_rotation(
-                Vec3::ZERO,
-                Quat::from_rotation_x(BASE_ROTATION_X_RAD),
-            ),
-        ));
-        let model = ArticulatedModel::from_robot(&*world, robot).expect("floating model");
-        world.entity_mut(base).insert(saved);
-
-        let kinematics = KinematicModel::from_robot(world, robot).expect("kinematic model");
-        let joint_links: Vec<String> = kinematics
-            .movable_joint_entities()
-            .iter()
-            .map(|joint| {
-                let child = kinematics.joint_child_link(*joint).expect("child");
-                let index = kinematics.link_index(child).expect("index");
-                kinematics.link_name(index).expect("name").to_string()
-            })
-            .collect();
-        let foot_names = FOOT_LINKS.iter().map(|name| name.to_string()).collect();
-        let torque_limits = vec![TORQUE_LIMIT_NM; joint_links.len()];
-        Self {
-            model,
-            joint_links,
-            foot_names,
-            torque_limits,
-        }
-    }
-
-    fn q(&self, sim: &UrdfSceneSim) -> Vec<f64> {
-        let base = sim.named_transform("base").expect("base pose");
-        let floating = base.rotation * Quat::from_rotation_x(-BASE_ROTATION_X_RAD);
-        let (yaw, pitch, roll) = floating.to_euler(EulerRot::ZYX);
-        let mut q = vec![0.0; self.model.nv()];
-        q[0] = base.translation.x;
-        q[1] = base.translation.y;
-        q[2] = base.translation.z;
-        q[3] = roll;
-        q[4] = pitch;
-        q[5] = yaw;
-        for (dof, link) in self.joint_links.iter().enumerate() {
-            q[6 + dof] = sim.named_joint_position(link).unwrap_or(0.0);
-        }
-        q
-    }
-
-    fn qd(&self, sim: &UrdfSceneSim) -> Vec<f64> {
-        let mut qd = vec![0.0; self.model.nv()];
-        for (dof, link) in self.joint_links.iter().enumerate() {
-            qd[6 + dof] = sim.named_joint_velocity(link).unwrap_or(0.0);
-        }
-        qd
-    }
-}
-
 #[allow(clippy::needless_range_loop)]
 fn main() {
     let model = build_model();
@@ -339,7 +268,6 @@ fn main() {
     if position_stance {
         sim.configure_position_motors(stance_kp, stance_kd, TORQUE_LIMIT_NM);
     }
-    let sim_model = wbc_stance.then(|| SimModel::build(&mut sim));
     let horizon = CROUCH_STEPS + PUSH_STEPS + FLIGHT_STEPS;
     let phases = [
         ContactPhase {
@@ -441,9 +369,7 @@ fn main() {
     };
     let wbc_controller = WholeBodyController::new(WholeBodyConfig {
         com_weight: 1.0e5,
-        torque_limits_nm: sim_model
-            .as_ref()
-            .map(|sim_model| sim_model.torque_limits.clone()),
+        torque_limits_nm: Some(vec![TORQUE_LIMIT_NM; control_dim]),
         ..WholeBodyConfig::default()
     });
 
@@ -467,86 +393,85 @@ fn main() {
         let per_foot_force = mass_kg * desired_acceleration / 4.0;
 
         if wbc_stance && node < CROUCH_STEPS + PUSH_STEPS {
-            if let Some(sim_model) = sim_model.as_ref() {
-                let q = sim_model.q(&sim);
-                let qd = sim_model.qd(&sim);
-                let foot_contacts: Vec<ContactPoint> = sim_model
-                    .foot_names
-                    .iter()
-                    .filter_map(|name| sim_model.model.kinematic().link_entity_by_name(name))
-                    .map(|link| ContactPoint::new(link, SOLE_OFFSET_LOCAL_M, 0.6))
-                    .collect();
-                let com_task = ComTask {
-                    desired_position_m: plan_com[node],
-                    desired_velocity_m_s: plan_com_velocity(node),
-                    desired_acceleration_m_s2: plan_com_acceleration(node),
-                    position_gain_s_inv2: wbc_kp,
-                    velocity_gain_s_inv: wbc_kd,
-                };
-                let base_pose = sim.named_transform("base").expect("base pose");
-                let up_world = (base_pose.rotation * Vec3::Y).normalize_or_zero();
-                let tilt_axis_world = Vec3::Y.cross(up_world);
-                let sin_angle = tilt_axis_world.length();
-                let tilt_angle = up_world.y.clamp(-1.0, 1.0).acos();
-                let axis_body = if sin_angle > 1.0e-6 {
-                    base_pose.rotation.inverse() * (tilt_axis_world / sin_angle)
-                } else {
-                    Vec3::ZERO
-                };
-                let observation = sim.observe();
-                let omega_body = base_pose.rotation.inverse()
-                    * Vec3::new(
-                        observation.base_angular_velocity_x_rad_s,
-                        observation.base_angular_velocity_y_rad_s,
-                        observation.base_angular_velocity_z_rad_s,
-                    );
-                let attitude = BaseAttitudeTask {
-                    desired_angular_acceleration_rad_s2: axis_body * (WBC_ATTITUDE_KP * tilt_angle)
-                        - omega_body * WBC_ATTITUDE_KD,
-                };
-                let posture = PostureTask {
-                    desired_joint_positions: q[6..].to_vec(),
-                    position_gain_s_inv2: 4.0,
-                    velocity_gain_s_inv: 1.0,
-                };
-                let wbc_solution = wbc_controller
-                    .solve(
-                        &sim_model.model,
-                        &q,
-                        &qd,
-                        &foot_contacts,
-                        Some(&com_task),
-                        Some(&attitude),
-                        Some(&posture),
-                    )
-                    .expect("wbc solve");
-                let wbc_targets: Vec<UrdfJointTorqueTarget<'_>> = sim_model
-                    .joint_links
-                    .iter()
-                    .zip(&wbc_solution.joint_torque_nm)
-                    .map(|(link, torque)| UrdfJointTorqueTarget {
-                        link_name: link.as_str(),
-                        torque_nm: torque.clamp(-TORQUE_LIMIT_NM, TORQUE_LIMIT_NM),
-                        max_velocity_rad_s: 30.1,
-                    })
-                    .collect();
-                sim.step_joint_torques(&wbc_targets);
-                if trace {
-                    println!(
-                        "  node {node:02}: base_y={:.4} sim_com={:.4} plan_com_y={:.4} min_foot={:.4} (wbc)",
-                        sim.observe().base_y_m,
-                        center_of_mass(&sim_model.model, &q).expect("com").y,
-                        plan_com[node].y,
-                        min_foot_height_m(&sim),
-                    );
-                }
-                apex_sim_y = apex_sim_y.max(sim.observe().base_y_m);
-                max_min_foot = max_min_foot.max(min_foot_height_m(&sim));
-                let pose = sim.named_transform("base").expect("base");
-                let up = (pose.rotation * up_reference).normalize_or_zero();
-                max_tilt = max_tilt.max(up.y.clamp(-1.0, 1.0).acos());
-                continue;
+            let state_now = read_state(&sim, &model, &joint_names);
+            let q = &state_now[..nv];
+            let qd = vec![0.0; nv];
+            let foot_contacts: Vec<ContactPoint> = FOOT_LINKS
+                .iter()
+                .filter_map(|name| model.kinematic().link_entity_by_name(name))
+                .map(|link| ContactPoint::new(link, SOLE_OFFSET_LOCAL_M, 0.6))
+                .collect();
+            let com_task = ComTask {
+                desired_position_m: plan_com[node],
+                desired_velocity_m_s: plan_com_velocity(node),
+                desired_acceleration_m_s2: plan_com_acceleration(node),
+                position_gain_s_inv2: wbc_kp,
+                velocity_gain_s_inv: wbc_kd,
+            };
+            let base_pose = sim.named_transform("base").expect("base pose");
+            let floating_rotation =
+                base_pose.rotation * Quat::from_rotation_x(-BASE_ROTATION_X_RAD);
+            let up_world = (base_pose.rotation * Vec3::Z).normalize_or_zero();
+            let tilt_axis_world = Vec3::Y.cross(up_world);
+            let sin_angle = tilt_axis_world.length();
+            let tilt_angle = up_world.y.clamp(-1.0, 1.0).acos();
+            let axis_body = if sin_angle > 1.0e-6 {
+                floating_rotation.inverse() * (tilt_axis_world / sin_angle)
+            } else {
+                Vec3::ZERO
+            };
+            let observation = sim.observe();
+            let omega_body = floating_rotation.inverse()
+                * Vec3::new(
+                    observation.base_angular_velocity_x_rad_s,
+                    observation.base_angular_velocity_y_rad_s,
+                    observation.base_angular_velocity_z_rad_s,
+                );
+            let attitude = BaseAttitudeTask {
+                desired_angular_acceleration_rad_s2: axis_body * (WBC_ATTITUDE_KP * tilt_angle)
+                    - omega_body * WBC_ATTITUDE_KD,
+            };
+            let posture = PostureTask {
+                desired_joint_positions: q[6..].to_vec(),
+                position_gain_s_inv2: 4.0,
+                velocity_gain_s_inv: 1.0,
+            };
+            let wbc_solution = wbc_controller
+                .solve(
+                    &model,
+                    q,
+                    &qd,
+                    &foot_contacts,
+                    Some(&com_task),
+                    Some(&attitude),
+                    Some(&posture),
+                )
+                .expect("wbc solve");
+            let wbc_targets: Vec<UrdfJointTorqueTarget<'_>> = joint_names
+                .iter()
+                .zip(&wbc_solution.joint_torque_nm)
+                .map(|(link, torque)| UrdfJointTorqueTarget {
+                    link_name: link.as_str(),
+                    torque_nm: torque.clamp(-TORQUE_LIMIT_NM, TORQUE_LIMIT_NM),
+                    max_velocity_rad_s: 30.1,
+                })
+                .collect();
+            sim.step_joint_torques(&wbc_targets);
+            if trace {
+                println!(
+                    "  node {node:02}: base_y={:.4} sim_com={:.4} plan_com_y={:.4} min_foot={:.4} (wbc)",
+                    sim.observe().base_y_m,
+                    center_of_mass(&model, q).expect("com").y,
+                    plan_com[node].y,
+                    min_foot_height_m(&sim),
+                );
             }
+            apex_sim_y = apex_sim_y.max(sim.observe().base_y_m);
+            max_min_foot = max_min_foot.max(min_foot_height_m(&sim));
+            let pose = sim.named_transform("base").expect("base");
+            let up = (pose.rotation * up_reference).normalize_or_zero();
+            max_tilt = max_tilt.max(up.y.clamp(-1.0, 1.0).acos());
+            continue;
         }
 
         let correction: Vec<f64> = {
