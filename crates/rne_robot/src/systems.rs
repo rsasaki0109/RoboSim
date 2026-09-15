@@ -3837,7 +3837,7 @@ fn effective_cornering_stiffness(
 /// differently on and off the power. Below [`VehicleDynamics::blend_low_speed_m_s`] the
 /// lateral states relax toward the kinematic solution to avoid the `1/vx` singularity.
 /// `C` itself is constant unless [`VehicleDynamics::cornering_stiffness_load_sensitivity`]
-/// is present, in which case [`effective_cornering_stiffness`] scales it with the same
+/// is present, in which case `effective_cornering_stiffness` scales it with the same
 /// per-axle `Fz`.
 pub fn vehicle_dynamics(world: &mut World, dt: SimDuration) {
     let dt_s = dt.as_seconds().value();
