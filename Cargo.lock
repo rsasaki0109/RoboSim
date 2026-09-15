@@ -1651,12 +1651,16 @@ name = "go2_jump_sim"
 version = "0.2.0"
 dependencies = [
  "glam",
+ "image",
+ "png",
  "rne_ai",
  "rne_dynamics",
  "rne_ecs",
  "rne_math",
  "rne_oc",
  "rne_physics",
+ "rne_render",
+ "rne_render_wgpu",
  "rne_robot",
  "rne_urdf_import",
  "rne_wbc",
