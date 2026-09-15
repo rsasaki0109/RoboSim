@@ -65,6 +65,8 @@ pub struct WholeBodyConfig {
     pub posture_weight: f64,
     /// Weight on the base-attitude task.
     pub angular_weight: f64,
+    /// Weight on an optional feed-forward joint torque reference.
+    pub torque_reference_weight: f64,
     /// Tikhonov weight on the contact forces (pulls them toward zero).
     pub force_regularization: f64,
     /// Tikhonov weight on the joint accelerations (pulls them toward zero).
@@ -73,6 +75,11 @@ pub struct WholeBodyConfig {
     pub solver_regularization: f64,
     /// Optional symmetric joint torque limit per actuated joint, in N·m.
     pub torque_limits_nm: Option<Vec<f64>>,
+    /// When true, the torque limits are enforced *inside* the solve (a box on
+    /// the joint torques) so the controller returns the best feasible
+    /// compromise. When false (the default) the unconstrained solution is
+    /// clipped afterward, preserving the historical behavior.
+    pub enforce_torque_limits: bool,
 }
 
 impl Default for WholeBodyConfig {
@@ -83,10 +90,12 @@ impl Default for WholeBodyConfig {
             com_weight: 1.0e2,
             posture_weight: 1.0,
             angular_weight: 1.0e4,
+            torque_reference_weight: 1.0e3,
             force_regularization: 1.0e-4,
             acceleration_regularization: 1.0e-4,
             solver_regularization: 1.0e-9,
             torque_limits_nm: None,
+            enforce_torque_limits: false,
         }
     }
 }
@@ -124,6 +133,12 @@ impl ComTask {
 pub struct PostureTask {
     /// Desired actuated joint positions in degrees of freedom order, in rad or m.
     pub desired_joint_positions: Vec<f64>,
+    /// Optional desired joint velocities, for an acceleration-level tracking law.
+    pub desired_joint_velocities: Option<Vec<f64>>,
+    /// Optional desired joint accelerations, for an acceleration-level tracking
+    /// law. Supplying a reference trajectory's acceleration keeps the task in
+    /// the solve's null space instead of letting it drift.
+    pub desired_joint_accelerations: Option<Vec<f64>>,
     /// Position feedback gain in inverse seconds squared.
     pub position_gain_s_inv2: f64,
     /// Velocity feedback gain in inverse seconds.
@@ -192,6 +207,33 @@ impl WholeBodyController {
         com_task: Option<&ComTask>,
         base_attitude_task: Option<&BaseAttitudeTask>,
         posture_task: Option<&PostureTask>,
+    ) -> Result<WholeBodySolution, WbcError> {
+        self.solve_with_torque_reference(
+            model,
+            q,
+            qd,
+            contacts,
+            com_task,
+            base_attitude_task,
+            posture_task,
+            None,
+        )
+    }
+
+    /// [`Self::solve`] with an optional per-joint feed-forward torque
+    /// reference, such as a trajectory-plan torque.
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::needless_range_loop)]
+    pub fn solve_with_torque_reference(
+        &self,
+        model: &ArticulatedModel,
+        q: &[f64],
+        qd: &[f64],
+        contacts: &[ContactPoint],
+        com_task: Option<&ComTask>,
+        base_attitude_task: Option<&BaseAttitudeTask>,
+        posture_task: Option<&PostureTask>,
+        torque_reference_nm: Option<&[f64]>,
     ) -> Result<WholeBodySolution, WbcError> {
         if model.base_dof() != 6 {
             return Err(WbcError::RequiresFloatingBase);
@@ -326,12 +368,49 @@ impl WholeBodyController {
             let scale = self.config.posture_weight.sqrt();
             for joint in 0..nj {
                 let dof = model.base_dof() + joint;
-                let target = task.position_gain_s_inv2
-                    * (task.desired_joint_positions[joint] - q[dof])
-                    - task.velocity_gain_s_inv * qd[dof];
+                let acceleration = task
+                    .desired_joint_accelerations
+                    .as_ref()
+                    .map(|values| values[joint])
+                    .unwrap_or(0.0);
+                let velocity_target = task
+                    .desired_joint_velocities
+                    .as_ref()
+                    .map(|values| values[joint])
+                    .unwrap_or(0.0);
+                let target = acceleration
+                    + task.position_gain_s_inv2 * (task.desired_joint_positions[joint] - q[dof])
+                    + task.velocity_gain_s_inv * (velocity_target - qd[dof]);
                 let mut coefficients = vec![0.0; cols];
                 coefficients[dof] = 1.0;
                 push_row(&mut rows, &mut rhs, coefficients, target, scale);
+            }
+        }
+
+        // Feed-forward joint torque reference, for example a trajectory-plan
+        // torque. `tau_j = (M qdd + h - J^T f)_j`, so the row is
+        // `M_j qdd - J^T_j f = reference_j - h_j`.
+        if let Some(reference) = torque_reference_nm {
+            assert_eq!(reference.len(), nj);
+            let scale = self.config.torque_reference_weight.sqrt();
+            for joint in 0..nj {
+                let row = model.base_dof() + joint;
+                let mut coefficients = vec![0.0; cols];
+                for column in 0..nv {
+                    coefficients[column] = mass.get(row, column);
+                }
+                for (contact, jacobian) in contact_jacobians.iter().enumerate() {
+                    for component in 0..3 {
+                        coefficients[nv + 3 * contact + component] -= jacobian[component][row];
+                    }
+                }
+                push_row(
+                    &mut rows,
+                    &mut rhs,
+                    coefficients,
+                    reference[joint] - bias[row],
+                    scale,
+                );
             }
         }
 
@@ -351,8 +430,59 @@ impl WholeBodyController {
             push_row(&mut rows, &mut rhs, coefficients, 0.0, acceleration_scale);
         }
 
-        let solution = solve_least_squares(&rows, &rhs, cols, self.config.solver_regularization)
-            .ok_or(WbcError::SingularSystem)?;
+        // Solve. With actuated joint torque limits the torques join the
+        // unknowns and are box-constrained inside the solve, so the solver
+        // returns the best *feasible* compromise instead of clipping the
+        // unconstrained torques afterward (which distorts the whole motion).
+        let nj = nv - model.base_dof();
+        let (solution, torque_from_solve) = match &self.config.torque_limits_nm {
+            Some(limits) if self.config.enforce_torque_limits && limits.len() == nj => {
+                let cols_total = cols + nj;
+                let mut extended: Vec<Vec<f64>> = rows
+                    .iter()
+                    .map(|row| {
+                        let mut padded = row.clone();
+                        padded.resize(cols_total, 0.0);
+                        padded
+                    })
+                    .collect();
+                let mut extended_rhs = rhs.clone();
+                // tau_j = (M qdd + h - J^T f)_j  ->  M_j qdd - J^T_j f - tau_j = -h_j
+                // Weighted like the dynamics rows so the box actually bounds the
+                // joint torques instead of a decoupled slack variable.
+                let tau_scale = self.config.dynamics_weight.sqrt();
+                for j in 0..nj {
+                    let r = model.base_dof() + j;
+                    let mut row = vec![0.0; cols_total];
+                    for column in 0..nv {
+                        row[column] = mass.get(r, column) * tau_scale;
+                    }
+                    for (contact, jacobian) in contact_jacobians.iter().enumerate() {
+                        for component in 0..3 {
+                            row[nv + 3 * contact + component] -= jacobian[component][r] * tau_scale;
+                        }
+                    }
+                    row[cols + j] = -tau_scale;
+                    extended.push(row);
+                    extended_rhs.push(-bias[r] * tau_scale);
+                }
+                let solution = solve_box_least_squares(
+                    &extended,
+                    &extended_rhs,
+                    cols_total,
+                    cols,
+                    limits,
+                    self.config.solver_regularization,
+                )
+                .ok_or(WbcError::SingularSystem)?;
+                (solution, true)
+            }
+            _ => (
+                solve_least_squares(&rows, &rhs, cols, self.config.solver_regularization)
+                    .ok_or(WbcError::SingularSystem)?,
+                false,
+            ),
+        };
         let joint_acceleration = solution[..nv].to_vec();
         let mut contact_forces_world_n = Vec::with_capacity(contacts.len());
         for (contact, cone) in cones.iter().enumerate() {
@@ -383,15 +513,23 @@ impl WholeBodyController {
         }
         let mut base_wrench_residual = [0.0; 6];
         base_wrench_residual.copy_from_slice(&generalized[..6]);
-        let mut joint_torque_nm = generalized[model.base_dof()..].to_vec();
+        let mut joint_torque_nm = if torque_from_solve {
+            solution[cols..cols + nj].to_vec()
+        } else {
+            generalized[model.base_dof()..].to_vec()
+        };
         let mut torque_saturated = false;
         if let Some(limits) = &self.config.torque_limits_nm {
             for (torque, limit) in joint_torque_nm.iter_mut().zip(limits) {
-                let limited = torque.clamp(-limit, *limit);
-                if (limited - *torque).abs() > 1.0e-12 {
+                if !torque_from_solve {
+                    let limited = torque.clamp(-limit, *limit);
+                    if (limited - *torque).abs() > 1.0e-12 {
+                        torque_saturated = true;
+                    }
+                    *torque = limited;
+                } else if torque.abs() >= *limit - 1.0e-9 {
                     torque_saturated = true;
                 }
-                *torque = limited;
             }
         }
 
@@ -480,8 +618,6 @@ fn solve_least_squares(
     cols: usize,
     regularization: f64,
 ) -> Option<Vec<f64>> {
-    // Column equilibration keeps the normal equations well-conditioned even when
-    // the mass matrix mixes base inertias and tiny link inertias.
     let mut column_norm = vec![0.0; cols];
     for row in rows {
         for (column, value) in row.iter().enumerate() {
@@ -534,6 +670,117 @@ fn solve_least_squares(
     )
 }
 
+/// Box-constrained linear least squares solved by projected gradient.
+///
+/// Minimizes `||A x - b||^2 + regularization * ||x||^2` subject to
+/// `-limits[i] <= x[box_start + i] <= limits[i]`. The projection just clamps the
+/// constrained coordinates, and the step size is set from a power-iteration
+/// estimate of the Lipschitz constant, so the method is deterministic and needs
+/// no external solver.
+#[allow(clippy::needless_range_loop)]
+fn solve_box_least_squares(
+    rows: &[Vec<f64>],
+    rhs: &[f64],
+    cols: usize,
+    box_start: usize,
+    limits: &[f64],
+    regularization: f64,
+) -> Option<Vec<f64>> {
+    // Column equilibration, matching the unconstrained solve.
+    let mut column_norm = vec![0.0; cols];
+    for row in rows {
+        for (column, value) in row.iter().enumerate() {
+            column_norm[column] += value * value;
+        }
+    }
+    let column_scale: Vec<f64> = column_norm
+        .iter()
+        .map(|value| {
+            let norm = value.sqrt();
+            if norm > 1.0e-12 {
+                norm
+            } else {
+                1.0
+            }
+        })
+        .collect();
+
+    // Normal equations H = A^T A + reg I and gradient g = A^T b (in scaled x).
+    let mut h = vec![vec![0.0; cols]; cols];
+    let mut g = vec![0.0; cols];
+    for (row, target) in rows.iter().zip(rhs) {
+        let scaled: Vec<f64> = row
+            .iter()
+            .zip(&column_scale)
+            .map(|(value, scale)| value * scale)
+            .collect();
+        for i in 0..cols {
+            if scaled[i] == 0.0 {
+                continue;
+            }
+            g[i] += scaled[i] * target;
+            for j in i..cols {
+                h[i][j] += scaled[i] * scaled[j];
+            }
+        }
+    }
+    for i in 0..cols {
+        for j in 0..i {
+            h[i][j] = h[j][i];
+        }
+        h[i][i] += regularization;
+    }
+
+    // Lipschitz constant of the scaled normal equations via power iteration.
+    let mut v = vec![1.0 / (cols as f64).sqrt(); cols];
+    let mut lambda = 1.0_f64;
+    for _ in 0..12 {
+        let mut w = vec![0.0; cols];
+        for i in 0..cols {
+            let mut sum = 0.0;
+            for j in 0..cols {
+                sum += h[i][j] * v[j];
+            }
+            w[i] = sum;
+        }
+        let norm = w.iter().map(|value| value * value).sum::<f64>().sqrt();
+        if norm > 1.0e-18 {
+            lambda = norm;
+            for i in 0..cols {
+                v[i] = w[i] / norm;
+            }
+        }
+    }
+    let step = 1.0 / lambda.max(1.0e-12);
+
+    // Scaled-space bounds for the boxed coordinates.
+    let bounds: Vec<f64> = (0..limits.len())
+        .map(|i| limits[i].abs().max(0.0) / column_scale[box_start + i])
+        .collect();
+
+    let mut x = vec![0.0; cols];
+    for _ in 0..2_000 {
+        for i in 0..cols {
+            let mut sum = -g[i];
+            for j in 0..cols {
+                sum += h[i][j] * x[j];
+            }
+            x[i] -= step * sum;
+        }
+        for (i, bound) in bounds.iter().enumerate() {
+            let bound = *bound;
+            x[box_start + i] = x[box_start + i].clamp(-bound, bound);
+        }
+    }
+
+    Some(
+        x.iter()
+            .zip(&column_scale)
+            .map(|(value, scale)| value * scale)
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,6 +789,20 @@ mod tests {
     use rne_physics::{RigidBody, RigidBodyInertia};
     use rne_robot::{FloatingBase, Link, Robot, RobotId};
     use rne_world::Transform3;
+
+    #[test]
+    fn box_solver_respects_and_releases_the_box() {
+        // Independent rows: unconstrained x = (3, 10); the box on x[1] clips it.
+        let rows = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let rhs = vec![3.0, 10.0];
+        let clipped = solve_box_least_squares(&rows, &rhs, 2, 1, &[2.0], 1.0e-9).unwrap();
+        assert_relative_eq!(clipped[0], 3.0, epsilon = 1.0e-6);
+        assert_relative_eq!(clipped[1], 2.0, epsilon = 1.0e-6);
+
+        let released = solve_box_least_squares(&rows, &rhs, 2, 1, &[100.0], 1.0e-9).unwrap();
+        assert_relative_eq!(released[0], 3.0, epsilon = 1.0e-6);
+        assert_relative_eq!(released[1], 10.0, epsilon = 1.0e-6);
+    }
 
     fn floating_body() -> (World, rne_dynamics::ArticulatedModel, Entity) {
         let mut world = World::new();

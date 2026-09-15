@@ -231,6 +231,8 @@ fn main() {
         com_task.velocity_gain_s_inv = 4.0;
         let posture = PostureTask {
             desired_joint_positions: q[6..].to_vec(),
+            desired_joint_velocities: None,
+            desired_joint_accelerations: None,
             position_gain_s_inv2: 4.0,
             velocity_gain_s_inv: 1.0,
         };
