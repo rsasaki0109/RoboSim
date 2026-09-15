@@ -31,9 +31,12 @@
 //! four feet stay fixed (gains via `--wbc-kp`/`--wbc-kd`). It does inject the
 //! planned energy — with a velocity gain of 20 the base reaches the planned
 //! apex (0.525 m versus a planned 0.503 m) — but the base then pitches over
-//! (about 2 rad) and the feet never leave the ground, so the attitude/contact
-//! reconciliation between the plan's rigid-contact model and Rapier remains
-//! open.
+//! (about 2 rad) and the feet never leave the ground. The blocking cause is a
+//! center-of-mass convention mismatch: the plan model (base offset
+//! `R_x(-90)`, world-aligned floating frame) reports a standing CoM of 0.135 m
+//! while the simulator floating model reports 0.247 m at the same base height
+//! of 0.222 m, so the controller tracks the wrong reference and over-injects.
+//! Reconciling the two floating-base conventions is the next step.
 //!
 //! Run with `cargo run --release -p go2_jump_sim --example 109_go2_jump_sim`.
 
@@ -178,9 +181,13 @@ impl SimModel {
             .expect("robot entity");
         let base = world.get::<Robot>(robot).expect("robot").base_link;
         let saved = world.get::<Transform3>(base).copied().unwrap_or_default();
-        world
-            .entity_mut(base)
-            .insert((FloatingBase, Transform3::IDENTITY));
+        world.entity_mut(base).insert((
+            FloatingBase,
+            Transform3::from_translation_rotation(
+                Vec3::ZERO,
+                Quat::from_rotation_x(BASE_ROTATION_X_RAD),
+            ),
+        ));
         let model = ArticulatedModel::from_robot(&*world, robot).expect("floating model");
         world.entity_mut(base).insert(saved);
 
@@ -206,7 +213,8 @@ impl SimModel {
 
     fn q(&self, sim: &UrdfSceneSim) -> Vec<f64> {
         let base = sim.named_transform("base").expect("base pose");
-        let (yaw, pitch, roll) = base.rotation.to_euler(EulerRot::ZYX);
+        let floating = base.rotation * Quat::from_rotation_x(-BASE_ROTATION_X_RAD);
+        let (yaw, pitch, roll) = floating.to_euler(EulerRot::ZYX);
         let mut q = vec![0.0; self.model.nv()];
         q[0] = base.translation.x;
         q[1] = base.translation.y;
