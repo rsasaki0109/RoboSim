@@ -35,8 +35,14 @@
 //! lean by less than 0.01 rad. The plan launches by extending the legs fast
 //! (thigh 0.80 -> 0.63, calf -1.44 -> -1.19 over five steps) and the joint
 //! torques to track that are at the actuator limit, so a position playback
-//! stays level but never leaves the ground. Making the solve torque-aware (a
-//! constrained whole-body QP) is the next step.
+//! stays level but never leaves the ground. A torque-aware solve is available
+//! (`WholeBodyConfig::enforce_torque_limits`, opt-in, with an optional
+//! feed-forward torque reference), and it confirms the trade-off: with the
+//! limits enforced the optimum stays level (`tilt 0.11`) but does not jump
+//! (`height -0.001`), even with the plan torque as a reference. Within
+//! ±23.7 Nm the whole-body solve can either jump or stay level, not both, so
+//! re-optimizing the *plan* with an explicit base-attitude cost (reserving
+//! attitude torque in the launch) is the real next step.
 //!
 //! The example still owns the **landing**: the flight plan ends near the apex,
 //! so it catches the touchdown with stiff position motors and settles into the

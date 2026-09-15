@@ -28,6 +28,15 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_wbc` opt-in torque-constrained solve (`WholeBodyConfig::enforce_torque_limits`)
+  and an optional feed-forward joint torque reference
+  (`WholeBodyController::solve_with_torque_reference`). The joint torques join
+  the unknowns and are box-constrained inside the solve (projected-gradient
+  least squares), so the controller returns the best feasible compromise
+  instead of clipping the unconstrained torques afterward. On the Go2 jump it
+  shows the launch and the base attitude cannot both be served by the 23.7 Nm
+  budget: the constrained optimum stays level but never leaves the ground.
+
 - `rne_oc::ActuatorLimitCost`: a cost-model wrapper that adds a differentiable
   hinge penalty on joint velocity limit violations, so a joint speed bound acts
   as a soft state constraint on top of the existing running/terminal cost.

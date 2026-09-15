@@ -65,6 +65,8 @@ pub struct WholeBodyConfig {
     pub posture_weight: f64,
     /// Weight on the base-attitude task.
     pub angular_weight: f64,
+    /// Weight on an optional feed-forward joint torque reference.
+    pub torque_reference_weight: f64,
     /// Tikhonov weight on the contact forces (pulls them toward zero).
     pub force_regularization: f64,
     /// Tikhonov weight on the joint accelerations (pulls them toward zero).
@@ -88,6 +90,7 @@ impl Default for WholeBodyConfig {
             com_weight: 1.0e2,
             posture_weight: 1.0,
             angular_weight: 1.0e4,
+            torque_reference_weight: 1.0e3,
             force_regularization: 1.0e-4,
             acceleration_regularization: 1.0e-4,
             solver_regularization: 1.0e-9,
@@ -198,6 +201,33 @@ impl WholeBodyController {
         com_task: Option<&ComTask>,
         base_attitude_task: Option<&BaseAttitudeTask>,
         posture_task: Option<&PostureTask>,
+    ) -> Result<WholeBodySolution, WbcError> {
+        self.solve_with_torque_reference(
+            model,
+            q,
+            qd,
+            contacts,
+            com_task,
+            base_attitude_task,
+            posture_task,
+            None,
+        )
+    }
+
+    /// [`Self::solve`] with an optional per-joint feed-forward torque
+    /// reference, such as a trajectory-plan torque.
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::needless_range_loop)]
+    pub fn solve_with_torque_reference(
+        &self,
+        model: &ArticulatedModel,
+        q: &[f64],
+        qd: &[f64],
+        contacts: &[ContactPoint],
+        com_task: Option<&ComTask>,
+        base_attitude_task: Option<&BaseAttitudeTask>,
+        posture_task: Option<&PostureTask>,
+        torque_reference_nm: Option<&[f64]>,
     ) -> Result<WholeBodySolution, WbcError> {
         if model.base_dof() != 6 {
             return Err(WbcError::RequiresFloatingBase);
@@ -338,6 +368,33 @@ impl WholeBodyController {
                 let mut coefficients = vec![0.0; cols];
                 coefficients[dof] = 1.0;
                 push_row(&mut rows, &mut rhs, coefficients, target, scale);
+            }
+        }
+
+        // Feed-forward joint torque reference, for example a trajectory-plan
+        // torque. `tau_j = (M qdd + h - J^T f)_j`, so the row is
+        // `M_j qdd - J^T_j f = reference_j - h_j`.
+        if let Some(reference) = torque_reference_nm {
+            assert_eq!(reference.len(), nj);
+            let scale = self.config.torque_reference_weight.sqrt();
+            for joint in 0..nj {
+                let row = model.base_dof() + joint;
+                let mut coefficients = vec![0.0; cols];
+                for column in 0..nv {
+                    coefficients[column] = mass.get(row, column);
+                }
+                for (contact, jacobian) in contact_jacobians.iter().enumerate() {
+                    for component in 0..3 {
+                        coefficients[nv + 3 * contact + component] -= jacobian[component][row];
+                    }
+                }
+                push_row(
+                    &mut rows,
+                    &mut rhs,
+                    coefficients,
+                    reference[joint] - bias[row],
+                    scale,
+                );
             }
         }
 
@@ -686,7 +743,7 @@ fn solve_box_least_squares(
         .collect();
 
     let mut x = vec![0.0; cols];
-    for _ in 0..500 {
+    for _ in 0..2_000 {
         for i in 0..cols {
             let mut sum = -g[i];
             for j in 0..cols {
