@@ -87,12 +87,12 @@ pub struct TerminalDerivatives {
 
 /// A running and terminal cost model.
 pub trait CostModel {
-    /// Running cost `l(x, u)`.
-    fn running(&self, state: &[f64], control: &[f64]) -> f64;
+    /// Running cost `l_k(x, u)` at node `node`.
+    fn running(&self, node: usize, state: &[f64], control: &[f64]) -> f64;
     /// Terminal cost `lf(x)`.
     fn terminal(&self, state: &[f64]) -> f64;
-    /// Derivatives of the running cost.
-    fn running_derivatives(&self, state: &[f64], control: &[f64]) -> CostDerivatives;
+    /// Derivatives of the running cost at node `node`.
+    fn running_derivatives(&self, node: usize, state: &[f64], control: &[f64]) -> CostDerivatives;
     /// Derivatives of the terminal cost.
     fn terminal_derivatives(&self, state: &[f64]) -> TerminalDerivatives;
 }
@@ -135,7 +135,7 @@ impl QuadraticCost {
 }
 
 impl CostModel for QuadraticCost {
-    fn running(&self, state: &[f64], control: &[f64]) -> f64 {
+    fn running(&self, _node: usize, state: &[f64], control: &[f64]) -> f64 {
         let state_cost: f64 = self
             .state_weights
             .iter()
@@ -164,7 +164,7 @@ impl CostModel for QuadraticCost {
         0.5 * state_cost
     }
 
-    fn running_derivatives(&self, state: &[f64], control: &[f64]) -> CostDerivatives {
+    fn running_derivatives(&self, _node: usize, state: &[f64], control: &[f64]) -> CostDerivatives {
         let lx = self
             .state_weights
             .iter()
@@ -200,6 +200,45 @@ impl CostModel for QuadraticCost {
             lx,
             lxx: diagonal(&self.terminal_weights, 1.0),
         }
+    }
+}
+
+/// A per-node schedule of quadratic running costs with one terminal cost.
+///
+/// This is the Crocoddyl action-model analogue for a fixed contact sequence:
+/// each phase can pull toward a different reference, for example a crouch
+/// during a loading phase and a target apex during flight.
+#[derive(Clone, Debug)]
+pub struct PhaseCostSchedule {
+    /// Running cost per node.
+    pub running: Vec<QuadraticCost>,
+    /// Terminal cost.
+    pub terminal: QuadraticCost,
+}
+
+impl PhaseCostSchedule {
+    fn running_cost(&self, node: usize) -> &QuadraticCost {
+        let index = node.min(self.running.len().saturating_sub(1));
+        &self.running[index]
+    }
+}
+
+impl CostModel for PhaseCostSchedule {
+    fn running(&self, node: usize, state: &[f64], control: &[f64]) -> f64 {
+        self.running_cost(node).running(node, state, control)
+    }
+
+    fn terminal(&self, state: &[f64]) -> f64 {
+        self.terminal.terminal(state)
+    }
+
+    fn running_derivatives(&self, node: usize, state: &[f64], control: &[f64]) -> CostDerivatives {
+        self.running_cost(node)
+            .running_derivatives(node, state, control)
+    }
+
+    fn terminal_derivatives(&self, state: &[f64]) -> TerminalDerivatives {
+        self.terminal.terminal_derivatives(state)
     }
 }
 
@@ -347,7 +386,7 @@ pub fn solve(
 
     let trajectory_cost = |states: &[Vec<f64>], controls: &[Vec<f64>]| -> f64 {
         let running: f64 = (0..horizon)
-            .map(|k| cost.running(&states[k], &controls[k]))
+            .map(|k| cost.running(k, &states[k], &controls[k]))
             .sum();
         running + cost.terminal(&states[horizon])
     };
@@ -379,7 +418,7 @@ pub fn solve(
                 };
             let fx = derivatives.fx;
             let fu = derivatives.fu;
-            let derivative = cost.running_derivatives(&states[k], &controls[k]);
+            let derivative = cost.running_derivatives(k, &states[k], &controls[k]);
 
             let fx_t = mat_transpose(&fx);
             let fu_t = mat_transpose(&fu);
@@ -464,7 +503,7 @@ pub fn solve(
                 if config.keep_gaps_open && !gaps.is_empty() {
                     next = vec_add(&next, &vec_scale(&gaps[k], 1.0 - alpha));
                 }
-                candidate_cost += cost.running(&candidate_states[k], &u);
+                candidate_cost += cost.running(k, &candidate_states[k], &u);
                 candidate_controls[k] = u;
                 candidate_states[k + 1] = next;
             }
@@ -619,6 +658,24 @@ mod tests {
             }
         }
         assert!(max_gap < 1.0e-3, "unclosed gap {max_gap}");
+    }
+
+    #[test]
+    fn phase_schedule_dispatches_per_node_references() {
+        let unit = |reference: f64| {
+            let mut cost = QuadraticCost::new(vec![1.0, 0.0], vec![0.0], vec![0.0]);
+            cost.state_reference = vec![reference, 0.0];
+            cost
+        };
+        let running: Vec<QuadraticCost> = (0..10)
+            .map(|node| unit(if node < 5 { -1.0 } else { 1.0 }))
+            .collect();
+        let terminal = QuadraticCost::new(vec![0.0, 0.0], vec![0.0], vec![0.0]);
+        let schedule = PhaseCostSchedule { running, terminal };
+        let state = [1.0, 0.0];
+        // Node 0 targets -1, node 9 targets +1.
+        assert!((schedule.running(0, &state, &[]) - 2.0).abs() < 1.0e-12);
+        assert!((schedule.running(9, &state, &[]) - 0.0).abs() < 1.0e-12);
     }
 
     #[test]

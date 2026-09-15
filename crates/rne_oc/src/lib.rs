@@ -22,6 +22,6 @@ pub use articulated::ArticulatedDynamics;
 pub use constrained::{ConstrainedArticulatedDynamics, ContactPhase, ContactSequenceDynamics};
 pub use ddp::{
     dynamics_derivatives, solve, CostDerivatives, CostModel, DdpConfig, DdpSolution,
-    DiscreteDynamics, DynamicsDerivatives, OcError, QuadraticCost, ShootingDynamics,
-    TerminalDerivatives,
+    DiscreteDynamics, DynamicsDerivatives, OcError, PhaseCostSchedule, QuadraticCost,
+    ShootingDynamics, TerminalDerivatives,
 };
