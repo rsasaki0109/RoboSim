@@ -25,6 +25,7 @@ ROS2 is an adapter only. Do not add ROS2, rclrs, rclcpp, DDS, or ROS message dep
 - `crates/rne_dynamics`: backend-neutral articulated-body dynamics (CRBA mass matrix, recursive Newton-Euler inverse dynamics, floating base, center of mass and Jacobians)
 - `crates/rne_legged`: backend-neutral legged walking templates (LIPM/DCM, capture-point foot placement, ZMP preview control, footstep plans)
 - `crates/rne_wbc`: backend-neutral whole-body control (weighted inverse dynamics, contact and friction handling, joint torque recovery)
+- `crates/rne_oc`: backend-neutral multi-contact optimal control (DDP shooting solver, numerical dynamics derivatives, articulated dynamics adapter)
 - `crates/rne_physics`: physics backend traits only
 - `crates/rne_physics_rapier`: Rapier implementation
 - `crates/rne_physics_analytic`: deterministic collision-free analytic backend
@@ -129,6 +130,7 @@ Allowed dependencies:
 - `rne_dynamics` may depend on `rne_physics`, `rne_robot`, `rne_world`, `rne_ecs`, `rne_math`.
 - `rne_legged` may depend on `rne_dynamics`, `rne_robot`, `rne_world`, `rne_ecs`, `rne_math`.
 - `rne_wbc` may depend on `rne_dynamics`, `rne_robot`, `rne_world`, `rne_ecs`, `rne_math`.
+- `rne_oc` may depend on `rne_dynamics`, `rne_robot`, `rne_world`, `rne_ecs`, `rne_math`.
 - `rne_physics_rapier` may depend on `rne_physics` and Rapier.
 - `rne_sensor` may depend on `rne_physics`, `rne_render`, `rne_data`.
 - `rne_render_wgpu` may depend on `rne_render` and wgpu.
@@ -154,6 +156,9 @@ Forbidden:
 - `rne_wbc` must not depend on a renderer, physics backend, ROS 2, or an
   external control stack; it builds on `rne_dynamics` and `rne_robot` types
   without changing them.
+- `rne_oc` must not depend on a renderer, physics backend, ROS 2, or an external
+  optimal-control/dynamics library (Crocoddyl, Pinocchio, RBDL); it builds on
+  `rne_dynamics` types without changing them.
 - `rne_sensor` must not require a renderer unless the specific sensor is camera-like.
 - `rne_traffic` must not depend on a renderer, physics backend, geospatial importer,
   robotics adapter, or external traffic simulator.

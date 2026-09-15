@@ -424,6 +424,18 @@ cargo run -p whole_body_control --example 105_whole_body_control
 
 See [whole-body control](docs/architecture/014_whole_body_control.md).
 
+### Native optimal control
+
+`rne_oc` is the native Crocoddyl-style layer for generating agile maneuvers:
+a discrete shooting problem solved by **DDP** with Levenberg-Marquardt
+regularization and a backtracking line search, central-difference dynamics
+derivatives, quadratic running/terminal costs, and an `ArticulatedDynamics`
+adapter that integrates `rne_dynamics` forward dynamics. A pendulum swings up
+from hanging to upright under the solver, deterministically and without any
+external optimal-control library.
+
+See [native optimal control](docs/architecture/015_native_optimal_control.md).
+
 ## Architecture
 
 The workspace is split by responsibility:
