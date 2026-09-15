@@ -58,6 +58,14 @@ All notable changes to Robot Native Engine are documented in this file.
   `desired_joint_accelerations`, so a posture task can track a reference
   trajectory at the acceleration level instead of only holding a position.
 
+- `rne_oc::ContactImplicitArticulatedDynamics` and `CompliantContactModel`: a
+  contact-implicit dynamics model where the candidate contact points decide at
+  every step whether they push, from their penetration of a ground plane (a
+  smooth normal force plus regularized Coulomb friction). The contact schedule
+  is discovered from the trajectory instead of supplied as phases, so an
+  optimizer can plan a takeoff and a landing with one fixed candidate set. Unit
+  tests cover a freely falling body, a body caught by its candidate points, and
+  the normal-force clamp.
 - `rne_oc::ActuatorLimitCost`: a cost-model wrapper that adds a differentiable
   hinge penalty on joint velocity limit violations, so a joint speed bound acts
   as a soft state constraint on top of the existing running/terminal cost.
