@@ -91,6 +91,12 @@ external optimal-control/dynamics library.
   the actuator limit, the joints stay natural (`[-3.31, 1.96]` rad), and the
   contact dynamics are satisfied to machine precision. This is the first
   **actuator-realizable** jump produced by the native stack.
+- `rne_oc::ActuatorLimitCost` wraps any cost model with a differentiable hinge
+  penalty on joint velocity limit violations, turning a velocity bound into a
+  soft state constraint the existing backward pass can use. On the Go2 jump it
+  cuts the peak joint speed from an infeasible `44.0` rad/s to `31.0` rad/s
+  (against a thigh limit of `15.7` rad/s) at a small apex cost, and the unit
+  tests confirm the penalty and its gradient are exactly zero inside the limit.
 
 ## Limitations and follow-ups
 
@@ -105,8 +111,10 @@ external optimal-control/dynamics library.
 - **Analytical derivatives.** Central differences are correct but slow; a
   Pinocchio-equivalent analytical RNEA/CRBA derivative layer is the natural
   `rne_dynamics` extension.
-- **Inequality constraints.** Box (control) constraints are implemented; the
-  friction cone and general state inequality constraints are not.
+- **Inequality constraints.** Box (control) constraints are implemented, and
+  joint velocity limits are enforced softly with `ActuatorLimitCost`; hard state
+  bounds, the friction cone, and general nonlinear inequality constraints are
+  not.
 
 ## Consequences
 

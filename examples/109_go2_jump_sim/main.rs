@@ -42,6 +42,15 @@
 //! lean instead of a flip), so the remaining gap is purely the push: the
 //! simulator's stance never reaches the planned takeoff velocity.
 //!
+//! `--vel-weight` wraps the planner cost in `rne_oc::ActuatorLimitCost`, a
+//! hinge penalty that keeps joint speeds near their URDF limits. The default
+//! plan peaks at 44 rad/s — well beyond the Go2 thigh limit of 15.7 rad/s — so
+//! the unconstrained optimum is not even physically realizable. The penalty
+//! brings the peak to 31 rad/s at a small apex cost, but the transfer still
+//! fails, which locates the blocker in the planner/plant model mismatch (the
+//! landed model never reaches the planned takeoff velocity) rather than in
+//! actuator bandwidth.
+//!
 //! Run with `cargo run --release -p go2_jump_sim --example 109_go2_jump_sim`.
 
 use glam::EulerRot;
@@ -50,7 +59,8 @@ use rne_dynamics::{center_of_mass, ArticulatedModel, ContactSpec};
 use rne_ecs::World;
 use rne_math::{Quat, Vec3};
 use rne_oc::{
-    solve, ContactPhase, ContactSequenceDynamics, DdpConfig, PhaseCostSchedule, QuadraticCost,
+    solve, ActuatorLimitCost, ContactPhase, ContactSequenceDynamics, DdpConfig, PhaseCostSchedule,
+    QuadraticCost,
 };
 use rne_robot::{FloatingBase, KinematicModel, Robot, Transform3};
 use rne_wbc::{
@@ -81,6 +91,7 @@ const WBC_COM_KP: f64 = 120.0;
 const WBC_COM_KD: f64 = 20.0;
 const WBC_ATTITUDE_KP: f64 = -40.0;
 const WBC_ATTITUDE_KD: f64 = 8.0;
+const ACTUATOR_VELOCITY_WEIGHT: f64 = 5.0;
 
 fn dof_joint_names(model: &ArticulatedModel) -> Vec<String> {
     model
@@ -186,6 +197,9 @@ fn main() {
     let wbc_kd = argument_value("--wbc-kd")
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(WBC_COM_KD);
+    let velocity_weight = argument_value("--vel-weight")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(ACTUATOR_VELOCITY_WEIGHT);
     let lookahead = argument_value("--lookahead")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
@@ -323,7 +337,19 @@ fn main() {
     let mut terminal_reference = vec![0.0; 2 * nv];
     terminal_reference[1] = start_y + TARGET_APEX_M;
     terminal.state_reference = terminal_reference;
-    let cost = PhaseCostSchedule { running, terminal };
+    let velocity_limits: Vec<f64> = model
+        .kinematic()
+        .joint_limits()
+        .iter()
+        .map(|limits| limits.max_velocity)
+        .collect();
+    let cost = ActuatorLimitCost::new(
+        PhaseCostSchedule { running, terminal },
+        velocity_limits,
+        velocity_weight,
+        nv,
+        0,
+    );
 
     let mut crouch = initial.clone();
     crouch[1] = start_y - 0.09;
@@ -352,8 +378,17 @@ fn main() {
         .iter()
         .flatten()
         .fold(0.0_f64, |maximum, value| maximum.max(value.abs()));
+    let takeoff = CROUCH_STEPS + PUSH_STEPS;
+    let takeoff_base_vel =
+        (solution.states[takeoff + 1][1] - solution.states[takeoff][1]) / STEP_TIME_S;
+    let mut max_joint_speed = 0.0_f64;
+    for state in &solution.states {
+        for dof in 0..control_dim {
+            max_joint_speed = max_joint_speed.max(state[nv + 6 + dof].abs());
+        }
+    }
     println!(
-        "plan: apex_y={plan_apex:.3} height={:.3} max_torque={max_torque:.2}",
+        "plan: apex_y={plan_apex:.3} height={:.3} max_torque={max_torque:.2} takeoff_base_vel={takeoff_base_vel:.2} max_joint_speed={max_joint_speed:.2}",
         plan_apex - start_y
     );
 

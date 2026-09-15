@@ -21,6 +21,14 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_oc::ActuatorLimitCost`: a cost-model wrapper that adds a differentiable
+  hinge penalty on joint velocity limit violations, so a joint speed bound acts
+  as a soft state constraint on top of the existing running/terminal cost.
+  `examples/109_go2_jump_sim` exposes it through `--vel-weight`; on the Go2 jump
+  it reduces the peak planned joint speed from `44.0` to `31.0` rad/s. The
+  plan still does not transfer to the simulator, which isolates the remaining
+  blocker to the planner/plant model mismatch rather than actuator bandwidth.
+
 - `rne_oc` control-limited DDP: `DdpConfig::control_lower`/`control_upper` project
   the feedforward onto the control box and zero the feedback on saturated
   coordinates. `examples/108_go2_jump_opt` now produces an
