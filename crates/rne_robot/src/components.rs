@@ -1304,6 +1304,44 @@ impl CorneringStiffnessLoadSensitivity {
     }
 }
 
+/// Optional lateral (left/right) load-transfer model for the dynamic bicycle.
+///
+/// The single-track model has one tire per axle, so it cannot represent the
+/// left/right load shift a corner produces. When present, each axle is split
+/// into two equal-slip tires: the total lateral transfer `m |ay| h / track` is
+/// split front/rear by [`Self::front_roll_stiffness_fraction`], and the axle
+/// force becomes the sum of the two sides at their own loads. Because the
+/// friction limit is linear in load but the load-sensitive linear tire clamps
+/// one side earlier than the other, the split reduces the axle's usable lateral
+/// force and shifts the balance between the axles — the classical
+/// load-transfer understeer/oversteer effect.
+///
+/// This is a deliberately lower-order model, not a measurement: it uses a mean
+/// track width, a single roll-stiffness fraction, and the steady centripetal
+/// acceleration `vx r` rather than a full roll dynamic. `None` reproduces the
+/// single-tire-per-axle behavior bit-for-bit, so existing trajectories,
+/// goldens, and evidence digests are unaffected.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LateralLoadTransferSpec {
+    /// Distance between the left and right contact patches, in meters.
+    pub track_width_m: f64,
+    /// Fraction of the total roll moment carried by the front axle, in `[0, 1]`.
+    ///
+    /// `0.0` transfers all lateral load at the rear axle, `1.0` all at the
+    /// front. A front-biased value tends toward understeer.
+    pub front_roll_stiffness_fraction: f64,
+}
+
+impl LateralLoadTransferSpec {
+    /// Returns whether the track width and roll-stiffness split are physical.
+    pub fn is_valid(&self) -> bool {
+        self.track_width_m.is_finite()
+            && self.track_width_m > 0.0
+            && self.front_roll_stiffness_fraction.is_finite()
+            && (0.0..=1.0).contains(&self.front_roll_stiffness_fraction)
+    }
+}
+
 /// Planar dynamic bicycle model state and parameters for an Ackermann vehicle.
 ///
 /// [`crate::ackermann_kinematics`] assumes the tires never slip, which makes every
@@ -1316,6 +1354,8 @@ impl CorneringStiffnessLoadSensitivity {
 /// The model runs in the ground plane. Front and rear slip angles produce lateral
 /// forces through a linear tire that saturates at the friction limit, and longitudinal
 /// weight transfer shifts that limit between the axles under acceleration and braking.
+/// An optional [`LateralLoadTransferSpec`] additionally splits each axle left/right to
+/// represent cornering load transfer.
 /// Below [`Self::blend_low_speed_m_s`] the update blends into the kinematic solution,
 /// because slip angles divide by forward speed and become singular near standstill.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -1369,6 +1409,16 @@ pub struct VehicleDynamics {
     /// stiffness values keep their meaning at the static load exactly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cornering_stiffness_load_sensitivity: Option<CorneringStiffnessLoadSensitivity>,
+    /// Optional lateral (left/right) load-transfer model.
+    ///
+    /// Absent by default (`None`), which keeps the single-tire-per-axle model
+    /// bit-for-bit identical. When present, each axle splits into two equal-slip
+    /// tires at half the axle load plus or minus its share of
+    /// `m |vx r| h / track`, and the axle force is their sum. This is the
+    /// left/right counterpart of the longitudinal transfer that shifts `Fz`
+    /// between the axles under acceleration and braking.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lateral_load_transfer: Option<LateralLoadTransferSpec>,
 }
 
 impl Default for VehicleDynamics {
@@ -1392,6 +1442,7 @@ impl Default for VehicleDynamics {
             front_saturated: false,
             rear_saturated: false,
             cornering_stiffness_load_sensitivity: None,
+            lateral_load_transfer: None,
         }
     }
 }
@@ -1428,6 +1479,9 @@ impl VehicleDynamics {
             && self
                 .cornering_stiffness_load_sensitivity
                 .is_none_or(|sensitivity| sensitivity.is_valid())
+            && self
+                .lateral_load_transfer
+                .is_none_or(|transfer| transfer.is_valid())
     }
 
     /// Wheelbase implied by the axle distances, in meters.
