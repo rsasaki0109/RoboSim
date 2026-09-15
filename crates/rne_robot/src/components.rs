@@ -1274,6 +1274,36 @@ impl Default for Inertial {
     }
 }
 
+/// Optional load-dependent cornering-stiffness adjustment for [`VehicleDynamics`].
+///
+/// Reuses [`CombinedSlipTireSpec`]'s load-sensitivity functional form and clamping
+/// conventions rather than inventing a second load-sensitivity law: a load ratio
+/// (`axle_load / static_axle_load`) is capped at [`Self::maximum_load_ratio`], then
+/// scales stiffness affinely through [`Self::load_sensitivity_per_load_ratio`]. Unlike
+/// the tire's friction sensitivity, which decreases with load, cornering stiffness
+/// increases with load, so the slope sign is flipped; the clamp and parameter
+/// semantics are otherwise identical. This is a refinement of a deliberately simple
+/// linear tire, not a measurement: it has not been validated against measured vehicle
+/// or tire data.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CorneringStiffnessLoadSensitivity {
+    /// Fractional cornering-stiffness gain per unit increase in `axle_load / static_axle_load`.
+    pub load_sensitivity_per_load_ratio: f64,
+    /// Maximum `axle_load / static_axle_load` admitted by this model's validity envelope.
+    pub maximum_load_ratio: f64,
+}
+
+impl CorneringStiffnessLoadSensitivity {
+    /// Returns whether the load-sensitivity parameters are finite and inside the
+    /// declared physical domain, matching [`CombinedSlipTireSpec`]'s conventions.
+    pub fn is_valid(&self) -> bool {
+        self.load_sensitivity_per_load_ratio.is_finite()
+            && (0.0..1.0).contains(&self.load_sensitivity_per_load_ratio)
+            && self.maximum_load_ratio.is_finite()
+            && self.maximum_load_ratio >= 1.0
+    }
+}
+
 /// Planar dynamic bicycle model state and parameters for an Ackermann vehicle.
 ///
 /// [`crate::ackermann_kinematics`] assumes the tires never slip, which makes every
@@ -1328,6 +1358,17 @@ pub struct VehicleDynamics {
     pub front_saturated: bool,
     /// Whether the rear axle saturated its friction limit during the last step.
     pub rear_saturated: bool,
+    /// Optional load-dependent cornering-stiffness adjustment.
+    ///
+    /// Absent by default (`None`), which keeps this model bit-for-bit identical to its
+    /// original constant-stiffness behavior: [`Self::front_cornering_stiffness_n_rad`]
+    /// and [`Self::rear_cornering_stiffness_n_rad`] are then used exactly as declared,
+    /// unaffected by load transfer. When present, each axle's stiffness scales with its
+    /// instantaneous load relative to its own static load
+    /// ([`Self::static_front_load_n`] / [`Self::static_rear_load_n`]), so the declared
+    /// stiffness values keep their meaning at the static load exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cornering_stiffness_load_sensitivity: Option<CorneringStiffnessLoadSensitivity>,
 }
 
 impl Default for VehicleDynamics {
@@ -1350,6 +1391,7 @@ impl Default for VehicleDynamics {
             rear_slip_rad: 0.0,
             front_saturated: false,
             rear_saturated: false,
+            cornering_stiffness_load_sensitivity: None,
         }
     }
 }
@@ -1383,6 +1425,9 @@ impl VehicleDynamics {
             && self.blend_low_speed_m_s >= 0.0
             && self.steering_lag_s.is_finite()
             && self.steering_lag_s >= 0.0
+            && self
+                .cornering_stiffness_load_sensitivity
+                .is_none_or(|sensitivity| sensitivity.is_valid())
     }
 
     /// Wheelbase implied by the axle distances, in meters.
