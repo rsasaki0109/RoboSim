@@ -16,6 +16,7 @@
 pub mod articulated;
 pub mod constrained;
 pub mod ddp;
+pub mod limits;
 pub mod matrix;
 
 pub use articulated::ArticulatedDynamics;
@@ -25,3 +26,4 @@ pub use ddp::{
     DiscreteDynamics, DynamicsDerivatives, OcError, PhaseCostSchedule, QuadraticCost,
     ShootingDynamics, TerminalDerivatives,
 };
+pub use limits::ActuatorLimitCost;

@@ -21,6 +21,12 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_oc::ActuatorLimitCost`: a cost-model wrapper that adds a differentiable
+  hinge penalty on joint velocity limit violations, so a joint speed bound acts
+  as a soft state constraint on top of the existing running/terminal cost.
+  `examples/109_go2_jump_sim` exposes it through `--vel-weight`; on the Go2 jump
+  it reduces the peak planned joint speed from `44.0` to `31.0` rad/s, against a
+  URDF thigh limit of `15.7` rad/s.
 - `weld_fixed_children` URDF articulation option. When enabled, links reachable
   only through fixed joints (for example the Unitree Go2 foot and calf shells)
   join the reduced-coordinate multibody instead of becoming free rigid bodies
@@ -28,6 +34,12 @@ All notable changes to Robot Native Engine are documented in this file.
   behavior; the mass-matched jump robot opts in. With the flag on, the Go2 foot
   frame matches the planner's URDF forward kinematics and the optimized jump
   lifts off (0.144 m whole-body-control jump height) for the first time.
+- `examples/109_go2_jump_sim --debug-fk` compares the planner's URDF forward
+  kinematics with the plant's articulation frames. It isolated the failed jump
+  transfer: the base and the chain through the calf matched to machine
+  precision, but the Go2 foot link sat `0.138` m from the calf instead of the
+  URDF's `0.213` m, because `rne_urdf_import` excluded fixed-only children from
+  the physics multibody.
 
 - `rne_oc` control-limited DDP: `DdpConfig::control_lower`/`control_upper` project
   the feedforward onto the control box and zero the feedback on saturated
