@@ -39,6 +39,44 @@ load-sensitive peak force, low-speed regularization, relaxation length, and a sm
 friction ellipse. Semi-implicit Euler advances velocities before positions at a fixed
 simulation step.
 
+## Optional longitudinal load transfer
+
+By default the driven wheel's normal load is the constant
+`normal_load_per_driven_wheel_n`, so `CombinedSlipTireSpec::load_sensitivity_per_load_ratio`
+has nothing to react to in this plant: the load ratio never moves. `LongitudinalMobilityPlantSpec::longitudinal_load_transfer`
+is an opt-in `Option<LongitudinalLoadTransferSpec>` that instead derives the driven
+wheel's normal load from the chassis's own longitudinal acceleration each step:
+
+```text
+delta_F_z = m * a_x * h_cg / L
+```
+
+`h_cg` (`cg_height_m`) and `L` (`wheelbase_m`) are declared geometry; `driven_axle`
+(`Front` or `Rear`) fixes the sign, since forward acceleration always loads the rear
+axle and unloads the front regardless of which axle the plant's single driven-wheel
+path represents. The transfer is applied to the driven axle's static total load
+(`normal_load_per_driven_wheel_n * driven_wheel_count`) and split evenly across
+`driven_wheel_count` wheels; the result is clamped to non-negative so an analytically
+unloaded axle reads zero rather than a negative load.
+
+`a_x` is the chassis acceleration `evaluate_longitudinal_mobility_plant` already
+computed on the *previous* step (`state.previous_chassis_acceleration_m_s2`), not a
+value solved jointly with this step's tire force. This keeps the evaluator a single
+explicit step, matches its existing semi-implicit integration (a step's contact
+evidence is always derived from already-completed motion), and already reflects
+grade and aerodynamic drag, since those terms are baked into the acceleration the
+loop computes. At rest, or with the field absent, this is exactly today's constant
+load.
+
+This is an analytic, rigid-body model: no suspension spring/damper dynamics, no pitch
+state, and longitudinal transfer only -- no lateral or cornering transfer. It has not
+been fitted or validated against measured vehicle data; `wheelbase_m` and
+`cg_height_m` are declared geometry, not identified parameters. When
+`longitudinal_load_transfer` is absent (the default), the plant is bit-for-bit
+identical to its behavior before this field existed, which existing serialized specs
+and evidence depend on: it decodes as `None` under `#[serde(default)]` and is never
+emitted when absent.
+
 ## Research and OSS correspondence
 
 - Li et al., *Estimation of Vehicle Dynamic Parameters Based on the Two-Stage
@@ -95,11 +133,13 @@ cargo run -p rne_mobility_benchmark -- --output mobility-report.json
 
 The model is suitable for deterministic straight-line controller tests at the declared
 fixed step, parameter sensitivity checks, and a first stage of real-log identification.
-It currently assumes identical driven wheels, prescribed per-wheel normal load, a rigid
-driveline ratio, flat longitudinal contact, and no native backend tangential friction.
+It currently assumes identical driven wheels, a rigid driveline ratio, flat longitudinal
+contact, and no native backend tangential friction. Per-wheel normal load is prescribed
+by default and can optionally follow an analytic longitudinal weight-transfer model (see
+above); either way it is not solved from a suspended rigid body.
 
-It does not yet model front/rear load transfer, suspension, pitch, steering, yaw, lateral
-scrub, backlash state, tire temperature or pressure, road roughness, wheel lift, ABS,
+It does not yet model suspension, pitch, steering, yaw, lateral scrub, cornering/lateral
+load transfer, backlash state, tire temperature or pressure, road roughness, ABS,
 traction control, inverter switching, bus-voltage sag, battery state, or thermal limits.
 The analytic plant itself does not inject tire forces into Rapier or MuJoCo. The separate
 [`MOBILITY_BACKEND_CLOSED_LOOP_V1.md`](MOBILITY_BACKEND_CLOSED_LOOP_V1.md) fixture now

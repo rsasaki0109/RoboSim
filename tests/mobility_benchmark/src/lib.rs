@@ -433,6 +433,7 @@ fn plant_spec(
             reference_load_n: 490.3325,
             ..CombinedSlipTireSpec::default()
         },
+        longitudinal_load_transfer: None,
     }
 }
 

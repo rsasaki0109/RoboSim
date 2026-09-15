@@ -740,6 +740,7 @@ pub(crate) fn wheel_plant_spec() -> LongitudinalMobilityPlantSpec {
             lateral_relaxation_length_m: 0.05,
             ..CombinedSlipTireSpec::default()
         },
+        longitudinal_load_transfer: None,
     }
 }
 

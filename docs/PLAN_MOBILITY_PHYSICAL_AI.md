@@ -122,7 +122,13 @@ rotor, acceleration, ice-like traction limiting, regenerative braking, open circ
 step convergence emit versioned SI-unit metrics and a stable content digest. Its scope and
 research basis are frozen in
 [`MOBILITY_LONGITUDINAL_BENCHMARK_V1.md`](MOBILITY_LONGITUDINAL_BENCHMARK_V1.md). This is
-the analytic control baseline, not by itself a rigid-body fidelity claim.
+the analytic control baseline, not by itself a rigid-body fidelity claim. The plant's
+driven-wheel normal load is a constant by default; an opt-in
+`LongitudinalMobilityPlantSpec::longitudinal_load_transfer` can instead derive it from the
+plant's own longitudinal acceleration through an analytic `m * a_x * h_cg / L` rigid-body
+model, so `CombinedSlipTireSpec::load_sensitivity_per_load_ratio` has something to act on
+in this reduced plant. It is longitudinal-only and bit-for-bit identical to before when
+absent; per-wheel/Ackermann suspension and lateral load transfer remain M3-C scope.
 
 M3-B now runs the exact same TaskSpec, seed, 1 ms clock, motor/transmission/wheel/tire
 evaluator, contact acquisition, and external-wrench loop through Rapier and MuJoCo. Complete

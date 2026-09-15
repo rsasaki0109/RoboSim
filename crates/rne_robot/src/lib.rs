@@ -20,12 +20,13 @@ pub use commands::{ActuatorCommand, ActuatorCommandBuffer, ActuatorCommandEntry}
 pub use components::{
     AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
     DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, Device, DeviceKind,
-    FloatingBase, Joint, JointKind, JointLimits, Link, LinkDevices, LongitudinalDrivePathState,
-    LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState, MimicJoint, MultirotorFlight,
-    PassiveCasterSpec, PassiveJoint, PwmMotorCommandFrontendSpec, PwmMotorCommandPolarity,
-    RigidRoadPatchSpec, RigidRoadProfileSpec, Robot, RobotId, SteeringActuatorFailureMode,
-    SteeringActuatorSpec, SteeringActuatorState, SuspensionStrutSpec, TransmissionSpec,
-    VehicleDynamics, WheelAssemblySpec, WheelStationSpec, WheelSteeringState,
+    DrivenAxle, FloatingBase, Joint, JointKind, JointLimits, Link, LinkDevices,
+    LongitudinalDrivePathState, LongitudinalLoadTransferSpec, LongitudinalMobilityPlantSpec,
+    LongitudinalMobilityPlantState, MimicJoint, MultirotorFlight, PassiveCasterSpec, PassiveJoint,
+    PwmMotorCommandFrontendSpec, PwmMotorCommandPolarity, RigidRoadPatchSpec, RigidRoadProfileSpec,
+    Robot, RobotId, SteeringActuatorFailureMode, SteeringActuatorSpec, SteeringActuatorState,
+    SuspensionStrutSpec, TransmissionSpec, VehicleDynamics, WheelAssemblySpec, WheelStationSpec,
+    WheelSteeringState,
 };
 pub use controller_io::{
     apply_controller_output, build_controller_io, step_controller, Controller,
