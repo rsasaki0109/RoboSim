@@ -28,6 +28,23 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `VehicleDynamics::cornering_stiffness_load_sensitivity` (an optional
+  `CorneringStiffnessLoadSensitivity`): lets the planar dynamic bicycle model's
+  per-axle cornering stiffness scale with the axle's instantaneous load,
+  instead of staying constant while only the friction saturation limit moves
+  with load transfer. It reuses `CombinedSlipTireSpec`'s load-ratio clamp and
+  `load_sensitivity_per_load_ratio` functional form (factored into a shared
+  `capped_load_ratio` helper) with the slope sign flipped, since cornering
+  stiffness rises with load where tire friction falls with it; stiffness stays
+  exactly at its declared value when the axle is at its own static load. This
+  is a **model refinement of a deliberately simple linear tire, not a
+  measurement** — it has not been validated against measured vehicle or tire
+  data, and the affine/clamped shape is chosen for consistency with the
+  existing tire law, not fit to data. The field is absent (`None`) by default,
+  which keeps every existing constant-stiffness trajectory bit-for-bit
+  identical; serialized `VehicleDynamics` values omit the field entirely
+  (`skip_serializing_if`) unless it is set.
+
 - `rne_oc::ActuatorLimitCost`: a cost-model wrapper that adds a differentiable
   hinge penalty on joint velocity limit violations, so a joint speed bound acts
   as a soft state constraint on top of the existing running/terminal cost.

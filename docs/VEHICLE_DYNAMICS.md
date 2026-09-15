@@ -34,6 +34,29 @@ loads the front tires and throttle loads the rear — the same corner behaves
 differently on and off the power. Saturation state and the slip angles of the last
 step are exposed on the component for telemetry and evaluation.
 
+### Load-dependent cornering stiffness (opt-in)
+
+`C` above is constant by default: load transfer moves the friction limit
+`mu Fz`, but not the slope of the linear tire. Setting
+[`VehicleDynamics::cornering_stiffness_load_sensitivity`] to a
+`CorneringStiffnessLoadSensitivity` makes `C` itself track each axle's
+instantaneous load, reusing [`CombinedSlipTireSpec`]'s load-ratio clamp and
+`load_sensitivity_per_load_ratio` functional form rather than a second,
+independently invented law — the slope sign is flipped, since cornering
+stiffness rises with load where tire friction falls with it. The reference
+load is each axle's own static (zero-acceleration) load, so the declared
+`front_cornering_stiffness_n_rad` / `rear_cornering_stiffness_n_rad` values
+keep their exact meaning there; a hard brake still raises front stiffness and
+lowers rear (and throttle does the reverse), sub-linearly in the load ratio.
+
+This is a **model refinement of a deliberately simple linear tire, not a
+measurement**: no real vehicle or tire data was used to choose the affine
+shape, only consistency with the codebase's existing tire law. The field is
+absent (`None`) by default, which keeps every existing constant-stiffness
+trajectory bit-for-bit identical, and it is skipped entirely when serializing
+a `VehicleDynamics` that does not set it, so existing serialized artifacts,
+goldens, and retained evidence digests are unaffected.
+
 ### Low-speed blend
 
 Slip angles divide by `vx` and become singular near standstill; this is the standard

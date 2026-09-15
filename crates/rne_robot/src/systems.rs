@@ -4,12 +4,12 @@ use crate::actuator::ControlMode;
 use crate::commands::{ActuatorCommand, ActuatorCommandBuffer};
 use crate::components::{
     AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
-    DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec, DcMotorState, DrivenAxle, Joint,
-    JointKind, LongitudinalDrivePathState, LongitudinalLoadTransferSpec,
-    LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState, MultirotorFlight,
-    PwmMotorCommandFrontendSpec, PwmMotorCommandPolarity, RigidRoadPatchSpec, RigidRoadProfileSpec,
-    SteeringActuatorFailureMode, SteeringActuatorSpec, SteeringActuatorState, SuspensionStrutSpec,
-    TransmissionSpec, VehicleDynamics, WheelAssemblySpec, WheelStationSpec,
+    CorneringStiffnessLoadSensitivity, DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec,
+    DcMotorState, DrivenAxle, Joint, JointKind, LongitudinalDrivePathState,
+    LongitudinalLoadTransferSpec, LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState,
+    MultirotorFlight, PwmMotorCommandFrontendSpec, PwmMotorCommandPolarity, RigidRoadPatchSpec,
+    RigidRoadProfileSpec, SteeringActuatorFailureMode, SteeringActuatorSpec, SteeringActuatorState,
+    SuspensionStrutSpec, TransmissionSpec, VehicleDynamics, WheelAssemblySpec, WheelStationSpec,
 };
 use crate::diff_drive::DifferentialDrive;
 use crate::joint::{validate_joint_position, validate_joint_velocity, JointValidationError};
@@ -1884,6 +1884,16 @@ pub fn aggregate_wheel_contact_patch(
     }))
 }
 
+/// Caps a normalized load ratio (`load_n / reference_load_n`) at `maximum_load_ratio`.
+///
+/// This is the load-sensitivity envelope clamp shared by [`CombinedSlipTireSpec`]
+/// (evaluated in [`evaluate_combined_slip_tire`]) and
+/// [`CorneringStiffnessLoadSensitivity`] (evaluated in [`vehicle_dynamics`]): both
+/// treat load beyond this ratio as outside the model's identified validity range.
+fn capped_load_ratio(load_n: f64, reference_load_n: f64, maximum_load_ratio: f64) -> f64 {
+    (load_n / reference_load_n).min(maximum_load_ratio)
+}
+
 /// Evaluates one deterministic, identifiable transient combined-slip tire force.
 ///
 /// The contact velocity already includes wheel rotation. Positive longitudinal slip is
@@ -1957,8 +1967,11 @@ pub fn evaluate_combined_slip_tire(
         dt_s,
     );
 
-    let uncapped_load_ratio = patch.normal_load_n / spec.reference_load_n;
-    let load_ratio = uncapped_load_ratio.min(spec.maximum_load_ratio);
+    let load_ratio = capped_load_ratio(
+        patch.normal_load_n,
+        spec.reference_load_n,
+        spec.maximum_load_ratio,
+    );
     let friction_ratio = (1.0 - spec.load_sensitivity_per_load_ratio * (load_ratio - 1.0))
         .max(spec.minimum_friction_ratio);
     let longitudinal_peak_force_n = spec.longitudinal_peak_friction
@@ -3759,6 +3772,47 @@ pub fn pure_pursuit_steering(
     (-2.0 * wheelbase_m * local_target.z).atan2(lookahead_m * lookahead_m)
 }
 
+/// Evaluates one axle's cornering stiffness, applying [`CorneringStiffnessLoadSensitivity`]
+/// when present.
+///
+/// Absent `sensitivity` returns `reference_stiffness_n_rad` unchanged, which keeps
+/// [`vehicle_dynamics`]'s constant-stiffness path bit-for-bit identical to before this
+/// adjustment existed. A non-positive `static_axle_load_n` also falls back to the
+/// unchanged value; that should not occur once [`VehicleDynamics::is_valid`] holds, since
+/// a valid spec has strictly positive mass and axle distances.
+///
+/// When present, stiffness scales affinely with the axle's instantaneous load ratio
+/// relative to its own static load, reusing [`CombinedSlipTireSpec`]'s load-ratio clamp
+/// through [`capped_load_ratio`] and its `load_sensitivity_per_load_ratio` functional
+/// form, with the slope sign flipped: cornering stiffness increases with load where tire
+/// friction decreases with it. Because the affine map has a nonzero intercept at
+/// `load_ratio == 1`, it is sub-linear in the load ratio (doubling the ratio does not
+/// double the output), and it evaluates to exactly `reference_stiffness_n_rad` at the
+/// axle's static load, preserving that parameter's declared meaning. Validation bounds
+/// `load_sensitivity_per_load_ratio` to `[0.0, 1.0)` and `load_ratio` is never negative,
+/// so the result stays strictly positive.
+fn effective_cornering_stiffness(
+    reference_stiffness_n_rad: f64,
+    axle_load_n: f64,
+    static_axle_load_n: f64,
+    sensitivity: Option<CorneringStiffnessLoadSensitivity>,
+) -> f64 {
+    let Some(sensitivity) = sensitivity else {
+        return reference_stiffness_n_rad;
+    };
+    if static_axle_load_n <= 0.0 {
+        return reference_stiffness_n_rad;
+    }
+    let load_ratio = capped_load_ratio(
+        axle_load_n,
+        static_axle_load_n,
+        sensitivity.maximum_load_ratio,
+    );
+    let stiffness_ratio =
+        (1.0 + sensitivity.load_sensitivity_per_load_ratio * (load_ratio - 1.0)).max(0.0);
+    reference_stiffness_n_rad * stiffness_ratio
+}
+
 /// Advances vehicles that carry both [`AckermannDrive`] and [`VehicleDynamics`] with a
 /// planar dynamic bicycle model.
 ///
@@ -3782,6 +3836,9 @@ pub fn pure_pursuit_steering(
 /// front tires and throttle loads the rear — which is why the same corner behaves
 /// differently on and off the power. Below [`VehicleDynamics::blend_low_speed_m_s`] the
 /// lateral states relax toward the kinematic solution to avoid the `1/vx` singularity.
+/// `C` itself is constant unless [`VehicleDynamics::cornering_stiffness_load_sensitivity`]
+/// is present, in which case [`effective_cornering_stiffness`] scales it with the same
+/// per-axle `Fz`.
 pub fn vehicle_dynamics(world: &mut World, dt: SimDuration) {
     let dt_s = dt.as_seconds().value();
     if !dt_s.is_finite() || dt_s <= 0.0 {
@@ -3867,19 +3924,29 @@ pub fn vehicle_dynamics(world: &mut World, dt: SimDuration) {
             let alpha_f = ((vy + dynamics.front_axle_m * r) / vx).atan() - delta;
             let alpha_r = ((vy - dynamics.rear_axle_m * r) / vx).atan();
 
+            let front_stiffness_n_rad = effective_cornering_stiffness(
+                dynamics.front_cornering_stiffness_n_rad,
+                front_load_n,
+                dynamics.static_front_load_n(),
+                dynamics.cornering_stiffness_load_sensitivity,
+            );
+            let rear_stiffness_n_rad = effective_cornering_stiffness(
+                dynamics.rear_cornering_stiffness_n_rad,
+                rear_load_n,
+                dynamics.static_rear_load_n(),
+                dynamics.cornering_stiffness_load_sensitivity,
+            );
+
             let front_limit_n = dynamics.friction_coefficient * front_load_n;
             let rear_limit_n = dynamics.friction_coefficient * rear_load_n;
-            let front_force_n = (-dynamics.front_cornering_stiffness_n_rad * alpha_f)
-                .clamp(-front_limit_n, front_limit_n);
-            let rear_force_n = (-dynamics.rear_cornering_stiffness_n_rad * alpha_r)
-                .clamp(-rear_limit_n, rear_limit_n);
+            let front_force_n =
+                (-front_stiffness_n_rad * alpha_f).clamp(-front_limit_n, front_limit_n);
+            let rear_force_n = (-rear_stiffness_n_rad * alpha_r).clamp(-rear_limit_n, rear_limit_n);
 
             dynamics.front_slip_rad = alpha_f;
             dynamics.rear_slip_rad = alpha_r;
-            dynamics.front_saturated =
-                (dynamics.front_cornering_stiffness_n_rad * alpha_f).abs() > front_limit_n;
-            dynamics.rear_saturated =
-                (dynamics.rear_cornering_stiffness_n_rad * alpha_r).abs() > rear_limit_n;
+            dynamics.front_saturated = (front_stiffness_n_rad * alpha_f).abs() > front_limit_n;
+            dynamics.rear_saturated = (rear_stiffness_n_rad * alpha_r).abs() > rear_limit_n;
 
             let lateral_acceleration =
                 (front_force_n * delta.cos() + rear_force_n) / dynamics.mass_kg - vx * r;
@@ -6124,6 +6191,262 @@ mod tests {
         };
 
         assert_eq!(run(), run());
+    }
+
+    #[test]
+    fn cornering_stiffness_load_sensitivity_absent_returns_reference_unchanged() {
+        // The absent-spec path must be bit-for-bit identical to the original
+        // constant-stiffness formula: effective_cornering_stiffness must hand back
+        // exactly the declared value, untouched, for every load -- not merely close.
+        for axle_load_n in [0.0, 1.0, 2_500.0, 8_175.0, 1.0e6] {
+            assert_eq!(
+                effective_cornering_stiffness(80_000.0, axle_load_n, 8_175.0, None),
+                80_000.0
+            );
+        }
+    }
+
+    #[test]
+    fn cornering_stiffness_load_sensitivity_absent_trajectory_is_bit_identical() {
+        // Full-pipeline version of the same guarantee: a braking-and-turning
+        // transient run with the spec absent must match, field for field, the same
+        // transient with an explicit zero-gain spec present. Zero gain multiplies
+        // stiffness by exactly 1.0 (IEEE-754 exact), so if this ever diverges the
+        // new load-dependent term is leaking into the constant-stiffness path.
+        let run = |sensitivity| {
+            let mut world = World::new();
+            let vehicle = spawn_dynamic_vehicle(
+                &mut world,
+                AckermannDrive {
+                    target_speed_m_s: 6.0,
+                    speed_m_s: 22.0,
+                    max_deceleration_m_s2: 5.0,
+                    max_acceleration_m_s2: 1_000.0,
+                    max_steering_rate_rad_s: 1_000.0,
+                    steering_rad: 0.1,
+                    target_steering_rad: 0.1,
+                    max_speed_m_s: 60.0,
+                    ..AckermannDrive::default()
+                },
+                VehicleDynamics {
+                    cornering_stiffness_load_sensitivity: sensitivity,
+                    ..VehicleDynamics::default()
+                },
+            );
+            step_seconds(&mut world, 3.0);
+            let dynamics = *world.get::<VehicleDynamics>(vehicle).unwrap();
+            // Compare every numerically meaningful output, but not the sensitivity
+            // spec itself (which trivially differs between the two runs).
+            (
+                world.get::<Transform3>(vehicle).unwrap().translation,
+                dynamics.lateral_velocity_m_s,
+                dynamics.yaw_rate_rad_s,
+                dynamics.front_slip_rad,
+                dynamics.rear_slip_rad,
+                dynamics.front_saturated,
+                dynamics.rear_saturated,
+            )
+        };
+
+        let absent = run(None);
+        let zero_gain = run(Some(CorneringStiffnessLoadSensitivity {
+            load_sensitivity_per_load_ratio: 0.0,
+            maximum_load_ratio: 3.0,
+        }));
+        assert_eq!(absent, zero_gain);
+    }
+
+    #[test]
+    fn cornering_stiffness_at_reference_load_equals_declared_value_exactly() {
+        let sensitivity = CorneringStiffnessLoadSensitivity {
+            load_sensitivity_per_load_ratio: 0.4,
+            maximum_load_ratio: 3.0,
+        };
+        // At the axle's own static load the ratio is exactly 1.0, so the declared
+        // parameter keeps its current meaning bit-for-bit.
+        assert_eq!(
+            effective_cornering_stiffness(80_000.0, 8_175.0, 8_175.0, Some(sensitivity)),
+            80_000.0
+        );
+    }
+
+    #[test]
+    fn cornering_stiffness_rises_with_load_and_falls_when_unloaded() {
+        let sensitivity = CorneringStiffnessLoadSensitivity {
+            load_sensitivity_per_load_ratio: 0.3,
+            maximum_load_ratio: 3.0,
+        };
+        let reference = 80_000.0;
+        let static_load = 8_175.0;
+        let loaded = effective_cornering_stiffness(
+            reference,
+            static_load * 1.4,
+            static_load,
+            Some(sensitivity),
+        );
+        let unloaded = effective_cornering_stiffness(
+            reference,
+            static_load * 0.6,
+            static_load,
+            Some(sensitivity),
+        );
+        assert!(loaded > reference, "loaded stiffness {loaded} must rise");
+        assert!(
+            unloaded < reference,
+            "unloaded stiffness {unloaded} must fall"
+        );
+        assert!(loaded.is_finite() && loaded > 0.0);
+        assert!(unloaded.is_finite() && unloaded > 0.0);
+    }
+
+    #[test]
+    fn cornering_stiffness_load_sensitivity_is_sub_linear_in_load_ratio() {
+        let sensitivity = CorneringStiffnessLoadSensitivity {
+            load_sensitivity_per_load_ratio: 0.5,
+            maximum_load_ratio: 3.0,
+        };
+        let reference = 80_000.0;
+        let static_load = 1_000.0;
+        // load_ratio 1.2 -> 2.4 is exactly a doubling of the ratio.
+        let at_1_2 =
+            effective_cornering_stiffness(reference, 1_200.0, static_load, Some(sensitivity));
+        let at_2_4 =
+            effective_cornering_stiffness(reference, 2_400.0, static_load, Some(sensitivity));
+        assert!(
+            at_2_4 < 2.0 * at_1_2,
+            "doubling the load ratio must not double stiffness: {at_1_2} -> {at_2_4}"
+        );
+    }
+
+    #[test]
+    fn cornering_stiffness_load_sensitivity_validation_rejects_bad_parameters() {
+        let valid = CorneringStiffnessLoadSensitivity {
+            load_sensitivity_per_load_ratio: 0.3,
+            maximum_load_ratio: 3.0,
+        };
+        assert!(valid.is_valid());
+
+        let non_finite_sensitivity = CorneringStiffnessLoadSensitivity {
+            load_sensitivity_per_load_ratio: f64::NAN,
+            ..valid
+        };
+        assert!(!non_finite_sensitivity.is_valid());
+
+        let negative_sensitivity = CorneringStiffnessLoadSensitivity {
+            load_sensitivity_per_load_ratio: -0.1,
+            ..valid
+        };
+        assert!(!negative_sensitivity.is_valid());
+
+        let unit_sensitivity = CorneringStiffnessLoadSensitivity {
+            load_sensitivity_per_load_ratio: 1.0,
+            ..valid
+        };
+        assert!(!unit_sensitivity.is_valid());
+
+        let sub_unity_max_ratio = CorneringStiffnessLoadSensitivity {
+            maximum_load_ratio: 0.5,
+            ..valid
+        };
+        assert!(!sub_unity_max_ratio.is_valid());
+
+        let infinite_max_ratio = CorneringStiffnessLoadSensitivity {
+            maximum_load_ratio: f64::INFINITY,
+            ..valid
+        };
+        assert!(!infinite_max_ratio.is_valid());
+
+        // An otherwise-valid VehicleDynamics is invalidated by a bad nested spec.
+        let dynamics = VehicleDynamics {
+            cornering_stiffness_load_sensitivity: Some(non_finite_sensitivity),
+            ..VehicleDynamics::default()
+        };
+        assert!(!dynamics.is_valid());
+    }
+
+    #[test]
+    fn cornering_stiffness_load_sensitivity_is_deterministic() {
+        let sensitivity = Some(CorneringStiffnessLoadSensitivity {
+            load_sensitivity_per_load_ratio: 0.35,
+            maximum_load_ratio: 3.0,
+        });
+        let run = || {
+            let mut world = World::new();
+            let vehicle = spawn_dynamic_vehicle(
+                &mut world,
+                AckermannDrive {
+                    target_speed_m_s: 6.0,
+                    speed_m_s: 22.0,
+                    max_deceleration_m_s2: 5.0,
+                    max_acceleration_m_s2: 1_000.0,
+                    max_steering_rate_rad_s: 1_000.0,
+                    steering_rad: 0.1,
+                    target_steering_rad: 0.1,
+                    max_speed_m_s: 60.0,
+                    ..AckermannDrive::default()
+                },
+                VehicleDynamics {
+                    cornering_stiffness_load_sensitivity: sensitivity,
+                    ..VehicleDynamics::default()
+                },
+            );
+            step_seconds(&mut world, 3.0);
+            (
+                world.get::<Transform3>(vehicle).unwrap().translation,
+                *world.get::<VehicleDynamics>(vehicle).unwrap(),
+            )
+        };
+
+        assert_eq!(run(), run());
+    }
+
+    #[test]
+    fn load_dependent_stiffness_measurably_changes_yaw_response_under_braking() {
+        // The test that fails if stiffness stayed constant: identical steering and
+        // braking commands, spec absent vs. present. If front_stiffness_n_rad /
+        // rear_stiffness_n_rad were silently ignored in favor of the constant
+        // fields, these two runs would be bit-identical and the assertion below
+        // would fail.
+        let yaw_rate_after_braking_turn = |sensitivity| {
+            let mut world = World::new();
+            let vehicle = spawn_dynamic_vehicle(
+                &mut world,
+                AckermannDrive {
+                    target_speed_m_s: 4.0,
+                    speed_m_s: 22.0,
+                    max_deceleration_m_s2: 7.0,
+                    max_acceleration_m_s2: 1_000.0,
+                    max_steering_rate_rad_s: 1_000.0,
+                    steering_rad: 0.1,
+                    target_steering_rad: 0.1,
+                    max_speed_m_s: 60.0,
+                    ..AckermannDrive::default()
+                },
+                VehicleDynamics {
+                    cornering_stiffness_load_sensitivity: sensitivity,
+                    ..VehicleDynamics::default()
+                },
+            );
+            step_seconds(&mut world, 1.0);
+            world
+                .get::<VehicleDynamics>(vehicle)
+                .unwrap()
+                .yaw_rate_rad_s
+        };
+
+        let constant = yaw_rate_after_braking_turn(None);
+        let load_dependent = yaw_rate_after_braking_turn(Some(CorneringStiffnessLoadSensitivity {
+            load_sensitivity_per_load_ratio: 0.6,
+            maximum_load_ratio: 3.0,
+        }));
+
+        let relative_difference = (load_dependent - constant).abs() / constant.abs();
+        assert!(
+            relative_difference > 0.01,
+            "load-dependent stiffness must measurably change the yaw response: \
+             constant={constant:.6} rad/s, load_dependent={load_dependent:.6} rad/s, \
+             relative_difference={relative_difference:.6}"
+        );
     }
 
     #[test]
