@@ -17,18 +17,26 @@
 //! the calf instead of 0.213 m. Attaching it with the jump robot's
 //! `weld_fixed_children = true` option makes the optimized jump lift off:
 //!
-//! - torque + PD: apex 0.324 m, tilt 0.42 rad
-//! - `--position-stance` (`--lookahead`): apex 0.403 m, jump 0.071 m, tilt 0.63
-//! - `--wbc-stance`: apex 0.438 m, jump 0.106 m (plan 0.250 m), tilt 0.73 rad
+//! - torque + PD: apex 0.324 m, tilt 0.45 rad, feet skim but do not lift off
+//! - `--position-stance` (`--lookahead`): apex 0.402 m, jump 0.070 m, tilt 0.67
+//! - `--wbc-stance`: apex 0.425 m, jump 0.094 m (plan 0.175 m), tilt 0.64 rad
+//!
+//! Executing the whole maneuver also includes the **landing**: the flight plan
+//! ends near the apex, so the example catches the touchdown with stiff position
+//! motors and settles into the stand (`landed=true`, end height 0.332 m,
+//! settled tilt 0.006 rad). The catch is open-loop, so it only tolerates a
+//! small jump: the default `--apex 0.21` is the largest whole-body jump that
+//! still lands, and a taller plan pitches over on touchdown. A closed-loop
+//! landing controller is the next step.
 //!
 //! The whole-body stance feed has two subtleties. It must pass the *measured*
 //! joint velocities to the solver (feeding zeros over-drives the center of mass
 //! and inflates the apex while the base pitches far more), and its posture task
 //! must pull toward the *planned* joint angles, not the plant's current ones.
-//! The base attitude still pitches about 0.7 rad during the crouch: the
-//! `BaseAttitudeTask` only commands the base angular acceleration and is weak
-//! against the center-of-mass task, so a stronger base-attitude formulation
-//! (and re-optimizing the plan for the compliant contact) is the next step.
+//! The base attitude still pitches during the crouch: the `BaseAttitudeTask`
+//! only commands the base angular acceleration and is weak against the
+//! center-of-mass task, so a stronger base-attitude formulation (and
+//! re-optimizing the plan for the compliant contact) is the next step.
 //!
 //! `--vel-weight` wraps the planner cost in `rne_oc::ActuatorLimitCost`, a hinge
 //! penalty that keeps joint speeds near their URDF limits. The default plan
@@ -37,8 +45,9 @@
 //!
 //! Tuning knobs: `--wbc-kp`/`--wbc-kd` (center-of-mass gains), `--com-ff`
 //! (center-of-mass acceleration feed-forward), `--att-kp`/`--att-kd`/
-//! `--att-weight` (base attitude), `--apex` (plan target), `--vel-weight`,
-//! `--kp`/`--kd`/`--lookahead` (position stance).
+//! `--att-weight` (base attitude), `--apex` (plan target), `--land-kp`/
+//! `--land-kd` (touchdown catch), `--vel-weight`, and `--kp`/`--kd`/
+//! `--lookahead` (position stance).
 //!
 //! `--gif` renders the live jump to `docs/media/go2-jump.gif`: the frames come
 //! from the same headless simulation the metrics report, so the GIF shows the
@@ -76,7 +85,7 @@ const STEP_TIME_S: f64 = 1.0 / 60.0;
 const CROUCH_STEPS: usize = 15;
 const PUSH_STEPS: usize = 10;
 const FLIGHT_STEPS: usize = 15;
-const TARGET_APEX_M: f64 = 0.30;
+const TARGET_APEX_M: f64 = 0.21;
 
 const SETTLE_STEPS: u64 = 240;
 const POSITION_STIFFNESS: f64 = 420.0;
@@ -100,7 +109,12 @@ const GIF_HEIGHT: u32 = 600;
 /// Background color for captured GIF frames.
 const GIF_CLEAR_COLOR: [f32; 4] = [0.035, 0.05, 0.08, 1.0];
 /// Settle frames captured as a lead-in.
-const GIF_LEAD_IN_FRAMES: u64 = 12;
+const GIF_LEAD_IN_FRAMES: u64 = 8;
+/// Simulation steps of touchdown catch and settling after the flight plan.
+const LANDING_STEPS: u64 = 300;
+/// Position-motor gains for the touchdown catch.
+const LANDING_STIFFNESS: f64 = 900.0;
+const LANDING_DAMPING: f64 = 40.0;
 
 fn dof_joint_names(model: &ArticulatedModel) -> Vec<String> {
     model
@@ -219,6 +233,12 @@ fn main() {
     let target_apex = argument_value("--apex")
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(TARGET_APEX_M);
+    let land_kp = argument_value("--land-kp")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(LANDING_STIFFNESS);
+    let land_kd = argument_value("--land-kd")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(LANDING_DAMPING);
     let com_ff = argument_value("--com-ff")
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(WBC_COM_FF);
@@ -736,19 +756,47 @@ fn main() {
         max_tilt = max_tilt.max(up.y.clamp(-1.0, 1.0).acos());
         capture_frame!();
     }
-    // Hold the landed pose for a few frames so the GIF does not cut off.
-    if let Some(capture) = capture.as_mut() {
-        let hold: Vec<UrdfJointPositionTarget<'_>> = joint_names
-            .iter()
-            .map(|name| UrdfJointPositionTarget {
-                link_name: name.as_str(),
-                position: sim.named_joint_position(name).unwrap_or(0.0),
-            })
-            .collect();
-        for _ in 0..18 {
-            sim.step_joint_position_targets(&hold);
-            capture.capture(&sim);
+    // Landing: catch the touchdown and settle back into the stand. The flight
+    // plan ends near the apex, so the example owns the descent: stiff position
+    // motors drive the stand pose, absorb the impact, and hold it.
+    sim.configure_position_motors(land_kp, land_kd, TORQUE_LIMIT_NM);
+    let mut settled_tilt = 0.0_f64;
+    let mut touchdown_y = f64::MAX;
+    let landing_targets: Vec<UrdfJointPositionTarget<'_>> = joint_names
+        .iter()
+        .map(|name| UrdfJointPositionTarget {
+            link_name: name.as_str(),
+            position: stand_angle(name),
+        })
+        .collect();
+    for step in 0..LANDING_STEPS {
+        sim.step_joint_position_targets(&landing_targets);
+        touchdown_y = touchdown_y.min(min_foot_height_m(&sim));
+        let pose = sim.named_transform("base").expect("base");
+        let up = (pose.rotation * up_reference).normalize_or_zero();
+        let tilt = up.y.clamp(-1.0, 1.0).acos();
+        if step + 90 >= LANDING_STEPS {
+            settled_tilt = settled_tilt.max(tilt);
         }
+        if trace && step % 30 == 0 {
+            println!(
+                "  land {step:03}: base_y={:.3} tilt={:.3} min_foot={:.3}",
+                sim.observe().base_y_m,
+                tilt,
+                min_foot_height_m(&sim),
+            );
+        }
+        // Subsample the slow settle so the GIF stays short.
+        if step % 5 == 0 || step + 1 == LANDING_STEPS {
+            capture_frame!();
+        }
+    }
+    let landed_height = sim.observe().base_y_m;
+    let landed = settled_tilt < 0.6 && landed_height > 0.15;
+    println!(
+        "landing: end_height={landed_height:.3} settled_tilt={settled_tilt:.3} touchdown_min_foot={touchdown_y:.3} landed={landed}"
+    );
+    if let Some(capture) = capture.as_mut() {
         capture.encode();
     }
     println!(
