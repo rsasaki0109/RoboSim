@@ -25,17 +25,21 @@ All notable changes to Robot Native Engine are documented in this file.
   hinge penalty on joint velocity limit violations, so a joint speed bound acts
   as a soft state constraint on top of the existing running/terminal cost.
   `examples/109_go2_jump_sim` exposes it through `--vel-weight`; on the Go2 jump
-  it reduces the peak planned joint speed from `44.0` to `31.0` rad/s. The
-  plan still does not transfer to the simulator, which isolates the remaining
-  blocker to the planner/plant model mismatch rather than actuator bandwidth.
+  it reduces the peak planned joint speed from `44.0` to `31.0` rad/s, against a
+  URDF thigh limit of `15.7` rad/s.
+- `weld_fixed_children` URDF articulation option. When enabled, links reachable
+  only through fixed joints (for example the Unitree Go2 foot and calf shells)
+  join the reduced-coordinate multibody instead of becoming free rigid bodies
+  that fall off the robot. It defaults to off for bit-identical legacy
+  behavior; the mass-matched jump robot opts in. With the flag on, the Go2 foot
+  frame matches the planner's URDF forward kinematics and the optimized jump
+  lifts off (0.144 m whole-body-control jump height) for the first time.
 - `examples/109_go2_jump_sim --debug-fk` compares the planner's URDF forward
-  kinematics with the plant's articulation frames. The base and the chain
-  through the calf match to machine precision, but the Go2 foot link sits
-  `0.138` m from the calf instead of the URDF's `0.213` m and has no joint
-  descriptor, because `rne_urdf_import` excludes fixed-only children from the
-  physics multibody. This 0.075 m frame error is the root cause of the failed
-  plan-to-sim jump transfer; the ladder, the sole contacts, and the whole-body
-  contact forces are all built on the wrong foot frame.
+  kinematics with the plant's articulation frames. It isolated the failed jump
+  transfer: the base and the chain through the calf matched to machine
+  precision, but the Go2 foot link sat `0.138` m from the calf instead of the
+  URDF's `0.213` m, because `rne_urdf_import` excluded fixed-only children from
+  the physics multibody.
 
 - `rne_oc` control-limited DDP: `DdpConfig::control_lower`/`control_upper` project
   the feedforward onto the control box and zero the feedback on saturated

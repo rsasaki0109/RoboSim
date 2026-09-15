@@ -9,4 +9,5 @@ initial_rotation_rpy = [-1.5707963267948966, 0.0, 0.0]
 articulation = true
 self_collisions = false
 multibody = true
+weld_fixed_children = true
 use_declared_inertial_masses = true

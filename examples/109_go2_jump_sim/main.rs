@@ -7,59 +7,24 @@
 //! masses. Execution applies the feed-forward torque plus a joint PD term, one
 //! planning node per simulation step.
 //!
-//! Status: the plan is actuator-realizable (a 0.28 m apex, torque saturated at
-//! ±23.7 Nm, gap-free) but does not transfer to the simulator. A joint-PD plus
-//! a base-height feedback loop both fail for the same reason: the planner's
-//! feed-forward torques produce a *different* joint motion in the simulator
-//! (it over-crouches to 0.07 m against a planned 0.19 m), so the extension
-//! extracts no upward momentum. Torque control and masses are correct, which
-//! isolates the gap to the contact/actuator model (rigid-contact KKT in the
-//! planner versus Rapier's compliant contacts).
+//! Status: the plan is actuator-realizable (a 0.25 m apex, torque saturated at
+//! ±23.7 Nm, gap-free). It originally failed to transfer, and the cause was
+//! not the controller: the plant's Go2 **foot link** was a free rigid body. The
+//! URDF multibody excluded links reachable only through fixed joints, so the
+//! foot (welded to the calf) fell away and the plant's foot frame never matched
+//! the planner's. `--debug-fk` shows the error — the base and the chain through
+//! the calf match the URDF forward kinematics, but the foot sits 0.138 m from
+//! the calf instead of 0.213 m. Attaching it with the jump robot's
+//! `weld_fixed_children = true` option makes the optimized jump lift off:
 //!
-//! `--position-stance` instead tracks the planned joint trajectory with position
-//! motors during stance (optionally phase-leading with `--lookahead`, gains via
-//! `--kp`/`--kd`). This bypasses the contact mismatch and follows the plan much
-//! more closely: the base rises 0.227 m (apex 0.449 m) versus 0.07 m under
-//! torque control. It still does not lift off cleanly — the feet never leave the
-//! ground and the base pitches ~38 degrees — because the position loop lags the
-//! plan and the rise comes from leg extension plus a pitch rather than a
-//! ballistic launch. Closing that gap needs a whole-body tracking controller
-//! (`rne_wbc`) at the simulation rate, not gain tuning.
+//! - torque + PD: apex 0.324 m, tilt 0.42 rad
+//! - `--position-stance` (`--lookahead`): apex 0.403 m, jump 0.071 m, tilt 0.63
+//! - `--wbc-stance`: apex 0.476 m, jump 0.144 m (plan 0.250 m), tilt 1.08 rad
 //!
-//! `--wbc-stance` runs `rne_wbc` during stance, tracking the plan's center of
-//! mass (position/velocity/acceleration) and holding the base level while the
-//! four feet stay fixed (gains via `--wbc-kp`/`--wbc-kd`). It does inject the
-//! planned energy — with a velocity gain of 20 the base reaches the planned
-//! apex (0.525 m versus a planned 0.503 m) — but the base then pitches over
-//! (about 2 rad) and the feet never leave the ground. The blocker was a model
-//! mismatch: the floating model built from the simulator's own world places the
-//! link frames differently from the plan model (the standing CoM reads 0.247 m
-//! versus the plan's 0.135 m even though the link inertias and total mass are
-//! identical), so the controller over-injected. Solving the WBC on the plan's
-//! own model with the simulator state now tracks the planned CoM closely, but
-//! the base still does not launch. Tracking the planned joint trajectory with
-//! position motors during flight keeps the base much more level (a 0.65 rad
-//! lean instead of a flip), so the remaining gap is purely the push: the
-//! simulator's stance never reaches the planned takeoff velocity.
-//!
-//! `--vel-weight` wraps the planner cost in `rne_oc::ActuatorLimitCost`, a
-//! hinge penalty that keeps joint speeds near their URDF limits. The default
-//! plan peaks at 44 rad/s — well beyond the Go2 thigh limit of 15.7 rad/s — so
-//! the unconstrained optimum is not even physically realizable. The penalty
-//! brings the peak to 31 rad/s at a small apex cost, but the transfer still
-//! fails, which locates the blocker in the planner/plant model mismatch (the
-//! landed model never reaches the planned takeoff velocity) rather than in
-//! actuator bandwidth.
-//!
-//! `--debug-fk` compares the planner's URDF forward kinematics with the plant's
-//! articulation frames at one state. The base and the chain through the calf
-//! match to machine precision, but the foot link sits **0.138 m** from the calf
-//! instead of the URDF's 0.213 m and carries no joint descriptor: `rne_urdf_import`
-//! excludes fixed-only children (the foot, calf shells) from the physics
-//! multibody, so the plant's foot frame never matches the planner's. Every sole
-//! contact, the liftoff gate, and the whole-body contact forces are therefore
-//! built on a frame 0.075 m away from the real one, which is the root cause of
-//! the failed transfer and not a controller gain.
+//! `--vel-weight` wraps the planner cost in `rne_oc::ActuatorLimitCost`, a hinge
+//! penalty that keeps joint speeds near their URDF limits. The default plan
+//! peaks at 44 rad/s, beyond the Go2 thigh limit of 15.7 rad/s; the penalty
+//! brings it to 31 rad/s.
 //!
 //! Run with `cargo run --release -p go2_jump_sim --example 109_go2_jump_sim`.
 
