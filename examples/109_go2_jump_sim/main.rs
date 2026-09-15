@@ -19,12 +19,26 @@
 //!
 //! - torque + PD: apex 0.324 m, tilt 0.42 rad
 //! - `--position-stance` (`--lookahead`): apex 0.403 m, jump 0.071 m, tilt 0.63
-//! - `--wbc-stance`: apex 0.476 m, jump 0.144 m (plan 0.250 m), tilt 1.08 rad
+//! - `--wbc-stance`: apex 0.438 m, jump 0.106 m (plan 0.250 m), tilt 0.73 rad
+//!
+//! The whole-body stance feed has two subtleties. It must pass the *measured*
+//! joint velocities to the solver (feeding zeros over-drives the center of mass
+//! and inflates the apex while the base pitches far more), and its posture task
+//! must pull toward the *planned* joint angles, not the plant's current ones.
+//! The base attitude still pitches about 0.7 rad during the crouch: the
+//! `BaseAttitudeTask` only commands the base angular acceleration and is weak
+//! against the center-of-mass task, so a stronger base-attitude formulation
+//! (and re-optimizing the plan for the compliant contact) is the next step.
 //!
 //! `--vel-weight` wraps the planner cost in `rne_oc::ActuatorLimitCost`, a hinge
 //! penalty that keeps joint speeds near their URDF limits. The default plan
 //! peaks at 44 rad/s, beyond the Go2 thigh limit of 15.7 rad/s; the penalty
 //! brings it to 31 rad/s.
+//!
+//! Tuning knobs: `--wbc-kp`/`--wbc-kd` (center-of-mass gains), `--com-ff`
+//! (center-of-mass acceleration feed-forward), `--att-kp`/`--att-kd`/
+//! `--att-weight` (base attitude), `--apex` (plan target), `--vel-weight`,
+//! `--kp`/`--kd`/`--lookahead` (position stance).
 //!
 //! Run with `cargo run --release -p go2_jump_sim --example 109_go2_jump_sim`.
 
@@ -63,7 +77,8 @@ const BASE_KP: f64 = 120.0;
 const BASE_KD: f64 = 12.0;
 const BASE_SIGN: f64 = 1.0;
 const WBC_COM_KP: f64 = 120.0;
-const WBC_COM_KD: f64 = 20.0;
+const WBC_COM_KD: f64 = 40.0;
+const WBC_COM_FF: f64 = 2.0;
 const WBC_ATTITUDE_KP: f64 = -40.0;
 const WBC_ATTITUDE_KD: f64 = 8.0;
 const ACTUATOR_VELOCITY_WEIGHT: f64 = 5.0;
@@ -175,6 +190,21 @@ fn main() {
     let velocity_weight = argument_value("--vel-weight")
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(ACTUATOR_VELOCITY_WEIGHT);
+    let attitude_kp = argument_value("--att-kp")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(WBC_ATTITUDE_KP);
+    let attitude_kd = argument_value("--att-kd")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(WBC_ATTITUDE_KD);
+    let target_apex = argument_value("--apex")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(TARGET_APEX_M);
+    let com_ff = argument_value("--com-ff")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(WBC_COM_FF);
+    let angular_weight = argument_value("--att-weight")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(WholeBodyConfig::default().angular_weight);
     let lookahead = argument_value("--lookahead")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
@@ -355,7 +385,7 @@ fn main() {
     }
     let mut terminal = QuadraticCost::new(zero.clone(), vec![0.0; control_dim], terminal_weights);
     let mut terminal_reference = vec![0.0; 2 * nv];
-    terminal_reference[1] = start_y + TARGET_APEX_M;
+    terminal_reference[1] = start_y + target_apex;
     terminal.state_reference = terminal_reference;
     let velocity_limits: Vec<f64> = model
         .kinematic()
@@ -429,6 +459,7 @@ fn main() {
     };
     let wbc_controller = WholeBodyController::new(WholeBodyConfig {
         com_weight: 1.0e5,
+        angular_weight,
         torque_limits_nm: Some(vec![TORQUE_LIMIT_NM; control_dim]),
         ..WholeBodyConfig::default()
     });
@@ -481,7 +512,7 @@ fn main() {
         if wbc_stance && node < CROUCH_STEPS + PUSH_STEPS {
             let state_now = read_state(&sim, &model, &joint_names);
             let q = &state_now[..nv];
-            let qd = vec![0.0; nv];
+            let qd = state_now[nv..].to_vec();
             let foot_contacts: Vec<ContactPoint> = FOOT_LINKS
                 .iter()
                 .filter_map(|name| model.kinematic().link_entity_by_name(name))
@@ -490,7 +521,7 @@ fn main() {
             let com_task = ComTask {
                 desired_position_m: plan_com[node],
                 desired_velocity_m_s: plan_com_velocity(node),
-                desired_acceleration_m_s2: plan_com_acceleration(node),
+                desired_acceleration_m_s2: plan_com_acceleration(node) * com_ff,
                 position_gain_s_inv2: wbc_kp,
                 velocity_gain_s_inv: wbc_kd,
             };
@@ -514,11 +545,11 @@ fn main() {
                     observation.base_angular_velocity_z_rad_s,
                 );
             let attitude = BaseAttitudeTask {
-                desired_angular_acceleration_rad_s2: axis_body * (WBC_ATTITUDE_KP * tilt_angle)
-                    - omega_body * WBC_ATTITUDE_KD,
+                desired_angular_acceleration_rad_s2: axis_body * (attitude_kp * tilt_angle)
+                    - omega_body * attitude_kd,
             };
             let posture = PostureTask {
-                desired_joint_positions: q[6..].to_vec(),
+                desired_joint_positions: state[6..nv].to_vec(),
                 position_gain_s_inv2: 4.0,
                 velocity_gain_s_inv: 1.0,
             };
@@ -543,9 +574,12 @@ fn main() {
                 })
                 .collect();
             sim.step_joint_torques(&wbc_targets);
+            let pose_now = sim.named_transform("base").expect("base");
+            let up_now = (pose_now.rotation * up_reference).normalize_or_zero();
+            let stance_tilt = up_now.y.clamp(-1.0, 1.0).acos();
             if trace {
                 println!(
-                    "  node {node:02}: base_y={:.4} sim_com={:.4} plan_com_y={:.4} min_foot={:.4} (wbc)",
+                    "  node {node:02}: base_y={:.4} sim_com={:.4} plan_com_y={:.4} min_foot={:.4} tilt={stance_tilt:.3} (wbc)",
                     sim.observe().base_y_m,
                     center_of_mass(&model, q).expect("com").y,
                     plan_com[node].y,

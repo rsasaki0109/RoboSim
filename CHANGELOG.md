@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- `examples/109_go2_jump_sim` whole-body stance now feeds the measured joint
+  velocities to `rne_wbc` and pulls its posture task toward the planned joint
+  angles. The previous all-zero velocity feed over-drove the center of mass and
+  inflated the jump apex while pitching the base about 1.08 rad; the corrected
+  feed jumps 0.106 m with a 0.73 rad peak crouch lean (plan 0.250 m). New
+  `--com-ff`, `--att-kp`, `--att-kd`, `--att-weight`, and `--apex` tuning knobs.
+
 - Prepare the `0.3.0` release candidate and retarget the immutable Rust API
   baseline. All workspace packages and exact internal dependency requirements
   now use `0.3.0`; release metadata, native archive/wheel names, provenance
