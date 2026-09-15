@@ -370,7 +370,13 @@ pub fn solve(
 
         for k in (0..horizon).rev() {
             let derivatives =
-                dynamics_derivatives(dynamics, k, &states[k], &controls[k], config.epsilon)?;
+                match dynamics_derivatives(dynamics, k, &states[k], &controls[k], config.epsilon) {
+                    Ok(derivatives) => derivatives,
+                    Err(_) => {
+                        failed = true;
+                        break;
+                    }
+                };
             let fx = derivatives.fx;
             let fu = derivatives.fu;
             let derivative = cost.running_derivatives(&states[k], &controls[k]);
@@ -414,11 +420,21 @@ pub fn solve(
 
         let gaps: Vec<Vec<f64>> = if config.keep_gaps_open {
             let mut gaps = Vec::with_capacity(horizon);
+            let mut ok = true;
             for k in 0..horizon {
-                let predicted = dynamics.step_at(k, &states[k], &controls[k])?;
-                gaps.push(vec_sub(&states[k + 1], &predicted));
+                match dynamics.step_at(k, &states[k], &controls[k]) {
+                    Ok(predicted) => gaps.push(vec_sub(&states[k + 1], &predicted)),
+                    Err(_) => {
+                        ok = false;
+                        break;
+                    }
+                }
             }
-            gaps
+            if ok {
+                gaps
+            } else {
+                Vec::new()
+            }
         } else {
             Vec::new()
         };
@@ -445,7 +461,7 @@ pub fn solve(
                         break;
                     }
                 };
-                if config.keep_gaps_open {
+                if config.keep_gaps_open && !gaps.is_empty() {
                     next = vec_add(&next, &vec_scale(&gaps[k], 1.0 - alpha));
                 }
                 candidate_cost += cost.running(&candidate_states[k], &u);
@@ -488,12 +504,23 @@ pub fn solve(
     if config.keep_gaps_open {
         let mut feasible = vec![vec![0.0; nx]; horizon + 1];
         feasible[0] = states[0].clone();
+        let mut ok = true;
         for k in 0..horizon {
-            feasible[k + 1] = dynamics.step_at(k, &feasible[k], &controls[k])?;
+            match dynamics.step_at(k, &feasible[k], &controls[k]) {
+                Ok(next) => feasible[k + 1] = next,
+                Err(_) => {
+                    ok = false;
+                    break;
+                }
+            }
         }
-        let mut polish = *config;
-        polish.keep_gaps_open = false;
-        return solve(dynamics, cost, &feasible, &controls, &polish);
+        if ok {
+            let mut polish = *config;
+            polish.keep_gaps_open = false;
+            if let Ok(solution) = solve(dynamics, cost, &feasible, &controls, &polish) {
+                return Ok(solution);
+            }
+        }
     }
 
     Ok(DdpSolution {

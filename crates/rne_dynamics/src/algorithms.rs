@@ -578,7 +578,7 @@ pub struct ContactSpec {
 /// This keeps the system solvable when the active points are linearly
 /// dependent (several feet that do not independently constrain the body) at the
 /// cost of a small, bounded contact acceleration.
-pub const CONTACT_REGULARIZATION: f64 = 1.0e-9;
+pub const CONTACT_REGULARIZATION: f64 = 1.0e-8;
 
 /// Constrained forward dynamics with rigid point contacts.
 ///
