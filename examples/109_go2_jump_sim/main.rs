@@ -14,8 +14,17 @@
 //! (it over-crouches to 0.07 m against a planned 0.19 m), so the extension
 //! extracts no upward momentum. Torque control and masses are correct, which
 //! isolates the gap to the contact/actuator model (rigid-contact KKT in the
-//! planner versus Rapier's compliant contacts) or to a whole-body tracking
-//! controller rather than joint PD.
+//! planner versus Rapier's compliant contacts).
+//!
+//! `--position-stance` instead tracks the planned joint trajectory with position
+//! motors during stance (optionally phase-leading with `--lookahead`, gains via
+//! `--kp`/`--kd`). This bypasses the contact mismatch and follows the plan much
+//! more closely: the base rises 0.227 m (apex 0.449 m) versus 0.07 m under
+//! torque control. It still does not lift off cleanly — the feet never leave the
+//! ground and the base pitches ~38 degrees — because the position loop lags the
+//! plan and the rise comes from leg extension plus a pitch rather than a
+//! ballistic launch. Closing that gap needs a whole-body tracking controller
+//! (`rne_wbc`) at the simulation rate, not gain tuning.
 //!
 //! Run with `cargo run --release -p go2_jump_sim --example 109_go2_jump_sim`.
 
@@ -139,6 +148,16 @@ fn min_foot_height_m(sim: &UrdfSceneSim) -> f64 {
 fn main() {
     let model = build_model();
     let trace = std::env::args().any(|argument| argument == "--trace");
+    let position_stance = std::env::args().any(|argument| argument == "--position-stance");
+    let stance_kp = argument_value("--kp")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(320.0);
+    let stance_kd = argument_value("--kd")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(14.0);
+    let lookahead = argument_value("--lookahead")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
     let nv = model.nv();
     let control_dim = nv - model.base_dof();
     let joint_names = dof_joint_names(&model);
@@ -217,6 +236,9 @@ fn main() {
     let plan_index_of = |name: &str| joint_names.iter().position(|candidate| candidate == name);
     let _ = &plan_index_of;
 
+    if position_stance {
+        sim.configure_position_motors(stance_kp, stance_kd, TORQUE_LIMIT_NM);
+    }
     let horizon = CROUCH_STEPS + PUSH_STEPS + FLIGHT_STEPS;
     let phases = [
         ContactPhase {
@@ -339,6 +361,39 @@ fn main() {
             correction
         };
 
+        if position_stance && node < CROUCH_STEPS + PUSH_STEPS {
+            let position_targets: Vec<UrdfJointPositionTarget<'_>> = sim_joint_links
+                .iter()
+                .map(|name| {
+                    let reference = solution
+                        .states
+                        .get((node + lookahead).min(horizon - 1))
+                        .unwrap_or(state);
+                    let position = plan_index_of(name)
+                        .map(|plan_dof| reference[6 + plan_dof])
+                        .unwrap_or_else(|| sim.named_joint_position(name).unwrap_or(0.0));
+                    UrdfJointPositionTarget {
+                        link_name: name.as_str(),
+                        position,
+                    }
+                })
+                .collect();
+            sim.step_joint_position_targets(&position_targets);
+            if trace {
+                println!(
+                    "  node {node:02}: base_y={:.4} plan_y={:.4} min_foot={:.4} (position)",
+                    sim.observe().base_y_m,
+                    state[1],
+                    min_foot_height_m(&sim),
+                );
+            }
+            apex_sim_y = apex_sim_y.max(sim.observe().base_y_m);
+            max_min_foot = max_min_foot.max(min_foot_height_m(&sim));
+            let pose = sim.named_transform("base").expect("base");
+            let up = (pose.rotation * up_reference).normalize_or_zero();
+            max_tilt = max_tilt.max(up.y.clamp(-1.0, 1.0).acos());
+            continue;
+        }
         let targets: Vec<UrdfJointTorqueTarget<'_>> = sim_joint_links
             .iter()
             .enumerate()
@@ -385,4 +440,12 @@ fn main() {
         apex_sim_y - start_y,
         max_min_foot > 0.04,
     );
+}
+
+fn argument_value(flag: &str) -> Option<String> {
+    let arguments: Vec<String> = std::env::args().collect();
+    arguments
+        .iter()
+        .position(|argument| argument == flag)
+        .and_then(|index| arguments.get(index + 1).cloned())
 }
