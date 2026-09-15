@@ -46,7 +46,11 @@ The first slice owns:
   solution from `rne_dynamics::constrained_forward_dynamics` so the active
   points neither accelerate nor separate;
 - `ContactSequenceDynamics`, a node-dependent shooting model whose active
-  contact set changes per phase, exposed through the `ShootingDynamics` trait.
+  contact set changes per phase, exposed through the `ShootingDynamics` trait;
+- `ContactImplicitArticulatedDynamics`, a compliant contact model over a fixed
+  set of candidate points. It decides at every step which points push from their
+  penetration, so the contact schedule is a result of the trajectory instead of
+  an input to it.
 
 The crate owns no physics backend, renderer, contact solver, or external
 library.
@@ -97,11 +101,18 @@ external optimal-control/dynamics library.
   cuts the peak joint speed from an infeasible `44.0` rad/s to `31.0` rad/s
   (against a thigh limit of `15.7` rad/s) at a small apex cost, and the unit
   tests confirm the penalty and its gradient are exactly zero inside the limit.
+- `rne_oc::ContactImplicitArticulatedDynamics` lifts a body off a compliant
+  ground: candidate points that are above the plane exert no force, so the body
+  falls freely, and the same candidate points catch it once gravity presses them
+  in. The contact set is never scheduled, and the unit tests cover both the free
+  and the caught case plus the normal-force clamp.
 
 ## Limitations and follow-ups
 
-- **Contact-sequence search.** The phase schedule is still caller-provided;
-  automatic discovery is not implemented.
+- **Contact-sequence search.** The phase schedule is still caller-provided for
+  the rigid-contact models; `ContactImplicitArticulatedDynamics` removes the
+  schedule for a compliant model but does not yet choose between discrete
+  contact modes.
 - **Analytical derivatives.** Richardson-extrapolated central differences fixed
   the conditioning of the jump, but a Pinocchio-equivalent analytical
   RNEA/CRBA derivative layer would be faster and more accurate.
