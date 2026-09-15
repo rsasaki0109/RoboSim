@@ -16,6 +16,7 @@ members = [
   "crates/rne_plugin_legacy_v2_fixture",
   "crates/rne_deformable",
   "crates/rne_dynamics",
+  "crates/rne_oc",
   "crates/rne_legged",
   "crates/rne_wbc",
   "crates/rne_robot",
@@ -190,6 +191,7 @@ rne_core = { version = "=0.3.0", path = "crates/rne_core" }
 rne_data = { version = "=0.3.0", path = "crates/rne_data" }
 rne_deformable = { version = "=0.3.0", path = "crates/rne_deformable" }
 rne_dynamics = { version = "=0.3.0", path = "crates/rne_dynamics" }
+rne_oc = { version = "=0.3.0", path = "crates/rne_oc" }
 rne_legged = { version = "=0.3.0", path = "crates/rne_legged" }
 rne_wbc = { version = "=0.3.0", path = "crates/rne_wbc" }
 rne_ecs = { version = "=0.3.0", path = "crates/rne_ecs" }

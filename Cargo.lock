@@ -4089,6 +4089,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rne_oc"
+version = "0.3.0"
+dependencies = [
+ "approx",
+ "rne_dynamics",
+ "rne_ecs",
+ "rne_math",
+ "rne_physics",
+ "rne_robot",
+ "rne_world",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "rne_openscenario"
 version = "0.3.0"
 dependencies = [

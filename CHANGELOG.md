@@ -21,6 +21,14 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_oc`: a backend-neutral multi-contact optimal-control crate. It provides a
+  discrete `DiscreteDynamics`/`CostModel` shooting problem, a deterministic DDP
+  solver with Levenberg-Marquardt regularization and a backtracking line search,
+  central-difference dynamics derivatives, a diagonal `QuadraticCost`, and an
+  `ArticulatedDynamics` adapter over `rne_dynamics::forward_dynamics`. Tests pin a
+  double-integrator regulation and a single-joint pendulum swing-up solved through
+  the native dynamics (`docs/architecture/015_native_optimal_control.md`).
+
 
 - `rne_legged::centroidal`: the classical centroidal layer for dynamic maneuvers.
   It provides a single-rigid-body model and state, a weighted least-squares

@@ -70,3 +70,4 @@ See also:
 - [Articulated-body dynamics](012_dynamics.md)
 - [Legged walking templates](013_legged_templates.md)
 - [Whole-body control](014_whole_body_control.md)
+- [Native optimal control](015_native_optimal_control.md)
