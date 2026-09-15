@@ -315,7 +315,7 @@ pub fn dynamics_derivatives(
 }
 
 /// Solver configuration.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DdpConfig {
     /// Maximum number of DDP iterations.
     pub max_iterations: usize,
@@ -335,6 +335,10 @@ pub struct DdpConfig {
     pub epsilon: f64,
     /// Keep dynamics gaps open in the forward pass (FDDP-style infeasible warm start).
     pub keep_gaps_open: bool,
+    /// Optional per-control lower bounds for control-limited DDP.
+    pub control_lower: Option<Vec<f64>>,
+    /// Optional per-control upper bounds for control-limited DDP.
+    pub control_upper: Option<Vec<f64>>,
 }
 
 impl Default for DdpConfig {
@@ -349,6 +353,8 @@ impl Default for DdpConfig {
             line_search_steps: 12,
             epsilon: 1.0e-6,
             keep_gaps_open: false,
+            control_lower: None,
+            control_upper: None,
         }
     }
 }
@@ -382,6 +388,21 @@ fn vec_scale(a: &[f64], factor: f64) -> Vec<f64> {
 
 fn vec_neg(a: &[f64]) -> Vec<f64> {
     a.iter().map(|value| -value).collect()
+}
+
+fn clamp_control(control: &[f64], config: &DdpConfig) -> Vec<f64> {
+    match (&config.control_lower, &config.control_upper) {
+        (Some(lower), Some(upper)) => control
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let low = lower.get(index).copied().unwrap_or(f64::NEG_INFINITY);
+                let high = upper.get(index).copied().unwrap_or(f64::INFINITY);
+                value.clamp(low, high)
+            })
+            .collect(),
+        _ => control.to_vec(),
+    }
 }
 
 /// Solves the shooting problem with differential dynamic programming.
@@ -510,7 +531,7 @@ pub fn solve(
                     &vec_scale(&feedforward[k], alpha),
                     &mat_vec(&feedback[k], &dx),
                 );
-                let u = vec_add(&controls[k], &du);
+                let u = clamp_control(&vec_add(&controls[k], &du), config);
                 let mut next = match dynamics.step_at(k, &candidate_states[k], &u) {
                     Ok(next) => next,
                     Err(_) => {
@@ -572,7 +593,7 @@ pub fn solve(
             }
         }
         if ok {
-            let mut polish = *config;
+            let mut polish = config.clone();
             polish.keep_gaps_open = false;
             if let Ok(solution) = solve(dynamics, cost, &feasible, &controls, &polish) {
                 return Ok(solution);
@@ -692,6 +713,29 @@ mod tests {
         fn step(&self, state: &[f64], control: &[f64]) -> Result<Vec<f64>, OcError> {
             Ok(vec![state[0].sin() + control[0]])
         }
+    }
+
+    #[test]
+    fn control_limited_solve_respects_bounds() {
+        let dynamics = DoubleIntegrator { dt: 0.1 };
+        let mut cost = QuadraticCost::new(vec![0.01, 0.01], vec![0.001], vec![200.0, 20.0]);
+        cost.state_reference = vec![1.0, 0.0];
+        cost.running_scale = 0.1;
+        let states = vec![vec![0.0, 0.0]; 61];
+        let controls = vec![vec![0.0]; 60];
+        let config = DdpConfig {
+            max_iterations: 200,
+            control_lower: Some(vec![-0.4]),
+            control_upper: Some(vec![0.4]),
+            ..DdpConfig::default()
+        };
+        let solution = solve(&dynamics, &cost, &states, &controls, &config).expect("solve");
+        assert!(solution
+            .controls
+            .iter()
+            .all(|control| control[0] >= -0.4 - 1.0e-9 && control[0] <= 0.4 + 1.0e-9));
+        // The bound forbids the unconstrained optimum, but p still advances.
+        assert!(solution.states[60][0] > 0.5);
     }
 
     #[test]

@@ -86,26 +86,27 @@ external optimal-control/dynamics library.
   the dynamics to `1e-3`.
 - `examples/108_go2_jump_opt` optimizes a Unitree **Go2 jump** over a fixed
   crouch → push → flight contact sequence with per-phase action costs and FDDP:
-  the floating base reaches a **0.327 m apex**, ends at the target with
-  near-zero velocity, the joints stay in a natural range (`[-3.38, 1.59]` rad,
-  no winding), and the contact dynamics are satisfied to machine precision. The
-  unconstrained solve uses up to 57.5 Nm, so control-limit constraints are what
-  separate this plan from an actuator-realizable one.
+  with control limits of ±23.7 Nm the floating base reaches a **0.372 m apex**,
+  ends at the target with near-zero velocity, the torque saturates exactly at
+  the actuator limit, the joints stay natural (`[-3.31, 1.96]` rad), and the
+  contact dynamics are satisfied to machine precision. This is the first
+  **actuator-realizable** jump produced by the native stack.
 
 ## Limitations and follow-ups
 
-- **Control and state limits.** The jump now converges, but the unconstrained
-  solution demands ~57.5 Nm against a 23.7 Nm actuator. Box constraints
-  (Box-FDDP / control-limited DDP) are the next required tier for an
-  actuator-realizable plan.
+- **Contact-sequence search.** The phase schedule is still caller-provided;
+  automatic discovery is not implemented.
+- **Analytical derivatives.** Richardson-extrapolated central differences fixed
+  the conditioning of the jump, but a Pinocchio-equivalent analytical
+  RNEA/CRBA derivative layer would be faster and more accurate.
 
 - **Search over contact sequences.** The phase schedule is still caller-provided;
   automatic contact-sequence discovery is not implemented.
 - **Analytical derivatives.** Central differences are correct but slow; a
   Pinocchio-equivalent analytical RNEA/CRBA derivative layer is the natural
   `rne_dynamics` extension.
-- **Inequality constraints.** No box/control limits or friction cone yet
-  (Box-FDDP / interior-point tier).
+- **Inequality constraints.** Box (control) constraints are implemented; the
+  friction cone and general state inequality constraints are not.
 
 ## Consequences
 
