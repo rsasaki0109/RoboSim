@@ -229,6 +229,7 @@ impl SimModel {
     }
 }
 
+#[allow(clippy::needless_range_loop)]
 fn main() {
     let model = build_model();
     let trace = std::env::args().any(|argument| argument == "--trace");
