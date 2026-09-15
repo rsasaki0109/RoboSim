@@ -74,6 +74,8 @@ fn main() {
     });
     let posture = PostureTask {
         desired_joint_positions: q[model.base_dof()..].to_vec(),
+        desired_joint_velocities: None,
+        desired_joint_accelerations: None,
         position_gain_s_inv2: 100.0,
         velocity_gain_s_inv: 20.0,
     };

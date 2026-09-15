@@ -133,6 +133,12 @@ impl ComTask {
 pub struct PostureTask {
     /// Desired actuated joint positions in degrees of freedom order, in rad or m.
     pub desired_joint_positions: Vec<f64>,
+    /// Optional desired joint velocities, for an acceleration-level tracking law.
+    pub desired_joint_velocities: Option<Vec<f64>>,
+    /// Optional desired joint accelerations, for an acceleration-level tracking
+    /// law. Supplying a reference trajectory's acceleration keeps the task in
+    /// the solve's null space instead of letting it drift.
+    pub desired_joint_accelerations: Option<Vec<f64>>,
     /// Position feedback gain in inverse seconds squared.
     pub position_gain_s_inv2: f64,
     /// Velocity feedback gain in inverse seconds.
@@ -362,9 +368,19 @@ impl WholeBodyController {
             let scale = self.config.posture_weight.sqrt();
             for joint in 0..nj {
                 let dof = model.base_dof() + joint;
-                let target = task.position_gain_s_inv2
-                    * (task.desired_joint_positions[joint] - q[dof])
-                    - task.velocity_gain_s_inv * qd[dof];
+                let acceleration = task
+                    .desired_joint_accelerations
+                    .as_ref()
+                    .map(|values| values[joint])
+                    .unwrap_or(0.0);
+                let velocity_target = task
+                    .desired_joint_velocities
+                    .as_ref()
+                    .map(|values| values[joint])
+                    .unwrap_or(0.0);
+                let target = acceleration
+                    + task.position_gain_s_inv2 * (task.desired_joint_positions[joint] - q[dof])
+                    + task.velocity_gain_s_inv * (velocity_target - qd[dof]);
                 let mut coefficients = vec![0.0; cols];
                 coefficients[dof] = 1.0;
                 push_row(&mut rows, &mut rhs, coefficients, target, scale);
