@@ -66,6 +66,10 @@ All notable changes to Robot Native Engine are documented in this file.
   optimizer can plan a takeoff and a landing with one fixed candidate set. Unit
   tests cover a freely falling body, a body caught by its candidate points, and
   the normal-force clamp.
+- `examples/109_go2_jump_sim --mpc`: receding-horizon replanning of the Go2 jump
+  from the measured state (warm-started, `--mpc-period`, `--mpc-iters`). It
+  closes the loop on the plan but does not remove the forward pitch, which the
+  whole-body solve produces, so the pitch is not a plan/plant drift.
 - `rne_oc::ActuatorLimitCost`: a cost-model wrapper that adds a differentiable
   hinge penalty on joint velocity limit violations, so a joint speed bound acts
   as a soft state constraint on top of the existing running/terminal cost.
