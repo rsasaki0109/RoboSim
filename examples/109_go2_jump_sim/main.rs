@@ -1,31 +1,29 @@
-//! Optimizes a Go2 jump with the native FDDP solver, then executes the torque
-//! trajectory on the dynamic simulation and measures whether the feet leave the
-//! ground.
+//! Solves a phased Go2 jump with the native FDDP solver and executes the
+//! actuator-limited plan on the dynamic simulation.
 //!
-//! The optimizer's initial state is read from the settled simulator, so the
-//! plan starts where the robot actually is. During execution the optimized
-//! torques are augmented with a joint PD term that damps drift.
+//! The plan uses a crouch -> push -> flight contact sequence with per-phase
+//! action costs and a ±23.7 Nm control box. The simulator uses the declared
+//! inertias (the mass-matched jump scene), so the plan and plant share the same
+//! masses. Execution applies the feed-forward torque plus a joint PD term, one
+//! planning node per simulation step.
 //!
-//! Status: a measurement, not a working jump. Two findings:
-//! * With no posture regularization the FDDP solver returns a non-physical
-//!   solution that swings the joints through several radians to reach the height
-//!   target, so it cannot execute.
-//! * With posture regularization the reachable jump from the standing pose is
-//!   small (~0.04 m): the legs start near full extension, and the optimizer does
-//!   not discover a crouch-then-push schedule. A real jump needs an explicit
-//!   crouch phase (or a better-conditioned cost) and analytical derivatives.
-//!
-//! The scene now uses the declared inertias (matching the planner), so the
-//! remaining gap is the plan, not the mass model.
+//! Status: the **plan is now actuator-realizable** (a 0.28 m apex with the
+//! torque saturated at ±23.7 Nm, gap-free and with natural joints), but
+//! executing it on the simulator still does not lift off — the simulated base
+//! barely moves even with strong joint PD. This points at a plan/simulator
+//! interface gap (torque application, Rapier contact compliance, or the
+//! actuator model) rather than the plan, and needs dedicated debugging.
 //!
 //! Run with `cargo run --release -p go2_jump_sim --example 109_go2_jump_sim`.
 
 use glam::EulerRot;
-use rne_ai::{UrdfJointPositionTarget, UrdfSceneSim};
+use rne_ai::{UrdfJointPositionTarget, UrdfJointTorqueTarget, UrdfSceneSim};
 use rne_dynamics::{ArticulatedModel, ContactSpec};
 use rne_ecs::World;
 use rne_math::{Quat, Vec3};
-use rne_oc::{solve, ContactPhase, ContactSequenceDynamics, DdpConfig, QuadraticCost};
+use rne_oc::{
+    solve, ContactPhase, ContactSequenceDynamics, DdpConfig, PhaseCostSchedule, QuadraticCost,
+};
 use rne_robot::{FloatingBase, Transform3};
 
 const GO2_URDF: &str = include_str!("../../assets/robots/go2_description/go2_description.rne.urdf");
@@ -34,17 +32,17 @@ const SOLE_OFFSET_LOCAL_M: Vec3 = Vec3::new(0.0, 0.0, -0.02);
 const FOOT_LINKS: [&str; 4] = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"];
 
 const STEP_TIME_S: f64 = 1.0 / 60.0;
-const STANCE_STEPS: usize = 20;
-const FLIGHT_STEPS: usize = 34;
-const JUMP_HEIGHT_M: f64 = 0.28;
+const CROUCH_STEPS: usize = 15;
+const PUSH_STEPS: usize = 10;
+const FLIGHT_STEPS: usize = 15;
+const TARGET_APEX_M: f64 = 0.30;
 
 const SETTLE_STEPS: u64 = 240;
 const POSITION_STIFFNESS: f64 = 420.0;
 const POSITION_DAMPING: f64 = 28.0;
 const TORQUE_LIMIT_NM: f64 = 23.7;
-
-const TRACK_KP: f64 = 120.0;
-const TRACK_KD: f64 = 6.0;
+const TRACK_KP: f64 = 400.0;
+const TRACK_KD: f64 = 20.0;
 
 fn dof_joint_names(model: &ArticulatedModel) -> Vec<String> {
     model
@@ -63,21 +61,21 @@ fn dof_joint_names(model: &ArticulatedModel) -> Vec<String> {
         .collect()
 }
 
-fn crouch_angle(link: &str) -> f64 {
-    if link.ends_with("thigh") {
-        1.15
-    } else if link.ends_with("calf") {
-        -2.05
-    } else {
-        0.0
-    }
-}
-
 fn stand_angle(link: &str) -> f64 {
     if link.ends_with("thigh") {
         0.8
     } else if link.ends_with("calf") {
         -1.5
+    } else {
+        0.0
+    }
+}
+
+fn crouch_angle(link: &str) -> f64 {
+    if link.ends_with("thigh") {
+        1.15
+    } else if link.ends_with("calf") {
+        -2.05
     } else {
         0.0
     }
@@ -105,7 +103,6 @@ fn build_model() -> ArticulatedModel {
     ArticulatedModel::from_robot(&world, spawned.robot).expect("model")
 }
 
-/// Reads `[q, qd]` from the simulator in the model's generalized convention.
 fn read_state(sim: &UrdfSceneSim, model: &ArticulatedModel, joint_names: &[String]) -> Vec<f64> {
     let nv = model.nv();
     let base = sim.named_transform("base").expect("base pose");
@@ -151,7 +148,6 @@ fn main() {
         })
         .collect();
 
-    // Settle the simulator and plan from where it actually stands.
     let scene = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../assets/scenes/unitree_go2_jump.rne.scene.toml");
     let mut sim = UrdfSceneSim::from_scene_path(&scene).expect("load jump Go2 scene");
@@ -168,13 +164,17 @@ fn main() {
     }
     let initial = read_state(&sim, &model, &joint_names);
     let start_y = initial[1];
-    println!("stand base_y={start_y:.3} m joints={}", joint_names.len());
+    println!("stand base_y={start_y:.3} m");
 
-    // Build the jump problem: stance then flight.
+    let horizon = CROUCH_STEPS + PUSH_STEPS + FLIGHT_STEPS;
     let phases = [
         ContactPhase {
             contacts: contacts.clone(),
-            steps: STANCE_STEPS,
+            steps: CROUCH_STEPS,
+        },
+        ContactPhase {
+            contacts: contacts.clone(),
+            steps: PUSH_STEPS,
         },
         ContactPhase {
             contacts: Vec::new(),
@@ -183,36 +183,60 @@ fn main() {
     ];
     let dynamics = ContactSequenceDynamics::new(&model, STEP_TIME_S, &phases);
 
+    let control_weights = vec![1.0e-3; control_dim];
+    let zero = vec![0.0; 2 * nv];
+    let mut running = Vec::with_capacity(horizon);
+    for node in 0..horizon {
+        let mut weights = vec![0.0; 2 * nv];
+        let mut reference = vec![0.0; 2 * nv];
+        if node < CROUCH_STEPS {
+            weights[1] = 200.0;
+            reference[1] = start_y - 0.09;
+        }
+        for (dof, name) in joint_names.iter().enumerate() {
+            if node < CROUCH_STEPS {
+                weights[6 + dof] = 5.0;
+                reference[6 + dof] = crouch_angle(name);
+            } else {
+                weights[6 + dof] = 2.0;
+                reference[6 + dof] = stand_angle(name);
+            }
+        }
+        let mut cost = QuadraticCost::new(weights, control_weights.clone(), zero.clone());
+        cost.state_reference = reference;
+        cost.running_scale = 1.0;
+        running.push(cost);
+    }
     let mut terminal_weights = vec![0.0; 2 * nv];
-    terminal_weights[1] = 1.0e3;
+    terminal_weights[1] = 2.0e3;
     for dof in 0..nv {
-        terminal_weights[nv + dof] = 20.0;
+        terminal_weights[nv + dof] = 50.0;
     }
-    let mut state_weights = vec![0.0; 2 * nv];
-    for dof in 0..nv {
-        state_weights[6 + dof] = 0.1;
-    }
-    let mut cost = QuadraticCost::new(state_weights, vec![1.0e-2; control_dim], terminal_weights);
-    let mut reference = vec![0.0; 2 * nv];
-    reference[1] = start_y + JUMP_HEIGHT_M;
-    for (dof, name) in joint_names.iter().enumerate() {
-        reference[6 + dof] = crouch_angle(name);
-    }
-    cost.state_reference = reference;
-    cost.running_scale = STEP_TIME_S;
+    let mut terminal = QuadraticCost::new(zero.clone(), vec![0.0; control_dim], terminal_weights);
+    let mut terminal_reference = vec![0.0; 2 * nv];
+    terminal_reference[1] = start_y + TARGET_APEX_M;
+    terminal.state_reference = terminal_reference;
+    let cost = PhaseCostSchedule { running, terminal };
 
-    let horizon = STANCE_STEPS + FLIGHT_STEPS;
-    let states = vec![initial.clone(); horizon + 1];
+    let mut crouch = initial.clone();
+    crouch[1] = start_y - 0.09;
+    for (dof, name) in joint_names.iter().enumerate() {
+        crouch[6 + dof] = crouch_angle(name);
+    }
+    let mut states = vec![crouch; horizon + 1];
+    states[0] = initial.clone();
     let controls = vec![vec![0.0; control_dim]; horizon];
     let config = DdpConfig {
-        max_iterations: 140,
-        tolerance: 1.0e-7,
+        max_iterations: 120,
+        tolerance: 1.0e-8,
         keep_gaps_open: true,
+        control_lower: Some(vec![-TORQUE_LIMIT_NM; control_dim]),
+        control_upper: Some(vec![TORQUE_LIMIT_NM; control_dim]),
         ..DdpConfig::default()
     };
     println!("solving FDDP...");
     let solution = solve(&dynamics, &cost, &states, &controls, &config).expect("solve");
-    let planned_apex = solution
+    let plan_apex = solution
         .states
         .iter()
         .fold(f64::MIN, |maximum, state| maximum.max(state[1]));
@@ -222,30 +246,11 @@ fn main() {
         .flatten()
         .fold(0.0_f64, |maximum, value| maximum.max(value.abs()));
     println!(
-        "plan: apex_y={planned_apex:.3} max_torque={max_torque:.2} Nm iterations={}",
-        solution.iterations
+        "plan: apex_y={plan_apex:.3} height={:.3} max_torque={max_torque:.2}",
+        plan_apex - start_y
     );
 
-    {
-        let mut joint_min = f64::MAX;
-        let mut joint_max = f64::MIN;
-        let mut base_min = f64::MAX;
-        let mut base_max = f64::MIN;
-        for state in &solution.states {
-            base_min = base_min.min(state[1]);
-            base_max = base_max.max(state[1]);
-            for dof in 0..control_dim {
-                joint_min = joint_min.min(state[6 + dof]);
-                joint_max = joint_max.max(state[6 + dof]);
-            }
-        }
-        println!("plan ranges: base_y [{base_min:.3},{base_max:.3}] joints [{joint_min:.3},{joint_max:.3}]");
-    }
-
-    // Execute: replay the planned joint trajectory with stiff position control.
-    // Position tracking is mass-robust, so the simulator's collider-augmented
-    // mass does not invalidate the plan.
-    sim.configure_position_motors(TRACK_KP * 6.0, TRACK_KD * 6.0, TORQUE_LIMIT_NM);
+    // Execute: feed-forward torque plus joint PD, one node per simulation step.
     let mut apex_sim_y = f64::MIN;
     let mut max_min_foot = 0.0_f64;
     let mut max_tilt = 0.0_f64;
@@ -255,23 +260,30 @@ fn main() {
     };
     for node in 0..horizon {
         let state = &solution.states[node];
-        let targets: Vec<UrdfJointPositionTarget<'_>> = joint_names
+        let torque = &solution.controls[node];
+        let targets: Vec<UrdfJointTorqueTarget<'_>> = joint_names
             .iter()
             .enumerate()
-            .map(|(dof, name)| UrdfJointPositionTarget {
-                link_name: name.as_str(),
-                position: state[6 + dof],
+            .map(|(dof, name)| {
+                let q = sim.named_joint_position(name).unwrap_or(0.0);
+                let qd = sim.named_joint_velocity(name).unwrap_or(0.0);
+                let command = torque[dof]
+                    + TRACK_KP * (state[6 + dof] - q)
+                    + TRACK_KD * (state[nv + 6 + dof] - qd);
+                UrdfJointTorqueTarget {
+                    link_name: name.as_str(),
+                    torque_nm: command.clamp(-TORQUE_LIMIT_NM, TORQUE_LIMIT_NM),
+                    max_velocity_rad_s: 30.1,
+                }
             })
             .collect();
-        sim.step_joint_position_targets(&targets);
-        let base = sim.observe().base_y_m;
-        apex_sim_y = apex_sim_y.max(base);
+        sim.step_joint_torques(&targets);
+        apex_sim_y = apex_sim_y.max(sim.observe().base_y_m);
         max_min_foot = max_min_foot.max(min_foot_height_m(&sim));
         let pose = sim.named_transform("base").expect("base");
         let up = (pose.rotation * up_reference).normalize_or_zero();
         max_tilt = max_tilt.max(up.y.clamp(-1.0, 1.0).acos());
     }
-
     println!(
         "execute: apex_y={apex_sim_y:.3} height={:.3} max_min_foot={max_min_foot:.3} liftoff={} max_tilt={max_tilt:.3}",
         apex_sim_y - start_y,
