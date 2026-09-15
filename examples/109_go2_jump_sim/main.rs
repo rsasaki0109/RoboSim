@@ -238,6 +238,9 @@ fn main() {
     let wbc_kd = argument_value("--wbc-kd")
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(WBC_COM_KD);
+    let control_weight = argument_value("--control-weight")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(1.0e-3);
     let velocity_weight = argument_value("--vel-weight")
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(ACTUATOR_VELOCITY_WEIGHT);
@@ -436,7 +439,7 @@ fn main() {
     ];
     let dynamics = ContactSequenceDynamics::new(&model, STEP_TIME_S, &phases);
 
-    let control_weights = vec![1.0e-3; control_dim];
+    let control_weights = vec![control_weight; control_dim];
     let zero = vec![0.0; 2 * nv];
     let mut running = Vec::with_capacity(horizon);
     for node in 0..horizon {
@@ -634,6 +637,8 @@ fn main() {
             };
             let posture = PostureTask {
                 desired_joint_positions: state[6..nv].to_vec(),
+                desired_joint_velocities: None,
+                desired_joint_accelerations: None,
                 position_gain_s_inv2: 4.0,
                 velocity_gain_s_inv: 1.0,
             };
