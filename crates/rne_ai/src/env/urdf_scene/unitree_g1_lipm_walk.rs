@@ -274,7 +274,14 @@ pub fn run_unitree_g1_lipm_walk(
         config.position_damping,
         config.torque_limit_nm,
     );
-    let stand = super::unitree_g1_gait_targets(0, super::UnitreeG1GaitCommand::default());
+    let stand = super::unitree_g1_gait_targets(
+        0,
+        super::UnitreeG1GaitCommand {
+            stride_rad: 0.0,
+            foot_lift_rad: 0.0,
+            cycle_steps: 120,
+        },
+    );
     for _ in 0..config.settle_steps {
         sim.step_joint_position_targets(&stand);
     }
@@ -308,8 +315,10 @@ pub fn run_unitree_g1_lipm_walk(
         Horizontal::new(0.5 * (left.x + right.x), 0.5 * (left.z + right.z))
     };
     let start_height = pelvis_start.translation.y;
+    // The G1's local +Z is up, so its fore-aft axis is world X and its lateral
+    // axis is world Z. The plan's `x_m` maps to world X and `z_m` to world Z.
     let request = StraightWalkRequest {
-        direction: Horizontal::new(0.0, 1.0),
+        direction: Horizontal::new(1.0, 0.0),
         start_com_m: start_horizontal,
         steps: config.steps,
         step_length_m: config.step_length_m,
