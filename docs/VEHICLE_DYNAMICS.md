@@ -81,6 +81,30 @@ serialized artifacts, goldens, and retained evidence digests are unaffected. Wit
 lateral transfer the two half-load tires reproduce the single tire exactly, because
 halving and doubling are exact in binary floating point.
 
+### Four-wheel model (opt-in)
+
+The single-track model has one wheel per axle, so its left and right wheels share a slip
+angle and a steer angle. Setting [`VehicleDynamics::four_wheel`] to a
+`FourWheelVehicleSpec` replaces that axle abstraction with four explicit wheels. Each
+front wheel gets an Ackermann steer angle blended by `ackermann_fraction` (`0.0` is
+parallel steering, `1.0` is the exact geometry for the rear-axle path radius
+`R = L / tan(delta)`). Each wheel carries its own normal load, its own slip angle from
+`vy + r x` and `vx + r z` (so the outer wheel of a turn runs faster), and its own
+friction-saturated lateral force. The axle force and yaw moment are the explicit
+per-wheel sums `sum Fy_i cos(delta_i)` and `sum x_i Fy_i cos(delta_i)`. Lateral load
+transfer is directional: the outer side is loaded according to the sign of `vx r`, using
+the same per-axle value `m |vx r| h / track` as the single-track split. The per-wheel
+slip angles and saturation flags are exposed on `wheel_slip_rad` / `wheel_saturated`, and
+the axle slip fields become the per-wheel mean.
+
+Like the other extensions this is a **deliberately lower-order model, not a
+measurement**: no roll degree of freedom, a linear friction-saturated tire, and the
+steered front tires' longitudinal force component and any aligning moment are omitted.
+The field is absent (`None`) by default, which keeps the single-track model bit-for-bit
+identical, and it is skipped when serializing a `VehicleDynamics` that does not set it.
+When it is present, [`VehicleDynamics::lateral_load_transfer`] is ignored, because the
+four-wheel spec carries its own track width and roll split.
+
 ### Low-speed blend
 
 Slip angles divide by `vx` and become singular near standstill; this is the standard
@@ -151,7 +175,10 @@ velocity to carry the lateral component a mounted sensor would observe, and two 
 to be bit-identical. The lateral-transfer tests additionally require the split axle to
 reproduce the single tire bit-for-bit at zero transfer, to cost usable axle force when
 one side saturates first, to measurably change the steady-turn yaw response, and to be
-deterministic.
+deterministic. The four-wheel tests require exact Ackermann steering to spread the front
+slip angles more than parallel steering, the axle slip telemetry to be the per-wheel
+mean, the model to measurably change the steady-turn yaw response versus the
+single-track model, and the run to be deterministic.
 
 [`AckermannDrive`]: ../crates/rne_robot/src/components.rs
 [`VehicleDynamics`]: ../crates/rne_robot/src/components.rs

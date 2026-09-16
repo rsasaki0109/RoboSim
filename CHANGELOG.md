@@ -28,6 +28,20 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `VehicleDynamics::four_wheel` (an optional `FourWheelVehicleSpec`) replaces the
+  single-track axle abstraction with four explicit wheels when set: each front wheel
+  gets a blended Ackermann steer angle, each wheel carries its own normal load and slip
+  angle (`vy + r x`, `vx + r z`), and the axle force and yaw moment are the explicit
+  per-wheel sums. Directional lateral load transfer loads the outer side by the sign of
+  `vx r`; per-wheel telemetry is exposed on `wheel_slip_rad` / `wheel_saturated`, and
+  the axle slip fields become the per-wheel mean. This is a **deliberately lower-order
+  model, not a measurement**: there is no roll degree of freedom, the tire stays linear
+  and friction-saturated, and the steered front tires' longitudinal force component and
+  any aligning moment are omitted. `None` by default keeps the single-track model
+  bit-for-bit identical, the field is skipped when serializing a `VehicleDynamics` that
+  does not set it, and `lateral_load_transfer` is ignored while the four-wheel model is
+  active.
+
 - `rne_mobility_benchmark` combined suspension-and-tire identification
   application (`identified_suspension_tire`): fits one suspension
   `SuspensionIdentificationDataset`, replays one `IdentifiedTireProfileEvidence`,
