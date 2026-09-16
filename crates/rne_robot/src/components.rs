@@ -1342,6 +1342,63 @@ impl LateralLoadTransferSpec {
     }
 }
 
+/// Optional four-wheel (per-wheel) steering and load model for [`VehicleDynamics`].
+///
+/// The single-track model has one tire per axle, so its left and right wheels share a
+/// single slip angle and steer angle. When present on [`VehicleDynamics::four_wheel`],
+/// this spec replaces that axle abstraction with four explicit wheels: the front wheels
+/// receive individual Ackermann steer angles, each wheel carries its own normal load and
+/// slip angle, and the axle forces and yaw moment are explicit per-wheel sums. It is the
+/// higher-order counterpart of [`LateralLoadTransferSpec`], which only split an axle into
+/// two equal-slip tires.
+///
+/// The wheel order used by the telemetry arrays is front-left, front-right, rear-left,
+/// rear-right, with the left wheels at lateral offset `+track/2`. The model chooses the
+/// rear-axle path radius `R = L / tan(delta)`, so the front wheel at lateral offset `z`
+/// steers by `atan(L / (R + z))`; [`Self::ackermann_fraction`] blends between the exact
+/// geometry (`1.0`) and parallel steering (`0.0`). This is a deliberately lower-order
+/// model with no roll degree of freedom and a linear, friction-saturated tire, not a
+/// measurement: it has not been validated against measured vehicle or tire data.
+///
+/// `None` on [`VehicleDynamics`] keeps the single-track behavior bit-for-bit identical,
+/// so serialized artifacts, goldens, and retained evidence digests are unaffected.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FourWheelVehicleSpec {
+    /// Distance between the left and right contact patches, in meters.
+    pub track_width_m: f64,
+    /// Fraction of the total lateral roll moment carried by the front axle, in `[0, 1]`.
+    ///
+    /// The per-side load shift uses the same convention as the single-track
+    /// [`LateralLoadTransferSpec`], so a front-biased value tends toward understeer.
+    pub front_roll_stiffness_fraction: f64,
+    /// Blend toward exact Ackermann front steering geometry, in `[0, 1]`.
+    ///
+    /// `0.0` gives both front wheels the center steer angle (parallel steering); `1.0`
+    /// gives each front wheel its exact Ackermann angle. Intermediate values linearly
+    /// interpolate the two.
+    pub ackermann_fraction: f64,
+}
+
+impl FourWheelVehicleSpec {
+    /// Returns whether the track width and blends are finite and physical.
+    pub fn is_valid(&self) -> bool {
+        self.track_width_m.is_finite()
+            && self.track_width_m > 0.0
+            && self.front_roll_stiffness_fraction.is_finite()
+            && (0.0..=1.0).contains(&self.front_roll_stiffness_fraction)
+            && self.ackermann_fraction.is_finite()
+            && (0.0..=1.0).contains(&self.ackermann_fraction)
+    }
+}
+
+fn wheel_slip_is_default(value: &[f64; 4]) -> bool {
+    *value == [0.0; 4]
+}
+
+fn wheel_saturation_is_default(value: &[bool; 4]) -> bool {
+    *value == [false; 4]
+}
+
 /// Planar dynamic bicycle model state and parameters for an Ackermann vehicle.
 ///
 /// [`crate::ackermann_kinematics`] assumes the tires never slip, which makes every
@@ -1419,6 +1476,24 @@ pub struct VehicleDynamics {
     /// between the axles under acceleration and braking.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lateral_load_transfer: Option<LateralLoadTransferSpec>,
+    /// Optional four-wheel (per-wheel) steering and load model.
+    ///
+    /// Absent by default (`None`), which keeps the single-track behavior bit-for-bit
+    /// identical. When present, [`crate::vehicle_dynamics`] computes each wheel's own
+    /// slip angle, normal load, and lateral force with individual Ackermann front
+    /// steering; [`Self::lateral_load_transfer`] is then ignored, because the four-wheel
+    /// spec carries its own track width and roll split.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub four_wheel: Option<FourWheelVehicleSpec>,
+    /// Per-wheel slip angles of the last step in FL, FR, RL, RR order, in radians.
+    ///
+    /// Only the four-wheel model populates this array; the single-track path leaves it
+    /// at its zero default, which is also skipped when serializing.
+    #[serde(default, skip_serializing_if = "wheel_slip_is_default")]
+    pub wheel_slip_rad: [f64; 4],
+    /// Whether each wheel saturated its friction limit last step, in FL, FR, RL, RR order.
+    #[serde(default, skip_serializing_if = "wheel_saturation_is_default")]
+    pub wheel_saturated: [bool; 4],
 }
 
 impl Default for VehicleDynamics {
@@ -1443,6 +1518,9 @@ impl Default for VehicleDynamics {
             rear_saturated: false,
             cornering_stiffness_load_sensitivity: None,
             lateral_load_transfer: None,
+            four_wheel: None,
+            wheel_slip_rad: [0.0; 4],
+            wheel_saturated: [false; 4],
         }
     }
 }
@@ -1482,6 +1560,9 @@ impl VehicleDynamics {
             && self
                 .lateral_load_transfer
                 .is_none_or(|transfer| transfer.is_valid())
+            && self
+                .four_wheel
+                .is_none_or(|four_wheel| four_wheel.is_valid())
     }
 
     /// Wheelbase implied by the axle distances, in meters.

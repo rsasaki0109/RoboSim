@@ -5,7 +5,7 @@ use crate::commands::{ActuatorCommand, ActuatorCommandBuffer};
 use crate::components::{
     AckermannDrive, Actuator, CombinedSlipTireSpec, CombinedSlipTireState,
     CorneringStiffnessLoadSensitivity, DcMotorCompletedTelemetry, DcMotorFailureMode, DcMotorSpec,
-    DcMotorState, DrivenAxle, Joint, JointKind, LongitudinalDrivePathState,
+    DcMotorState, DrivenAxle, FourWheelVehicleSpec, Joint, JointKind, LongitudinalDrivePathState,
     LongitudinalLoadTransferSpec, LongitudinalMobilityPlantSpec, LongitudinalMobilityPlantState,
     MultirotorFlight, PwmMotorCommandFrontendSpec, PwmMotorCommandPolarity, RigidRoadPatchSpec,
     RigidRoadProfileSpec, SteeringActuatorFailureMode, SteeringActuatorSpec, SteeringActuatorState,
@@ -3858,6 +3858,167 @@ fn axle_lateral_force_n(
     (side_forces_n[0] + side_forces_n[1], saturated)
 }
 
+/// Explicit per-wheel lateral result of the optional four-wheel model.
+struct FourWheelLateralForces {
+    /// Total body-lateral force `sum Fy_i cos(delta_i)`, in newtons.
+    lateral_force_n: f64,
+    /// Yaw moment `sum x_i Fy_i cos(delta_i)`, in newton meters.
+    yaw_moment_nm: f64,
+    /// Per-wheel slip angles in FL, FR, RL, RR order, in radians.
+    slip_rad: [f64; 4],
+    /// Per-wheel friction saturation in FL, FR, RL, RR order.
+    saturated: [bool; 4],
+}
+
+/// Computes the explicit per-wheel lateral forces of [`VehicleDynamics::four_wheel`].
+///
+/// Wheel order is front-left, front-right, rear-left, rear-right, with the left wheels
+/// at lateral offset `+track/2`. Each front wheel gets an Ackermann steer angle blended
+/// by [`FourWheelVehicleSpec::ackermann_fraction`]; the rear wheels are unsteered. Each
+/// wheel's forward speed is `vx + r z`, so the outer wheel of a turn runs faster, and its
+/// lateral speed is `vy + r x`, the same per-axle value the single-track model uses.
+///
+/// Lateral load transfer is directional: the outer side is loaded according to the sign
+/// of the steady centripetal acceleration `vx r`, using the same per-axle transfer value
+/// `m |vx r| h / track` as the single-track split. This mirrors the bicycle model's
+/// lateral-only simplification: the longitudinal force component of a steered front tire
+/// and any aligning moment are intentionally omitted.
+fn four_wheel_lateral_forces(
+    dynamics: &VehicleDynamics,
+    spec: FourWheelVehicleSpec,
+    vx: f64,
+    ax: f64,
+    vy: f64,
+    r: f64,
+    delta: f64,
+) -> FourWheelLateralForces {
+    let front_axle_m = dynamics.front_axle_m;
+    let rear_axle_m = dynamics.rear_axle_m;
+    let wheelbase_m = dynamics.wheelbase_m();
+    let half_track_m = 0.5 * spec.track_width_m;
+
+    // Axle loads with longitudinal transfer; clamped so neither axle lifts.
+    let transfer_n = dynamics.mass_kg * ax * dynamics.center_of_mass_height_m / wheelbase_m;
+    let front_load_n = (dynamics.static_front_load_n() - transfer_n).max(0.0);
+    let rear_load_n = (dynamics.static_rear_load_n() + transfer_n).max(0.0);
+
+    // Lateral roll transfer, split front/rear and added to the outer side.
+    let centripetal_acceleration_m_s2 = vx * r;
+    let total_transfer_n =
+        dynamics.mass_kg * centripetal_acceleration_m_s2.abs() * dynamics.center_of_mass_height_m
+            / spec.track_width_m;
+    let front_transfer_n = spec.front_roll_stiffness_fraction * total_transfer_n;
+    let rear_transfer_n = (1.0 - spec.front_roll_stiffness_fraction) * total_transfer_n;
+    let transfer_sign = if centripetal_acceleration_m_s2 >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    let front_half_n = 0.5 * front_load_n;
+    let rear_half_n = 0.5 * rear_load_n;
+
+    // Rear-axle path radius; infinite for straight-line steering gives zero Ackermann
+    // difference, so exact and parallel steering coincide there.
+    let radius_m = if delta.abs() > 0.0 {
+        wheelbase_m / delta.tan()
+    } else {
+        f64::INFINITY
+    };
+    let ackermann = |z_m: f64| {
+        let denominator_m = radius_m + z_m;
+        let exact_rad = if denominator_m.is_infinite() {
+            0.0
+        } else if denominator_m != 0.0 {
+            (wheelbase_m / denominator_m).atan()
+        } else {
+            delta
+        };
+        delta + spec.ackermann_fraction * (exact_rad - delta)
+    };
+    let front_left_steer_rad = ackermann(half_track_m);
+    let front_right_steer_rad = ackermann(-half_track_m);
+
+    let wheel = |x_m: f64,
+                 z_m: f64,
+                 load_n: f64,
+                 static_half_n: f64,
+                 axle_stiffness_n_rad: f64,
+                 steer_rad: f64| {
+        let wheel_lateral_velocity_m_s = vy + r * x_m;
+        let wheel_forward_velocity_m_s = vx + r * z_m;
+        let slip_rad = (wheel_lateral_velocity_m_s / wheel_forward_velocity_m_s).atan() - steer_rad;
+        let stiffness_n_rad = effective_cornering_stiffness(
+            0.5 * axle_stiffness_n_rad,
+            load_n,
+            static_half_n,
+            dynamics.cornering_stiffness_load_sensitivity,
+        );
+        let limit_n = dynamics.friction_coefficient * load_n;
+        let demanded_n = -stiffness_n_rad * slip_rad;
+        let saturated = demanded_n.abs() > limit_n;
+        (demanded_n.clamp(-limit_n, limit_n), slip_rad, saturated)
+    };
+
+    let front_static_half_n = 0.5 * dynamics.static_front_load_n();
+    let rear_static_half_n = 0.5 * dynamics.static_rear_load_n();
+
+    let (front_left_force_n, front_left_slip_rad, front_left_saturated) = wheel(
+        front_axle_m,
+        half_track_m,
+        (front_half_n + transfer_sign * front_transfer_n).max(0.0),
+        front_static_half_n,
+        dynamics.front_cornering_stiffness_n_rad,
+        front_left_steer_rad,
+    );
+    let (front_right_force_n, front_right_slip_rad, front_right_saturated) = wheel(
+        front_axle_m,
+        -half_track_m,
+        (front_half_n - transfer_sign * front_transfer_n).max(0.0),
+        front_static_half_n,
+        dynamics.front_cornering_stiffness_n_rad,
+        front_right_steer_rad,
+    );
+    let (rear_left_force_n, rear_left_slip_rad, rear_left_saturated) = wheel(
+        -rear_axle_m,
+        half_track_m,
+        (rear_half_n + transfer_sign * rear_transfer_n).max(0.0),
+        rear_static_half_n,
+        dynamics.rear_cornering_stiffness_n_rad,
+        0.0,
+    );
+    let (rear_right_force_n, rear_right_slip_rad, rear_right_saturated) = wheel(
+        -rear_axle_m,
+        -half_track_m,
+        (rear_half_n - transfer_sign * rear_transfer_n).max(0.0),
+        rear_static_half_n,
+        dynamics.rear_cornering_stiffness_n_rad,
+        0.0,
+    );
+
+    let front_left_body_n = front_left_force_n * front_left_steer_rad.cos();
+    let front_right_body_n = front_right_force_n * front_right_steer_rad.cos();
+    FourWheelLateralForces {
+        lateral_force_n: front_left_body_n
+            + front_right_body_n
+            + rear_left_force_n
+            + rear_right_force_n,
+        yaw_moment_nm: front_axle_m * (front_left_body_n + front_right_body_n)
+            - rear_axle_m * (rear_left_force_n + rear_right_force_n),
+        slip_rad: [
+            front_left_slip_rad,
+            front_right_slip_rad,
+            rear_left_slip_rad,
+            rear_right_slip_rad,
+        ],
+        saturated: [
+            front_left_saturated,
+            front_right_saturated,
+            rear_left_saturated,
+            rear_right_saturated,
+        ],
+    }
+}
+
 /// Advances vehicles that carry both [`AckermannDrive`] and [`VehicleDynamics`] with a
 /// planar dynamic bicycle model.
 ///
@@ -3962,64 +4123,84 @@ pub fn vehicle_dynamics(world: &mut World, dt: SimDuration) {
             dynamics.rear_slip_rad = 0.0;
             dynamics.front_saturated = false;
             dynamics.rear_saturated = false;
+            dynamics.wheel_slip_rad = [0.0; 4];
+            dynamics.wheel_saturated = [false; 4];
         } else {
             let vy = dynamics.lateral_velocity_m_s;
             let r = dynamics.yaw_rate_rad_s;
 
-            let alpha_f = ((vy + dynamics.front_axle_m * r) / vx).atan() - delta;
-            let alpha_r = ((vy - dynamics.rear_axle_m * r) / vx).atan();
+            if let Some(four_wheel) = dynamics.four_wheel {
+                let forces = four_wheel_lateral_forces(&dynamics, four_wheel, vx, ax, vy, r, delta);
+                dynamics.front_slip_rad = 0.5 * (forces.slip_rad[0] + forces.slip_rad[1]);
+                dynamics.rear_slip_rad = 0.5 * (forces.slip_rad[2] + forces.slip_rad[3]);
+                dynamics.front_saturated = forces.saturated[0] || forces.saturated[1];
+                dynamics.rear_saturated = forces.saturated[2] || forces.saturated[3];
+                dynamics.wheel_slip_rad = forces.slip_rad;
+                dynamics.wheel_saturated = forces.saturated;
 
-            // Left/right load transfer is opt-in. Using the steady centripetal
-            // acceleration from the current state rather than this step's forces keeps
-            // the load/force relation explicit and loop-free, mirroring the
-            // longitudinal path that uses the previous chassis acceleration.
-            let (front_transfer_n, rear_transfer_n) = match dynamics.lateral_load_transfer {
-                Some(spec) => {
-                    let centripetal_acceleration_m_s2 = vx * r;
-                    let total_transfer_n = dynamics.mass_kg
-                        * centripetal_acceleration_m_s2.abs()
-                        * dynamics.center_of_mass_height_m
-                        / spec.track_width_m;
-                    (
-                        spec.front_roll_stiffness_fraction * total_transfer_n,
-                        (1.0 - spec.front_roll_stiffness_fraction) * total_transfer_n,
-                    )
-                }
-                None => (0.0, 0.0),
-            };
+                let lateral_acceleration = forces.lateral_force_n / dynamics.mass_kg - vx * r;
+                let yaw_acceleration = forces.yaw_moment_nm / dynamics.yaw_inertia_kg_m2;
 
-            let (front_force_n, front_saturated) = axle_lateral_force_n(
-                dynamics.front_cornering_stiffness_n_rad,
-                dynamics.static_front_load_n(),
-                front_load_n,
-                alpha_f,
-                dynamics.friction_coefficient,
-                dynamics.cornering_stiffness_load_sensitivity,
-                front_transfer_n,
-            );
-            let (rear_force_n, rear_saturated) = axle_lateral_force_n(
-                dynamics.rear_cornering_stiffness_n_rad,
-                dynamics.static_rear_load_n(),
-                rear_load_n,
-                alpha_r,
-                dynamics.friction_coefficient,
-                dynamics.cornering_stiffness_load_sensitivity,
-                rear_transfer_n,
-            );
+                dynamics.lateral_velocity_m_s += lateral_acceleration * dt_s;
+                dynamics.yaw_rate_rad_s += yaw_acceleration * dt_s;
+            } else {
+                let alpha_f = ((vy + dynamics.front_axle_m * r) / vx).atan() - delta;
+                let alpha_r = ((vy - dynamics.rear_axle_m * r) / vx).atan();
 
-            dynamics.front_slip_rad = alpha_f;
-            dynamics.rear_slip_rad = alpha_r;
-            dynamics.front_saturated = front_saturated;
-            dynamics.rear_saturated = rear_saturated;
+                // Left/right load transfer is opt-in. Using the steady centripetal
+                // acceleration from the current state rather than this step's forces keeps
+                // the load/force relation explicit and loop-free, mirroring the
+                // longitudinal path that uses the previous chassis acceleration.
+                let (front_transfer_n, rear_transfer_n) = match dynamics.lateral_load_transfer {
+                    Some(spec) => {
+                        let centripetal_acceleration_m_s2 = vx * r;
+                        let total_transfer_n = dynamics.mass_kg
+                            * centripetal_acceleration_m_s2.abs()
+                            * dynamics.center_of_mass_height_m
+                            / spec.track_width_m;
+                        (
+                            spec.front_roll_stiffness_fraction * total_transfer_n,
+                            (1.0 - spec.front_roll_stiffness_fraction) * total_transfer_n,
+                        )
+                    }
+                    None => (0.0, 0.0),
+                };
 
-            let lateral_acceleration =
-                (front_force_n * delta.cos() + rear_force_n) / dynamics.mass_kg - vx * r;
-            let yaw_acceleration = (dynamics.front_axle_m * front_force_n * delta.cos()
-                - dynamics.rear_axle_m * rear_force_n)
-                / dynamics.yaw_inertia_kg_m2;
+                let (front_force_n, front_saturated) = axle_lateral_force_n(
+                    dynamics.front_cornering_stiffness_n_rad,
+                    dynamics.static_front_load_n(),
+                    front_load_n,
+                    alpha_f,
+                    dynamics.friction_coefficient,
+                    dynamics.cornering_stiffness_load_sensitivity,
+                    front_transfer_n,
+                );
+                let (rear_force_n, rear_saturated) = axle_lateral_force_n(
+                    dynamics.rear_cornering_stiffness_n_rad,
+                    dynamics.static_rear_load_n(),
+                    rear_load_n,
+                    alpha_r,
+                    dynamics.friction_coefficient,
+                    dynamics.cornering_stiffness_load_sensitivity,
+                    rear_transfer_n,
+                );
 
-            dynamics.lateral_velocity_m_s += lateral_acceleration * dt_s;
-            dynamics.yaw_rate_rad_s += yaw_acceleration * dt_s;
+                dynamics.front_slip_rad = alpha_f;
+                dynamics.rear_slip_rad = alpha_r;
+                dynamics.front_saturated = front_saturated;
+                dynamics.rear_saturated = rear_saturated;
+                dynamics.wheel_slip_rad = [0.0; 4];
+                dynamics.wheel_saturated = [false; 4];
+
+                let lateral_acceleration =
+                    (front_force_n * delta.cos() + rear_force_n) / dynamics.mass_kg - vx * r;
+                let yaw_acceleration = (dynamics.front_axle_m * front_force_n * delta.cos()
+                    - dynamics.rear_axle_m * rear_force_n)
+                    / dynamics.yaw_inertia_kg_m2;
+
+                dynamics.lateral_velocity_m_s += lateral_acceleration * dt_s;
+                dynamics.yaw_rate_rad_s += yaw_acceleration * dt_s;
+            }
         }
 
         let yaw_delta_rad = dynamics.yaw_rate_rad_s * dt_s;
@@ -6659,6 +6840,161 @@ mod tests {
                 hot_lap_drive(18.0, 0.12),
                 VehicleDynamics {
                     lateral_load_transfer: transfer,
+                    ..VehicleDynamics::default()
+                },
+            );
+            step_seconds(&mut world, 3.0);
+            (
+                world.get::<Transform3>(vehicle).unwrap().translation,
+                *world.get::<VehicleDynamics>(vehicle).unwrap(),
+            )
+        };
+
+        assert_eq!(run(), run());
+    }
+
+    fn four_wheel_spec() -> FourWheelVehicleSpec {
+        FourWheelVehicleSpec {
+            track_width_m: 1.6,
+            front_roll_stiffness_fraction: 0.6,
+            ackermann_fraction: 1.0,
+        }
+    }
+
+    fn run_four_wheel(
+        drive: AckermannDrive,
+        four_wheel: Option<FourWheelVehicleSpec>,
+        seconds: f64,
+    ) -> VehicleDynamics {
+        let mut world = World::new();
+        let vehicle = spawn_dynamic_vehicle(
+            &mut world,
+            drive,
+            VehicleDynamics {
+                four_wheel,
+                ..VehicleDynamics::default()
+            },
+        );
+        step_seconds(&mut world, seconds);
+        *world.get::<VehicleDynamics>(vehicle).unwrap()
+    }
+
+    #[test]
+    fn four_wheel_validation_rejects_bad_parameters() {
+        let valid = four_wheel_spec();
+        assert!(valid.is_valid());
+
+        assert!(!FourWheelVehicleSpec {
+            track_width_m: 0.0,
+            ..valid
+        }
+        .is_valid());
+        assert!(!FourWheelVehicleSpec {
+            track_width_m: f64::NAN,
+            ..valid
+        }
+        .is_valid());
+        assert!(!FourWheelVehicleSpec {
+            front_roll_stiffness_fraction: -0.1,
+            ..valid
+        }
+        .is_valid());
+        assert!(!FourWheelVehicleSpec {
+            front_roll_stiffness_fraction: 1.1,
+            ..valid
+        }
+        .is_valid());
+        assert!(!FourWheelVehicleSpec {
+            ackermann_fraction: -0.1,
+            ..valid
+        }
+        .is_valid());
+        assert!(!FourWheelVehicleSpec {
+            ackermann_fraction: f64::NAN,
+            ..valid
+        }
+        .is_valid());
+
+        let dynamics = VehicleDynamics {
+            four_wheel: Some(FourWheelVehicleSpec {
+                track_width_m: -1.0,
+                ..valid
+            }),
+            ..VehicleDynamics::default()
+        };
+        assert!(!dynamics.is_valid());
+    }
+
+    #[test]
+    fn four_wheel_ackermann_spreads_the_front_slip_angles() {
+        let drive = || hot_lap_drive(15.0, 0.1);
+        // The front-left/right slip spread comes only from the Ackermann geometry and
+        // the `vx + r z` wheel-speed difference. Exact Ackermann must spread the front
+        // slips more than parallel steering does.
+        let front_spread = |ackermann_fraction: f64| {
+            let dynamics = run_four_wheel(
+                drive(),
+                Some(FourWheelVehicleSpec {
+                    ackermann_fraction,
+                    ..four_wheel_spec()
+                }),
+                2.0,
+            );
+            (dynamics.wheel_slip_rad[1] - dynamics.wheel_slip_rad[0]).abs()
+        };
+
+        let parallel = front_spread(0.0);
+        let ackermann = front_spread(1.0);
+        assert!(
+            ackermann > parallel * 1.5,
+            "Ackermann steering must spread the front slips more than parallel: \
+             parallel={parallel:.6}, ackermann={ackermann:.6}"
+        );
+    }
+
+    #[test]
+    fn four_wheel_populates_per_wheel_telemetry_and_keeps_axle_means() {
+        let dynamics = run_four_wheel(hot_lap_drive(15.0, 0.1), Some(four_wheel_spec()), 2.0);
+        assert!(dynamics.wheel_slip_rad.iter().all(|slip| slip.is_finite()));
+        assert!(dynamics.wheel_slip_rad != [0.0; 4]);
+        // The axle slip fields are the per-wheel mean, not an independent value.
+        assert_eq!(
+            dynamics.front_slip_rad,
+            0.5 * (dynamics.wheel_slip_rad[0] + dynamics.wheel_slip_rad[1])
+        );
+        assert_eq!(
+            dynamics.rear_slip_rad,
+            0.5 * (dynamics.wheel_slip_rad[2] + dynamics.wheel_slip_rad[3])
+        );
+    }
+
+    #[test]
+    fn four_wheel_measurably_changes_yaw_response_versus_single_track() {
+        let yaw_rate = |four_wheel: Option<FourWheelVehicleSpec>| {
+            run_four_wheel(hot_lap_drive(20.0, 0.15), four_wheel, 2.0).yaw_rate_rad_s
+        };
+
+        let single_track = yaw_rate(None);
+        let four_wheel = yaw_rate(Some(four_wheel_spec()));
+
+        let relative_difference = (four_wheel - single_track).abs() / single_track.abs();
+        assert!(
+            relative_difference > 0.01,
+            "the four-wheel model must measurably change the yaw response: \
+             single_track={single_track:.6} rad/s, four_wheel={four_wheel:.6} rad/s, \
+             relative_difference={relative_difference:.6}"
+        );
+    }
+
+    #[test]
+    fn four_wheel_is_deterministic() {
+        let run = || {
+            let mut world = World::new();
+            let vehicle = spawn_dynamic_vehicle(
+                &mut world,
+                hot_lap_drive(18.0, 0.12),
+                VehicleDynamics {
+                    four_wheel: Some(four_wheel_spec()),
                     ..VehicleDynamics::default()
                 },
             );
