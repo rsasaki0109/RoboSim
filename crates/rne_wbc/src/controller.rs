@@ -686,7 +686,12 @@ fn solve_box_least_squares(
     limits: &[f64],
     regularization: f64,
 ) -> Option<Vec<f64>> {
-    // Column equilibration, matching the unconstrained solve.
+    // Coordinate-descent sweeps. Deterministic and fixed so replays match.
+    const ITERATIONS: usize = 400;
+    // Column equilibration: divide each column by its norm so the scaled system
+    // has unit-norm columns, which is what makes the coordinate descent below
+    // converge quickly. (`A' = A D` with `D = diag(1 / norm)`, so the recovered
+    // variables are `x = D x'`.)
     let mut column_norm = vec![0.0; cols];
     for row in rows {
         for (column, value) in row.iter().enumerate() {
@@ -705,14 +710,14 @@ fn solve_box_least_squares(
         })
         .collect();
 
-    // Normal equations H = A^T A + reg I and gradient g = A^T b (in scaled x).
+    // Normal equations H = A'^T A' + reg I and gradient g = A'^T b (in scaled x).
     let mut h = vec![vec![0.0; cols]; cols];
     let mut g = vec![0.0; cols];
     for (row, target) in rows.iter().zip(rhs) {
         let scaled: Vec<f64> = row
             .iter()
             .zip(&column_scale)
-            .map(|(value, scale)| value * scale)
+            .map(|(value, scale)| value / scale)
             .collect();
         for i in 0..cols {
             if scaled[i] == 0.0 {
@@ -731,52 +736,47 @@ fn solve_box_least_squares(
         h[i][i] += regularization;
     }
 
-    // Lipschitz constant of the scaled normal equations via power iteration.
-    let mut v = vec![1.0 / (cols as f64).sqrt(); cols];
-    let mut lambda = 1.0_f64;
-    for _ in 0..12 {
-        let mut w = vec![0.0; cols];
-        for i in 0..cols {
-            let mut sum = 0.0;
-            for j in 0..cols {
-                sum += h[i][j] * v[j];
-            }
-            w[i] = sum;
-        }
-        let norm = w.iter().map(|value| value * value).sum::<f64>().sqrt();
-        if norm > 1.0e-18 {
-            lambda = norm;
-            for i in 0..cols {
-                v[i] = w[i] / norm;
-            }
-        }
-    }
-    let step = 1.0 / lambda.max(1.0e-12);
-
     // Scaled-space bounds for the boxed coordinates.
     let bounds: Vec<f64> = (0..limits.len())
-        .map(|i| limits[i].abs().max(0.0) / column_scale[box_start + i])
+        .map(|i| limits[i].abs().max(0.0) * column_scale[box_start + i])
         .collect();
 
+    // Projected coordinate descent (projected Gauss-Seidel) on the SPD normal
+    // equations `H x = g`. Each coordinate takes its exact one-dimensional
+    // minimizer
+    //
+    //     x_i <- (g_i - sum_{j != i} H_ij x_j) / H_ii,  clipped to its bound,
+    //
+    // which converges monotonically for a symmetric positive-definite `H`. A
+    // plain steepest-descent step with `1 / lambda_max` stalls on the
+    // ill-conditioned systems a whole-body solve produces (the joint-torque
+    // variables in particular), which is how `tau` used to come back at zero.
     let mut x = vec![0.0; cols];
-    for _ in 0..2_000 {
+    for _ in 0..ITERATIONS {
         for i in 0..cols {
-            let mut sum = -g[i];
-            for j in 0..cols {
-                sum += h[i][j] * x[j];
+            let mut residual = g[i];
+            for (j, value) in x.iter().enumerate() {
+                if j != i {
+                    residual -= h[i][j] * value;
+                }
             }
-            x[i] -= step * sum;
-        }
-        for (i, bound) in bounds.iter().enumerate() {
-            let bound = *bound;
-            x[box_start + i] = x[box_start + i].clamp(-bound, bound);
+            let diagonal = h[i][i];
+            if diagonal.abs() <= 1.0e-18 {
+                continue;
+            }
+            let mut value = residual / diagonal;
+            if i >= box_start {
+                let bound = bounds[i - box_start];
+                value = value.clamp(-bound, bound);
+            }
+            x[i] = value;
         }
     }
 
     Some(
         x.iter()
             .zip(&column_scale)
-            .map(|(value, scale)| value * scale)
+            .map(|(value, scale)| value / scale)
             .collect(),
     )
 }
@@ -789,6 +789,31 @@ mod tests {
     use rne_physics::{RigidBody, RigidBodyInertia};
     use rne_robot::{FloatingBase, Link, Robot, RobotId};
     use rne_world::Transform3;
+
+    #[test]
+    fn box_solver_converges_across_a_wide_scale_spread() {
+        // Columns separated by three orders of magnitude, like the joint-torque
+        // variables next to the acceleration variables. The old steepest-descent
+        // step stalled here and left the boxed coordinate at zero.
+        let rows = vec![vec![1.0e-3, 0.0], vec![0.0, 1.0], vec![1.0e-3, 1.0]];
+        let rhs = vec![2.0e-3, 3.0, 4.0];
+        let solution = solve_box_least_squares(&rows, &rhs, 2, 1, &[1.0], 1.0e-12).unwrap();
+        // The box sits on x[1]: the unconstrained optimum there is far above 1,
+        // so it clips to 1, and x[0] must then reach its own clipped optimum.
+        assert_relative_eq!(solution[1], 1.0, epsilon = 1.0e-9);
+        assert_relative_eq!(solution[0], 1501.0, epsilon = 1.0e-3);
+        let residual = |x: &[f64]| {
+            rows.iter()
+                .zip(&rhs)
+                .map(|(row, target)| (row[0] * x[0] + row[1] * x[1] - target).powi(2))
+                .sum::<f64>()
+        };
+        assert!(
+            residual(&solution) < 0.5 * residual(&[0.0, 0.0]),
+            "residual {}",
+            residual(&solution)
+        );
+    }
 
     #[test]
     fn box_solver_respects_and_releases_the_box() {
