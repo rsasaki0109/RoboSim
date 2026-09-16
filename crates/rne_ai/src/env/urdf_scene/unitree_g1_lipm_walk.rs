@@ -503,12 +503,6 @@ pub fn run_unitree_g1_lipm_walk(
             fell = true;
         }
         if config.trace {
-            let left_actual = sim
-                .named_transform("left_ankle_roll_link")
-                .expect("left foot");
-            let right_actual = sim
-                .named_transform("right_ankle_roll_link")
-                .expect("right foot");
             println!(
                 "  t={:5.2} pelx={:+.3} tgtx={:+.3} comrefx={:+.3} planLx={:+.3} actLx={:+.3} tgtz={:+.3} tilt={:.3}",
                 time_s,
