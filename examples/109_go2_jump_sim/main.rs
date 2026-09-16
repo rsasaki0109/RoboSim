@@ -55,6 +55,14 @@
 //! *measured* joint velocities to the solver (feeding zeros over-drives the
 //! center of mass and inflates the apex while the base pitches far more).
 //!
+//! The stance feed follows the open-source recipe for torque-controlled legged
+//! robots (an NMPC torque feed-forward plus low-gain tracking): it passes the
+//! plan's torque to `solve_with_torque_reference` and keeps the center-of-mass
+//! and attitude gains low, so the solve tracks the plan instead of fighting it
+//! in the null space. That cuts the peak lean from 0.73 rad to **0.25 rad**
+//! (the robot stays essentially upright, and the feet clear 29 mm). Disable it
+//! with `--no-ff-torque` to see the old behavior (lean up to 2.4 rad).
+//!
 //! `--vel-weight` wraps the planner cost in `rne_oc::ActuatorLimitCost`, a hinge
 //! penalty that keeps joint speeds near their URDF limits. The default plan
 //! peaks at 44 rad/s, beyond the Go2 thigh limit of 15.7 rad/s; the penalty
@@ -119,11 +127,11 @@ const TRACK_KD: f64 = 6.0;
 const BASE_KP: f64 = 120.0;
 const BASE_KD: f64 = 12.0;
 const BASE_SIGN: f64 = 1.0;
-const WBC_COM_KP: f64 = 120.0;
-const WBC_COM_KD: f64 = 40.0;
+const WBC_COM_KP: f64 = 6.0;
+const WBC_COM_KD: f64 = 2.0;
 const WBC_COM_FF: f64 = 2.0;
-const WBC_ATTITUDE_KP: f64 = -40.0;
-const WBC_ATTITUDE_KD: f64 = 8.0;
+const WBC_ATTITUDE_KP: f64 = -200.0;
+const WBC_ATTITUDE_KD: f64 = 16.0;
 const ACTUATOR_VELOCITY_WEIGHT: f64 = 5.0;
 
 /// GIF capture frame size in pixels.
@@ -312,6 +320,10 @@ fn main() {
     let velocity_weight = argument_value("--vel-weight")
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(ACTUATOR_VELOCITY_WEIGHT);
+    let ff_torque = !std::env::args().any(|argument| argument == "--no-ff-torque");
+    let torque_reference_weight = argument_value("--torque-weight")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(1.0e5);
     let mpc = std::env::args().any(|argument| argument == "--mpc");
     let mpc_period = argument_value("--mpc-period")
         .and_then(|value| value.parse::<usize>().ok())
@@ -664,6 +676,7 @@ fn main() {
         posture_weight,
         angular_weight,
         torque_limits_nm: Some(vec![TORQUE_LIMIT_NM; control_dim]),
+        torque_reference_weight,
         ..WholeBodyConfig::default()
     });
 
@@ -787,7 +800,7 @@ fn main() {
                 velocity_gain_s_inv: 1.0,
             };
             let wbc_solution = wbc_controller
-                .solve(
+                .solve_with_torque_reference(
                     &model,
                     q,
                     &qd,
@@ -795,6 +808,11 @@ fn main() {
                     Some(&com_task),
                     Some(&attitude),
                     Some(&posture),
+                    if ff_torque {
+                        Some(torque.as_slice())
+                    } else {
+                        None
+                    },
                 )
                 .expect("wbc solve");
             let wbc_targets: Vec<UrdfJointTorqueTarget<'_>> = joint_names
