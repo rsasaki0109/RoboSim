@@ -436,6 +436,20 @@ external optimal-control library.
 
 See [native optimal control](docs/architecture/015_native_optimal_control.md).
 
+Example 109 plans a Go2 **crouch–push–flight jump** with the FDDP solver and
+executes it with the whole-body controller.
+
+<p align="center">
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/go2-jump.png">
+    <img src="docs/media/go2-jump.gif" alt="A Unitree Go2 crouches, pushes off, tucks its legs in flight, and lands upright" width="460">
+  <br>
+  <sub>Crouch–push–flight jump planned by the native FDDP solver, executed by the whole-body controller with torque feed-forward and low-gain tracking. The body rises 0.107 m, the feet clear 44 mm, and the peak lean is 0.33 rad (0.73 rad before the feed-forward). <a href="examples/109_go2_jump_sim/main.rs">source</a></sub>
+</p>
+
+```bash
+cargo run --release -p go2_jump_sim --example 109_go2_jump_sim -- --wbc-stance
+```
+
 ## Architecture
 
 The workspace is split by responsibility:
