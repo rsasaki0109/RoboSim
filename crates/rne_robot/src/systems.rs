@@ -3813,6 +3813,51 @@ fn effective_cornering_stiffness(
     reference_stiffness_n_rad * stiffness_ratio
 }
 
+/// Lateral force from one axle, optionally split into two equal-slip tires to
+/// represent left/right load transfer.
+///
+/// With `lateral_transfer_n == 0` the two half-load tires reproduce the
+/// single-tire axle exactly, including the friction clamp and the saturation
+/// flag: halving and doubling are exact in binary floating point, so the
+/// per-side stiffness sums to the axle stiffness and the per-side clamps sum to
+/// the axle clamp whenever both sides are in the same regime.
+fn axle_lateral_force_n(
+    axle_stiffness_n_rad: f64,
+    static_axle_load_n: f64,
+    axle_load_n: f64,
+    slip_rad: f64,
+    friction_coefficient: f64,
+    sensitivity: Option<CorneringStiffnessLoadSensitivity>,
+    lateral_transfer_n: f64,
+) -> (f64, bool) {
+    let half_load_n = 0.5 * axle_load_n;
+    let half_static_n = 0.5 * static_axle_load_n;
+    let reference_stiffness_n_rad = 0.5 * axle_stiffness_n_rad;
+    let transfer_n = lateral_transfer_n.max(0.0);
+    let outer_load_n = (half_load_n + transfer_n).max(0.0);
+    let inner_load_n = (half_load_n - transfer_n).max(0.0);
+
+    let mut saturated = false;
+    let mut side_forces_n = [0.0_f64; 2];
+    for (index, side_load_n) in [outer_load_n, inner_load_n].into_iter().enumerate() {
+        let stiffness_n_rad = effective_cornering_stiffness(
+            reference_stiffness_n_rad,
+            side_load_n,
+            half_static_n,
+            sensitivity,
+        );
+        let limit_n = friction_coefficient * side_load_n;
+        let demanded_n = -stiffness_n_rad * slip_rad;
+        if demanded_n.abs() > limit_n {
+            saturated = true;
+        }
+        side_forces_n[index] = demanded_n.clamp(-limit_n, limit_n);
+    }
+    // Summing the two sides directly, rather than from a `+0.0` accumulator, keeps
+    // the sign of a zero-slip force identical to the single-tire formula.
+    (side_forces_n[0] + side_forces_n[1], saturated)
+}
+
 /// Advances vehicles that carry both [`AckermannDrive`] and [`VehicleDynamics`] with a
 /// planar dynamic bicycle model.
 ///
@@ -3924,29 +3969,48 @@ pub fn vehicle_dynamics(world: &mut World, dt: SimDuration) {
             let alpha_f = ((vy + dynamics.front_axle_m * r) / vx).atan() - delta;
             let alpha_r = ((vy - dynamics.rear_axle_m * r) / vx).atan();
 
-            let front_stiffness_n_rad = effective_cornering_stiffness(
-                dynamics.front_cornering_stiffness_n_rad,
-                front_load_n,
-                dynamics.static_front_load_n(),
-                dynamics.cornering_stiffness_load_sensitivity,
-            );
-            let rear_stiffness_n_rad = effective_cornering_stiffness(
-                dynamics.rear_cornering_stiffness_n_rad,
-                rear_load_n,
-                dynamics.static_rear_load_n(),
-                dynamics.cornering_stiffness_load_sensitivity,
-            );
+            // Left/right load transfer is opt-in. Using the steady centripetal
+            // acceleration from the current state rather than this step's forces keeps
+            // the load/force relation explicit and loop-free, mirroring the
+            // longitudinal path that uses the previous chassis acceleration.
+            let (front_transfer_n, rear_transfer_n) = match dynamics.lateral_load_transfer {
+                Some(spec) => {
+                    let centripetal_acceleration_m_s2 = vx * r;
+                    let total_transfer_n = dynamics.mass_kg
+                        * centripetal_acceleration_m_s2.abs()
+                        * dynamics.center_of_mass_height_m
+                        / spec.track_width_m;
+                    (
+                        spec.front_roll_stiffness_fraction * total_transfer_n,
+                        (1.0 - spec.front_roll_stiffness_fraction) * total_transfer_n,
+                    )
+                }
+                None => (0.0, 0.0),
+            };
 
-            let front_limit_n = dynamics.friction_coefficient * front_load_n;
-            let rear_limit_n = dynamics.friction_coefficient * rear_load_n;
-            let front_force_n =
-                (-front_stiffness_n_rad * alpha_f).clamp(-front_limit_n, front_limit_n);
-            let rear_force_n = (-rear_stiffness_n_rad * alpha_r).clamp(-rear_limit_n, rear_limit_n);
+            let (front_force_n, front_saturated) = axle_lateral_force_n(
+                dynamics.front_cornering_stiffness_n_rad,
+                dynamics.static_front_load_n(),
+                front_load_n,
+                alpha_f,
+                dynamics.friction_coefficient,
+                dynamics.cornering_stiffness_load_sensitivity,
+                front_transfer_n,
+            );
+            let (rear_force_n, rear_saturated) = axle_lateral_force_n(
+                dynamics.rear_cornering_stiffness_n_rad,
+                dynamics.static_rear_load_n(),
+                rear_load_n,
+                alpha_r,
+                dynamics.friction_coefficient,
+                dynamics.cornering_stiffness_load_sensitivity,
+                rear_transfer_n,
+            );
 
             dynamics.front_slip_rad = alpha_f;
             dynamics.rear_slip_rad = alpha_r;
-            dynamics.front_saturated = (front_stiffness_n_rad * alpha_f).abs() > front_limit_n;
-            dynamics.rear_saturated = (rear_stiffness_n_rad * alpha_r).abs() > rear_limit_n;
+            dynamics.front_saturated = front_saturated;
+            dynamics.rear_saturated = rear_saturated;
 
             let lateral_acceleration =
                 (front_force_n * delta.cos() + rear_force_n) / dynamics.mass_kg - vx * r;
@@ -4382,7 +4446,8 @@ mod tests {
     use super::*;
     use crate::actuator::ActuatorLimits;
     use crate::components::{
-        AckermannDrive, JointKind, JointLimits, Link, MultirotorFlight, Robot, RobotId,
+        AckermannDrive, JointKind, JointLimits, LateralLoadTransferSpec, Link, MultirotorFlight,
+        Robot, RobotId,
     };
     use rne_core::{SimClock, SimTime};
     use rne_ecs::spawn_named;
@@ -6447,6 +6512,164 @@ mod tests {
              constant={constant:.6} rad/s, load_dependent={load_dependent:.6} rad/s, \
              relative_difference={relative_difference:.6}"
         );
+    }
+
+    #[test]
+    fn zero_lateral_transfer_matches_the_single_tire_axle_bit_for_bit() {
+        let sensitivity = Some(CorneringStiffnessLoadSensitivity {
+            load_sensitivity_per_load_ratio: 0.4,
+            maximum_load_ratio: 3.0,
+        });
+        let cases = [
+            (80_000.0, 8_000.0, 8_000.0, 0.05, 0.9, None),
+            (80_000.0, 8_000.0, 12_000.0, 0.2, 0.9, None),
+            (80_000.0, 8_000.0, 5_000.0, -0.1, 1.1, None),
+            (80_000.0, 8_000.0, 8_000.0, 0.05, 0.9, sensitivity),
+            (80_000.0, 8_000.0, 12_000.0, 0.2, 0.9, sensitivity),
+            (88_000.0, 9_000.0, 9_000.0, 0.0, 0.9, sensitivity),
+        ];
+        for (stiffness, static_load, load, slip, mu, sens) in cases {
+            let axle_effective = effective_cornering_stiffness(stiffness, load, static_load, sens);
+            let limit_n = mu * load;
+            let expected_force_n = (-axle_effective * slip).clamp(-limit_n, limit_n);
+            let expected_saturated = (axle_effective * slip).abs() > limit_n;
+
+            let (force_n, saturated) =
+                axle_lateral_force_n(stiffness, static_load, load, slip, mu, sens, 0.0);
+            assert_eq!(
+                force_n.to_bits(),
+                expected_force_n.to_bits(),
+                "split axle must reproduce the single tire exactly for slip {slip}"
+            );
+            assert_eq!(saturated, expected_saturated);
+        }
+    }
+
+    #[test]
+    fn lateral_load_transfer_reduces_usable_axle_force() {
+        // A moderate slip angle saturates the loaded side before the unloaded one,
+        // which is exactly where the left/right split costs the axle grip.
+        let (single_force_n, single_saturated) =
+            axle_lateral_force_n(80_000.0, 8_000.0, 8_000.0, 0.15, 1.0, None, 0.0);
+        let (split_force_n, split_saturated) =
+            axle_lateral_force_n(80_000.0, 8_000.0, 8_000.0, 0.15, 1.0, None, 3_000.0);
+
+        assert!(single_saturated && split_saturated);
+        assert!(
+            split_force_n.abs() < single_force_n.abs(),
+            "load transfer must cost axle grip: single={single_force_n}, split={split_force_n}"
+        );
+        // Loaded side 7000 N saturates at mu*7000; unloaded side 1000 N is already
+        // friction limited, so the axle carries 7000 N instead of 8000 N.
+        assert!((split_force_n.abs() - 7_000.0).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn lateral_load_transfer_validation_rejects_bad_parameters() {
+        let valid = LateralLoadTransferSpec {
+            track_width_m: 1.6,
+            front_roll_stiffness_fraction: 0.6,
+        };
+        assert!(valid.is_valid());
+
+        assert!(!LateralLoadTransferSpec {
+            track_width_m: 0.0,
+            ..valid
+        }
+        .is_valid());
+        assert!(!LateralLoadTransferSpec {
+            track_width_m: f64::NAN,
+            ..valid
+        }
+        .is_valid());
+        assert!(!LateralLoadTransferSpec {
+            front_roll_stiffness_fraction: -0.1,
+            ..valid
+        }
+        .is_valid());
+        assert!(!LateralLoadTransferSpec {
+            front_roll_stiffness_fraction: 1.1,
+            ..valid
+        }
+        .is_valid());
+
+        let dynamics = VehicleDynamics {
+            lateral_load_transfer: Some(LateralLoadTransferSpec {
+                track_width_m: -1.0,
+                ..valid
+            }),
+            ..VehicleDynamics::default()
+        };
+        assert!(!dynamics.is_valid());
+    }
+
+    #[test]
+    fn lateral_load_transfer_measurably_changes_yaw_response_in_a_steady_turn() {
+        let yaw_rate = |transfer: Option<LateralLoadTransferSpec>| {
+            let mut world = World::new();
+            let vehicle = spawn_dynamic_vehicle(
+                &mut world,
+                AckermannDrive {
+                    target_speed_m_s: 25.0,
+                    speed_m_s: 25.0,
+                    max_acceleration_m_s2: 1_000.0,
+                    max_steering_rate_rad_s: 1_000.0,
+                    steering_rad: 0.18,
+                    target_steering_rad: 0.18,
+                    max_speed_m_s: 60.0,
+                    ..AckermannDrive::default()
+                },
+                VehicleDynamics {
+                    lateral_load_transfer: transfer,
+                    ..VehicleDynamics::default()
+                },
+            );
+            step_seconds(&mut world, 2.0);
+            world
+                .get::<VehicleDynamics>(vehicle)
+                .unwrap()
+                .yaw_rate_rad_s
+        };
+
+        let without = yaw_rate(None);
+        let with = yaw_rate(Some(LateralLoadTransferSpec {
+            track_width_m: 1.6,
+            front_roll_stiffness_fraction: 0.6,
+        }));
+
+        let relative_difference = (with - without).abs() / without.abs();
+        assert!(
+            relative_difference > 0.01,
+            "lateral load transfer must measurably change the yaw response: \
+             without={without:.6} rad/s, with={with:.6} rad/s, \
+             relative_difference={relative_difference:.6}"
+        );
+    }
+
+    #[test]
+    fn lateral_load_transfer_is_deterministic() {
+        let transfer = Some(LateralLoadTransferSpec {
+            track_width_m: 1.55,
+            front_roll_stiffness_fraction: 0.55,
+        });
+        let run = || {
+            let mut world = World::new();
+            let vehicle = spawn_dynamic_vehicle(
+                &mut world,
+                hot_lap_drive(18.0, 0.12),
+                VehicleDynamics {
+                    lateral_load_transfer: transfer,
+                    ..VehicleDynamics::default()
+                },
+            );
+            step_seconds(&mut world, 3.0);
+            (
+                world.get::<Transform3>(vehicle).unwrap().translation,
+                *world.get::<VehicleDynamics>(vehicle).unwrap(),
+            )
+        };
+
+        assert_eq!(run(), run());
     }
 
     #[test]

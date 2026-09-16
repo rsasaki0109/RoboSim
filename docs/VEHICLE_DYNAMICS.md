@@ -57,6 +57,30 @@ trajectory bit-for-bit identical, and it is skipped entirely when serializing
 a `VehicleDynamics` that does not set it, so existing serialized artifacts,
 goldens, and retained evidence digests are unaffected.
 
+### Lateral load transfer (opt-in)
+
+The single-track model has one tire per axle, so it cannot represent the left/right
+load shift a corner produces. Setting [`VehicleDynamics::lateral_load_transfer`] to a
+`LateralLoadTransferSpec` splits each axle into two equal-slip tires: the total lateral
+transfer `m |vx r| h / track` is split front/rear by
+`front_roll_stiffness_fraction`, each side carries `Fz / 2 +/- dFz`, and the axle force
+is the sum of the two sides at their own loads. Because the friction limit `mu Fz` is
+linear in load but the linear tire saturates the loaded side before the unloaded one,
+the split reduces the axle's usable lateral force and shifts the balance between the
+axles — the classical load-transfer understeer/oversteer effect. A front-biased
+roll-stiffness fraction tends toward understeer.
+
+The transfer uses the steady centripetal acceleration `vx r` from the current state, not
+this step's forces, so the load/force relation stays explicit and loop-free, mirroring
+the longitudinal path that uses the previous chassis acceleration. This is a
+**deliberately lower-order model, not a measurement**: a mean track width, a single
+roll-stiffness fraction, and no roll degree of freedom. The field is absent (`None`) by
+default, which keeps the single-tire-per-axle model bit-for-bit identical, and it is
+skipped when serializing a `VehicleDynamics` that does not set it, so existing
+serialized artifacts, goldens, and retained evidence digests are unaffected. With zero
+lateral transfer the two half-load tires reproduce the single tire exactly, because
+halving and doubling are exact in binary floating point.
+
 ### Low-speed blend
 
 Slip angles divide by `vx` and become singular near standstill; this is the standard
@@ -124,7 +148,10 @@ the center-of-mass offset bound, the line to widen with speed through real slip
 angles without saturation, a hard corner to saturate the front axle and undershoot
 the no-slip yaw rate, load transfer to preserve total weight, the world-frame
 velocity to carry the lateral component a mounted sensor would observe, and two runs
-to be bit-identical.
+to be bit-identical. The lateral-transfer tests additionally require the split axle to
+reproduce the single tire bit-for-bit at zero transfer, to cost usable axle force when
+one side saturates first, to measurably change the steady-turn yaw response, and to be
+deterministic.
 
 [`AckermannDrive`]: ../crates/rne_robot/src/components.rs
 [`VehicleDynamics`]: ../crates/rne_robot/src/components.rs
