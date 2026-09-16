@@ -510,16 +510,14 @@ pub fn run_unitree_g1_lipm_walk(
                 .named_transform("right_ankle_roll_link")
                 .expect("right foot");
             println!(
-                "  t={:5.2} pelz={:+.3} tgtz={:+.3} planLz={:+.3} actLz={:+.3} planRz={:+.3} actRz={:+.3} actLy={:+.3} actRy={:+.3} tilt={:.3}",
+                "  t={:5.2} pelx={:+.3} tgtx={:+.3} comrefx={:+.3} planLx={:+.3} actLx={:+.3} tgtz={:+.3} tilt={:.3}",
                 time_s,
-                pelvis.translation.z,
+                pelvis.translation.x,
+                pelvis_target.x,
+                com_reference.x_m,
+                left_foot.x,
+                sim.named_transform("left_ankle_roll_link").expect("l").translation.x,
                 pelvis_target.z,
-                left_foot.z,
-                left_actual.translation.z,
-                right_foot.z,
-                right_actual.translation.z,
-                left_actual.translation.y,
-                right_actual.translation.y,
                 tilt,
             );
         }

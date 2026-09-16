@@ -26,6 +26,16 @@ fn main() {
         .and_then(|index| std::env::args().nth(index + 1))
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(88.0);
+    let parse = |flag: &str, default: f64| {
+        std::env::args()
+            .position(|argument| argument == flag)
+            .and_then(|index| std::env::args().nth(index + 1))
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(default)
+    };
+    let single_support = parse("--single-support", 0.5);
+    let width = parse("--width", 0.04);
+    let com_height = parse("--com-height", 0.60);
     let foot_gain = std::env::args()
         .position(|argument| argument == "--foot-gain")
         .and_then(|index| std::env::args().nth(index + 1))
@@ -49,6 +59,9 @@ fn main() {
         position_damping: (stiffness * 0.11).max(24.0),
         torque_limit_nm: limit,
         steps,
+        single_support_s: single_support,
+        step_width_m: width,
+        com_height_m: com_height,
         step_length_m,
         rollout_steps: (0.4 / (1.0 / 60.0)) as usize + steps * 36 + (0.4 / (1.0 / 60.0)) as usize,
         ..UnitreeG1LipmWalkConfig::default()
