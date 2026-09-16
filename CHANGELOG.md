@@ -28,6 +28,26 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_mobility_benchmark` combined suspension-and-tire identification
+  application (`identified_suspension_tire`): fits one suspension
+  `SuspensionIdentificationDataset`, replays one `IdentifiedTireProfileEvidence`,
+  and applies the fitted `SuspensionStrutSpec` plus the profile's
+  `CombinedSlipTireSpec` to the exact same suspended four-wheel road-excitation
+  task on Rapier and MuJoCo. New self-verifying artifacts
+  `rne_mobility_identified_suspension_tire_trace` and
+  `rne_mobility_identified_suspension_tire_evidence` bind both source chains,
+  the applied specs, the traces, the cross-backend comparison, and a digest.
+  New CLI backends `identified-suspension-tire-rapier` and
+  `identified-suspension-tire-compare` take `--input <suspension dataset>` and
+  `--tire-profile <profile>`. `run_road_excitation_trace_with_specs` adds the
+  parameterized wheel-plant entry point; `RoadExcitationTrace` now validates its
+  retained suspension and tire specs as individually valid (the wrapper evidence
+  binds them), matching the earlier suspension parameterization, while
+  `IdentifiedSuspensionRoadEvidence` explicitly binds the baseline wheel plant so
+  its guarantee is unchanged and the baseline trace stays byte-for-byte
+  identical. Fixtures are synthetic; the combined artifact never asserts physical
+  qualification.
+
 - `VehicleDynamics::cornering_stiffness_load_sensitivity` (an optional
   `CorneringStiffnessLoadSensitivity`): lets the planar dynamic bicycle model's
   per-axle cornering stiffness scale with the axle's instantaneous load,

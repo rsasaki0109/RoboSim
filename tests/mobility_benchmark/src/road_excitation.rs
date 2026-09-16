@@ -163,7 +163,7 @@ impl RoadExcitationTrace {
             "road profile drift"
         );
         ensure!(self.road_profile.is_valid(), "invalid road profile");
-        ensure!(self.wheel_plant_spec == wheel_plant_spec(), "plant drift");
+        ensure!(self.wheel_plant_spec.is_valid(), "invalid wheel plant spec");
         ensure!(self.suspension_spec.is_valid(), "invalid suspension spec");
         ensure!(
             self.wheel_station_specs == wheel_station_specs(),
@@ -365,9 +365,25 @@ pub fn run_road_excitation_trace<B: PhysicsBackend>(
 
 /// Runs the metric road profile with an explicitly supplied portable suspension.
 pub fn run_road_excitation_trace_with_suspension<B: PhysicsBackend>(
+    backend: B,
+    manifest: PhysicsBackendManifest,
+    suspension: SuspensionStrutSpec,
+) -> Result<RoadExcitationTrace> {
+    run_road_excitation_trace_with_specs(backend, manifest, suspension, wheel_plant_spec())
+}
+
+/// Runs the metric road profile with explicit portable suspension and wheel-plant specs.
+///
+/// This parameterized entry point applies identified suspension and tire values to
+/// the exact same executed task that [`run_road_excitation_trace`] runs with the
+/// baseline fixture. [`RoadExcitationTrace::validate`] only checks that the retained
+/// specs are individually valid; the wrapper evidence that supplies them is
+/// responsible for binding each spec to its identification chain.
+pub fn run_road_excitation_trace_with_specs<B: PhysicsBackend>(
     mut backend: B,
     manifest: PhysicsBackendManifest,
     suspension: SuspensionStrutSpec,
+    wheel_plant: LongitudinalMobilityPlantSpec,
 ) -> Result<RoadExcitationTrace> {
     manifest.validate()?;
     require_capabilities(
@@ -388,8 +404,9 @@ pub fn run_road_excitation_trace_with_suspension<B: PhysicsBackend>(
     task_spec.validate()?;
     let road_profile = rigid_road_profile();
     ensure!(road_profile.is_valid(), "invalid road profile fixture");
-    let plant = wheel_plant_spec();
+    let plant = wheel_plant;
     ensure!(suspension.is_valid(), "invalid suspension spec");
+    ensure!(plant.is_valid(), "invalid wheel plant spec");
     let fixed_delta = SimDuration::from_ticks(ROAD_EXCITATION_FIXED_DELTA_TICKS);
     let dt_s = fixed_delta.as_seconds().value();
     let physics_world = backend.create_world(PhysicsWorldDesc {

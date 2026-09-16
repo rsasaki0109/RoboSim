@@ -199,6 +199,15 @@ joined artifact can enter the physical Rapier/MuJoCo comparison; a `recorded_sou
 is rejected, and files are always rehashed at qualification time rather than trusting a
 previously serialized `physical_measurement` value.
 
+An identified profile can also be applied jointly with an identified suspension
+strut. `identified_suspension_tire` fits one suspension
+`SuspensionIdentificationDataset`, replays one `IdentifiedTireProfileEvidence`,
+and executes the fitted strut plus this profile's `CombinedSlipTireSpec` on the
+shared suspended four-wheel road task on both backends. Its combined
+`physical_measurement` is the conjunction of the suspension declaration and this
+profile's `recorded_source_claim` and is still not qualification; see
+[`MOBILITY_SUSPENSION_IDENTIFICATION_V1.md`](MOBILITY_SUSPENSION_IDENTIFICATION_V1.md).
+
 ## CLI
 
 The identification fixture is deliberately non-physical:

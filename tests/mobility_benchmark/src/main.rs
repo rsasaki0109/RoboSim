@@ -7,6 +7,9 @@ use rne_mobility_benchmark::backend::run_backend_mobility_trace;
 use rne_mobility_benchmark::diff_caster::run_differential_caster_trace;
 #[cfg(feature = "mujoco")]
 use rne_mobility_benchmark::identified_suspension_road::run_identified_suspension_road_evidence;
+#[cfg(feature = "mujoco")]
+use rne_mobility_benchmark::identified_suspension_tire::run_identified_suspension_tire_evidence;
+use rne_mobility_benchmark::identified_suspension_tire::run_identified_suspension_tire_trace;
 use rne_mobility_benchmark::identified_tire_backend::{
     decode_identified_tire_profile, run_identified_tire_backend_trace,
     synthetic_identified_tire_profile, synthetic_load_sensitive_identified_tire_profile,
@@ -73,6 +76,7 @@ fn main() -> Result<()> {
     let mut load_acquisition_manifest = None;
     let mut longitudinal_acquisition_manifest = None;
     let mut lateral_acquisition_manifest = None;
+    let mut tire_profile = None;
     let mut evidence_root = None;
     let mut num_envs = None;
     let mut num_workers = None;
@@ -162,6 +166,12 @@ fn main() -> Result<()> {
                         .context("--lateral-acquisition-manifest requires a path")?,
                 ));
             }
+            "--tire-profile" => {
+                ensure!(tire_profile.is_none(), "duplicate --tire-profile");
+                tire_profile = Some(PathBuf::from(
+                    args.next().context("--tire-profile requires a path")?,
+                ));
+            }
             "--evidence-root" => {
                 evidence_root = Some(PathBuf::from(
                     args.next().context("--evidence-root requires a path")?,
@@ -228,6 +238,7 @@ fn main() -> Result<()> {
                 && load_acquisition_manifest.is_none()
                 && longitudinal_acquisition_manifest.is_none()
                 && lateral_acquisition_manifest.is_none()
+                && tire_profile.is_none()
                 && evidence_root.is_none()
                 && episode_index.is_none()
                 && lane_id.is_none(),
@@ -266,6 +277,7 @@ fn main() -> Result<()> {
                 && load_acquisition_manifest.is_none()
                 && longitudinal_acquisition_manifest.is_none()
                 && lateral_acquisition_manifest.is_none()
+                && tire_profile.is_none()
                 && evidence_root.is_none()
                 && num_envs.is_none()
                 && root_seed.is_none()
@@ -976,6 +988,24 @@ fn main() -> Result<()> {
                 .context("--backend identified-road-compare requires --input")?;
             run_identified_road_comparison(input)?
         }
+        "identified-suspension-tire-compare" => {
+            let input = input
+                .as_deref()
+                .context("--backend identified-suspension-tire-compare requires --input")?;
+            let tire_profile = tire_profile
+                .as_deref()
+                .context("--backend identified-suspension-tire-compare requires --tire-profile")?;
+            run_identified_suspension_tire_comparison(input, tire_profile)?
+        }
+        "identified-suspension-tire-rapier" => {
+            let input = input
+                .as_deref()
+                .context("--backend identified-suspension-tire-rapier requires --input")?;
+            let tire_profile = tire_profile
+                .as_deref()
+                .context("--backend identified-suspension-tire-rapier requires --tire-profile")?;
+            run_identified_suspension_tire_rapier(input, tire_profile)?
+        }
         "suspension-acquisition-verify" => {
             let input = input
                 .as_deref()
@@ -1164,6 +1194,8 @@ fn main() -> Result<()> {
                 | "physical-tire-qualify"
                 | "physical-tire-compare"
                 | "identified-road-compare"
+                | "identified-suspension-tire-compare"
+                | "identified-suspension-tire-rapier"
                 | "suspension-acquisition-verify"
                 | "suspension-acquired"
                 | "suspension-uncertainty"
@@ -1207,6 +1239,13 @@ fn main() -> Result<()> {
                 && longitudinal_acquisition_manifest.is_none()
                 && lateral_acquisition_manifest.is_none()),
         "axis-specific acquisition manifests require --backend physical-tire-request"
+    );
+    ensure!(
+        matches!(
+            backend.as_str(),
+            "identified-suspension-tire-compare" | "identified-suspension-tire-rapier"
+        ) || tire_profile.is_none(),
+        "--tire-profile requires an identified-suspension-tire backend"
     );
     ensure!(
         matches!(
@@ -1435,6 +1474,29 @@ fn read_bounded_regular_file(
     std::fs::read(input).with_context(|| format!("read {}", input.display()))
 }
 
+fn run_identified_suspension_tire_rapier(
+    suspension_input: &std::path::Path,
+    tire_profile_input: &std::path::Path,
+) -> Result<(String, &'static str)> {
+    let dataset = read_suspension_identification_dataset(suspension_input)?;
+    let profile = read_identified_tire_profile(tire_profile_input)?;
+    let evidence = run_identified_suspension_tire_trace(
+        RapierBackend::new(),
+        RapierBackend::manifest(),
+        dataset,
+        profile,
+    )?;
+    ensure!(
+        evidence.passed,
+        "identified suspension tire Rapier task failed: {:#?}",
+        evidence.trace.metrics
+    );
+    Ok((
+        serde_json::to_string_pretty(&evidence)? + "\n",
+        "identified-suspension-tire-rapier",
+    ))
+}
+
 #[cfg(feature = "mujoco")]
 fn run_identified_tire_comparison(input: &std::path::Path) -> Result<(String, &'static str)> {
     use rne_core::SimDuration;
@@ -1526,6 +1588,44 @@ fn run_identified_road_comparison(input: &std::path::Path) -> Result<(String, &'
 #[cfg(not(feature = "mujoco"))]
 fn run_identified_road_comparison(_input: &std::path::Path) -> Result<(String, &'static str)> {
     bail!("identified suspension road comparison requires --features mujoco")
+}
+
+#[cfg(feature = "mujoco")]
+fn run_identified_suspension_tire_comparison(
+    suspension_input: &std::path::Path,
+    tire_profile_input: &std::path::Path,
+) -> Result<(String, &'static str)> {
+    use rne_core::SimDuration;
+    use rne_mobility_benchmark::road_excitation::ROAD_EXCITATION_FIXED_DELTA_TICKS;
+    use rne_physics_mujoco::MuJoCoBackend;
+
+    let dataset = read_suspension_identification_dataset(suspension_input)?;
+    let profile = read_identified_tire_profile(tire_profile_input)?;
+    let evidence = run_identified_suspension_tire_evidence(
+        dataset,
+        profile,
+        RapierBackend::new(),
+        RapierBackend::manifest(),
+        MuJoCoBackend::new(SimDuration::from_ticks(ROAD_EXCITATION_FIXED_DELTA_TICKS))?,
+        MuJoCoBackend::manifest(),
+    )?;
+    ensure!(
+        evidence.passed,
+        "identified suspension tire comparison failed: {:#?}",
+        evidence.road_comparison.metrics
+    );
+    Ok((
+        serde_json::to_string_pretty(&evidence)? + "\n",
+        "identified-suspension-tire-rapier-vs-mujoco",
+    ))
+}
+
+#[cfg(not(feature = "mujoco"))]
+fn run_identified_suspension_tire_comparison(
+    _suspension_input: &std::path::Path,
+    _tire_profile_input: &std::path::Path,
+) -> Result<(String, &'static str)> {
+    bail!("identified suspension tire comparison requires --features mujoco")
 }
 
 #[cfg(feature = "mujoco")]

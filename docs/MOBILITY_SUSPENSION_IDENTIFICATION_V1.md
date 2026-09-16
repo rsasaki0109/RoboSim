@@ -1169,3 +1169,42 @@ position, velocity, and timing is retained externally; the resulting parameters 
 then pass this same two-backend application path and a separately captured road profile.
 Confidence/conditioning evidence, outlier-robust fitting, tire parameter
 identification, and recorded/shadow/HIL comparison are also still required.
+
+## Combined suspension and tire application
+
+Each identification family previously exited into simulation against the other
+element's frozen baseline fixture: an identified strut ran only with the
+road-excitation baseline tire, and an identified tire profile ran only in a
+suspension-free longitudinal plant. `identified_suspension_tire` closes that gap
+by applying both identified contracts to the exact same suspended four-wheel
+road-excitation task on two physics backends.
+
+`run_identified_suspension_tire_trace` fits one suspension
+`SuspensionIdentificationDataset`, replays one `IdentifiedTireProfileEvidence`,
+and executes the fitted strut plus the profile's `CombinedSlipTireSpec` on one
+backend. `run_identified_suspension_tire_evidence` runs the identical
+finite-difference task, identified strut, and identified tire on both backends and
+retains the unit-bearing cross-backend comparison. Both artifacts recompute the
+suspension fit, replay the tire chain, and fail if either applied spec differs
+from its recomputed value or if a backend trace did not use both applied specs.
+The combined `physical_measurement` flag is the conjunction of the suspension
+chain's declaration and the tire profile's `recorded_source_claim`; it is still a
+declaration, never a qualification, because only the separate acquisition gates
+can promote a real capture.
+
+`run_road_excitation_trace_with_specs` adds the parameterized wheel-plant entry
+point behind the existing `run_road_excitation_trace` and
+`run_road_excitation_trace_with_suspension`. `RoadExcitationTrace::validate` now
+checks that its retained suspension and tire specs are individually valid rather
+than equal to the baseline fixture, matching the earlier suspension
+parameterization; `IdentifiedSuspensionRoadEvidence` explicitly binds the
+baseline wheel plant, so its previous guarantee is unchanged. The baseline
+`run_road_excitation_trace` path is byte-for-byte identical.
+
+CLI backends `identified-suspension-tire-rapier` and
+`identified-suspension-tire-compare` take `--input <suspension dataset>` and
+`--tire-profile <identified tire profile>`. Process tests exercise the Rapier
+path with default features and the Rapier/MuJoCo comparison with the `mujoco`
+feature. The bundled fixtures are synthetic; the combined artifact demonstrates
+software parameter transport and backend agreement, not physical calibration or
+HIL.
