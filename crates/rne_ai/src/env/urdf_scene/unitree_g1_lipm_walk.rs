@@ -61,6 +61,11 @@ pub struct UnitreeG1LipmWalkConfig {
     /// Center-of-mass tracking feedback gain (fraction of the DCM error added
     /// to the reference).
     pub com_feedback_gain: f64,
+    /// Scale on the DCM step adjustment (1.0 applies the full Khadiv landing
+    /// correction; 0.0 disables it).
+    pub dcm_foot_placement_gain: f64,
+    /// Maximum landing-point adjustment in meters.
+    pub max_foot_mod_m: f64,
     /// Servo stiffness for every joint.
     pub position_stiffness: f64,
     /// Servo damping for every joint.
@@ -86,6 +91,8 @@ impl Default for UnitreeG1LipmWalkConfig {
             weight_shift_s: 0.4,
             swing_height_m: 0.05,
             com_feedback_gain: 0.3,
+            dcm_foot_placement_gain: 1.0,
+            max_foot_mod_m: 0.12,
             position_stiffness: 220.0,
             position_damping: 24.0,
             torque_limit_nm: 88.0,
@@ -148,6 +155,43 @@ pub fn g1_leg_ik(forward_m: f64, down_m: f64) -> (f64, f64, f64) {
     (hip_pitch, knee, -(hip_pitch + knee))
 }
 
+/// The single-support state of the current step.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct StepPhase {
+    /// 1-based step index.
+    index: usize,
+    /// Elapsed single-support time in seconds.
+    elapsed_s: f64,
+    /// Single-support duration in seconds.
+    duration_s: f64,
+    /// Whether the left foot is the swing foot.
+    swing_left: bool,
+}
+
+/// Locates the single-support phase of the step containing `time_s`.
+fn step_phase(config: &UnitreeG1LipmWalkConfig, time_s: f64) -> Option<StepPhase> {
+    if time_s < config.weight_shift_s {
+        return None;
+    }
+    let mut remaining = time_s - config.weight_shift_s;
+    for index in 1..=config.steps {
+        if remaining < config.single_support_s {
+            return Some(StepPhase {
+                index,
+                elapsed_s: remaining,
+                duration_s: config.single_support_s,
+                swing_left: index % 2 == 0,
+            });
+        }
+        remaining -= config.single_support_s;
+        if remaining < config.double_support_s {
+            return None;
+        }
+        remaining -= config.double_support_s;
+    }
+    None
+}
+
 /// The neutral ankle offset ahead of and below the hip, from the neutral pose.
 fn neutral_ankle_offset() -> (f64, f64) {
     let a = G1_THIGH_M;
@@ -168,6 +212,7 @@ fn planned_feet(
     pattern: &WalkingPattern,
     config: &UnitreeG1LipmWalkConfig,
     time_s: f64,
+    swing_mod: Horizontal,
 ) -> (Vec3, Vec3) {
     let plan = &pattern.plan;
     let mut left = plan.footsteps[0].position_m;
@@ -180,7 +225,10 @@ fn planned_feet(
         let mut phase_time = time_s - config.weight_shift_s;
         for index in 1..=config.steps {
             let swing_left = index % 2 == 0;
-            let target = plan.footsteps.get(index + 1).map(|foot| foot.position_m);
+            let target = plan
+                .footsteps
+                .get(index + 1)
+                .map(|foot| foot.position_m + swing_mod);
             if phase_time < single {
                 if let Some(target) = target {
                     let u = (phase_time / single).clamp(0.0, 1.0);
@@ -198,9 +246,9 @@ fn planned_feet(
             }
             if let Some(target) = target {
                 if swing_left {
-                    left = target;
+                    left = plan.footsteps[index + 1].position_m;
                 } else {
-                    right = target;
+                    right = plan.footsteps[index + 1].position_m;
                 }
             }
             phase_time -= single;
@@ -342,7 +390,55 @@ pub fn run_unitree_g1_lipm_walk(
             com_reference.z_m + correction.z,
         );
 
-        let (left_foot, right_foot) = planned_feet(&pattern, &config, time_s);
+        // Khadiv et al. step adjustment: estimate where the divergent component
+        // of motion will be at the end of the current step and pick the landing
+        // point that brings it to the planned DCM one step later.
+        let (planned_left, planned_right) =
+            planned_feet(&pattern, &config, time_s, Horizontal::ZERO);
+        let swing_mod = match step_phase(&config, time_s) {
+            Some(phase) if config.dcm_foot_placement_gain != 0.0 => {
+                let stance = if phase.swing_left {
+                    planned_right
+                } else {
+                    planned_left
+                };
+                let u = Horizontal::new(stance.x, stance.z);
+                let dcm_measured = Horizontal::new(
+                    pelvis_now.translation.x + measured_velocity.x / omega,
+                    pelvis_now.translation.z + measured_velocity.z / omega,
+                );
+                let remaining = (phase.duration_s - phase.elapsed_s).max(0.0);
+                let decay = (omega * remaining).exp();
+                let dcm_end = (dcm_measured - u) * decay + u;
+                let future = (time_s + phase.duration_s).min(pattern.duration_s());
+                let future_index =
+                    ((future / sample_time_s).floor() as usize).min(pattern.sample_count() - 1);
+                let dcm_reference = Horizontal::new(
+                    pattern.com_m[future_index].x_m
+                        + pattern.com_velocity_m_s[future_index].x_m / omega,
+                    pattern.com_m[future_index].z_m
+                        + pattern.com_velocity_m_s[future_index].z_m / omega,
+                );
+                let cycle_decay = (omega * phase.duration_s).exp();
+                let u_estimated =
+                    (dcm_reference - dcm_end * cycle_decay) * (1.0 / (1.0 - cycle_decay));
+                let nominal = pattern
+                    .plan
+                    .footsteps
+                    .get(phase.index + 1)
+                    .map(|foot| foot.position_m)
+                    .unwrap_or(u_estimated);
+                let raw = (u_estimated - nominal) * config.dcm_foot_placement_gain;
+                let magnitude = raw.norm();
+                if magnitude > config.max_foot_mod_m {
+                    raw * (config.max_foot_mod_m / magnitude)
+                } else {
+                    raw
+                }
+            }
+            _ => Horizontal::ZERO,
+        };
+        let (left_foot, right_foot) = planned_feet(&pattern, &config, time_s, swing_mod);
         // `planned_feet` returns the lift above the neutral foot height, not an
         // absolute world height.
         let left_foot = Vec3::new(

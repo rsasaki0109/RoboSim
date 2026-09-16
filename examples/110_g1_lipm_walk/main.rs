@@ -26,6 +26,11 @@ fn main() {
         .and_then(|index| std::env::args().nth(index + 1))
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(88.0);
+    let foot_gain = std::env::args()
+        .position(|argument| argument == "--foot-gain")
+        .and_then(|index| std::env::args().nth(index + 1))
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(1.0);
     let stiffness = std::env::args()
         .position(|argument| argument == "--stiffness")
         .and_then(|index| std::env::args().nth(index + 1))
@@ -39,6 +44,7 @@ fn main() {
     let config = UnitreeG1LipmWalkConfig {
         trace,
         com_feedback_gain: gain,
+        dcm_foot_placement_gain: foot_gain,
         position_stiffness: stiffness,
         position_damping: (stiffness * 0.11).max(24.0),
         torque_limit_nm: limit,
