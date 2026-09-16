@@ -66,13 +66,17 @@ All notable changes to Robot Native Engine are documented in this file.
   optimizer can plan a takeoff and a landing with one fixed candidate set. Unit
   tests cover a freely falling body, a body caught by its candidate points, and
   the normal-force clamp.
-- `examples/109_go2_jump_sim --wbc-stance` now feeds the plan's torque to the
-  whole-body solve (`solve_with_torque_reference`) with low center-of-mass and
-  attitude gains, following the open-source NMPC-feed-forward plus low-gain
-  tracking recipe for torque-controlled legged robots. This is the first change
-  to remove the forward pitch rather than trade against it: the peak lean drops
-  from `0.73` rad to `0.25` rad while the robot still leaves the ground (the
-  feet clear `29` mm). `--no-ff-torque` restores the previous behavior.
+- `examples/109_go2_jump_sim --wbc-stance` now removes the jump's forward pitch
+  instead of trading against it. The stance feed passes the plan's torque to
+  `solve_with_torque_reference` with low center-of-mass and attitude gains
+  (the open-source NMPC-feed-forward plus low-gain tracking recipe for
+  torque-controlled legged robots), and during flight the legs blend toward the
+  crouch pose and release over the last 30% of the flight (`--tuck`, default
+  `1`). The flight targets now also restore the position motors after the
+  torque-mode stance feed, which is why the previous flight targets were
+  silently ignored. The example reports `liftoff=true` with a peak lean of
+  `0.325` rad and a `44` mm foot clearance, against `0.73` rad before;
+  `--no-ff-torque` restores the old behavior (lean up to `2.4` rad).
 - `examples/109_go2_jump_sim --mpc`: receding-horizon replanning of the Go2 jump
   from the measured state (warm-started, `--mpc-period`, `--mpc-iters`). It
   closes the loop on the plan but does not remove the forward pitch, which the

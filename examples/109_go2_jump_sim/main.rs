@@ -59,9 +59,14 @@
 //! robots (an NMPC torque feed-forward plus low-gain tracking): it passes the
 //! plan's torque to `solve_with_torque_reference` and keeps the center-of-mass
 //! and attitude gains low, so the solve tracks the plan instead of fighting it
-//! in the null space. That cuts the peak lean from 0.73 rad to **0.25 rad**
-//! (the robot stays essentially upright, and the feet clear 29 mm). Disable it
-//! with `--no-ff-torque` to see the old behavior (lean up to 2.4 rad).
+//! in the null space. That cuts the peak lean from 0.73 rad to 0.33 rad.
+//! Disable it with `--no-ff-torque` to see the old behavior (lean up to 2.4 rad).
+//!
+//! During flight the legs blend toward the crouch pose (`--tuck`, default 1)
+//! and release over the last 30% of the flight, which tucks the feet so the
+//! body rises 0.107 m while the feet clear 44 mm: the example reports
+//! `liftoff=true` with a peak lean of 0.325 rad, against 0.73 rad before.
+//! Flying the plan with the legs extended leaves the feet at only 29 mm.
 //!
 //! `--vel-weight` wraps the planner cost in `rne_oc::ActuatorLimitCost`, a hinge
 //! penalty that keeps joint speeds near their URDF limits. The default plan
@@ -321,6 +326,9 @@ fn main() {
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(ACTUATOR_VELOCITY_WEIGHT);
     let ff_torque = !std::env::args().any(|argument| argument == "--no-ff-torque");
+    let tuck_gain = argument_value("--tuck")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(1.0);
     let torque_reference_weight = argument_value("--torque-weight")
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(1.0e5);
@@ -726,14 +734,23 @@ fn main() {
             BASE_KP * (state[1] - actual_y) + BASE_KD * (state[nv + 1] - actual_vy);
         let per_foot_force = mass_kg * desired_acceleration / 4.0;
 
-        if wbc_stance && node >= CROUCH_STEPS + PUSH_STEPS {
+        if wbc_stance && node >= total_stance {
+            let flight_index = (node - total_stance) as f64;
+            let flight_phase = (flight_index + 1.0) / (FLIGHT_STEPS as f64 + 1.0);
+            let release = ((flight_phase - 0.7) / 0.3).clamp(0.0, 1.0);
+            let tuck = tuck_gain * (1.0 - release);
             let position_targets: Vec<UrdfJointPositionTarget<'_>> = joint_names
                 .iter()
-                .map(|name| UrdfJointPositionTarget {
-                    link_name: name.as_str(),
-                    position: state[6 + joint_names.iter().position(|n| n == name).unwrap_or(0)],
+                .map(|name| {
+                    let planned =
+                        state[6 + joint_names.iter().position(|n| n == name).unwrap_or(0)];
+                    UrdfJointPositionTarget {
+                        link_name: name.as_str(),
+                        position: planned + tuck * (crouch_angle(name) - planned),
+                    }
                 })
                 .collect();
+            sim.configure_position_motors(POSITION_STIFFNESS, POSITION_DAMPING, TORQUE_LIMIT_NM);
             sim.step_joint_position_targets(&position_targets);
             apex_sim_y = apex_sim_y.max(sim.observe().base_y_m);
             max_min_foot = max_min_foot.max(min_foot_height_m(&sim));
