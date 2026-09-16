@@ -1,6 +1,6 @@
 //! Content-bound evidence that applies identified suspension parameters to rigid-road simulation.
 
-use crate::ackermann_suspension::suspension_spec;
+use crate::ackermann_suspension::{suspension_spec, wheel_plant_spec};
 use crate::road_excitation::{
     compare_road_excitation_traces, run_road_excitation_trace_with_suspension,
     RoadExcitationComparison,
@@ -67,6 +67,11 @@ impl IdentifiedSuspensionRoadEvidence {
             self.road_comparison.first.suspension_spec == self.applied_suspension_spec
                 && self.road_comparison.second.suspension_spec == self.applied_suspension_spec,
             "backend trace did not use identified suspension"
+        );
+        ensure!(
+            self.road_comparison.first.wheel_plant_spec == wheel_plant_spec()
+                && self.road_comparison.second.wheel_plant_spec == wheel_plant_spec(),
+            "backend trace did not use the baseline wheel plant"
         );
         ensure!(
             self.passed == self.road_comparison.passed,

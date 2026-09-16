@@ -452,7 +452,10 @@ and cross-backend results.
     and independent road-friction evidence under a streamed external-root verifier. No genuine
     physical capture is qualified yet; see
     [`MOBILITY_TIRE_IDENTIFICATION_V1.md`](MOBILITY_TIRE_IDENTIFICATION_V1.md).
-    A transient subgate now identifies either longitudinal or lateral relaxation
+    Identified suspension and identified tire contracts can now be applied
+    jointly: `identified_suspension_tire` fits one strut dataset, replays one
+    identified tire profile, and runs both on the shared suspended four-wheel
+    road task with a bound Rapier/MuJoCo comparison. A transient subgate now identifies either longitudinal or lateral relaxation
     length from physical observables rather than privileged tire state: it inverts the frozen
     pure-axis steady force law below a bounded utilization ceiling, then fits the runtime's
     exact speed/distance first-order update using training acquisitions only and applies pooled
