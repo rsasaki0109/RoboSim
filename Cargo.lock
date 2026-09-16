@@ -1364,6 +1364,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "g1_lipm_walk"
+version = "0.3.0"
+dependencies = [
+ "rne_ai",
+]
+
+[[package]]
 name = "g1_photoreal_capture"
 version = "0.3.0"
 dependencies = [
@@ -3812,6 +3819,7 @@ dependencies = [
  "rne_data",
  "rne_deformable",
  "rne_ecs",
+ "rne_legged",
  "rne_log",
  "rne_math",
  "rne_physics",

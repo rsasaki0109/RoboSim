@@ -147,6 +147,7 @@ members = [
   "examples/102_motion_planning_media",
   "examples/103_dynamics_diagnostics",
   "examples/104_legged_pattern",
+  "examples/110_g1_lipm_walk",
   "examples/105_whole_body_control",
   "examples/106_go2_jump",
   "examples/107_go2_hop",
