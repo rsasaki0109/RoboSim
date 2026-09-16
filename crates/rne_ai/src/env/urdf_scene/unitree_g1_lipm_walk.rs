@@ -10,13 +10,23 @@
 //!
 //! The plant is the dynamic multibody G1, and the whole path is deterministic.
 
-use super::{unitree_g1_dynamic_scene_path, UrdfSceneSim};
+use super::{
+    unitree_g1_dynamic_scene_path, UrdfJointPositionTarget, UrdfJointTorqueTarget, UrdfSceneSim,
+};
 use rne_assets::AssetError;
+use rne_dynamics::ArticulatedModel;
+use rne_ecs::World;
 use rne_legged::{
     plan_walking_pattern, GaitSchedule, Horizontal, LimpParams, StraightWalkRequest,
     WalkingPattern, ZmpPreviewController,
 };
+use rne_math::Quat;
 use rne_math::Vec3;
+use rne_robot::FloatingBase;
+use rne_wbc::{
+    BaseAttitudeTask, ComTask, ContactPoint, PostureTask, WholeBodyConfig, WholeBodyController,
+};
+use rne_world::Transform3;
 use std::path::PathBuf;
 
 /// Thigh length of the G1 leg in meters (hip-yaw to knee).
@@ -85,7 +95,7 @@ impl Default for UnitreeG1LipmWalkConfig {
             steps: 8,
             step_length_m: 0.18,
             step_width_m: 0.20,
-            com_height_m: 0.60,
+            com_height_m: 0.75,
             single_support_s: 0.5,
             double_support_s: 0.1,
             weight_shift_s: 0.4,
@@ -192,6 +202,66 @@ fn step_phase(config: &UnitreeG1LipmWalkConfig, time_s: f64) -> Option<StepPhase
     None
 }
 
+/// The twelve actuated G1 leg links, in the order the WBC torques are applied.
+const G1_LEG_LINKS: [&str; 12] = [
+    "left_hip_pitch_link",
+    "left_hip_roll_link",
+    "left_hip_yaw_link",
+    "left_knee_link",
+    "left_ankle_pitch_link",
+    "left_ankle_roll_link",
+    "right_hip_pitch_link",
+    "right_hip_roll_link",
+    "right_hip_yaw_link",
+    "right_knee_link",
+    "right_ankle_pitch_link",
+    "right_ankle_roll_link",
+];
+
+/// Builds the G1 articulated model from the shipped URDF.
+fn g1_model() -> ArticulatedModel {
+    const URDF: &str = include_str!("../../../../../assets/robots/g1_description/g1_23dof.urdf");
+    let document = rne_urdf_import::parse_urdf_document(URDF).expect("parse G1 URDF");
+    let mut world = World::new();
+    let config = rne_urdf_import::UrdfSpawnConfig {
+        attach_colliders: false,
+        attach_mesh_colliders: false,
+        self_collisions: false,
+        use_declared_inertial_masses: true,
+        ..rne_urdf_import::UrdfSpawnConfig::default()
+    };
+    let spawned = rne_urdf_import::spawn_urdf_document_with_config(&mut world, &document, config)
+        .expect("spawn G1");
+    world.entity_mut(spawned.base_link).insert((
+        Transform3::from_translation_rotation(
+            Vec3::ZERO,
+            Quat::from_rotation_x(-std::f64::consts::FRAC_PI_2),
+        ),
+        FloatingBase,
+    ));
+    ArticulatedModel::from_robot(&world, spawned.robot).expect("G1 model")
+}
+
+/// Reads the floating-base state from the scene in the model's dof order.
+fn read_g1_state(sim: &UrdfSceneSim, model: &ArticulatedModel, names: &[String]) -> Vec<f64> {
+    let nv = model.nv();
+    let base = sim.named_transform("pelvis").expect("pelvis pose");
+    let floating = base.rotation * Quat::from_rotation_x(std::f64::consts::FRAC_PI_2);
+    let (yaw, pitch, roll) = floating.to_euler(glam::EulerRot::ZYX);
+    let mut state = vec![0.0; 2 * nv];
+    state[0] = base.translation.x;
+    state[1] = base.translation.y;
+    state[2] = base.translation.z;
+    state[3] = roll;
+    state[4] = pitch;
+    state[5] = yaw;
+    for (dof, name) in names.iter().enumerate() {
+        state[6 + dof] = sim.named_joint_position(name).unwrap_or(0.0);
+        state[nv + 6 + dof] = sim.named_joint_velocity(name).unwrap_or(0.0);
+    }
+    state
+}
+
 /// The neutral ankle offset ahead of and below the hip, from the neutral pose.
 fn neutral_ankle_offset() -> (f64, f64) {
     let a = G1_THIGH_M;
@@ -285,6 +355,40 @@ pub fn run_unitree_g1_lipm_walk(
     for _ in 0..config.settle_steps {
         sim.step_joint_position_targets(&stand);
     }
+
+    let model = g1_model();
+    let nv = model.nv();
+    let names: Vec<String> = model
+        .kinematic()
+        .movable_joint_entities()
+        .iter()
+        .map(|joint| {
+            let child = model.kinematic().joint_child_link(*joint).expect("child");
+            let index = model.kinematic().link_index(child).expect("index");
+            model
+                .kinematic()
+                .link_name(index)
+                .expect("name")
+                .to_string()
+        })
+        .collect();
+    let leg_dofs: Vec<usize> = G1_LEG_LINKS
+        .iter()
+        .map(|name| {
+            names
+                .iter()
+                .position(|candidate| candidate == name)
+                .expect("leg dof")
+        })
+        .collect();
+    let control_dim = nv - 6;
+    let wbc = WholeBodyController::new(WholeBodyConfig {
+        com_weight: 1.0e5,
+        posture_weight: 1.0,
+        angular_weight: 1.0e3,
+        torque_limits_nm: Some(vec![config.torque_limit_nm; control_dim]),
+        ..WholeBodyConfig::default()
+    });
 
     let sample_time_s = super::UNITREE_G1_SIM_DT_S;
     let params = LimpParams::new(config.com_height_m, 9.806_65);
@@ -497,8 +601,117 @@ pub fn run_unitree_g1_lipm_walk(
                 }
             }
         }
-        sim.step_joint_position_targets(&targets);
-
+        // Whole-body balance layer: solve the leg torques that hold the center
+        // of mass on the LIPM reference over the measured contacts, and let the
+        // arms and waist stay position-servoed.
+        let q_full = read_g1_state(&sim, &model, &names);
+        let (q_model, qd_model) = q_full.split_at(nv);
+        if let Some((index, value)) = q_full
+            .iter()
+            .enumerate()
+            .find(|(_, value)| !value.is_finite())
+        {
+            eprintln!(
+                "non-finite q[{index}]={value} names_len={} nv={nv}",
+                names.len()
+            );
+            eprintln!("names={names:?}");
+            break;
+        }
+        // The support set comes from the plan: the stance foot during single
+        // support, both feet during the weight shift, double support, and the
+        // settle tail.
+        let support: Vec<&str> = match step_phase(&config, time_s) {
+            Some(phase) => {
+                if phase.swing_left {
+                    vec!["right_ankle_roll_link"]
+                } else {
+                    vec!["left_ankle_roll_link"]
+                }
+            }
+            None => vec!["left_ankle_roll_link", "right_ankle_roll_link"],
+        };
+        let mut contacts = Vec::new();
+        for link_name in support {
+            if let Some(link) = model.kinematic().link_entity_by_name(link_name) {
+                contacts.push(ContactPoint::new(link, Vec3::ZERO, 0.7));
+            }
+        }
+        let mut desired = vec![0.0; control_dim];
+        for (dof, name) in names.iter().enumerate() {
+            desired[dof] = targets
+                .iter()
+                .find(|target| target.link_name == *name)
+                .map(|target| target.position)
+                .unwrap_or(0.0);
+        }
+        let com_task = ComTask {
+            desired_position_m: Vec3::new(
+                com_reference.x_m,
+                config.com_height_m,
+                com_reference.z_m,
+            ),
+            desired_velocity_m_s: Vec3::new(com_velocity.x_m, 0.0, com_velocity.z_m),
+            desired_acceleration_m_s2: Vec3::ZERO,
+            position_gain_s_inv2: 100.0,
+            velocity_gain_s_inv: 20.0,
+        };
+        let pose = sim.named_transform("pelvis").expect("pelvis");
+        let up_world = (pose.rotation * Vec3::Z).normalize_or_zero();
+        let tilt_axis = Vec3::Y.cross(up_world);
+        let sin_angle = tilt_axis.length();
+        let tilt_angle = up_world.y.clamp(-1.0, 1.0).acos();
+        let axis_body = if sin_angle > 1.0e-6 {
+            pose.rotation.inverse() * (tilt_axis / sin_angle)
+        } else {
+            Vec3::ZERO
+        };
+        let observation = sim.observe();
+        let omega_body = pose.rotation.inverse()
+            * Vec3::new(
+                observation.base_angular_velocity_x_rad_s,
+                observation.base_angular_velocity_y_rad_s,
+                observation.base_angular_velocity_z_rad_s,
+            );
+        let attitude = BaseAttitudeTask {
+            desired_angular_acceleration_rad_s2: axis_body * (200.0 * tilt_angle)
+                - omega_body * 16.0,
+        };
+        let posture = PostureTask {
+            desired_joint_positions: desired,
+            desired_joint_velocities: None,
+            desired_joint_accelerations: None,
+            position_gain_s_inv2: 25.0,
+            velocity_gain_s_inv: 5.0,
+        };
+        let solution = wbc
+            .solve(
+                &model,
+                q_model,
+                qd_model,
+                &contacts,
+                Some(&com_task),
+                Some(&attitude),
+                Some(&posture),
+            )
+            .expect("G1 whole-body solve");
+        let servo: Vec<UrdfJointPositionTarget<'_>> = targets
+            .iter()
+            .filter(|target| !G1_LEG_LINKS.contains(&target.link_name))
+            .copied()
+            .collect();
+        sim.set_joint_position_targets(&servo);
+        let torques: Vec<UrdfJointTorqueTarget<'_>> = G1_LEG_LINKS
+            .iter()
+            .zip(&leg_dofs)
+            .map(|(link_name, dof)| UrdfJointTorqueTarget {
+                link_name,
+                torque_nm: solution.joint_torque_nm[*dof]
+                    .clamp(-config.torque_limit_nm, config.torque_limit_nm),
+                max_velocity_rad_s: 30.0,
+            })
+            .collect();
+        sim.step_joint_torques(&torques);
         let pelvis = sim.named_transform("pelvis").expect("pelvis");
         let up = (pelvis.rotation * up_reference).normalize_or_zero();
         let tilt = up.y.clamp(-1.0, 1.0).acos();
