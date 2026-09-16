@@ -21,6 +21,7 @@ fn main() {
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(0.18);
     let trace = std::env::args().any(|argument| argument == "--trace");
+    let stand_only = std::env::args().any(|argument| argument == "--stand-only");
     let limit = std::env::args()
         .position(|argument| argument == "--limit")
         .and_then(|index| std::env::args().nth(index + 1))
@@ -34,6 +35,9 @@ fn main() {
             .unwrap_or(default)
     };
     let single_support = parse("--single-support", 0.5);
+    let com_gain = parse("--com-gain", 100.0);
+    let com_weight = parse("--com-weight", 1.0e5);
+    let angular_weight = parse("--angular-weight", 1.0e3);
     let width = parse("--width", 0.04);
     let com_height = parse("--com-height", 0.60);
     let foot_gain = std::env::args()
@@ -53,6 +57,10 @@ fn main() {
         .unwrap_or(0.3);
     let config = UnitreeG1LipmWalkConfig {
         trace,
+        stand_only,
+        wbc_com_gain: com_gain,
+        wbc_com_weight: com_weight,
+        wbc_angular_weight: angular_weight,
         com_feedback_gain: gain,
         dcm_foot_placement_gain: foot_gain,
         position_stiffness: stiffness,
@@ -68,7 +76,7 @@ fn main() {
     };
     let outcome = run_unitree_g1_lipm_walk(config).expect("LIPM walk");
     println!(
-        "pattern={:.2}s planned_com=({:.3},{:.3}) measured=({:.3},{:.3}) forward={:.3} minH={:.3} tilt={:.3} track_err={:.3} fell={} digest=0x{:016x}",
+        "pattern={:.2}s planned_com=({:.3},{:.3}) measured=({:.3},{:.3}) forward={:.3} minH={:.3} tilt={:.3} track_err={:.3} tau_ratio={:.2} sat={} fell={} digest=0x{:016x}",
         outcome.pattern_duration_s,
         outcome.planned_com_m.x_m,
         outcome.planned_com_m.z_m,
@@ -78,6 +86,8 @@ fn main() {
         outcome.min_height_m,
         outcome.max_tilt_rad,
         outcome.max_tracking_error_m,
+        outcome.max_torque_ratio,
+        outcome.torque_saturated,
         outcome.fell,
         outcome.digest,
     );

@@ -14,7 +14,7 @@ use super::{
     unitree_g1_dynamic_scene_path, UrdfJointPositionTarget, UrdfJointTorqueTarget, UrdfSceneSim,
 };
 use rne_assets::AssetError;
-use rne_dynamics::ArticulatedModel;
+use rne_dynamics::{center_of_mass, ArticulatedModel};
 use rne_ecs::World;
 use rne_legged::{
     plan_walking_pattern, GaitSchedule, Horizontal, LimpParams, StraightWalkRequest,
@@ -84,6 +84,17 @@ pub struct UnitreeG1LipmWalkConfig {
     pub torque_limit_nm: f64,
     /// Prints the per-step state when true.
     pub trace: bool,
+    /// Center-of-mass task position gain for the whole-body solve.
+    pub wbc_com_gain: f64,
+    /// Center-of-mass task weight for the whole-body solve.
+    pub wbc_com_weight: f64,
+    /// Base-attitude task weight for the whole-body solve.
+    pub wbc_angular_weight: f64,
+    /// Posture task weight for the whole-body solve.
+    pub wbc_posture_weight: f64,
+    /// Holds the standing reference instead of tracking the walking pattern,
+    /// which isolates the whole-body balance layer from the gait.
+    pub stand_only: bool,
 }
 
 impl Default for UnitreeG1LipmWalkConfig {
@@ -107,6 +118,11 @@ impl Default for UnitreeG1LipmWalkConfig {
             position_damping: 24.0,
             torque_limit_nm: 88.0,
             trace: false,
+            wbc_com_gain: 100.0,
+            wbc_com_weight: 1.0e5,
+            wbc_angular_weight: 1.0e3,
+            wbc_posture_weight: 1.0,
+            stand_only: false,
         }
     }
 }
@@ -129,6 +145,10 @@ pub struct UnitreeG1LipmWalkOutcome {
     /// Maximum horizontal distance between the measured pelvis and the planned
     /// center of mass over the run, in meters.
     pub max_tracking_error_m: f64,
+    /// Largest ratio of an applied joint torque to its URDF limit over the run.
+    pub max_torque_ratio: f64,
+    /// Whether the whole-body solve reported a saturated actuator box.
+    pub torque_saturated: bool,
     /// Whether the pelvis dropped below half its start height.
     pub fell: bool,
     /// Deterministic digest of the run.
@@ -202,6 +222,19 @@ fn step_phase(config: &UnitreeG1LipmWalkConfig, time_s: f64) -> Option<StepPhase
     None
 }
 
+/// The eight proximal G1 leg links driven by whole-body torque. The ankles stay
+/// position-servoed: their small inertia makes the 60 Hz torque path unstable.
+const G1_TORQUE_LINKS: [&str; 8] = [
+    "left_hip_pitch_link",
+    "left_hip_roll_link",
+    "left_hip_yaw_link",
+    "left_knee_link",
+    "right_hip_pitch_link",
+    "right_hip_roll_link",
+    "right_hip_yaw_link",
+    "right_knee_link",
+];
+
 /// The twelve actuated G1 leg links, in the order the WBC torques are applied.
 const G1_LEG_LINKS: [&str; 12] = [
     "left_hip_pitch_link",
@@ -217,6 +250,23 @@ const G1_LEG_LINKS: [&str; 12] = [
     "right_ankle_pitch_link",
     "right_ankle_roll_link",
 ];
+
+/// The G1's URDF actuator effort limit for an actuated link, in newton-meters.
+fn g1_effort_limit_nm(link: &str) -> f64 {
+    if link.ends_with("knee_link") {
+        139.0
+    } else if link.ends_with("ankle_pitch_link") || link.ends_with("ankle_roll_link") {
+        35.0
+    } else if link.contains("shoulder") || link.ends_with("elbow_link") || link.contains("wrist") {
+        25.0
+    } else {
+        88.0
+    }
+}
+
+/// Heel and toe contact points in the G1 foot link frame (URDF z-down frame).
+const G1_FOOT_CONTACTS_LOCAL_M: [Vec3; 2] =
+    [Vec3::new(-0.05, 0.0, -0.03), Vec3::new(0.12, 0.0, -0.03)];
 
 /// Builds the G1 articulated model from the shipped URDF.
 fn g1_model() -> ArticulatedModel {
@@ -382,11 +432,14 @@ pub fn run_unitree_g1_lipm_walk(
         })
         .collect();
     let control_dim = nv - 6;
+    let torque_limits_nm: Vec<f64> = names.iter().map(|name| g1_effort_limit_nm(name)).collect();
     let wbc = WholeBodyController::new(WholeBodyConfig {
-        com_weight: 1.0e5,
-        posture_weight: 1.0,
-        angular_weight: 1.0e3,
-        torque_limits_nm: Some(vec![config.torque_limit_nm; control_dim]),
+        com_weight: config.wbc_com_weight,
+        posture_weight: config.wbc_posture_weight,
+        angular_weight: config.wbc_angular_weight,
+        force_regularization: 1.0e-6,
+        torque_limits_nm: Some(torque_limits_nm.clone()),
+        enforce_torque_limits: false,
         ..WholeBodyConfig::default()
     });
 
@@ -441,6 +494,14 @@ pub fn run_unitree_g1_lipm_walk(
         }
     })?;
 
+    // Anchor the LIPM trajectory on the measured center of mass: the plan's
+    // absolute horizontal origin is a foot midpoint, which is not where the
+    // model's CoM sits.
+    let com_origin = {
+        let q_origin = read_g1_state(&sim, &model, &names);
+        center_of_mass(&model, &q_origin[..nv]).expect("start CoM")
+    };
+    let plan_origin = pattern.com_m[0];
     let (neutral_forward, neutral_down) = neutral_ankle_offset();
     let neutral_relative = {
         let pelvis = sim.named_transform("pelvis").expect("pelvis").translation;
@@ -465,16 +526,23 @@ pub fn run_unitree_g1_lipm_walk(
     let mut max_tracking_error_m: f64 = 0.0;
     let mut digest = 0xcbf2_9ce4_8422_2325_u64;
     let mut fell = false;
+    let mut max_torque_ratio: f64 = 0.0;
+    let mut torque_saturated = false;
 
     for step in 0..config.rollout_steps {
         let time_s = step as f64 * sample_time_s;
-        let index = ((time_s / sample_time_s).floor() as usize).min(pattern.sample_count() - 1);
+        let motion_time_s = if config.stand_only { 0.0 } else { time_s };
+        let index =
+            ((motion_time_s / sample_time_s).floor() as usize).min(pattern.sample_count() - 1);
         let pattern_index = if index >= pattern.sample_count() {
             pattern.sample_count() - 1
         } else {
             index
         };
-        let com_reference = pattern.com_m[pattern_index];
+        let com_reference = Horizontal::new(
+            com_origin.x + (pattern.com_m[pattern_index].x_m - plan_origin.x_m),
+            com_origin.z + (pattern.com_m[pattern_index].z_m - plan_origin.z_m),
+        );
         let com_velocity = pattern.com_velocity_m_s[pattern_index];
         let omega = params.omega_rad_s();
 
@@ -507,8 +575,8 @@ pub fn run_unitree_g1_lipm_walk(
         // of motion will be at the end of the current step and pick the landing
         // point that brings it to the planned DCM one step later.
         let (planned_left, planned_right) =
-            planned_feet(&pattern, &config, time_s, Horizontal::ZERO);
-        let swing_mod = match step_phase(&config, time_s) {
+            planned_feet(&pattern, &config, motion_time_s, Horizontal::ZERO);
+        let swing_mod = match step_phase(&config, motion_time_s) {
             Some(phase) if config.dcm_foot_placement_gain != 0.0 => {
                 let stance = if phase.swing_left {
                     planned_right
@@ -551,7 +619,7 @@ pub fn run_unitree_g1_lipm_walk(
             }
             _ => Horizontal::ZERO,
         };
-        let (left_foot, right_foot) = planned_feet(&pattern, &config, time_s, swing_mod);
+        let (left_foot, right_foot) = planned_feet(&pattern, &config, motion_time_s, swing_mod);
         // `planned_feet` returns the lift above the neutral foot height, not an
         // absolute world height.
         let left_foot = Vec3::new(
@@ -621,7 +689,11 @@ pub fn run_unitree_g1_lipm_walk(
         // The support set comes from the plan: the stance foot during single
         // support, both feet during the weight shift, double support, and the
         // settle tail.
-        let support: Vec<&str> = match step_phase(&config, time_s) {
+        let support: Vec<&str> = match if config.stand_only {
+            None
+        } else {
+            step_phase(&config, motion_time_s)
+        } {
             Some(phase) => {
                 if phase.swing_left {
                     vec!["right_ankle_roll_link"]
@@ -634,7 +706,9 @@ pub fn run_unitree_g1_lipm_walk(
         let mut contacts = Vec::new();
         for link_name in support {
             if let Some(link) = model.kinematic().link_entity_by_name(link_name) {
-                contacts.push(ContactPoint::new(link, Vec3::ZERO, 0.7));
+                for point in G1_FOOT_CONTACTS_LOCAL_M {
+                    contacts.push(ContactPoint::new(link, point, 0.7));
+                }
             }
         }
         let mut desired = vec![0.0; control_dim];
@@ -646,15 +720,11 @@ pub fn run_unitree_g1_lipm_walk(
                 .unwrap_or(0.0);
         }
         let com_task = ComTask {
-            desired_position_m: Vec3::new(
-                com_reference.x_m,
-                config.com_height_m,
-                com_reference.z_m,
-            ),
+            desired_position_m: Vec3::new(com_reference.x_m, com_origin.y, com_reference.z_m),
             desired_velocity_m_s: Vec3::new(com_velocity.x_m, 0.0, com_velocity.z_m),
             desired_acceleration_m_s2: Vec3::ZERO,
-            position_gain_s_inv2: 100.0,
-            velocity_gain_s_inv: 20.0,
+            position_gain_s_inv2: config.wbc_com_gain,
+            velocity_gain_s_inv: config.wbc_com_gain.sqrt(),
         };
         let pose = sim.named_transform("pelvis").expect("pelvis");
         let up_world = (pose.rotation * Vec3::Z).normalize_or_zero();
@@ -695,20 +765,36 @@ pub fn run_unitree_g1_lipm_walk(
                 Some(&posture),
             )
             .expect("G1 whole-body solve");
+        torque_saturated |= solution.torque_saturated;
+        for (name, dof) in G1_TORQUE_LINKS.iter().map(|name| {
+            (
+                name,
+                leg_dofs[G1_LEG_LINKS.iter().position(|n| n == name).unwrap_or(0)],
+            )
+        }) {
+            let ratio = solution.joint_torque_nm[dof].abs() / g1_effort_limit_nm(name);
+            max_torque_ratio = max_torque_ratio.max(ratio);
+        }
         let servo: Vec<UrdfJointPositionTarget<'_>> = targets
             .iter()
-            .filter(|target| !G1_LEG_LINKS.contains(&target.link_name))
+            .filter(|target| !G1_TORQUE_LINKS.contains(&target.link_name))
             .copied()
             .collect();
         sim.set_joint_position_targets(&servo);
-        let torques: Vec<UrdfJointTorqueTarget<'_>> = G1_LEG_LINKS
+        let torques: Vec<UrdfJointTorqueTarget<'_>> = G1_TORQUE_LINKS
             .iter()
-            .zip(&leg_dofs)
-            .map(|(link_name, dof)| UrdfJointTorqueTarget {
-                link_name,
-                torque_nm: solution.joint_torque_nm[*dof]
-                    .clamp(-config.torque_limit_nm, config.torque_limit_nm),
-                max_velocity_rad_s: 30.0,
+            .map(|link_name| {
+                let leg_index = G1_LEG_LINKS
+                    .iter()
+                    .position(|name| name == link_name)
+                    .unwrap_or(0);
+                let dof = leg_dofs[leg_index];
+                let limit = g1_effort_limit_nm(link_name);
+                UrdfJointTorqueTarget {
+                    link_name,
+                    torque_nm: solution.joint_torque_nm[dof].clamp(-limit, limit),
+                    max_velocity_rad_s: 30.0,
+                }
             })
             .collect();
         sim.step_joint_torques(&torques);
@@ -756,10 +842,12 @@ pub fn run_unitree_g1_lipm_walk(
         pattern_duration_s: pattern.duration_s(),
         planned_com_m,
         measured_pelvis_m,
-        forward_distance_m: pelvis_end.translation.z - start_horizontal.z_m,
+        forward_distance_m: pelvis_end.translation.x - start_horizontal.x_m,
         min_height_m,
         max_tilt_rad,
         max_tracking_error_m,
+        max_torque_ratio,
+        torque_saturated,
         fell,
         digest,
     })
