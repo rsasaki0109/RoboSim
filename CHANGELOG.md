@@ -77,6 +77,9 @@ All notable changes to Robot Native Engine are documented in this file.
   silently ignored. The example reports `liftoff=true` with a peak lean of
   `0.325` rad and a `44` mm foot clearance, against `0.73` rad before;
   `--no-ff-torque` restores the old behavior (lean up to `2.4` rad).
+- Added `docs/media/go2-jump.gif` and its reduced-motion still, with a README
+  entry under the native optimal control section, now that the Go2 jump leaves
+  the ground without the forward pitch.
 - `examples/109_go2_jump_sim --mpc`: receding-horizon replanning of the Go2 jump
   from the measured state (warm-started, `--mpc-period`, `--mpc-iters`). It
   closes the loop on the plan but does not remove the forward pitch, which the
