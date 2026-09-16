@@ -347,3 +347,26 @@ so genuine walking needs either a GPU PPO path or an offline-distilled policy.
 The environment, native batch, pyo3 bindings (single and batch), and the SB3
 trainer are in place as the foundation; no stable walking policy is claimed on
 this plant yet.
+
+## Axis convention and the forward-velocity observation
+
+The G1's pelvis link frame keeps the URDF orientation: its local **+Z is up**
+(`pelvis.rotation * Vec3::Z` maps to world `+Y`), so its fore-aft axis is the
+local **+X** and its lateral axis is the local **+Y**. The harness computes the
+body-frame velocity and reads `.z` for the forward component — both the measured
+and the post-impact forward velocity in `unitree_g1_commanded_gait.rs`, and
+`forward_m_s` / `lateral_m_s` in `unitree_g1_joint_locomotion.rs`. With the
+local +Z vertical, `.z` is the **vertical** velocity: the policy's
+forward-velocity input is effectively dead and its lateral input carries the
+fore-aft velocity.
+
+Correcting it to the local +X (lateral to +Y) is a behavior change, not a
+one-line fix: the v0.1/v0.2/v0.3 candidates were tuned against the current
+observation, and the corrected run fails six pinned gait tests, one of them with
+a solver blow-up. The finding is recorded here rather than patched; re-tuning
+the pinned candidates against the corrected observation is the follow-up.
+
+This also matters for any new G1 locomotion work: a controller that maps the
+plan's forward axis to the world `Z` walks sideways. The LIPM walking pipeline
+draft (PR #304) had exactly that inversion, and correcting it to world `X` was
+what first made the robot translate.
