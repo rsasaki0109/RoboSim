@@ -244,7 +244,7 @@ fn planned_feet(
                 }
                 break;
             }
-            if let Some(target) = target {
+            if target.is_some() {
                 if swing_left {
                     left = plan.footsteps[index + 1].position_m;
                 } else {
