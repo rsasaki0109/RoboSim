@@ -432,14 +432,26 @@ pub fn run_unitree_g1_lipm_walk(
         })
         .collect();
     let control_dim = nv - 6;
-    let torque_limits_nm: Vec<f64> = names.iter().map(|name| g1_effort_limit_nm(name)).collect();
+    // Only the twelve leg joints are on the torque path. The arms and waist stay
+    // position-servoed, so their box must not clip the solve: the box solver
+    // would otherwise spend its authority on arm torques that are never applied.
+    let torque_limits_nm: Vec<f64> = names
+        .iter()
+        .map(|name| {
+            if G1_LEG_LINKS.contains(&name.as_str()) {
+                g1_effort_limit_nm(name)
+            } else {
+                1.0e6
+            }
+        })
+        .collect();
     let wbc = WholeBodyController::new(WholeBodyConfig {
         com_weight: config.wbc_com_weight,
         posture_weight: config.wbc_posture_weight,
         angular_weight: config.wbc_angular_weight,
         force_regularization: 1.0e-6,
         torque_limits_nm: Some(torque_limits_nm.clone()),
-        enforce_torque_limits: false,
+        enforce_torque_limits: true,
         ..WholeBodyConfig::default()
     });
 
