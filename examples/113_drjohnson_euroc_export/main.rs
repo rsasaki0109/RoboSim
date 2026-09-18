@@ -13,7 +13,10 @@ use std::fs::{self, File};
 use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
 
-use rne_ai::{DiffDriveAction, DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveRewardConfig, Episode};
+use rne_ai::{
+    build_visual_render_scene, DiffDriveAction, DiffDriveEpisode, DiffDriveEpisodeConfig,
+    DiffDriveRewardConfig, Episode,
+};
 use rne_math::{Quat, Transform3, Vec3};
 use rne_render::{validate_gaussian_splat_manifest_with_override, Camera, HybridRenderScene, RenderScene};
 use rne_render_3dgs::{load_gaussian_splat_background, render_hybrid_scene_camera};
@@ -30,6 +33,22 @@ const CAMERA_HEIGHT_OFFSET_M: f64 = 0.35;
 const STEREO_BASELINE_M: f64 = 0.06;
 const IMU_UPDATE_RATE_HZ: f64 = 60.0;
 const CLEAR_COLOR: [f32; 4] = [0.05, 0.06, 0.08, 1.0];
+// Fixed overview camera (third-person "sute-kame") for demo videos.
+const FIXED_PERIOD_STEPS: u64 = 6;
+const FIXED_FOV_Y_RAD: f64 = 0.9;
+const FIXED_POS: [f64; 3] = [0.8, 2.5, 3.0];
+const FIXED_TARGET: [f64; 3] = [0.8, 0.0, -0.7];
+
+/// Look-at view for an RNE camera (forward -Z, up +Y).
+fn fixed_view() -> Transform3 {
+    let pos = Vec3::new(FIXED_POS[0], FIXED_POS[1], FIXED_POS[2]);
+    let target = Vec3::new(FIXED_TARGET[0], FIXED_TARGET[1], FIXED_TARGET[2]);
+    let dir = (target - pos).normalize();
+    let yaw = (-dir.x).atan2(-dir.z);
+    let pitch = dir.y.asin();
+    let rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(pitch);
+    Transform3::from_translation_rotation(pos, rotation)
+}
 
 fn focal_length_px() -> f64 {
     (CAMERA_HEIGHT as f64 / 2.0) / (CAMERA_FOV_Y_RAD / 2.0).tan()
@@ -76,7 +95,68 @@ fn write_rgb_png(path: &Path, width: u32, height: u32, rgba8: &[u8]) -> Result<(
     Ok(())
 }
 
+/// Render a few fixed candidate views without running the episode (fast framing check).
+fn fixed_test(output: &Path) -> Result<(), Box<dyn Error>> {
+    fs::create_dir_all(output)?;
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let manifest =
+        workspace.join("assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml");
+    let mut backend = WgpuRenderBackend::new()
+        .map_err(|error| io::Error::other(format!("wgpu unavailable: {error}")))?;
+    let splat_env = validate_gaussian_splat_manifest_with_override(&manifest, None)
+        .map_err(|error| io::Error::other(format!("splat manifest: {error}")))?;
+    let mut background = load_gaussian_splat_background(backend.device(), &splat_env)
+        .map_err(|error| io::Error::other(format!("splat background: {error}")))?;
+    let hybrid = HybridRenderScene::new(splat_env, RenderScene::new());
+    let camera = Camera::new(CAMERA_WIDTH, CAMERA_HEIGHT, FIXED_FOV_Y_RAD);
+    let candidates: &[([f64; 3], [f64; 3])] = &[
+        ([0.0, 0.35, 0.0], [2.0, 0.35, 0.0]),
+        ([-1.5, 2.2, 2.0], [0.8, 0.3, -0.7]),
+        ([-1.5, 1.2, 2.0], [0.8, 0.3, -0.7]),
+        ([0.8, 2.5, 3.0], [0.8, 0.0, -0.7]),
+    ];
+    for (index, (pos, target)) in candidates.iter().enumerate() {
+        let dir = (Vec3::new(target[0], target[1], target[2])
+            - Vec3::new(pos[0], pos[1], pos[2]))
+        .normalize();
+        let yaw = (-dir.x).atan2(-dir.z);
+        let pitch = dir.y.asin();
+        let view = Transform3::from_translation_rotation(
+            Vec3::new(pos[0], pos[1], pos[2]),
+            Quat::from_rotation_y(yaw) * Quat::from_rotation_x(pitch),
+        );
+        let pass = render_hybrid_scene_camera(
+            &mut backend,
+            &mut background,
+            &camera,
+            &view,
+            &hybrid,
+            CLEAR_COLOR,
+        )
+        .map_err(|error| io::Error::other(format!("fixed render: {error}")))?;
+        write_rgb_png(
+            &output.join(format!("fixed_{index}.png")),
+            pass.color.width,
+            pass.color.height,
+            &pass.color.rgba8,
+        )?;
+    }
+    println!("wrote {} fixed candidates to {}", candidates.len(), output.display());
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    if raw_args.iter().any(|a| a == "--fixed-test") {
+        let output = raw_args
+            .iter()
+            .find(|a| !a.starts_with("--"))
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                io::Error::other("usage: 113_drjohnson_euroc_export OUTPUT_DIR [--fixed-test]")
+            })?;
+        return fixed_test(&output);
+    }
     let output = std::env::args_os()
         .nth(1)
         .map(PathBuf::from)
@@ -87,6 +167,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         output.join("mav0/imu0"),
         output.join("preview_rgb/cam0"),
         output.join("preview_rgb/cam1"),
+        output.join("preview_fixed"),
     ] {
         fs::create_dir_all(dir)?;
     }
@@ -116,7 +197,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map_err(|error| io::Error::other(format!("splat manifest: {error}")))?;
     let mut background = load_gaussian_splat_background(backend.device(), &splat_env)
         .map_err(|error| io::Error::other(format!("splat background: {error}")))?;
-    let hybrid = HybridRenderScene::new(splat_env, RenderScene::new());
+    let hybrid = HybridRenderScene::new(splat_env.clone(), RenderScene::new());
     let camera = Camera::new(CAMERA_WIDTH, CAMERA_HEIGHT, CAMERA_FOV_Y_RAD);
     let imu_spec = ImuSpec::default();
 
@@ -204,6 +285,36 @@ fn main() -> Result<(), Box<dyn Error>> {
                 csv.push_str(&format!("{timestamp_ns},{name}\n"));
             }
             frames += 1;
+        }
+
+        // Fixed overview camera with the live robot in the foreground.
+        if step % FIXED_PERIOD_STEPS == 0 {
+            let fixed_view = fixed_view();
+            let fixed_camera = Camera::new(CAMERA_WIDTH, CAMERA_HEIGHT, FIXED_FOV_Y_RAD);
+            // Robot only: drop the huge physics ground plane (it would cover
+            // the 3DGS floor from the overview angle).
+            let mut foreground = build_visual_render_scene(world);
+            foreground.items.retain(|item| {
+                let s = item.transform.scale;
+                s.x.max(s.y).max(s.z) < 2.0
+            });
+            let hybrid_fixed =
+                HybridRenderScene::new(splat_env.clone(), foreground);
+            let fixed = render_hybrid_scene_camera(
+                &mut backend,
+                &mut background,
+                &fixed_camera,
+                &fixed_view,
+                &hybrid_fixed,
+                CLEAR_COLOR,
+            )
+            .map_err(|error| io::Error::other(format!("fixed render: {error}")))?;
+            write_rgb_png(
+                &output.join(format!("preview_fixed/{timestamp_ns}.png")),
+                fixed.color.width,
+                fixed.color.height,
+                &fixed.color.rgba8,
+            )?;
         }
 
         let q = Quat::from_rotation_y(observation.base_yaw_rad);
