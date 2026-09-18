@@ -1032,6 +1032,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
+name = "drjohnson_euroc_export"
+version = "0.3.0"
+dependencies = [
+ "png",
+ "rne_ai",
+ "rne_core",
+ "rne_math",
+ "rne_render",
+ "rne_render_3dgs",
+ "rne_render_wgpu",
+ "rne_sensor",
+ "rne_world",
+]
+
+[[package]]
 name = "dynamics_diagnostics"
 version = "0.3.0"
 dependencies = [
@@ -1919,6 +1934,21 @@ name = "hexf-parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
+
+[[package]]
+name = "house_3dgs_euroc_export"
+version = "0.3.0"
+dependencies = [
+ "png",
+ "rne_ai",
+ "rne_core",
+ "rne_math",
+ "rne_render",
+ "rne_render_3dgs",
+ "rne_render_wgpu",
+ "rne_sensor",
+ "rne_world",
+]
 
 [[package]]
 name = "house_3dgs_hybrid"
@@ -5495,6 +5525,20 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "visloc_euroc_export"
+version = "0.3.0"
+dependencies = [
+ "png",
+ "rne_ai",
+ "rne_core",
+ "rne_math",
+ "rne_render",
+ "rne_render_wgpu",
+ "rne_sensor",
+ "rne_world",
+]
 
 [[package]]
 name = "walkdir"

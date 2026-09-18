@@ -1,0 +1,21 @@
+[package]
+name = "visloc_euroc_export"
+version = "0.3.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rne_ai = { workspace = true }
+rne_core = { workspace = true }
+rne_math = { workspace = true }
+rne_render = { workspace = true }
+rne_render_wgpu = { workspace = true }
+rne_sensor = { workspace = true }
+rne_world = { workspace = true }
+png = { workspace = true }
+
+[[example]]
+name = "111_diff_drive_euroc_export"
+path = "main.rs"
