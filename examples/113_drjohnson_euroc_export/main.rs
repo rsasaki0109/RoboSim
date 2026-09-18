@@ -18,7 +18,10 @@ use rne_ai::{
     DiffDriveRewardConfig, Episode,
 };
 use rne_math::{Quat, Transform3, Vec3};
-use rne_render::{validate_gaussian_splat_manifest_with_override, Camera, HybridRenderScene, RenderScene};
+use rne_render::{
+    validate_gaussian_splat_manifest_with_override, Camera, HybridRenderScene, PbrMaterial,
+    RenderScene, RenderSceneItem, VisualShape,
+};
 use rne_render_3dgs::{load_gaussian_splat_background, render_hybrid_scene_camera};
 use rne_render_wgpu::WgpuRenderBackend;
 use rne_sensor::{sample_imu, ImuSpec};
@@ -36,8 +39,69 @@ const CLEAR_COLOR: [f32; 4] = [0.05, 0.06, 0.08, 1.0];
 // Fixed overview camera (third-person "sute-kame") for demo videos.
 const FIXED_PERIOD_STEPS: u64 = 6;
 const FIXED_FOV_Y_RAD: f64 = 0.9;
-const FIXED_POS: [f64; 3] = [0.8, 2.5, 3.0];
-const FIXED_TARGET: [f64; 3] = [0.8, 0.0, -0.7];
+const FIXED_POS: [f64; 3] = [0.3, 2.0, -1.0];
+const FIXED_TARGET: [f64; 3] = [-2.2, 0.3, -4.0];
+
+/// Stereo camera 3D model (bar, housings, glass, mast) in the base frame.
+/// For third-person views only; never in the onboard foreground (self-occlusion).
+fn camera_model_items(base: &Transform3) -> Vec<RenderSceneItem> {
+    const BASE_HALF_HEIGHT_M: f64 = 0.15;
+    let dark = [0.15, 0.15, 0.17, 1.0];
+    let black = [0.05, 0.05, 0.06, 1.0];
+    let glass = [0.05, 0.10, 0.30, 1.0];
+    let mast_h = CAMERA_HEIGHT_OFFSET_M - BASE_HALF_HEIGHT_M;
+    let mast_y = (BASE_HALF_HEIGHT_M + CAMERA_HEIGHT_OFFSET_M) / 2.0;
+    // (local offset xyz, full size xyz, color).
+    let parts: &[([f64; 3], [f64; 3], [f32; 4])] = &[
+        (
+            [CAMERA_FORWARD_M, CAMERA_HEIGHT_OFFSET_M, 0.0],
+            [0.05, 0.04, 0.17],
+            dark,
+        ),
+        (
+            [CAMERA_FORWARD_M, CAMERA_HEIGHT_OFFSET_M, -0.03],
+            [0.04, 0.05, 0.06],
+            black,
+        ),
+        (
+            [CAMERA_FORWARD_M, CAMERA_HEIGHT_OFFSET_M, 0.03],
+            [0.04, 0.05, 0.06],
+            black,
+        ),
+        (
+            [CAMERA_FORWARD_M + 0.0225, CAMERA_HEIGHT_OFFSET_M, -0.03],
+            [0.005, 0.03, 0.04],
+            glass,
+        ),
+        (
+            [CAMERA_FORWARD_M + 0.0225, CAMERA_HEIGHT_OFFSET_M, 0.03],
+            [0.005, 0.03, 0.04],
+            glass,
+        ),
+        ([CAMERA_FORWARD_M, mast_y, 0.0], [0.03, mast_h, 0.03], dark),
+    ];
+    parts
+        .iter()
+        .map(|(offset, size, color)| {
+            let local = Transform3::from_translation_rotation(
+                Vec3::new(offset[0], offset[1], offset[2]),
+                Quat::IDENTITY,
+            );
+            let mut world = base.mul_transform(&local);
+            world.scale = Vec3::new(size[0], size[1], size[2]);
+            RenderSceneItem {
+                transform: world,
+                shape: VisualShape::Box {
+                    size_m: Vec3::new(size[0], size[1], size[2]),
+                },
+                color_rgba: *color,
+                mesh: None,
+                base_color_texture: None,
+                material: PbrMaterial::default(),
+            }
+        })
+        .collect()
+}
 
 /// Look-at view for an RNE camera (forward -Z, up +Y).
 fn fixed_view() -> Transform3 {
@@ -110,9 +174,9 @@ fn fixed_test(output: &Path) -> Result<(), Box<dyn Error>> {
     let hybrid = HybridRenderScene::new(splat_env, RenderScene::new());
     let camera = Camera::new(CAMERA_WIDTH, CAMERA_HEIGHT, FIXED_FOV_Y_RAD);
     let candidates: &[([f64; 3], [f64; 3])] = &[
-        ([0.0, 0.35, 0.0], [2.0, 0.35, 0.0]),
-        ([-1.5, 2.2, 2.0], [0.8, 0.3, -0.7]),
-        ([-1.5, 1.2, 2.0], [0.8, 0.3, -0.7]),
+        ([0.3, 2.0, -1.0], [-2.2, 0.3, -4.0]),
+        ([-0.5, 1.6, -2.0], [-2.2, 0.3, -4.0]),
+        ([-2.2, 1.8, -1.5], [-2.2, 0.3, -4.0]),
         ([0.8, 2.5, 3.0], [0.8, 0.0, -0.7]),
     ];
     for (index, (pos, target)) in candidates.iter().enumerate() {
@@ -177,10 +241,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let manifest =
         workspace.join("assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml");
 
+    // Start pose comes from the scene robot asset
+    // (dataset_diff_drive_drjohnson: calibrated Dr Johnson spawn).
     let mut environment = DiffDriveEpisode::new(DiffDriveEpisodeConfig {
         max_steps: MAX_STEPS,
         goal_x_m: 1.0e9,
-        initial_translation_m: Vec3::new(-2.2, 0.25, -4.0),
         reward: DiffDriveRewardConfig::default(),
         scene_path: Some(scene_path),
         rng_seed: 7,
@@ -211,11 +276,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut imu_count = 0_u64;
 
     for step in 0..MAX_STEPS {
-        // Rounded-square loop: 4 s straight + 3 s left turn, repeated. Gives
-        // translation + rotation (VIO) and revisit (map matching) while staying
-        // inside the 6.4 m room.
-        let phase = step % 420;
-        let action = if phase < 240 {
+        // Small rounded-square loop around the calibrated spawn (2 s straight
+        // + 2 s left turn). Stays on verified-free floor; gives translation +
+        // rotation (VIO) and revisit (map matching).
+        let phase = step % 240;
+        let action = if phase < 120 {
             DiffDriveAction {
                 left_velocity_rad_s: 4.0,
                 right_velocity_rad_s: 4.0,
@@ -244,15 +309,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         ));
         imu_count += 1;
 
+        let base = Transform3::from_translation_rotation(
+            Vec3::new(
+                observation.base_x_m,
+                observation.base_y_m,
+                observation.base_z_m,
+            ),
+            Quat::from_rotation_y(observation.base_yaw_rad),
+        );
         if step % CAMERA_PERIOD_STEPS == 0 {
-            let base = Transform3::from_translation_rotation(
-                Vec3::new(
-                    observation.base_x_m,
-                    observation.base_y_m,
-                    observation.base_z_m,
-                ),
-                Quat::from_rotation_y(observation.base_yaw_rad),
-            );
             for (side, lateral, csv) in [
                 (0_u16, -0.5 * STEREO_BASELINE_M, &mut cam0_csv),
                 (1_u16, 0.5 * STEREO_BASELINE_M, &mut cam1_csv),
@@ -292,12 +357,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             let fixed_view = fixed_view();
             let fixed_camera = Camera::new(CAMERA_WIDTH, CAMERA_HEIGHT, FIXED_FOV_Y_RAD);
             // Robot only: drop the huge physics ground plane (it would cover
-            // the 3DGS floor from the overview angle).
+            // the 3DGS floor from the overview angle). Then add the stereo
+            // camera 3D model mounted on the robot.
             let mut foreground = build_visual_render_scene(world);
             foreground.items.retain(|item| {
                 let s = item.transform.scale;
                 s.x.max(s.y).max(s.z) < 2.0
             });
+            foreground.items.extend(camera_model_items(&base));
             let hybrid_fixed =
                 HybridRenderScene::new(splat_env.clone(), foreground);
             let fixed = render_hybrid_scene_camera(
