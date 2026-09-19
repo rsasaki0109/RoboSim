@@ -154,6 +154,7 @@ members = [
   "examples/109_go2_jump_sim",
   "examples/110_go2_walk",
   "examples/112_go2_wbc_stance",
+  "examples/113_g1_backflip",
   "examples/111_g1_walk",
   "tests/determinism",
   "tests/dynamics",

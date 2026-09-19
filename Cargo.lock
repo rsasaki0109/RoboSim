@@ -1327,6 +1327,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "g1_backflip"
+version = "0.1.0"
+dependencies = [
+ "rne_dynamics",
+ "rne_ecs",
+ "rne_math",
+ "rne_oc",
+ "rne_robot",
+ "rne_urdf_import",
+]
+
+[[package]]
 name = "g1_commanded_locomotion"
 version = "0.3.0"
 dependencies = [
