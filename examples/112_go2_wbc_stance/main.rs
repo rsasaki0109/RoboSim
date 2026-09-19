@@ -7,18 +7,12 @@
 //!
 //! Measured results (see `docs/PLAN_LEGGED_LOCOMOTION_FRONTIER.md`):
 //! - At 60 Hz every task combination collapses, including pure gravity hold.
-//! - At 240 Hz a posture-only WBC (no CoM/attitude task, zero base velocity)
-//!   holds an upright stance. With the trot as its posture reference it stays
-//!   upright but does not transport continuously, because all four point
-//!   contacts stay no-slip and the swing feet never lift.
-//! - `rne_dynamics::base_velocity_map` documents the generalized base velocity
-//!   as the body-frame twist, and `rne_dynamics` tests verify it (link-motion /
-//!   Jacobian and free-body Newton-Euler consistency). Feeding that correct
-//!   twist (or the world/negated variants) still destabilizes the stance, so the
-//!   base velocity is left at zero. The first tick is identical between the two,
-//!   so the divergence is a closed-loop term; a candidate cause is the missing
-//!   spatial→chart base-acceleration map. The CoM/attitude tasks fail for the
-//!   same reason, since they need the base velocity to damp.
+//! - `rne_dynamics::link_motions` had a missing `omega_body x v_body` term in
+//!   the world bias acceleration; fixed and pinned by a finite-difference test.
+//!   The earlier "stable 240 Hz posture-only stance" was an artifact of that
+//!   bug, so with the corrected bias the WBC stance must be re-derived.
+//! - Feeding the measured base velocity still destabilizes the otherwise
+//!   zero-base stance, and the CoM/attitude tasks destabilize it too.
 //!
 //! Knobs: `RNE_WBC_HZ` (plant rate, default 240), `RNE_QD_MODE` (0 zero base,
 //! 1 world twist, 2 body twist, 3/4 their negations), `RNE_QD_SCALE`
@@ -375,25 +369,21 @@ fn run(
                 }
             })
             .collect();
-        if std::env::var("RNE_WBC_TRACE").is_ok() && step == 0 {
+        if std::env::var("RNE_WBC_TRACE").is_ok() && step < 40 {
             let max_torque = solution
                 .joint_torque_nm
                 .iter()
                 .fold(0.0_f64, |value, torque| value.max(torque.abs()));
-            let f_y: f64 = solution
-                .contact_forces_world_n
-                .iter()
-                .map(|force| force.y)
-                .sum();
-            let base_residual = solution
-                .base_wrench_residual
-                .iter()
-                .map(|value| value * value)
-                .sum::<f64>()
-                .sqrt();
+            let com_accel = solution.com_acceleration_m_s2;
             println!(
-                "  step0: max_tau={max_torque:.3} f_y={f_y:.2} base_res={base_residual:.2e} qd0=({:.4},{:.4},{:.4})",
-                qd[0], qd[1], qd[2]
+                "  step {step:02}: y={:.4} com_az=({:+.4},{:+.4},{:+.4}) v_twist=({:+.4},{:+.4},{:+.4}) tau={max_torque:.2}",
+                sim.observe().base_y_m,
+                com_accel.x,
+                com_accel.y,
+                com_accel.z,
+                qd[0],
+                qd[1],
+                qd[2],
             );
         }
         sim.step_joint_torques(&torques);

@@ -68,40 +68,31 @@ masses) and drives it with `rne_wbc` torques. Findings:
 
 - At 60 Hz every configuration collapses within 5 s, including a pure gravity
   hold, even though the same robot is stable under the position motors.
-- At 240 Hz a posture-only WBC (no CoM and no attitude task, `qd` base zero)
-  holds an upright stance (`minH` 0.226 m, tilt 0.05 rad). With the scripted
-  trot as the posture reference it stays upright for the full run, but all four
-  point contacts remain no-slip, so the forward motion is a one-off startup
-  transient (0.059 m) that does not accumulate: this is stable WBC stance, not
-  continuous walking.
-- `rne_dynamics::base_velocity_map` documents the generalized base velocity as
-  the **body-frame twist** (body linear and angular velocity). Two new
-  `rne_dynamics` tests verify that convention with a nonzero base twist:
+- `rne_dynamics` is verified consistent for the body-twist base velocity:
   `floating_base_link_motions_match_frame_jacobian` checks `frame_jacobian * qd`
   and `com_jacobian * qd` against `link_motions`, and
   `free_floating_body_matches_newton_euler` checks `forward_dynamics` against the
-  analytic Newton-Euler free-body equations. Both pass, so the base velocity
-  propagation and Coriolis handling in `rne_dynamics` are correct.
-- Feeding the correct body twist into `qd` still destabilizes the otherwise
-  stable 240 Hz stance — as do the world-twist and negated variants, and even a
-  25% scale — while the residual settled base velocity is only `~5e-4 m/s`. At
-  the first tick the two configurations produce identical torques and contact
-  forces, so the divergence is a closed-loop term, not the initial solve.
-- **Candidate cause: the base acceleration chart mismatch.** `rne_dynamics`
-  works in body/spatial coordinates (RNEA and `base_velocity_map`), while the
-  plant integrates the minimal `(translation, rpy)` chart. There is no
-  acceleration-side counterpart to `base_velocity_map` (it is private and only
-  used by `frame_jacobian`), so the velocity-dependent part of the spatial→chart
-  acceleration map is not represented anywhere. This is consistent with the
-  stance being stable only when `qd` base is zero, but it is a hypothesis, not
-  yet a measured proof: the next step is a test that compares a spatial-`qdd`
-  rollout against the plant's chart rollout, and then a dynamics-level helper
-  (or a WBC that solves in chart coordinates) if confirmed.
-- Stance-only contacts transport farther (`~0.10 m`) but topple.
+  analytic free-body equations.
+- **Bug found and fixed in `rne_dynamics`.** A new central-difference test,
+  `floating_base_point_bias_acceleration_matches_finite_difference`, showed that
+  `link_motions` was missing the frame-rotation term `omega_body x v_body` when
+  converting the spatial link acceleration to the classical world acceleration.
+  This term is zero only when the link is not moving, so it had been invisible
+  in the static WBC tests and in the `qd` base-zero stance. It directly feeds
+  `LinkMotion::point_bias_acceleration_m_s2`, and therefore the WBC contact and
+  CoM bias terms.
+- **Impact.** Before the fix, a posture-only 240 Hz WBC appeared to hold an
+  upright stance; that stability was an artifact of the missing term. With the
+  corrected bias the same solve diverges within the run, faster and regardless
+  of posture gains or solver regularization. The earlier "240 Hz stable stance"
+  result is retracted: the WBC was tuned against buggy dynamics.
 
-The next step is to harden `rne_wbc` for a nonzero body-twist base velocity
-(bias/Coriolis handling and solver regularization), then retry the CoM/attitude
-tasks and the contact schedule on the 240 Hz plant.
+The next step is to re-derive the `rne_wbc` stance on the corrected
+`point_bias_acceleration`, starting from the now-exact contact-bias constraints
+and the 240 Hz fixed-delta plant, before retrying CoM/attitude tasks and the
+contact schedule.
+
+### Theme A.1 — WBC re-derivation on corrected bias (active)
 
 ### Theme B — contact-schedule redesign above the joint targets (active)
 

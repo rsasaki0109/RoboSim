@@ -541,12 +541,17 @@ pub fn link_motions(
             rotation * Vec3::new(velocity[index][0], velocity[index][1], velocity[index][2]);
         let angular_velocity =
             rotation * Vec3::new(velocity[index][3], velocity[index][4], velocity[index][5]);
+        // The spatial acceleration is the body-frame derivative of the spatial
+        // velocity. The classical world acceleration of the link origin adds the
+        // frame-rotation term `omega_body x v_body` before rotating to world.
+        let velocity_body = Vec3::new(velocity[index][0], velocity[index][1], velocity[index][2]);
+        let omega_body = Vec3::new(velocity[index][3], velocity[index][4], velocity[index][5]);
         let linear_acceleration = rotation
-            * Vec3::new(
+            * (Vec3::new(
                 acceleration[index][0],
                 acceleration[index][1],
                 acceleration[index][2],
-            );
+            ) + omega_body.cross(velocity_body));
         let angular_acceleration = rotation
             * Vec3::new(
                 acceleration[index][3],
@@ -1116,6 +1121,82 @@ mod tests {
                 epsilon = 1.0e-9,
                 max_relative = 1.0e-9
             );
+        }
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn floating_base_point_bias_acceleration_matches_finite_difference() {
+        let (world, robot) = floating_two_link_world(2.0, 1.5, 0.7, 0.5, 4.0);
+        let model =
+            ArticulatedModel::from_robot_with_gravity(&world, robot, Vec3::ZERO).expect("model");
+        let q0 = vec![0.3, -0.2, 0.1, 0.4, -0.3, 0.25, 0.5, -0.7];
+        let spatial_qd = vec![0.15, -0.1, 0.2, 0.2, -0.15, 0.1, 0.4, -0.3];
+
+        // The model chart advances at `map * spatial_qd` for the base and the
+        // joint rates directly for the joints; holding the spatial twist constant
+        // makes the spatial acceleration zero, so a central difference of the
+        // point velocity is exactly the bias (Jdot * qd) term.
+        let chart_base_rate = |q: &[f64]| -> Vec<f64> {
+            let kinematics = model.kinematic.forward_kinematics(q).expect("kinematics");
+            let map = base_velocity_map(q, kinematics.transforms()[0].rotation);
+            (0..6)
+                .map(|row| (0..6).map(|k| map[row][k] * spatial_qd[k]).sum())
+                .collect()
+        };
+        let advance = |q: &[f64], dt: f64| -> Vec<f64> {
+            let mut next = q.to_vec();
+            let base = chart_base_rate(q);
+            for index in 0..6 {
+                next[index] += dt * base[index];
+            }
+            for index in 6..8 {
+                next[index] += dt * spatial_qd[index];
+            }
+            next
+        };
+
+        let h = 1.0e-6;
+        let q_plus = advance(&q0, h);
+        let q_minus = advance(&q0, -h);
+        let motions = link_motions(&model, &q0, &spatial_qd).expect("motions");
+        for index in 0..model.link_count() {
+            let entity = model.link_entity(index).expect("link");
+            let point = model
+                .link_inertia(index)
+                .map(|inertia| inertia.center_of_mass_m)
+                .unwrap_or(Vec3::ZERO);
+            let velocity = |q: &[f64]| -> [f64; 6] {
+                let jacobian = frame_jacobian(&model, q, entity, point).expect("jacobian");
+                let mut out = [0.0; 6];
+                for row in 0..6 {
+                    out[row] = (0..model.nv())
+                        .map(|column| jacobian.get(row, column) * spatial_qd[column])
+                        .sum();
+                }
+                out
+            };
+            let plus = velocity(&q_plus);
+            let minus = velocity(&q_minus);
+            let motion = &motions[index];
+            let expected_linear = motion.point_bias_acceleration_m_s2(point).to_array();
+            let expected_angular = motion.angular_acceleration_world_rad_s2.to_array();
+            for row in 0..3 {
+                let finite_difference = (plus[row] - minus[row]) / (2.0 * h);
+                assert_relative_eq!(
+                    finite_difference,
+                    expected_linear[row],
+                    epsilon = 1.0e-5,
+                    max_relative = 1.0e-5
+                );
+                let finite_difference = (plus[3 + row] - minus[3 + row]) / (2.0 * h);
+                assert_relative_eq!(
+                    finite_difference,
+                    expected_angular[row],
+                    epsilon = 1.0e-5,
+                    max_relative = 1.0e-5
+                );
+            }
         }
     }
 
