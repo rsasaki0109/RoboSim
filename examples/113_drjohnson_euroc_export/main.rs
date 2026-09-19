@@ -38,8 +38,8 @@ const CLEAR_COLOR: [f32; 4] = [0.05, 0.06, 0.08, 1.0];
 // Fixed overview camera (third-person "sute-kame") for demo videos.
 const FIXED_PERIOD_STEPS: u64 = 6;
 const FIXED_FOV_Y_RAD: f64 = 0.9;
-const FIXED_POS: [f64; 3] = [0.3, 2.0, -1.0];
-const FIXED_TARGET: [f64; 3] = [-2.2, 0.3, -4.0];
+const FIXED_POS: [f64; 3] = [-1.2, 1.4, -2.9];
+const FIXED_TARGET: [f64; 3] = [-2.2, 0.3, -4.4];
 
 /// Look-at view for an RNE camera (forward -Z, up +Y).
 fn fixed_view() -> Transform3 {
@@ -273,20 +273,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut imu_count = 0_u64;
 
     for step in 0..MAX_STEPS {
-        // Small rounded-square loop around the calibrated spawn (2 s straight
-        // + 2 s left turn). Stays on verified-free floor; gives translation +
-        // rotation (VIO) and revisit (map matching).
-        let phase = step % 240;
-        let action = if phase < 120 {
-            DiffDriveAction {
-                left_velocity_rad_s: 4.0,
-                right_velocity_rad_s: 4.0,
-            }
-        } else {
-            DiffDriveAction {
-                left_velocity_rad_s: 1.0,
-                right_velocity_rad_s: 4.5,
-            }
+        // Small circle (~0.8 m diameter) around the calibrated spawn: stays on
+        // the open rug, clear of the table/chairs; gives translation + rotation
+        // (VIO) and frequent revisit (map matching).
+        let action = DiffDriveAction {
+            left_velocity_rad_s: 1.5,
+            right_velocity_rad_s: 5.4,
         };
         let result = environment.step(action);
         let observation = result.observation;
