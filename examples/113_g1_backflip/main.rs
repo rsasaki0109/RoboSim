@@ -222,9 +222,6 @@ fn main() {
             if !no_flip {
                 weights[5] = 400.0;
                 reference[5] = -2.0 * std::f64::consts::PI * t;
-                weights[nv + 5] = 20.0;
-                reference[nv + 5] =
-                    -2.0 * std::f64::consts::PI / (FLIGHT_STEPS as f64 * STEP_TIME_S);
             }
         }
         let mut cost = QuadraticCost::new(weights, control_weights.clone(), zero.clone());
@@ -272,7 +269,6 @@ fn main() {
             tucked[1] = BASE_START_Y_M
                 + (TARGET_APEX_Y_M - BASE_START_Y_M) * (std::f64::consts::PI * t).sin();
             tucked[5] = -2.0 * std::f64::consts::PI * t;
-            tucked[nv + 5] = -2.0 * std::f64::consts::PI / (FLIGHT_STEPS as f64 * STEP_TIME_S);
             for (dof, name) in joint_names.iter().enumerate() {
                 tucked[6 + dof] = tuck_angle(name);
             }
@@ -286,15 +282,64 @@ fn main() {
     let controls = vec![vec![0.0; control_dim]; horizon];
     let limits: Vec<f64> = joint_names.iter().map(|name| torque_limit(name)).collect();
     let config = DdpConfig {
-        max_iterations: 150,
+        max_iterations: 300,
         tolerance: 1.0e-7,
-        keep_gaps_open: true,
+        keep_gaps_open: false,
         control_lower: Some(limits.iter().map(|limit| -limit).collect()),
         control_upper: Some(limits.clone()),
         ..DdpConfig::default()
     };
-    println!("solving FDDP...");
-    let solution = solve(&dynamics, &cost, &states, &controls, &config).expect("solve");
+    // The DDP's first rollout replaces the caller's state trajectory, so only the
+    // initial state and the initial controls seed the solve.
+    let initial_states = vec![initial.clone(); horizon + 1];
+    let mut solution = {
+        let mut result = None;
+        let mut tweak = config.clone();
+        for extra in [1.0, 0.1] {
+            tweak.initial_regularization =
+                (config.initial_regularization * extra).max(config.min_regularization);
+            if let Ok(solved) = solve(&dynamics, &cost, &initial_states, &controls, &tweak) {
+                result = Some(solved);
+                break;
+            }
+        }
+        let Some(solved) = result else {
+            eprintln!("FDDP failed to produce a feasible rollout from the initial controls");
+            return;
+        };
+        solved
+    };
+
+    // A failed line search can leave non-finite states; retry from the last
+    // finite node's controls if so.
+    if solution
+        .states
+        .iter()
+        .flatten()
+        .any(|value| !value.is_finite())
+    {
+        for (node, state) in solution.states.iter().enumerate() {
+            if state.iter().all(|value| value.is_finite()) {
+                continue;
+            }
+            let mut restart_states = vec![initial.clone(); horizon + 1];
+            let mut restart_controls = solution.controls.clone();
+            for control in restart_controls.iter_mut().skip(node) {
+                *control = vec![0.0; control_dim];
+            }
+            if let Ok(resolved) = solve(
+                &dynamics,
+                &cost,
+                &restart_states,
+                &restart_controls,
+                &config,
+            ) {
+                solution = resolved;
+            }
+            let _ = &mut restart_states;
+            break;
+        }
+    }
 
     let apex_y = solution
         .states
@@ -310,14 +355,24 @@ fn main() {
         .iter()
         .fold(f64::MIN, |maximum, state| maximum.max(state[5]));
     let mut max_gap = 0.0_f64;
+    let mut failed_nodes = 0_usize;
     for node in 0..horizon {
-        let predicted = dynamics
-            .step_at(node, &solution.states[node], &solution.controls[node])
-            .expect("step");
-        for (a, b) in solution.states[node + 1].iter().zip(&predicted) {
-            max_gap = max_gap.max((a - b).abs());
+        match dynamics.step_at(node, &solution.states[node], &solution.controls[node]) {
+            Ok(predicted) => {
+                for (a, b) in solution.states[node + 1].iter().zip(&predicted) {
+                    max_gap = max_gap.max((a - b).abs());
+                }
+            }
+            Err(_) => failed_nodes += 1,
         }
     }
+    let feasible = max_gap < 1.0e-4 && failed_nodes == 0;
+    println!(
+        "converged={} feasible={} cost_finite={}",
+        solution.converged,
+        feasible,
+        solution.cost.is_finite(),
+    );
     let max_torque = solution
         .controls
         .iter()

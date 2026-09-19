@@ -232,12 +232,15 @@ controller.
   the body twist as Euler rates (`q += qd * dt`); `rne_dynamics::integrate_configuration`
   now maps the twist through `base_velocity_map` first, and both integrators use
   it. This is the prerequisite for any large-rotation plan.
-- **Whole-body FDDP still does not converge.** Example 113 reaches the `2*pi`
-  yaw rotation but the dynamics gap stays above 1 at 29 DoF with
-  central-difference derivatives (21 min for 800 iterations). The native solver
-  has no analytic derivatives, and there is no flight-phase controller
-  (`rne_wbc` rejects empty contacts). `rne_dynamics::centroidal_momentum` now
-  exists to shape the aerial rotation.
+- **Whole-body FDDP still does not converge.** Example 113 reports
+  `converged=false feasible=false` (dynamics gap ~8) at 29 DoF. A prerequisite
+  bug was found and fixed: standard DDP scored the caller's infeasible state
+  guess instead of rolling the initial controls forward, so a kinematic warm
+  start was returned as a "zero-torque, zero-gap" solution. With that fixed the
+  solve is honest but still far from feasible; the native solver has no analytic
+  derivatives, and there is no flight-phase controller (`rne_wbc` rejects empty
+  contacts). `rne_dynamics::centroidal_momentum` now exists to shape the aerial
+  rotation.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic

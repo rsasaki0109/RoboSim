@@ -430,10 +430,33 @@ pub fn solve(
         running + cost.terminal(&states[horizon])
     };
 
+    // Standard DDP keeps a feasible rollout: the state trajectory must be the
+    // one the initial controls actually produce from `initial_states[0]`.
+    // Without this, a cheap but infeasible warm start (opened gaps not carried)
+    // makes the line search unable to improve, and the solver returns it.
     let mut states = initial_states.to_vec();
+    if !config.keep_gaps_open {
+        let mut rolled = initial_states.to_vec();
+        rolled[0] = initial_states[0].clone();
+        for k in 0..horizon {
+            match dynamics.step_at(k, &rolled[k], &initial_controls[k]) {
+                Ok(next) => rolled[k + 1] = next,
+                Err(_) => {
+                    rolled[k + 1] = initial_states[k + 1].clone();
+                }
+            }
+        }
+        states = rolled;
+    }
     let mut controls = initial_controls.to_vec();
     let mut regularization = config.initial_regularization;
     let mut current_cost = trajectory_cost(&states, &controls);
+    if !current_cost.is_finite() {
+        // A bad warm start can roll out to a non-finite state. Fall back to the
+        // caller's trajectory rather than letting NaNs poison the solve.
+        states = initial_states.to_vec();
+        current_cost = trajectory_cost(&states, &controls);
+    }
     let mut converged = false;
     let mut iterations = 0;
 

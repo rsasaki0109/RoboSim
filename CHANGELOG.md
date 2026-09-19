@@ -72,6 +72,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- Standard DDP (`keep_gaps_open = false`) now rolls the initial controls forward
+  and scores that feasible trajectory instead of the caller's (possibly
+  infeasible) state guess, and falls back to the caller's trajectory if the
+  rollout is non-finite. Previously a cheap but infeasible warm start made the
+  line search unable to improve and the solver returned it.
 - The native optimal-control integrators (`rne_oc::ArticulatedDynamics` and
   `ConstrainedArticulatedDynamics`) treated the floating-base body twist as Euler
   rates (`q += qd * dt`), which is inconsistent with `rne_dynamics` and
