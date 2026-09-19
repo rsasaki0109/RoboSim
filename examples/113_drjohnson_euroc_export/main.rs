@@ -44,11 +44,10 @@ const FIXED_TARGET: [f64; 3] = [-2.0, 0.2, -4.0];
 // the open rug, giving longer translation + 4 corners (VIO excitation) and
 // frequent revisit (map matching) while staying in the clean camera view.
 const WAYPOINTS: &[[f64; 2]] = &[
-    [-1.2, -4.5],
-    [-1.0, -3.2],
-    [-2.0, -2.9],
-    [-3.0, -3.3],
-    [-2.9, -4.5],
+    [-1.0, -4.6],
+    [-0.9, -3.0],
+    [-2.9, -3.0],
+    [-2.9, -4.6],
     [-2.0, -4.8],
 ];
 const WAYPOINT_REACHED_M: f64 = 0.35;
