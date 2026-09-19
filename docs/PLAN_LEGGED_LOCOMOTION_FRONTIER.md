@@ -222,23 +222,26 @@ optimization work (Konishi et al., IROS 2025; `se3_trajopt`; Crocoddyl-based
 rely on a singularity-free floating-base representation and a flight-phase
 controller.
 
-- **The Euler chart cannot represent a sagittal backflip.**
-  `rne_dynamics::base_velocity_map` inverts the Euler-rate map, whose
-  determinant vanishes at `pitch = ±pi/2`. A backflip is a rotation about the
-  world lateral axis, which maps into that singular roll/pitch region. A
-  rotation about the world vertical axis (a spin) maps to yaw and is fine, which
-  is why the FDDP probe (example 113) can drive a full `-2*pi` "rotation" but it
-  is an aerial **spin**, not a backflip.
-- **Whole-body FDDP is too slow and does not converge.** Example 113 finds a
-  `2*pi` spin but the dynamics gap stays ~2.3 after 800 iterations (21 min); a
-  no-spin jump still leaves a gap of `7e-2` after 150 iterations (3 min). The
-  native solver has central-difference derivatives only, no analytic dynamics
-  derivatives, no articulated centroidal/angular-momentum API, and no
-  flight-phase controller (`rne_wbc` rejects empty contacts).
+- **A sagittal backflip maps to a regular Euler coordinate here.** The floating
+  base composes as `base_world = R_euler * R_x(-90)`, so a rotation about the
+  world lateral axis (a backflip) is a change of the base **yaw**, where the
+  Euler-rate map is regular. (An earlier note claiming a backflip hits the
+  `pitch = ±pi/2` singularity was wrong: it assumed the root on the other side
+  of the composition.)
+- **The OC floating-base chart was inconsistent (fixed).** `rne_oc` integrated
+  the body twist as Euler rates (`q += qd * dt`); `rne_dynamics::integrate_configuration`
+  now maps the twist through `base_velocity_map` first, and both integrators use
+  it. This is the prerequisite for any large-rotation plan.
+- **Whole-body FDDP still does not converge.** Example 113 reaches the `2*pi`
+  yaw rotation but the dynamics gap stays above 1 at 29 DoF with
+  central-difference derivatives (21 min for 800 iterations). The native solver
+  has no analytic derivatives, and there is no flight-phase controller
+  (`rne_wbc` rejects empty contacts). `rne_dynamics::centroidal_momentum` now
+  exists to shape the aerial rotation.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
-  accuracy. A physically simulated backflip requires, in order: (1) a
-  singularity-free floating-base state (quaternion/SE(3)) with a consistent
-  acceleration map, (2) analytic dynamics derivatives, (3) an articulated
-  centroidal-momentum term for aerial rotation, and (4) a flight-phase
-  controller and a landing catch.
+  accuracy. A physically simulated backflip requires, in order: (1) analytic
+  dynamics derivatives (the central-difference solver does not converge), (2) a
+  flight-phase controller and a landing catch (`rne_wbc` rejects empty contacts),
+  and (3) an articulated centroidal-momentum term to shape the aerial rotation
+  (`centroidal_momentum` is now available).

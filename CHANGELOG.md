@@ -62,17 +62,23 @@ All notable changes to Robot Native Engine are documented in this file.
 
 - `examples/113_g1_backflip` research probe and `examples/114_g1_backflip_gif`
   render-only reference. Example 113 runs native FDDP over crouch/push/flight
-  and drives the base through a full `-2*pi` rotation, but that coordinate is a
-  **world-vertical spin**, not a sagittal backflip; the solver reaches the
-  rotation without converging (dynamics gap ~2.3 at 29 DoF with
-  central-difference derivatives). Example 114 is a clearly labeled
-  forward-kinematics backflip animation (`--smoke` headless gate, `--gif` writes
-  `docs/media/unitree-g1-backflip.gif`). A physically simulated backflip needs a
-  singularity-free quaternion/SE(3) floating base and a flight-phase controller,
-  neither of which exists yet.
+  and drives the base yaw through a full `-2*pi` sagittal backflip (the URDF
+  Z-up to Y-up root makes a lateral flip a yaw change, which is regular in the
+  Euler chart). The solver reaches the rotation without converging (dynamics gap
+  >1 at 29 DoF with central-difference derivatives). Example 114 is a clearly
+  labeled forward-kinematics backflip animation (`--smoke` headless gate, `--gif`
+  writes `docs/media/unitree-g1-backflip.gif`). A physically simulated backflip
+  still needs analytic derivatives and a flight-phase controller.
 
 ### Fixed
 
+- The native optimal-control integrators (`rne_oc::ArticulatedDynamics` and
+  `ConstrainedArticulatedDynamics`) treated the floating-base body twist as Euler
+  rates (`q += qd * dt`), which is inconsistent with `rne_dynamics` and
+  mishandles large rotations. New `rne_dynamics::integrate_configuration` routes
+  the twist through `base_velocity_map` before integrating, and both integrators
+  use it. Pinned by
+  `integrate_configuration_maps_body_twist_into_the_euler_chart`.
 - `rne_dynamics::link_motions` was missing the frame-rotation term
   `omega_body x v_body` when converting each link's spatial acceleration to the
   classical world acceleration. The term vanishes only for a stationary link,

@@ -266,6 +266,44 @@ pub fn rnea(
     Ok(tau)
 }
 
+/// Integrates one configuration step `q += dt * qdot + 0.5 * dt^2 * qddot`.
+///
+/// For a floating base the generalized velocity `qd[..6]` is the body twist,
+/// while `q[..6]` is the `(translation, roll-pitch-yaw)` chart. This function
+/// maps the twist through `base_velocity_map` before integrating, so the chart
+/// step is consistent with the dynamics. Treating the body twist as Euler rates
+/// (the naive `q += qd * dt`) mishandles large rotations such as an aerial flip.
+pub fn integrate_configuration(
+    model: &ArticulatedModel,
+    q: &[f64],
+    qd: &[f64],
+    qdd: &[f64],
+    dt: f64,
+) -> Result<Vec<f64>, DynamicsError> {
+    validate(model, q, "q")?;
+    validate(model, qd, "qd")?;
+    validate(model, qdd, "qdd")?;
+    let mut next = q.to_vec();
+    let base = model.base_dof();
+    if base == 6 {
+        let kinematics = model.kinematic.forward_kinematics(q)?;
+        let base_rotation = kinematics.transforms()[0].rotation;
+        let map = base_velocity_map(q, base_rotation);
+        let mut twist = [0.0; 6];
+        for (index, value) in twist.iter_mut().enumerate() {
+            *value = qd[index] + 0.5 * qdd[index] * dt;
+        }
+        let chart_velocity = mat6_mul_vec(&map, &twist);
+        for index in 0..6 {
+            next[index] += chart_velocity[index] * dt;
+        }
+    }
+    for index in base..model.nv() {
+        next[index] += qd[index] * dt + 0.5 * qdd[index] * dt * dt;
+    }
+    Ok(next)
+}
+
 /// Gravity and velocity bias `C(q, qd) qd + g(q)`.
 pub fn non_linear_effects(
     model: &ArticulatedModel,
@@ -1323,6 +1361,52 @@ mod tests {
                 qdd[3 + row],
                 expected_angular.to_array()[row],
                 epsilon = 1.0e-10
+            );
+        }
+    }
+
+    #[test]
+    fn integrate_configuration_maps_body_twist_into_the_euler_chart() {
+        let (world, robot) = floating_two_link_world(2.0, 1.5, 0.7, 0.5, 4.0);
+        let model =
+            ArticulatedModel::from_robot_with_gravity(&world, robot, Vec3::ZERO).expect("model");
+        let q = vec![0.1, -0.2, 0.3, 0.2, -0.1, 0.15, 0.3, -0.4];
+        let omega_body = Vec3::new(0.3, -0.2, 0.25);
+        let linear_body = Vec3::new(0.05, -0.02, 0.01);
+        let mut qd = vec![0.0; model.nv()];
+        qd[0] = linear_body.x;
+        qd[1] = linear_body.y;
+        qd[2] = linear_body.z;
+        qd[3] = omega_body.x;
+        qd[4] = omega_body.y;
+        qd[5] = omega_body.z;
+        let dt = 1.0e-9;
+        let next = integrate_configuration(&model, &q, &qd, &vec![0.0; model.nv()], dt)
+            .expect("integrate");
+
+        let fk = model.kinematic().forward_kinematics(&q).expect("fk");
+        let base_rotation = fk.transforms()[0].rotation;
+        // Translation advances by the world-frame body velocity.
+        let expected_translation = base_rotation * (linear_body * dt);
+        for row in 0..3 {
+            assert_relative_eq!(
+                next[row] - q[row],
+                expected_translation.to_array()[row],
+                epsilon = 1.0e-9
+            );
+        }
+        // The orientation change is the world angular velocity `R * omega_body`.
+        let next_fk = model.kinematic().forward_kinematics(&next).expect("fk");
+        let delta = base_rotation.inverse() * next_fk.transforms()[0].rotation;
+        let (axis, angle) = delta.to_axis_angle();
+        let rotation_vector = axis * angle;
+        let expected_angular = base_rotation * (omega_body * dt);
+        for row in 0..3 {
+            assert_relative_eq!(
+                rotation_vector.to_array()[row],
+                expected_angular.to_array()[row],
+                epsilon = 1.0e-8,
+                max_relative = 1.0e-4
             );
         }
     }

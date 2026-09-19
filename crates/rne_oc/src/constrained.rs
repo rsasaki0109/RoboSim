@@ -1,7 +1,10 @@
 //! Contact-constrained articulated dynamics and contact sequences.
 
 use crate::ddp::{DiscreteDynamics, OcError, ShootingDynamics};
-use rne_dynamics::{constrained_forward_dynamics, impulse_velocity, ArticulatedModel, ContactSpec};
+use rne_dynamics::{
+    constrained_forward_dynamics, impulse_velocity, integrate_configuration, ArticulatedModel,
+    ContactSpec,
+};
 
 fn integrate(
     model: &ArticulatedModel,
@@ -24,8 +27,10 @@ fn integrate(
         .map_err(|_| OcError::Dynamics)?;
     let dt = step_time_s;
     let mut next = vec![0.0; 2 * nv];
+    next[..nv].copy_from_slice(
+        &integrate_configuration(model, q, qd, &acceleration, dt).map_err(|_| OcError::Dynamics)?,
+    );
     for index in 0..nv {
-        next[index] = q[index] + qd[index] * dt + 0.5 * acceleration[index] * dt * dt;
         next[nv + index] = qd[index] + acceleration[index] * dt;
     }
     Ok(next)

@@ -1,7 +1,7 @@
 //! Discrete dynamics for a floating- or fixed-base articulated model.
 
 use crate::ddp::{DiscreteDynamics, OcError};
-use rne_dynamics::{forward_dynamics, ArticulatedModel};
+use rne_dynamics::{forward_dynamics, integrate_configuration, ArticulatedModel};
 
 /// Semi-implicit Euler dynamics for an [`ArticulatedModel`].
 ///
@@ -45,8 +45,11 @@ impl DiscreteDynamics for ArticulatedDynamics<'_> {
 
         let dt = self.step_time_s;
         let mut next = vec![0.0; 2 * nv];
+        next[..nv].copy_from_slice(
+            &integrate_configuration(self.model, q, qd, &acceleration, dt)
+                .map_err(|_| OcError::Dynamics)?,
+        );
         for index in 0..nv {
-            next[index] = q[index] + qd[index] * dt + 0.5 * acceleration[index] * dt * dt;
             next[nv + index] = qd[index] + acceleration[index] * dt;
         }
         Ok(next)
