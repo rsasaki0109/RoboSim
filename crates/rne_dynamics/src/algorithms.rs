@@ -987,6 +987,179 @@ mod tests {
         assert_relative_eq!(tau[5], expected_torque.z, epsilon = 1.0e-10);
     }
 
+    /// A two-link chain on a floating base with a massive base link.
+    fn floating_two_link_world(
+        m1: f64,
+        m2: f64,
+        l1: f64,
+        l2: f64,
+        base_mass: f64,
+    ) -> (World, rne_ecs::Entity) {
+        let mut world = World::new();
+        let robot = spawn_named(&mut world, "robot");
+        let base = spawn_named(&mut world, "base");
+        let link1 = spawn_named(&mut world, "link1");
+        let link2 = spawn_named(&mut world, "link2");
+        let joint1 = spawn_named(&mut world, "joint1");
+        let joint2 = spawn_named(&mut world, "joint2");
+
+        world.entity_mut(robot).insert(Robot {
+            robot_id: RobotId::new_v4(),
+            model_name: "floating_two_link".into(),
+            base_link: base,
+        });
+        world.entity_mut(base).insert((
+            Link {
+                robot,
+                name: "base".into(),
+            },
+            Transform3::IDENTITY,
+            FloatingBase,
+            RigidBody {
+                mass_kg: base_mass,
+                ..RigidBody::default()
+            },
+            RigidBodyInertia {
+                center_of_mass_local_m: Vec3::ZERO,
+                ixx_kg_m2: 0.05,
+                ixy_kg_m2: 0.0,
+                ixz_kg_m2: 0.0,
+                iyy_kg_m2: 0.06,
+                iyz_kg_m2: 0.0,
+                izz_kg_m2: 0.07,
+            },
+        ));
+        world.entity_mut(link1).insert((
+            Link {
+                robot,
+                name: "link1".into(),
+            },
+            Transform3::IDENTITY,
+            RigidBody {
+                mass_kg: m1,
+                ..RigidBody::default()
+            },
+            point_mass_inertia(Vec3::new(l1, 0.0, 0.0)),
+        ));
+        world.entity_mut(link2).insert((
+            Link {
+                robot,
+                name: "link2".into(),
+            },
+            Transform3::from_translation_rotation(Vec3::new(l1, 0.0, 0.0), Quat::IDENTITY),
+            RigidBody {
+                mass_kg: m2,
+                ..RigidBody::default()
+            },
+            point_mass_inertia(Vec3::new(l2, 0.0, 0.0)),
+        ));
+        world.entity_mut(joint1).insert(joint(robot, base, link1));
+        world.entity_mut(joint2).insert(joint(robot, link1, link2));
+        (world, robot)
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn floating_base_link_motions_match_frame_jacobian() {
+        let (world, robot) = floating_two_link_world(2.0, 1.5, 0.7, 0.5, 4.0);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        assert_eq!(model.base_dof(), 6);
+        let q = vec![0.3, -0.2, 0.1, 0.4, -0.3, 0.25, 0.5, -0.7];
+        let qd = vec![0.1, -0.05, 0.2, 0.3, -0.1, 0.15, 0.4, 0.6];
+        let motions = link_motions(&model, &q, &qd).expect("link motions");
+
+        // The spatial Jacobian applied to the body-twist generalized velocity
+        // must reproduce the world link velocity for every link.
+        for index in 0..model.link_count() {
+            let entity = model.link_entity(index).expect("link entity");
+            let jacobian = frame_jacobian(&model, &q, entity, Vec3::ZERO).expect("jacobian");
+            for row in 0..6 {
+                let mapped: f64 = (0..model.nv())
+                    .map(|column| jacobian.get(row, column) * qd[column])
+                    .sum();
+                let expected = if row < 3 {
+                    motions[index].linear_velocity_world_m_s.to_array()[row]
+                } else {
+                    motions[index].angular_velocity_world_rad_s.to_array()[row - 3]
+                };
+                assert_relative_eq!(mapped, expected, epsilon = 1.0e-9, max_relative = 1.0e-9);
+            }
+        }
+
+        // The CoM Jacobian applied to the same twist must equal the mass-weighted
+        // average of the link COM velocities read from `link_motions`.
+        let com_jacobian = com_jacobian(&model, &q).expect("com jacobian");
+        let mut expected = Vec3::ZERO;
+        let mut total_mass = 0.0;
+        for index in 0..model.link_count() {
+            let Some(inertia) = model.link_inertia(index) else {
+                continue;
+            };
+            if inertia.mass_kg == 0.0 {
+                continue;
+            }
+            total_mass += inertia.mass_kg;
+            let motion = &motions[index];
+            let com_world = motion.world_transform.rotation * inertia.center_of_mass_m;
+            let velocity = motion.linear_velocity_world_m_s
+                + motion.angular_velocity_world_rad_s.cross(com_world);
+            expected += velocity * inertia.mass_kg;
+        }
+        expected /= total_mass;
+        for row in 0..3 {
+            let mapped: f64 = (0..model.nv())
+                .map(|column| com_jacobian.get(row, column) * qd[column])
+                .sum();
+            assert_relative_eq!(
+                mapped,
+                expected.to_array()[row],
+                epsilon = 1.0e-9,
+                max_relative = 1.0e-9
+            );
+        }
+    }
+
+    #[test]
+    fn free_floating_body_matches_newton_euler() {
+        let mass = 3.0;
+        let tensor = [0.4, 0.5, 0.6];
+        let (world, robot) = floating_body_world(mass, Vec3::ZERO, tensor);
+        let model =
+            ArticulatedModel::from_robot_with_gravity(&world, robot, Vec3::ZERO).expect("model");
+        let q = vec![0.0; 6];
+        let linear = Vec3::new(0.3, -0.2, 0.1);
+        let angular = Vec3::new(0.2, 0.4, -0.3);
+        let qd = vec![
+            linear.x, linear.y, linear.z, angular.x, angular.y, angular.z,
+        ];
+
+        // With no external wrench, a free rigid body obeys
+        //   m (dv/dt + w x v) = 0            => dv/dt = -w x v
+        //   I dw/dt + w x (I w) = 0          => dw/dt = -I^-1 (w x I w)
+        let qdd = forward_dynamics(&model, &q, &qd, &[0.0; 6]).expect("forward dynamics");
+        let inertia = Vec3::new(tensor[0], tensor[1], tensor[2]);
+        let angular_momentum = Vec3::new(
+            inertia.x * angular.x,
+            inertia.y * angular.y,
+            inertia.z * angular.z,
+        );
+        let couple = angular.cross(angular_momentum);
+        let expected_linear = -angular.cross(linear);
+        let expected_angular = -Vec3::new(
+            couple.x / inertia.x,
+            couple.y / inertia.y,
+            couple.z / inertia.z,
+        );
+        for row in 0..3 {
+            assert_relative_eq!(qdd[row], expected_linear.to_array()[row], epsilon = 1.0e-10);
+            assert_relative_eq!(
+                qdd[3 + row],
+                expected_angular.to_array()[row],
+                epsilon = 1.0e-10
+            );
+        }
+    }
+
     #[test]
     fn double_pendulum_forward_dynamics_conserves_energy() {
         let (world, robot) = two_link_world(1.0, 1.0, 0.5, 0.5);

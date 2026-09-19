@@ -12,11 +12,12 @@
 //!   upright but does not transport continuously, because all four point
 //!   contacts stay no-slip and the swing feet never lift.
 //! - `rne_dynamics::base_velocity_map` documents the generalized base velocity
-//!   as the body-frame twist. Feeding that correct twist (or the world/negated
-//!   variants) into the WBC destabilizes the stance, so the base velocity is
-//!   left at zero: this is a `rne_wbc` robustness gap, not a frame bug. The
-//!   CoM/attitude tasks fail for the same reason, since they need the base
-//!   velocity to damp.
+//!   as the body-frame twist, and `rne_dynamics` tests verify it (link-motion /
+//!   Jacobian and free-body Newton-Euler consistency). Feeding that correct
+//!   twist (or the world/negated variants) still destabilizes the stance, so the
+//!   base velocity is left at zero: the gap is in `rne_wbc`'s contact/bias
+//!   consistency, not a frame bug. The CoM/attitude tasks fail for the same
+//!   reason, since they need the base velocity to damp.
 //!
 //! Knobs: `RNE_WBC_HZ` (plant rate, default 240), `RNE_QD_MODE` (0 zero base,
 //! 1 world twist, 2 body twist, 3/4 their negations), `RNE_QD_SCALE`

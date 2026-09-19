@@ -75,13 +75,19 @@ masses) and drives it with `rne_wbc` torques. Findings:
   transient (0.059 m) that does not accumulate: this is stable WBC stance, not
   continuous walking.
 - `rne_dynamics::base_velocity_map` documents the generalized base velocity as
-  the **body-frame twist** (body linear and angular velocity). Feeding that
-  correct twist into `qd` still destabilizes the otherwise stable 240 Hz stance,
-  as do the world-twist and negated variants; `qd` base is therefore left at
-  zero. The residual base velocity after the stance settle is only `~5e-4 m/s`,
-  so this is a `rne_wbc` robustness gap with nonzero base velocity (Coriolis /
-  bias handling), not a frame-convention bug. The CoM and attitude tasks fail for
-  the same reason: both need the base velocity to damp.
+  the **body-frame twist** (body linear and angular velocity). Two new
+  `rne_dynamics` tests verify that convention with a nonzero base twist:
+  `floating_base_link_motions_match_frame_jacobian` checks `frame_jacobian * qd`
+  and `com_jacobian * qd` against `link_motions`, and
+  `free_floating_body_matches_newton_euler` checks `forward_dynamics` against the
+  analytic Newton-Euler free-body equations. Both pass, so the base velocity
+  propagation and Coriolis handling in `rne_dynamics` are correct.
+- Feeding the correct body twist into `qd` still destabilizes the otherwise
+  stable 240 Hz stance — as do the world-twist and negated variants, and even a
+  25% scale — while the residual settled base velocity is only `~5e-4 m/s`. The
+  blocker is therefore in `rne_wbc`'s contact/bias consistency with a nonzero
+  base velocity, not in `rne_dynamics`. The CoM and attitude tasks fail for the
+  same reason: both need the base velocity to damp.
 - Stance-only contacts transport farther (`~0.10 m`) but topple.
 
 The next step is to harden `rne_wbc` for a nonzero body-twist base velocity

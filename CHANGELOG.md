@@ -45,9 +45,11 @@ All notable changes to Robot Native Engine are documented in this file.
   posture-only `rne_wbc` solve holds an upright stance and stays upright on the
   scripted trot, but all four point contacts stay no-slip so the forward motion
   is a one-off transient rather than continuous walking. The generalized base
-  velocity is the body-frame twist (`rne_dynamics::base_velocity_map`), but
-  feeding that correct twist into the WBC — or enabling the CoM/attitude task —
-  destabilizes the stance, a `rne_wbc` robustness gap with nonzero base velocity.
+  velocity is the body-frame twist (`rne_dynamics::base_velocity_map`), verified
+  by the new `floating_base_link_motions_match_frame_jacobian` and
+  `free_floating_body_matches_newton_euler` dynamics tests; feeding that correct
+  twist into the WBC — or enabling the CoM/attitude task — still destabilizes
+  the stance, isolating a `rne_wbc` contact/bias gap with nonzero base velocity.
   New
   `assets/robots/unitree_go2_declared.rne.robot.toml` and its scene opt the Go2
   into URDF-declared inertial masses, ruling out scene/URDF mass mismatch as the
