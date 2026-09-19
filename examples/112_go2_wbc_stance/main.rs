@@ -18,7 +18,8 @@
 //! 1 world twist, 2 body twist, 3/4 their negations), `RNE_QD_SCALE`
 //! (fraction of the base velocity fed to the WBC), `RNE_WALK_STEPS`,
 //! `RNE_STRIDE`, `RNE_LIFT`, `RNE_POSTURE_KP`/`RNE_POSTURE_KD`,
-//! `RNE_COM_KP`/`RNE_COM_KD`, `RNE_ATT_KP`/`RNE_ATT_KD`; flags `--walk`,
+//! `RNE_COM_KP`/`RNE_COM_KD`, `RNE_ATT_KP`/`RNE_ATT_KD`,
+//! `RNE_CONTACT_WEIGHT`, `RNE_TORQUE_FILTER`; flags `--walk`,
 //! `--stance-contacts`, `--force-com`, `--force-att`, `--hybrid`.
 //!
 //! Run with `cargo run -p go2_wbc_stance --example 112_go2_wbc_stance`.
@@ -242,6 +243,8 @@ fn run(
     } else {
         RUN_STEPS
     };
+    let torque_filter = env_f64("RNE_TORQUE_FILTER", 0.0).clamp(0.0, 0.999_999);
+    let mut held_torques = vec![0.0; model.joint_links.len()];
     for step in 0..iterations {
         let q = model.q(sim);
         let qd = model.qd(sim);
@@ -346,12 +349,16 @@ fn run(
                 Some(&posture),
             )
             .expect("wbc solve");
+        for (index, torque) in solution.joint_torque_nm.iter().enumerate() {
+            held_torques[index] =
+                torque_filter * held_torques[index] + (1.0 - torque_filter) * torque;
+        }
         let torques: Vec<rne_ai::UrdfJointTorqueTarget<'_>> = model
             .joint_links
             .iter()
-            .zip(&solution.joint_torque_nm)
-            .filter(|(link, _)| !hybrid || link.ends_with("_thigh"))
-            .map(|(link, torque)| {
+            .enumerate()
+            .filter(|(_, link)| !hybrid || link.ends_with("_thigh"))
+            .map(|(index, link)| {
                 let supplement = if hybrid_pd && link.ends_with("_thigh") {
                     let dof = model
                         .joint_links
@@ -364,7 +371,7 @@ fn run(
                 };
                 rne_ai::UrdfJointTorqueTarget {
                     link_name: link.as_str(),
-                    torque_nm: *torque + supplement,
+                    torque_nm: held_torques[index] + supplement,
                     max_velocity_rad_s: 30.1,
                 }
             })

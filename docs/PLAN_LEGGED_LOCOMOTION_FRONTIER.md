@@ -96,10 +96,19 @@ masses) and drives it with `rne_wbc` torques. Findings:
 - **Remaining gap: the contact model.** The WBC assumes rigid point contacts at
   `foot_link + (0, 0, -0.02)`, while the plant is Rapier's soft/penalty solver on
   a radius-0.022 foot sphere. Under motion those are not the same contact, so the
-  planned wrenches are not realised. The next step is either to feed the plant's
-  measured contact wrenches back into the WBC, to add contact compliance, or to
-  reduce the task bandwidth until the WBC stays inside the plant's contact
-  model — before retrying CoM/attitude tasks and the contact schedule.
+  planned wrenches are not realised.
+- **Bandwidth and compliance tuning did not close it (measured).** On the
+  corrected model the posture-only 240 Hz stance still tips regardless of posture
+  gain (`1..100`), and a first-order torque filter (`0..0.95`), a lowered
+  `contact_weight` (`1e6..1`), or an attitude task of either sign (gain
+  `5..300`) do not recover a stable stance — the best combinations only delay the
+  tilt. So the gap is not task bandwidth; it is the rigid-point-vs-soft-contact
+  mismatch itself.
+- The next step is to feed the plant's measured contact wrenches back into the
+  WBC (which needs a directional contact-force API; the current
+  `link_contact_impulse_ns` is scalar) or to give the WBC an explicit contact
+  compliance that matches Rapier's, before retrying CoM/attitude tasks and the
+  contact schedule.
 
 ### Theme A.1 — WBC stance on the corrected model (active)
 
