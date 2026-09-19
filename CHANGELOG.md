@@ -51,7 +51,10 @@ All notable changes to Robot Native Engine are documented in this file.
   under a nonzero body twist), `free_floating_body_matches_newton_euler`
   (`forward_dynamics` vs the analytic free-body equations), and
   `floating_base_point_bias_acceleration_matches_finite_difference` (the bias
-  acceleration vs a central difference of the point velocity).
+  acceleration vs a central difference of the point velocity). A new `rne_wbc`
+  test, `solution_matches_constrained_forward_dynamics_with_base_velocity`,
+  validates the controller's core solve against
+  `rne_dynamics::constrained_forward_dynamics` with a nonzero base twist.
 
 ### Fixed
 

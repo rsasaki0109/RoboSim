@@ -87,12 +87,21 @@ masses) and drives it with `rne_wbc` torques. Findings:
   of posture gains or solver regularization. The earlier "240 Hz stable stance"
   result is retracted: the WBC was tuned against buggy dynamics.
 
-The next step is to re-derive the `rne_wbc` stance on the corrected
-`point_bias_acceleration`, starting from the now-exact contact-bias constraints
-and the 240 Hz fixed-delta plant, before retrying CoM/attitude tasks and the
-contact schedule.
+- **The WBC core is validated on the corrected model.** A new `rne_wbc` test,
+  `solution_matches_constrained_forward_dynamics_with_base_velocity`, shows that
+  with no task competing the weighted-least-squares solve reproduces
+  `rne_dynamics::constrained_forward_dynamics` acceleration exactly, including a
+  nonzero base twist. The formulation is self-consistent, so the remaining
+  divergence is a model-vs-plant gap.
+- **Remaining gap: the contact model.** The WBC assumes rigid point contacts at
+  `foot_link + (0, 0, -0.02)`, while the plant is Rapier's soft/penalty solver on
+  a radius-0.022 foot sphere. Under motion those are not the same contact, so the
+  planned wrenches are not realised. The next step is either to feed the plant's
+  measured contact wrenches back into the WBC, to add contact compliance, or to
+  reduce the task bandwidth until the WBC stays inside the plant's contact
+  model — before retrying CoM/attitude tasks and the contact schedule.
 
-### Theme A.1 — WBC re-derivation on corrected bias (active)
+### Theme A.1 — WBC stance on the corrected model (active)
 
 ### Theme B — contact-schedule redesign above the joint targets (active)
 

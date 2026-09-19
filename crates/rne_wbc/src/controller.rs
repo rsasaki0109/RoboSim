@@ -939,6 +939,55 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn solution_matches_constrained_forward_dynamics_with_base_velocity() {
+        let (_world, model, base) = floating_body();
+        let contacts = vec![
+            ContactPoint::new(base, Vec3::new(0.1, -0.2, 0.1), 0.8),
+            ContactPoint::new(base, Vec3::new(-0.1, -0.2, 0.1), 0.8),
+            ContactPoint::new(base, Vec3::new(0.0, -0.2, -0.1), 0.8),
+        ];
+        let controller = WholeBodyController::new(WholeBodyConfig::default());
+        // A nonzero base twist exercises the Coriolis/bias terms.
+        let q = [0.05, -0.02, 0.03, 0.01, -0.02, 0.015];
+        let qd = [0.1, -0.05, 0.02, 0.03, -0.02, 0.04];
+        // No task competes with the dynamics/contact rows, so the weighted least
+        // squares must reproduce the exact constrained KKT solution.
+        let solution = controller
+            .solve(&model, &q, &qd, &contacts, None, None, None)
+            .expect("solve");
+
+        let specs: Vec<rne_dynamics::ContactSpec> = contacts
+            .iter()
+            .map(|contact| rne_dynamics::ContactSpec {
+                link: contact.link,
+                point_local_m: contact.point_local_m,
+            })
+            .collect();
+        let (qdd, _forces) = rne_dynamics::constrained_forward_dynamics(
+            &model,
+            &q,
+            &qd,
+            &vec![0.0; model.nv()],
+            &specs,
+        )
+        .expect("constrained dynamics");
+
+        // The contact constraints pin the acceleration, so the WBC solve must
+        // reproduce the constrained-dynamics acceleration even with a nonzero
+        // base twist. (The individual contact forces are not unique for an
+        // over-constrained point set, so they are not compared here.)
+        for index in 0..model.nv() {
+            assert_relative_eq!(
+                solution.joint_acceleration[index],
+                qdd[index],
+                epsilon = 1.0e-4,
+                max_relative = 1.0e-4
+            );
+        }
+    }
+
+    #[test]
     fn rejects_fixed_base_and_empty_contacts() {
         let (_world, model, base) = floating_body();
         let controller = WholeBodyController::new(WholeBodyConfig::default());
