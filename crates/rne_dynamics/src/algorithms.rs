@@ -463,6 +463,52 @@ pub fn com_jacobian(model: &ArticulatedModel, q: &[f64]) -> Result<DenseMatrix, 
     Ok(jacobian)
 }
 
+/// Centroidal momentum `[linear; angular]` in world coordinates.
+///
+/// The linear part is `M * v_com`; the angular part is taken about the whole-body
+/// center of mass. During a flight phase (no external wrench) the angular part
+/// is conserved, so it is the natural quantity for shaping an aerial rotation
+/// such as a flip.
+pub fn centroidal_momentum(
+    model: &ArticulatedModel,
+    q: &[f64],
+    qd: &[f64],
+) -> Result<SpatialVec, DynamicsError> {
+    validate(model, q, "q")?;
+    validate(model, qd, "qd")?;
+
+    let motions = link_motions(model, q, qd)?;
+    let com = center_of_mass(model, q)?;
+    let mut linear = Vec3::ZERO;
+    let mut angular_about_origin = Vec3::ZERO;
+    for (index, motion) in motions.iter().enumerate() {
+        let Some(inertia) = model.link_inertia(index) else {
+            continue;
+        };
+        if inertia.mass_kg == 0.0 {
+            continue;
+        }
+        let offset = motion.world_transform.rotation * inertia.center_of_mass_m;
+        let com_world = motion.world_transform.translation + offset;
+        let velocity =
+            motion.linear_velocity_world_m_s + motion.angular_velocity_world_rad_s.cross(offset);
+        let momentum = velocity * inertia.mass_kg;
+        linear += momentum;
+        let rotation = crate::spatial::rotation_matrix(motion.world_transform.rotation);
+        let inertia_world = crate::spatial::mat3_mul(
+            &crate::spatial::mat3_mul(&rotation, &inertia.inertia_about_com_kg_m2),
+            &crate::spatial::mat3_transpose(&rotation),
+        );
+        angular_about_origin += com_world.cross(momentum)
+            + crate::spatial::mat3_mul_vec(&inertia_world, motion.angular_velocity_world_rad_s);
+    }
+    // Shift the angular momentum from the world origin to the center of mass.
+    let angular = angular_about_origin - com.cross(linear);
+    Ok([
+        linear.x, linear.y, linear.z, angular.x, angular.y, angular.z,
+    ])
+}
+
 /// World-frame motion and bias acceleration of one link at state `(q, qd)`.
 ///
 /// The linear and angular accelerations are the *bias* accelerations, i.e. the
@@ -1197,6 +1243,46 @@ mod tests {
                     max_relative = 1.0e-5
                 );
             }
+        }
+    }
+
+    #[test]
+    fn floating_body_centroidal_momentum_matches_hand_derivation() {
+        let mass = 3.0;
+        let com = Vec3::new(0.1, -0.2, 0.3);
+        let tensor = [0.4, 0.5, 0.6];
+        let (world, robot) = floating_body_world(mass, com, tensor);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let angular_velocity = Vec3::new(0.3, -0.2, 0.1);
+        let qd = [
+            0.0,
+            0.0,
+            0.0,
+            angular_velocity.x,
+            angular_velocity.y,
+            angular_velocity.z,
+        ];
+        let momentum = centroidal_momentum(&model, &[0.0; 6], &qd).expect("momentum");
+
+        // With the origin at rest, the CoM velocity is `omega x com`, and the
+        // angular momentum about the CoM is `I_com * omega`.
+        let expected_linear = angular_velocity.cross(com) * mass;
+        let expected_angular = Vec3::new(
+            tensor[0] * angular_velocity.x,
+            tensor[1] * angular_velocity.y,
+            tensor[2] * angular_velocity.z,
+        );
+        for row in 0..3 {
+            assert_relative_eq!(
+                momentum[row],
+                expected_linear.to_array()[row],
+                epsilon = 1.0e-10
+            );
+            assert_relative_eq!(
+                momentum[3 + row],
+                expected_angular.to_array()[row],
+                epsilon = 1.0e-10
+            );
         }
     }
 
