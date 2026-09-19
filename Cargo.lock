@@ -1425,7 +1425,12 @@ dependencies = [
 name = "g1_walk"
 version = "0.1.0"
 dependencies = [
+ "image",
+ "png",
  "rne_ai",
+ "rne_math",
+ "rne_render",
+ "rne_render_wgpu",
 ]
 
 [[package]]

@@ -32,10 +32,12 @@ All notable changes to Robot Native Engine are documented in this file.
   The Go2 forward trot runs headless (and `--gif` captures
   `docs/media/unitree-go2-walk.gif`) and asserts transport, straightness, and an
   upright body; the G1 example runs the validated commanded gait at a pure
-  forward command and asserts no fall, height/tilt bounds, the torque ceiling,
-  ground coverage, and exact replay. Both are added to the headless CI smoke
-  set, and the Go2 trot regression is strengthened from a 120-step translation
-  smoke to a 600-step forward/straightness/determinism contract.
+  forward command (its `--gif` captures `docs/media/unitree-g1-walk.gif` from
+  the contact-gated hybrid plant) and asserts no fall, height/tilt bounds, the
+  torque ceiling, ground coverage, and exact replay. Both are added to the
+  headless CI smoke set, and the Go2 trot regression is strengthened from a
+  120-step translation smoke to a 600-step forward/straightness/determinism
+  contract.
 
 - `rne_mobility_benchmark` combined suspension-and-tire identification
   application (`identified_suspension_tire`): fits one suspension
