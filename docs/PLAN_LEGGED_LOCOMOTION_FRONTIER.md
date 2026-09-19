@@ -84,10 +84,19 @@ masses) and drives it with `rne_wbc` torques. Findings:
   propagation and Coriolis handling in `rne_dynamics` are correct.
 - Feeding the correct body twist into `qd` still destabilizes the otherwise
   stable 240 Hz stance — as do the world-twist and negated variants, and even a
-  25% scale — while the residual settled base velocity is only `~5e-4 m/s`. The
-  blocker is therefore in `rne_wbc`'s contact/bias consistency with a nonzero
-  base velocity, not in `rne_dynamics`. The CoM and attitude tasks fail for the
-  same reason: both need the base velocity to damp.
+  25% scale — while the residual settled base velocity is only `~5e-4 m/s`. At
+  the first tick the two configurations produce identical torques and contact
+  forces, so the divergence is a closed-loop term, not the initial solve.
+- **Candidate cause: the base acceleration chart mismatch.** `rne_dynamics`
+  works in body/spatial coordinates (RNEA and `base_velocity_map`), while the
+  plant integrates the minimal `(translation, rpy)` chart. There is no
+  acceleration-side counterpart to `base_velocity_map` (it is private and only
+  used by `frame_jacobian`), so the velocity-dependent part of the spatial→chart
+  acceleration map is not represented anywhere. This is consistent with the
+  stance being stable only when `qd` base is zero, but it is a hypothesis, not
+  yet a measured proof: the next step is a test that compares a spatial-`qdd`
+  rollout against the plant's chart rollout, and then a dynamics-level helper
+  (or a WBC that solves in chart coordinates) if confirmed.
 - Stance-only contacts transport farther (`~0.10 m`) but topple.
 
 The next step is to harden `rne_wbc` for a nonzero body-twist base velocity

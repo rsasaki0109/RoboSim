@@ -15,9 +15,10 @@
 //!   as the body-frame twist, and `rne_dynamics` tests verify it (link-motion /
 //!   Jacobian and free-body Newton-Euler consistency). Feeding that correct
 //!   twist (or the world/negated variants) still destabilizes the stance, so the
-//!   base velocity is left at zero: the gap is in `rne_wbc`'s contact/bias
-//!   consistency, not a frame bug. The CoM/attitude tasks fail for the same
-//!   reason, since they need the base velocity to damp.
+//!   base velocity is left at zero. The first tick is identical between the two,
+//!   so the divergence is a closed-loop term; a candidate cause is the missing
+//!   spatial→chart base-acceleration map. The CoM/attitude tasks fail for the
+//!   same reason, since they need the base velocity to damp.
 //!
 //! Knobs: `RNE_WBC_HZ` (plant rate, default 240), `RNE_QD_MODE` (0 zero base,
 //! 1 world twist, 2 body twist, 3/4 their negations), `RNE_QD_SCALE`
@@ -222,6 +223,11 @@ fn run(
         com_weight,
         posture_weight,
         angular_weight: 1.0e4,
+        contact_weight: env_f64("RNE_CONTACT_WEIGHT", 1.0e6),
+        dynamics_weight: env_f64("RNE_DYNAMICS_WEIGHT", 1.0e6),
+        force_regularization: env_f64("RNE_FORCE_REG", 1.0e-4),
+        acceleration_regularization: env_f64("RNE_ACCEL_REG", 1.0e-4),
+        solver_regularization: env_f64("RNE_SOLVER_REG", 1.0e-9),
         torque_limits_nm: Some(vec![TORQUE_LIMIT_NM; model.joint_links.len()]),
         ..WholeBodyConfig::default()
     });
@@ -369,6 +375,27 @@ fn run(
                 }
             })
             .collect();
+        if std::env::var("RNE_WBC_TRACE").is_ok() && step == 0 {
+            let max_torque = solution
+                .joint_torque_nm
+                .iter()
+                .fold(0.0_f64, |value, torque| value.max(torque.abs()));
+            let f_y: f64 = solution
+                .contact_forces_world_n
+                .iter()
+                .map(|force| force.y)
+                .sum();
+            let base_residual = solution
+                .base_wrench_residual
+                .iter()
+                .map(|value| value * value)
+                .sum::<f64>()
+                .sqrt();
+            println!(
+                "  step0: max_tau={max_torque:.3} f_y={f_y:.2} base_res={base_residual:.2e} qd0=({:.4},{:.4},{:.4})",
+                qd[0], qd[1], qd[2]
+            );
+        }
         sim.step_joint_torques(&torques);
 
         let observation = sim.observe();

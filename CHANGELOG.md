@@ -49,8 +49,10 @@ All notable changes to Robot Native Engine are documented in this file.
   by the new `floating_base_link_motions_match_frame_jacobian` and
   `free_floating_body_matches_newton_euler` dynamics tests; feeding that correct
   twist into the WBC — or enabling the CoM/attitude task — still destabilizes
-  the stance, isolating a `rne_wbc` contact/bias gap with nonzero base velocity.
-  New
+  the stance. The first tick is identical with and without the base velocity, so
+  the divergence is a closed-loop term; a candidate cause is that the
+  spatial→chart base-acceleration map has no counterpart to
+  `base_velocity_map`. New
   `assets/robots/unitree_go2_declared.rne.robot.toml` and its scene opt the Go2
   into URDF-declared inertial masses, ruling out scene/URDF mass mismatch as the
   cause of the earlier divergence.
