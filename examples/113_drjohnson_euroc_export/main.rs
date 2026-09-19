@@ -38,8 +38,52 @@ const CLEAR_COLOR: [f32; 4] = [0.05, 0.06, 0.08, 1.0];
 // Fixed overview camera (third-person "sute-kame") for demo videos.
 const FIXED_PERIOD_STEPS: u64 = 6;
 const FIXED_FOV_Y_RAD: f64 = 0.9;
-const FIXED_POS: [f64; 3] = [-1.2, 1.4, -2.9];
-const FIXED_TARGET: [f64; 3] = [-2.2, 0.3, -4.4];
+const FIXED_POS: [f64; 3] = [-1.2, 1.5, -2.9];
+const FIXED_TARGET: [f64; 3] = [-2.0, 0.2, -4.0];
+// Closed waypoint route (RNE world x,z): a ~1.4x1.2 m rounded rectangle over
+// the open rug, giving longer translation + 4 corners (VIO excitation) and
+// frequent revisit (map matching) while staying in the clean camera view.
+const WAYPOINTS: &[[f64; 2]] = &[
+    [-1.2, -4.5],
+    [-1.0, -3.2],
+    [-2.0, -2.9],
+    [-3.0, -3.3],
+    [-2.9, -4.5],
+    [-2.0, -4.8],
+];
+const WAYPOINT_REACHED_M: f64 = 0.35;
+const DRIVE_FORWARD_RAD_S: f64 = 4.0;
+const DRIVE_TURN_GAIN: f64 = 4.0;
+const DRIVE_TURN_MAX_RAD_S: f64 = 4.0;
+
+/// Differential-drive waypoint follower. Returns wheel velocities.
+fn follow_route(
+    waypoint_index: &mut usize,
+    x: f64,
+    z: f64,
+    yaw: f64,
+) -> DiffDriveAction {
+    let target = WAYPOINTS[*waypoint_index % WAYPOINTS.len()];
+    let dx = target[0] - x;
+    let dz = target[1] - z;
+    if (dx * dx + dz * dz).sqrt() < WAYPOINT_REACHED_M {
+        *waypoint_index = (*waypoint_index + 1) % WAYPOINTS.len();
+    }
+    let target = WAYPOINTS[*waypoint_index % WAYPOINTS.len()];
+    let desired_yaw = (-(target[1] - z)).atan2(target[0] - x);
+    let mut error = desired_yaw - yaw;
+    while error > std::f64::consts::PI {
+        error -= std::f64::consts::TAU;
+    }
+    while error < -std::f64::consts::PI {
+        error += std::f64::consts::TAU;
+    }
+    let turn = (DRIVE_TURN_GAIN * error).clamp(-DRIVE_TURN_MAX_RAD_S, DRIVE_TURN_MAX_RAD_S);
+    DiffDriveAction {
+        left_velocity_rad_s: DRIVE_FORWARD_RAD_S - turn,
+        right_velocity_rad_s: DRIVE_FORWARD_RAD_S + turn,
+    }
+}
 
 /// Look-at view for an RNE camera (forward -Z, up +Y).
 fn fixed_view() -> Transform3 {
@@ -150,21 +194,37 @@ fn robot_preview(output: &Path) -> Result<(), Box<dyn Error>> {
 fn fixed_test(output: &Path) -> Result<(), Box<dyn Error>> {
     fs::create_dir_all(output)?;
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let scene_path = workspace.join("assets/scenes/drjohnson_nav.rne.scene.toml");
     let manifest =
         workspace.join("assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml");
+    let mut environment = DiffDriveEpisode::new(DiffDriveEpisodeConfig {
+        max_steps: MAX_STEPS,
+        goal_x_m: 1.0e9,
+        reward: DiffDriveRewardConfig::default(),
+        scene_path: Some(scene_path),
+        rng_seed: 7,
+        ..DiffDriveEpisodeConfig::default()
+    });
+    environment.reset();
+    let world = environment.simulation().world();
     let mut backend = WgpuRenderBackend::new()
         .map_err(|error| io::Error::other(format!("wgpu unavailable: {error}")))?;
     let splat_env = validate_gaussian_splat_manifest_with_override(&manifest, None)
         .map_err(|error| io::Error::other(format!("splat manifest: {error}")))?;
     let mut background = load_gaussian_splat_background(backend.device(), &splat_env)
         .map_err(|error| io::Error::other(format!("splat background: {error}")))?;
-    let hybrid = HybridRenderScene::new(splat_env, RenderScene::new());
+    let mut foreground = build_visual_render_scene(world);
+    foreground.items.retain(|item| {
+        let s = item.transform.scale;
+        s.x.max(s.y).max(s.z) < 2.0
+    });
+    let hybrid = HybridRenderScene::new(splat_env, foreground);
     let camera = Camera::new(CAMERA_WIDTH, CAMERA_HEIGHT, FIXED_FOV_Y_RAD);
     let candidates: &[([f64; 3], [f64; 3])] = &[
-        ([0.3, 2.0, -1.0], [-2.2, 0.3, -4.0]),
-        ([-0.5, 1.6, -2.0], [-2.2, 0.3, -4.0]),
-        ([-2.2, 1.8, -1.5], [-2.2, 0.3, -4.0]),
-        ([0.8, 2.5, 3.0], [0.8, 0.0, -0.7]),
+        ([-2.8, 2.6, 0.4], [-0.3, 0.1, -3.3]),
+        ([-3.0, 3.2, -0.6], [-0.3, 0.1, -3.3]),
+        ([-2.2, 3.0, 0.8], [-0.3, 0.1, -3.3]),
+        ([0.2, 3.0, -0.8], [-0.3, 0.1, -3.3]),
     ];
     for (index, (pos, target)) in candidates.iter().enumerate() {
         let dir = (Vec3::new(target[0], target[1], target[2])
@@ -252,6 +312,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if initial.is_done() {
         return Err(io::Error::other("episode ended during reset").into());
     }
+    let mut observation = initial.observation;
     let robot = *environment.simulation().robot();
     let mut backend = WgpuRenderBackend::new()
         .map_err(|error| io::Error::other(format!("wgpu unavailable: {error}")))?;
@@ -272,16 +333,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut frames = 0_u64;
     let mut imu_count = 0_u64;
 
+    let mut waypoint_index = 0_usize;
     for step in 0..MAX_STEPS {
-        // Small circle (~0.8 m diameter) around the calibrated spawn: stays on
-        // the open rug, clear of the table/chairs; gives translation + rotation
-        // (VIO) and frequent revisit (map matching).
-        let action = DiffDriveAction {
-            left_velocity_rad_s: 1.5,
-            right_velocity_rad_s: 5.4,
-        };
+        let action = follow_route(
+            &mut waypoint_index,
+            observation.base_x_m,
+            observation.base_z_m,
+            observation.base_yaw_rad,
+        );
         let result = environment.step(action);
-        let observation = result.observation;
+        observation = result.observation;
         let sim = environment.simulation();
         let timestamp_ns = sim.sim_time().ticks();
         let world = sim.world();
