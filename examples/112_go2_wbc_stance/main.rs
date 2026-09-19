@@ -402,22 +402,26 @@ fn run(
     )
 }
 
+fn make_sim(path: &std::path::Path, hz: f64) -> UrdfSceneSim {
+    if (hz - 60.0).abs() < f64::EPSILON {
+        UrdfSceneSim::from_scene_path(path).expect("load declared-mass Go2 scene")
+    } else {
+        UrdfSceneSim::from_scene_path_with_solver_iterations_and_fixed_delta(
+            path,
+            0,
+            rne_core::SimDuration::from_hertz(Hertz::new(hz)),
+        )
+        .expect("load declared-mass Go2 scene at fixed delta")
+    }
+}
+
 fn main() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(SCENE);
     let hz = std::env::var("RNE_WBC_HZ")
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(240.0);
-    let mut sim = if (hz - 60.0).abs() < f64::EPSILON {
-        UrdfSceneSim::from_scene_path(&path).expect("load declared-mass Go2 scene")
-    } else {
-        UrdfSceneSim::from_scene_path_with_solver_iterations_and_fixed_delta(
-            &path,
-            0,
-            rne_core::SimDuration::from_hertz(Hertz::new(hz)),
-        )
-        .expect("load declared-mass Go2 scene at fixed delta")
-    };
+    let mut sim = make_sim(&path, hz);
     println!("plant rate = {hz:.0} Hz");
     let model = Model::build(&mut sim);
     let mass: f64 = (0..model.articulated.link_count())
@@ -447,10 +451,11 @@ fn main() {
         return;
     }
 
-    let (min_h, max_tilt, final_y, _forward) = run(&mut sim, &model, false, 1.0, 1.0e5);
-    println!("hold : minH={min_h:.3} maxTilt={max_tilt:.3} finalY={final_y:.3}");
-
-    settle(&mut sim);
     let (min_h, max_tilt, final_y, _forward) = run(&mut sim, &model, true, 1.0, 1.0e5);
     println!("posture: minH={min_h:.3} maxTilt={max_tilt:.3} finalY={final_y:.3}");
+
+    let mut hold_sim = make_sim(&path, hz);
+    settle(&mut hold_sim);
+    let (min_h, max_tilt, final_y, _forward) = run(&mut hold_sim, &model, false, 1.0, 1.0e5);
+    println!("hold : minH={min_h:.3} maxTilt={max_tilt:.3} finalY={final_y:.3}");
 }
