@@ -1,0 +1,122 @@
+<?xml version="1.0"?>
+<!-- mesh_diff_drive with a sensor mast + stereo camera bar (visual only).
+     ROS Z-up convention (x forward, y left, z up); RNE converts on import.
+     The stereo baseline matches the navigation calibration (lenses at y=±0.03,
+     optical centers at x=0.20, z=0.35 in base frame). Physics/collision are
+     identical to mesh_diff_drive. -->
+<robot name="mesh_diff_drive_nav">
+  <material name="dark_gray">
+    <color rgba="0.15 0.15 0.17 1.0"/>
+  </material>
+  <material name="robot_blue">
+    <color rgba="0.20 0.35 0.75 1.0"/>
+  </material>
+  <material name="black">
+    <color rgba="0.05 0.05 0.06 1.0"/>
+  </material>
+  <material name="lens_blue">
+    <color rgba="0.05 0.10 0.30 1.0"/>
+  </material>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://mesh_diff_drive/meshes/base_link.stl" scale="1 1 1"/>
+      </geometry>
+      <material name="robot_blue"/>
+    </visual>
+    <visual>
+      <origin xyz="0.20 0 0.25" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.03 0.03 0.20"/>
+      </geometry>
+      <material name="dark_gray"/>
+    </visual>
+    <visual>
+      <origin xyz="0.20 0 0.35" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.17 0.04"/>
+      </geometry>
+      <material name="dark_gray"/>
+    </visual>
+    <visual>
+      <origin xyz="0.20 0.03 0.35" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.04 0.06 0.05"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.20 -0.03 0.35" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.04 0.06 0.05"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.2225 0.03 0.35" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.005 0.04 0.03"/>
+      </geometry>
+      <material name="lens_blue"/>
+    </visual>
+    <visual>
+      <origin xyz="0.2225 -0.03 0.35" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.005 0.04 0.03"/>
+      </geometry>
+      <material name="lens_blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.5 0.3 0.4"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="left_wheel">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.1" length="0.05"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.1" length="0.05"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="right_wheel">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.1" length="0.05"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.1" length="0.05"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="left_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="left_wheel"/>
+    <origin xyz="0 0.225 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <joint name="right_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="right_wheel"/>
+    <origin xyz="0 -0.225 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+</robot>

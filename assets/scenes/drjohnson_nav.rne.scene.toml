@@ -6,4 +6,4 @@ seed = 2026
 enabled = true
 
 [[robots]]
-path = "../robots/dataset_diff_drive_drjohnson.rne.robot.toml"
+path = "../robots/mesh_diff_drive_drjohnson.rne.robot.toml"
