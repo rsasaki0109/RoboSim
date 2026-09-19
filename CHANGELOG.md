@@ -39,6 +39,15 @@ All notable changes to Robot Native Engine are documented in this file.
   120-step translation smoke to a 600-step forward/straightness/determinism
   contract.
 
+- `examples/112_go2_wbc_stance` whole-body-control diagnostic on a
+  declared-inertial-mass Go2 scene. At a 240 Hz fixed-delta plant a posture-only
+  `rne_wbc` solve holds an upright stance and tracks the scripted trot for 5 s
+  without falling; the same configuration collapses at 60 Hz, and enabling the
+  CoM or attitude task destabilizes the solve at both rates. New
+  `assets/robots/unitree_go2_declared.rne.robot.toml` and its scene opt the Go2
+  into URDF-declared inertial masses, ruling out scene/URDF mass mismatch as the
+  cause of the earlier divergence.
+
 - `rne_mobility_benchmark` combined suspension-and-tire identification
   application (`identified_suspension_tire`): fits one suspension
   `SuspensionIdentificationDataset`, replays one `IdentifiedTireProfileEvidence`,

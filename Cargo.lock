@@ -1789,6 +1789,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "go2_wbc_stance"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "rne_ai",
+ "rne_core",
+ "rne_dynamics",
+ "rne_math",
+ "rne_robot",
+ "rne_wbc",
+]
+
+[[package]]
 name = "goal_conditioned_agent"
 version = "0.3.0"
 dependencies = [

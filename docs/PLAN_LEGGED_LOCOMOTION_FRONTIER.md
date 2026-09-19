@@ -57,10 +57,22 @@ proximal torque-PD stiffness does not stabilize and only diverges.
 A naive integer-tick substep of the legacy acceleration-based `JointMotor`
 gains destabilizes even the nominal walk (NaNs from two substeps up), so it is
 not a valid test of a higher-rate plant. The right test is a dedicated
-fixed-delta plant (e.g. `from_scene_path_with_solver_iterations_and_fixed_delta`
+fixed-delta plant (e.g., `from_scene_path_with_solver_iterations_and_fixed_delta`
 at 240 Hz) with its gains re-derived for that rate; that remains open and is
 not the current priority. Evidence: `G1_LOCOMOTION.md`, "The solver-margin
 hypothesis".
+
+**First result on the 240 Hz plant (example 112).** `go2_wbc_stance` loads a
+declared-inertial-mass Go2 scene (so the WBC model and the plant share the same
+masses) and drives it with `rne_wbc` torques. At 60 Hz every configuration
+collapses within 5 s, including a pure gravity hold, even though the same robot
+is stable under the position motors. At 240 Hz a posture-only WBC (no CoM and no
+attitude task) holds an upright stance (`minH` 0.226 m, tilt 0.05 rad) and
+tracks the scripted trot for 5 s without falling. Enabling the CoM task or the
+attitude task destabilizes the solve at both rates, and stance-only contacts
+transport farther but topple. This confirms the 60 Hz torque path as the primary
+wall and makes the 240 Hz posture-only plant the new baseline for the WBC
+campaign; the next step is a contact-consistent balance task on top of it.
 
 ### Theme B — contact-schedule redesign above the joint targets (active)
 
