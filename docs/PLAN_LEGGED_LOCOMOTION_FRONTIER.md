@@ -97,18 +97,19 @@ masses) and drives it with `rne_wbc` torques. Findings:
   `foot_link + (0, 0, -0.02)`, while the plant is Rapier's soft/penalty solver on
   a radius-0.022 foot sphere. Under motion those are not the same contact, so the
   planned wrenches are not realised.
-- **Bandwidth and compliance tuning did not close it (measured).** On the
-  corrected model the posture-only 240 Hz stance still tips regardless of posture
-  gain (`1..100`), and a first-order torque filter (`0..0.95`), a lowered
-  `contact_weight` (`1e6..1`), or an attitude task of either sign (gain
-  `5..300`) do not recover a stable stance — the best combinations only delay the
-  tilt. So the gap is not task bandwidth; it is the rigid-point-vs-soft-contact
-  mismatch itself.
+- **Opt-in contact compliance helps but does not close it.** `WholeBodyConfig`
+  gained `contact_compliance` (`J qdd + bias = compliance * f`), pinned by
+  `contact_compliance_relaxes_the_no_slip_constraint`. On the Go2 stance it cuts
+  the worst tilt from `2.88` to `1.27` rad at `compliance ~1e-4` (posture-only),
+  which is the first mechanism so far that moves the needle, but the stance still
+  tips within the 1 s run. Adding a CoM or attitude task on top makes it worse
+  again. Bandwidth knobs (posture gain `1..100`, torque filter `0..0.95`,
+  `contact_weight 1e6..1`) do not help.
 - The next step is to feed the plant's measured contact wrenches back into the
   WBC (which needs a directional contact-force API; the current
-  `link_contact_impulse_ns` is scalar) or to give the WBC an explicit contact
-  compliance that matches Rapier's, before retrying CoM/attitude tasks and the
-  contact schedule.
+  `link_contact_impulse_ns` is scalar) or to fit the compliance and damping to
+  Rapier's contact model, before retrying CoM/attitude tasks and the contact
+  schedule.
 
 ### Theme A.1 — WBC stance on the corrected model (active)
 

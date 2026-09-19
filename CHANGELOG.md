@@ -46,8 +46,10 @@ All notable changes to Robot Native Engine are documented in this file.
   torques at a configurable fixed-delta plant rate and reports the stance and
   trot boundary; at 60 Hz every configuration collapses, including pure gravity
   hold. On the corrected dynamics, posture/attitude gains, a torque filter, and a
-  lowered `contact_weight` do not recover a stable stance; the remaining gap is
-  the WBC's rigid point contacts versus Rapier's soft foot-sphere contacts.
+  lowered `contact_weight` do not recover a stable stance; the WBC's opt-in
+  `contact_compliance` cuts the worst tilt roughly in half but does not close the
+  gap, which is the mismatch between rigid point contacts and Rapier's soft
+  foot-sphere contacts.
 - Three `rne_dynamics` floating-base velocity tests:
   `floating_base_link_motions_match_frame_jacobian` (Jacobians vs `link_motions`
   under a nonzero body twist), `free_floating_body_matches_newton_euler`

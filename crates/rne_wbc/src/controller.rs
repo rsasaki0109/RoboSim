@@ -59,6 +59,12 @@ pub struct WholeBodyConfig {
     pub dynamics_weight: f64,
     /// Weight on the contact no-slip rows.
     pub contact_weight: f64,
+    /// Contact compliance in meters per newton: the no-slip row is relaxed to
+    /// `J qdd + bias = compliance * f`, so a contact point accelerates slightly
+    /// under load. A value of zero (the default) enforces rigid point contacts.
+    /// A small positive value lets the solver match a soft/penalty plant such as
+    /// Rapier's.
+    pub contact_compliance: f64,
     /// Weight on the center-of-mass task.
     pub com_weight: f64,
     /// Weight on the posture task.
@@ -87,6 +93,7 @@ impl Default for WholeBodyConfig {
         Self {
             dynamics_weight: 1.0e6,
             contact_weight: 1.0e6,
+            contact_compliance: 0.0,
             com_weight: 1.0e2,
             posture_weight: 1.0,
             angular_weight: 1.0e4,
@@ -327,6 +334,8 @@ impl WholeBodyController {
             for component in 0..3 {
                 let mut coefficients = vec![0.0; cols];
                 coefficients[..nv].copy_from_slice(&jacobian[component]);
+                // Soft contacts: `J qdd + bias = compliance * f`.
+                coefficients[nv + 3 * contact + component] = -self.config.contact_compliance;
                 let target = -contact_bias[contact].to_array()[component];
                 push_row(&mut rows, &mut rhs, coefficients, target, contact_scale);
             }
@@ -985,6 +994,55 @@ mod tests {
                 max_relative = 1.0e-4
             );
         }
+    }
+
+    #[test]
+    fn contact_compliance_relaxes_the_no_slip_constraint() {
+        let (_world, model, base) = floating_body();
+        let contacts = vec![
+            ContactPoint::new(base, Vec3::new(0.1, -0.2, 0.0), 0.8),
+            ContactPoint::new(base, Vec3::new(-0.1, -0.2, 0.0), 0.8),
+        ];
+        let solve = |compliance: f64| {
+            WholeBodyController::new(WholeBodyConfig {
+                contact_compliance: compliance,
+                ..WholeBodyConfig::default()
+            })
+            .solve(
+                &model,
+                &[0.0; 6],
+                &[0.0; 6],
+                &contacts,
+                Some(&ComTask::hold(Vec3::ZERO)),
+                None,
+                None,
+            )
+            .expect("solve")
+        };
+        let rigid = solve(0.0);
+        let soft = solve(1.0e-4);
+
+        let worst = |solution: &WholeBodySolution| {
+            solution
+                .contact_acceleration_residual_m_s2
+                .iter()
+                .fold(0.0_f64, |value, residual| value.max(residual.abs()))
+        };
+        assert!(worst(&rigid) < 1.0e-3, "rigid residual {}", worst(&rigid));
+        assert!(
+            worst(&soft) > 10.0 * worst(&rigid).max(1.0e-9),
+            "compliance should allow a contact acceleration: rigid {} soft {}",
+            worst(&rigid),
+            worst(&soft)
+        );
+        let total = |solution: &WholeBodySolution| {
+            solution
+                .contact_forces_world_n
+                .iter()
+                .map(|force| force.y)
+                .sum::<f64>()
+        };
+        assert_relative_eq!(total(&rigid), total(&soft), epsilon = 1.0);
     }
 
     #[test]

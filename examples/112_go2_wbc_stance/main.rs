@@ -19,7 +19,8 @@
 //! (fraction of the base velocity fed to the WBC), `RNE_WALK_STEPS`,
 //! `RNE_STRIDE`, `RNE_LIFT`, `RNE_POSTURE_KP`/`RNE_POSTURE_KD`,
 //! `RNE_COM_KP`/`RNE_COM_KD`, `RNE_ATT_KP`/`RNE_ATT_KD`,
-//! `RNE_CONTACT_WEIGHT`, `RNE_TORQUE_FILTER`; flags `--walk`,
+//! `RNE_CONTACT_WEIGHT`, `RNE_CONTACT_COMPLIANCE`, `RNE_TORQUE_FILTER`;
+//! flags `--walk`,
 //! `--stance-contacts`, `--force-com`, `--force-att`, `--hybrid`.
 //!
 //! Run with `cargo run -p go2_wbc_stance --example 112_go2_wbc_stance`.
@@ -219,6 +220,7 @@ fn run(
         posture_weight,
         angular_weight: 1.0e4,
         contact_weight: env_f64("RNE_CONTACT_WEIGHT", 1.0e6),
+        contact_compliance: env_f64("RNE_CONTACT_COMPLIANCE", 0.0),
         dynamics_weight: env_f64("RNE_DYNAMICS_WEIGHT", 1.0e6),
         force_regularization: env_f64("RNE_FORCE_REG", 1.0e-4),
         acceleration_regularization: env_f64("RNE_ACCEL_REG", 1.0e-4),
