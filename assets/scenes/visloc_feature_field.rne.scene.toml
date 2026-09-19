@@ -1,0 +1,4024 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 2026
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/dataset_diff_drive.rne.robot.toml"
+
+[[objects]]
+name = "floor_0"
+translation_m = [-0.091, 0.004, -1.999]
+visual = { shape = "box", size_m = [0.446, 0.008, 0.446], color_rgba = [0.1424, 0.1424, 0.1396, 1.0] }
+
+[[objects]]
+name = "floor_1"
+translation_m = [-0.066, 0.004, -1.476]
+visual = { shape = "box", size_m = [0.45, 0.008, 0.45], color_rgba = [0.543, 0.543, 0.5321, 1.0] }
+
+[[objects]]
+name = "floor_2"
+translation_m = [0.055, 0.004, -0.936]
+visual = { shape = "box", size_m = [0.468, 0.008, 0.468], color_rgba = [0.2659, 0.2659, 0.2606, 1.0] }
+
+[[objects]]
+name = "floor_3"
+translation_m = [0.027, 0.004, -0.593]
+visual = { shape = "box", size_m = [0.474, 0.008, 0.474], color_rgba = [0.7833, 0.7833, 0.7676, 1.0] }
+
+[[objects]]
+name = "floor_4"
+translation_m = [0.044, 0.004, 0.043]
+visual = { shape = "box", size_m = [0.419, 0.008, 0.419], color_rgba = [0.9319, 0.9319, 0.9133, 1.0] }
+
+[[objects]]
+name = "floor_5"
+translation_m = [0.103, 0.004, 0.573]
+visual = { shape = "box", size_m = [0.49, 0.008, 0.49], color_rgba = [0.1187, 0.1187, 0.1163, 1.0] }
+
+[[objects]]
+name = "floor_6"
+translation_m = [-0.038, 0.004, 1.014]
+visual = { shape = "box", size_m = [0.426, 0.008, 0.426], color_rgba = [0.8388, 0.8388, 0.822, 1.0] }
+
+[[objects]]
+name = "floor_7"
+translation_m = [0.049, 0.004, 1.519]
+visual = { shape = "box", size_m = [0.402, 0.008, 0.402], color_rgba = [0.3772, 0.3772, 0.3697, 1.0] }
+
+[[objects]]
+name = "floor_8"
+translation_m = [-0.019, 0.004, 1.976]
+visual = { shape = "box", size_m = [0.453, 0.008, 0.453], color_rgba = [0.1548, 0.1548, 0.1517, 1.0] }
+
+[[objects]]
+name = "floor_9"
+translation_m = [0.502, 0.004, -1.94]
+visual = { shape = "box", size_m = [0.454, 0.008, 0.454], color_rgba = [0.8751, 0.8751, 0.8576, 1.0] }
+
+[[objects]]
+name = "floor_10"
+translation_m = [0.442, 0.004, -1.519]
+visual = { shape = "box", size_m = [0.483, 0.008, 0.483], color_rgba = [0.5162, 0.5162, 0.5059, 1.0] }
+
+[[objects]]
+name = "floor_11"
+translation_m = [0.386, 0.004, -1.066]
+visual = { shape = "box", size_m = [0.412, 0.008, 0.412], color_rgba = [0.6842, 0.6842, 0.6705, 1.0] }
+
+[[objects]]
+name = "floor_12"
+translation_m = [0.593, 0.004, -0.595]
+visual = { shape = "box", size_m = [0.456, 0.008, 0.456], color_rgba = [0.4839, 0.4839, 0.4742, 1.0] }
+
+[[objects]]
+name = "floor_13"
+translation_m = [0.435, 0.004, 0.093]
+visual = { shape = "box", size_m = [0.456, 0.008, 0.456], color_rgba = [0.4725, 0.4725, 0.463, 1.0] }
+
+[[objects]]
+name = "floor_14"
+translation_m = [0.603, 0.004, 0.617]
+visual = { shape = "box", size_m = [0.449, 0.008, 0.449], color_rgba = [0.6528, 0.6528, 0.6397, 1.0] }
+
+[[objects]]
+name = "floor_15"
+translation_m = [0.454, 0.004, 1.072]
+visual = { shape = "box", size_m = [0.445, 0.008, 0.445], color_rgba = [0.846, 0.846, 0.8291, 1.0] }
+
+[[objects]]
+name = "floor_16"
+translation_m = [0.484, 0.004, 1.451]
+visual = { shape = "box", size_m = [0.424, 0.008, 0.424], color_rgba = [0.0886, 0.1312, 0.7333, 1.0] }
+
+[[objects]]
+name = "floor_17"
+translation_m = [0.505, 0.004, 1.997]
+visual = { shape = "box", size_m = [0.483, 0.008, 0.483], color_rgba = [0.487, 0.487, 0.4773, 1.0] }
+
+[[objects]]
+name = "floor_18"
+translation_m = [1.003, 0.004, -1.922]
+visual = { shape = "box", size_m = [0.473, 0.008, 0.473], color_rgba = [0.8665, 0.8665, 0.8492, 1.0] }
+
+[[objects]]
+name = "floor_19"
+translation_m = [1.08, 0.004, -1.544]
+visual = { shape = "box", size_m = [0.483, 0.008, 0.483], color_rgba = [0.6704, 0.6704, 0.657, 1.0] }
+
+[[objects]]
+name = "floor_20"
+translation_m = [1.068, 0.004, -0.996]
+visual = { shape = "box", size_m = [0.441, 0.008, 0.441], color_rgba = [0.9205, 0.9205, 0.9021, 1.0] }
+
+[[objects]]
+name = "floor_21"
+translation_m = [1.082, 0.004, -0.505]
+visual = { shape = "box", size_m = [0.406, 0.008, 0.406], color_rgba = [0.4986, 0.4986, 0.4886, 1.0] }
+
+[[objects]]
+name = "floor_22"
+translation_m = [0.903, 0.004, 0.059]
+visual = { shape = "box", size_m = [0.437, 0.008, 0.437], color_rgba = [0.0626, 0.0626, 0.0613, 1.0] }
+
+[[objects]]
+name = "floor_23"
+translation_m = [0.88, 0.004, 0.519]
+visual = { shape = "box", size_m = [0.484, 0.008, 0.484], color_rgba = [0.7644, 0.7644, 0.7491, 1.0] }
+
+[[objects]]
+name = "floor_24"
+translation_m = [0.939, 0.004, 1.029]
+visual = { shape = "box", size_m = [0.468, 0.008, 0.468], color_rgba = [0.6516, 0.6516, 0.6386, 1.0] }
+
+[[objects]]
+name = "floor_25"
+translation_m = [1.032, 0.004, 1.417]
+visual = { shape = "box", size_m = [0.428, 0.008, 0.428], color_rgba = [0.7426, 0.7426, 0.7277, 1.0] }
+
+[[objects]]
+name = "floor_26"
+translation_m = [1.108, 0.004, 1.998]
+visual = { shape = "box", size_m = [0.465, 0.008, 0.465], color_rgba = [0.2506, 0.2506, 0.2456, 1.0] }
+
+[[objects]]
+name = "floor_27"
+translation_m = [1.521, 0.004, -1.89]
+visual = { shape = "box", size_m = [0.479, 0.008, 0.479], color_rgba = [0.126, 0.126, 0.1235, 1.0] }
+
+[[objects]]
+name = "floor_28"
+translation_m = [1.54, 0.004, -1.396]
+visual = { shape = "box", size_m = [0.471, 0.008, 0.471], color_rgba = [0.3254, 0.3254, 0.3189, 1.0] }
+
+[[objects]]
+name = "floor_29"
+translation_m = [1.479, 0.004, -0.926]
+visual = { shape = "box", size_m = [0.447, 0.008, 0.447], color_rgba = [0.0627, 0.0627, 0.0614, 1.0] }
+
+[[objects]]
+name = "floor_30"
+translation_m = [1.405, 0.004, -0.407]
+visual = { shape = "box", size_m = [0.405, 0.008, 0.405], color_rgba = [0.3681, 0.3681, 0.3607, 1.0] }
+
+[[objects]]
+name = "floor_31"
+translation_m = [1.565, 0.004, -0.114]
+visual = { shape = "box", size_m = [0.446, 0.008, 0.446], color_rgba = [0.3233, 0.3233, 0.3168, 1.0] }
+
+[[objects]]
+name = "floor_32"
+translation_m = [1.458, 0.004, 0.409]
+visual = { shape = "box", size_m = [0.485, 0.008, 0.485], color_rgba = [0.7744, 0.7744, 0.7589, 1.0] }
+
+[[objects]]
+name = "floor_33"
+translation_m = [1.417, 0.004, 1.005]
+visual = { shape = "box", size_m = [0.439, 0.008, 0.439], color_rgba = [0.5884, 0.5884, 0.5766, 1.0] }
+
+[[objects]]
+name = "floor_34"
+translation_m = [1.543, 0.004, 1.397]
+visual = { shape = "box", size_m = [0.436, 0.008, 0.436], color_rgba = [0.8793, 0.8793, 0.8617, 1.0] }
+
+[[objects]]
+name = "floor_35"
+translation_m = [1.391, 0.004, 2.011]
+visual = { shape = "box", size_m = [0.476, 0.008, 0.476], color_rgba = [0.7292, 0.7292, 0.7146, 1.0] }
+
+[[objects]]
+name = "floor_36"
+translation_m = [1.925, 0.004, -1.949]
+visual = { shape = "box", size_m = [0.479, 0.008, 0.479], color_rgba = [0.5269, 0.5269, 0.5164, 1.0] }
+
+[[objects]]
+name = "floor_37"
+translation_m = [2.068, 0.004, -1.496]
+visual = { shape = "box", size_m = [0.486, 0.008, 0.486], color_rgba = [0.8099, 0.8099, 0.7937, 1.0] }
+
+[[objects]]
+name = "floor_38"
+translation_m = [1.974, 0.004, -1.018]
+visual = { shape = "box", size_m = [0.437, 0.008, 0.437], color_rgba = [0.3244, 0.3244, 0.3179, 1.0] }
+
+[[objects]]
+name = "floor_39"
+translation_m = [1.963, 0.004, -0.557]
+visual = { shape = "box", size_m = [0.445, 0.008, 0.445], color_rgba = [0.4242, 0.4242, 0.4157, 1.0] }
+
+[[objects]]
+name = "floor_40"
+translation_m = [1.992, 0.004, -0.042]
+visual = { shape = "box", size_m = [0.443, 0.008, 0.443], color_rgba = [0.7669, 0.7669, 0.7516, 1.0] }
+
+[[objects]]
+name = "floor_41"
+translation_m = [2.071, 0.004, 0.576]
+visual = { shape = "box", size_m = [0.476, 0.008, 0.476], color_rgba = [0.9083, 0.9083, 0.8901, 1.0] }
+
+[[objects]]
+name = "floor_42"
+translation_m = [2.091, 0.004, 1.035]
+visual = { shape = "box", size_m = [0.437, 0.008, 0.437], color_rgba = [0.8145, 0.8145, 0.7982, 1.0] }
+
+[[objects]]
+name = "floor_43"
+translation_m = [2.041, 0.004, 1.611]
+visual = { shape = "box", size_m = [0.432, 0.008, 0.432], color_rgba = [0.5558, 0.5558, 0.5447, 1.0] }
+
+[[objects]]
+name = "floor_44"
+translation_m = [2.017, 0.004, 2.009]
+visual = { shape = "box", size_m = [0.41, 0.008, 0.41], color_rgba = [0.5502, 0.5502, 0.5392, 1.0] }
+
+[[objects]]
+name = "floor_45"
+translation_m = [2.516, 0.004, -2.069]
+visual = { shape = "box", size_m = [0.427, 0.008, 0.427], color_rgba = [0.5502, 0.5502, 0.5392, 1.0] }
+
+[[objects]]
+name = "floor_46"
+translation_m = [2.404, 0.004, -1.557]
+visual = { shape = "box", size_m = [0.486, 0.008, 0.486], color_rgba = [0.6661, 0.6661, 0.6528, 1.0] }
+
+[[objects]]
+name = "floor_47"
+translation_m = [2.562, 0.004, -0.947]
+visual = { shape = "box", size_m = [0.417, 0.008, 0.417], color_rgba = [0.506, 0.506, 0.4959, 1.0] }
+
+[[objects]]
+name = "floor_48"
+translation_m = [2.446, 0.004, -0.419]
+visual = { shape = "box", size_m = [0.426, 0.008, 0.426], color_rgba = [0.2848, 0.2848, 0.2791, 1.0] }
+
+[[objects]]
+name = "floor_49"
+translation_m = [2.395, 0.004, -0.021]
+visual = { shape = "box", size_m = [0.481, 0.008, 0.481], color_rgba = [0.4231, 0.4231, 0.4146, 1.0] }
+
+[[objects]]
+name = "floor_50"
+translation_m = [2.384, 0.004, 0.403]
+visual = { shape = "box", size_m = [0.402, 0.008, 0.402], color_rgba = [0.6672, 0.6672, 0.6539, 1.0] }
+
+[[objects]]
+name = "floor_51"
+translation_m = [2.518, 0.004, 1.105]
+visual = { shape = "box", size_m = [0.432, 0.008, 0.432], color_rgba = [0.5965, 0.5965, 0.5846, 1.0] }
+
+[[objects]]
+name = "floor_52"
+translation_m = [2.537, 0.004, 1.528]
+visual = { shape = "box", size_m = [0.483, 0.008, 0.483], color_rgba = [0.2441, 0.2441, 0.2392, 1.0] }
+
+[[objects]]
+name = "floor_53"
+translation_m = [2.491, 0.004, 2.115]
+visual = { shape = "box", size_m = [0.479, 0.008, 0.479], color_rgba = [0.8252, 0.8252, 0.8087, 1.0] }
+
+[[objects]]
+name = "floor_54"
+translation_m = [3.044, 0.004, -1.898]
+visual = { shape = "box", size_m = [0.435, 0.008, 0.435], color_rgba = [0.3707, 0.3707, 0.3633, 1.0] }
+
+[[objects]]
+name = "floor_55"
+translation_m = [3.056, 0.004, -1.515]
+visual = { shape = "box", size_m = [0.402, 0.008, 0.402], color_rgba = [0.3106, 0.3106, 0.3044, 1.0] }
+
+[[objects]]
+name = "floor_56"
+translation_m = [3.11, 0.004, -0.928]
+visual = { shape = "box", size_m = [0.411, 0.008, 0.411], color_rgba = [0.337, 0.337, 0.3303, 1.0] }
+
+[[objects]]
+name = "floor_57"
+translation_m = [3.097, 0.004, -0.49]
+visual = { shape = "box", size_m = [0.431, 0.008, 0.431], color_rgba = [0.6995, 0.6995, 0.6855, 1.0] }
+
+[[objects]]
+name = "floor_58"
+translation_m = [2.907, 0.004, 0.029]
+visual = { shape = "box", size_m = [0.411, 0.008, 0.411], color_rgba = [0.3686, 0.3686, 0.3612, 1.0] }
+
+[[objects]]
+name = "floor_59"
+translation_m = [3.035, 0.004, 0.537]
+visual = { shape = "box", size_m = [0.403, 0.008, 0.403], color_rgba = [0.3704, 0.3704, 0.363, 1.0] }
+
+[[objects]]
+name = "floor_60"
+translation_m = [2.972, 0.004, 0.937]
+visual = { shape = "box", size_m = [0.438, 0.008, 0.438], color_rgba = [0.1627, 0.1627, 0.1594, 1.0] }
+
+[[objects]]
+name = "floor_61"
+translation_m = [3.01, 0.004, 1.539]
+visual = { shape = "box", size_m = [0.484, 0.008, 0.484], color_rgba = [0.4072, 0.4072, 0.3991, 1.0] }
+
+[[objects]]
+name = "floor_62"
+translation_m = [2.941, 0.004, 1.915]
+visual = { shape = "box", size_m = [0.402, 0.008, 0.402], color_rgba = [0.481, 0.481, 0.4714, 1.0] }
+
+[[objects]]
+name = "floor_63"
+translation_m = [3.443, 0.004, -2.044]
+visual = { shape = "box", size_m = [0.485, 0.008, 0.485], color_rgba = [0.8056, 0.8056, 0.7895, 1.0] }
+
+[[objects]]
+name = "floor_64"
+translation_m = [3.513, 0.004, -1.464]
+visual = { shape = "box", size_m = [0.487, 0.008, 0.487], color_rgba = [0.2887, 0.2887, 0.2829, 1.0] }
+
+[[objects]]
+name = "floor_65"
+translation_m = [3.532, 0.004, -0.939]
+visual = { shape = "box", size_m = [0.429, 0.008, 0.429], color_rgba = [0.0603, 0.0603, 0.0591, 1.0] }
+
+[[objects]]
+name = "floor_66"
+translation_m = [3.615, 0.004, -0.507]
+visual = { shape = "box", size_m = [0.487, 0.008, 0.487], color_rgba = [0.8259, 0.8259, 0.8094, 1.0] }
+
+[[objects]]
+name = "floor_67"
+translation_m = [3.603, 0.004, 0.097]
+visual = { shape = "box", size_m = [0.436, 0.008, 0.436], color_rgba = [0.9059, 0.9059, 0.8878, 1.0] }
+
+[[objects]]
+name = "floor_68"
+translation_m = [3.436, 0.004, 0.579]
+visual = { shape = "box", size_m = [0.431, 0.008, 0.431], color_rgba = [0.3732, 0.3732, 0.3657, 1.0] }
+
+[[objects]]
+name = "floor_69"
+translation_m = [3.533, 0.004, 1.012]
+visual = { shape = "box", size_m = [0.443, 0.008, 0.443], color_rgba = [0.5725, 0.5725, 0.5611, 1.0] }
+
+[[objects]]
+name = "floor_70"
+translation_m = [3.425, 0.004, 1.531]
+visual = { shape = "box", size_m = [0.414, 0.008, 0.414], color_rgba = [0.9054, 0.9054, 0.8873, 1.0] }
+
+[[objects]]
+name = "floor_71"
+translation_m = [3.575, 0.004, 2.08]
+visual = { shape = "box", size_m = [0.463, 0.008, 0.463], color_rgba = [0.6252, 0.6252, 0.6127, 1.0] }
+
+[[objects]]
+name = "floor_72"
+translation_m = [3.9, 0.004, -2.031]
+visual = { shape = "box", size_m = [0.466, 0.008, 0.466], color_rgba = [0.7156, 0.7156, 0.7013, 1.0] }
+
+[[objects]]
+name = "floor_73"
+translation_m = [4.12, 0.004, -1.616]
+visual = { shape = "box", size_m = [0.42, 0.008, 0.42], color_rgba = [0.5741, 0.5741, 0.5626, 1.0] }
+
+[[objects]]
+name = "floor_74"
+translation_m = [4.017, 0.004, -0.891]
+visual = { shape = "box", size_m = [0.434, 0.008, 0.434], color_rgba = [0.5149, 0.5149, 0.5046, 1.0] }
+
+[[objects]]
+name = "floor_75"
+translation_m = [4.035, 0.004, -0.582]
+visual = { shape = "box", size_m = [0.446, 0.008, 0.446], color_rgba = [0.7093, 0.7093, 0.6951, 1.0] }
+
+[[objects]]
+name = "floor_76"
+translation_m = [3.96, 0.004, -0.057]
+visual = { shape = "box", size_m = [0.404, 0.008, 0.404], color_rgba = [0.7585, 0.7585, 0.7433, 1.0] }
+
+[[objects]]
+name = "floor_77"
+translation_m = [3.919, 0.004, 0.45]
+visual = { shape = "box", size_m = [0.449, 0.008, 0.449], color_rgba = [0.9255, 0.9255, 0.907, 1.0] }
+
+[[objects]]
+name = "floor_78"
+translation_m = [3.925, 0.004, 1.059]
+visual = { shape = "box", size_m = [0.401, 0.008, 0.401], color_rgba = [0.482, 0.482, 0.4724, 1.0] }
+
+[[objects]]
+name = "floor_79"
+translation_m = [3.981, 0.004, 1.575]
+visual = { shape = "box", size_m = [0.481, 0.008, 0.481], color_rgba = [0.9471, 0.9471, 0.9282, 1.0] }
+
+[[objects]]
+name = "floor_80"
+translation_m = [3.921, 0.004, 2.004]
+visual = { shape = "box", size_m = [0.416, 0.008, 0.416], color_rgba = [0.1975, 0.1975, 0.1935, 1.0] }
+
+[[objects]]
+name = "floor_81"
+translation_m = [4.593, 0.004, -1.996]
+visual = { shape = "box", size_m = [0.479, 0.008, 0.479], color_rgba = [0.0518, 0.0518, 0.0508, 1.0] }
+
+[[objects]]
+name = "floor_82"
+translation_m = [4.47, 0.004, -1.532]
+visual = { shape = "box", size_m = [0.419, 0.008, 0.419], color_rgba = [0.599, 0.599, 0.587, 1.0] }
+
+[[objects]]
+name = "floor_83"
+translation_m = [4.41, 0.004, -0.884]
+visual = { shape = "box", size_m = [0.444, 0.008, 0.444], color_rgba = [0.704, 0.704, 0.6899, 1.0] }
+
+[[objects]]
+name = "floor_84"
+translation_m = [4.471, 0.004, -0.472]
+visual = { shape = "box", size_m = [0.458, 0.008, 0.458], color_rgba = [0.8685, 0.8685, 0.8511, 1.0] }
+
+[[objects]]
+name = "floor_85"
+translation_m = [4.409, 0.004, 0.005]
+visual = { shape = "box", size_m = [0.475, 0.008, 0.475], color_rgba = [0.4603, 0.4603, 0.4511, 1.0] }
+
+[[objects]]
+name = "floor_86"
+translation_m = [4.52, 0.004, 0.4]
+visual = { shape = "box", size_m = [0.47, 0.008, 0.47], color_rgba = [0.4953, 0.4953, 0.4854, 1.0] }
+
+[[objects]]
+name = "floor_87"
+translation_m = [4.455, 0.004, 1.061]
+visual = { shape = "box", size_m = [0.42, 0.008, 0.42], color_rgba = [0.5056, 0.5056, 0.4955, 1.0] }
+
+[[objects]]
+name = "floor_88"
+translation_m = [4.46, 0.004, 1.598]
+visual = { shape = "box", size_m = [0.465, 0.008, 0.465], color_rgba = [0.4128, 0.4128, 0.4045, 1.0] }
+
+[[objects]]
+name = "floor_89"
+translation_m = [4.422, 0.004, 2.074]
+visual = { shape = "box", size_m = [0.42, 0.008, 0.42], color_rgba = [0.3637, 0.3637, 0.3564, 1.0] }
+
+[[objects]]
+name = "floor_90"
+translation_m = [5.069, 0.004, -2.022]
+visual = { shape = "box", size_m = [0.472, 0.008, 0.472], color_rgba = [0.1889, 0.1889, 0.1851, 1.0] }
+
+[[objects]]
+name = "floor_91"
+translation_m = [5.058, 0.004, -1.462]
+visual = { shape = "box", size_m = [0.411, 0.008, 0.411], color_rgba = [0.8021, 0.8021, 0.7861, 1.0] }
+
+[[objects]]
+name = "floor_92"
+translation_m = [4.957, 0.004, -0.918]
+visual = { shape = "box", size_m = [0.44, 0.008, 0.44], color_rgba = [0.6142, 0.6142, 0.6019, 1.0] }
+
+[[objects]]
+name = "floor_93"
+translation_m = [4.936, 0.004, -0.387]
+visual = { shape = "box", size_m = [0.451, 0.008, 0.451], color_rgba = [0.3141, 0.3141, 0.3078, 1.0] }
+
+[[objects]]
+name = "floor_94"
+translation_m = [4.99, 0.004, -0.024]
+visual = { shape = "box", size_m = [0.402, 0.008, 0.402], color_rgba = [0.6567, 0.6567, 0.6436, 1.0] }
+
+[[objects]]
+name = "floor_95"
+translation_m = [4.961, 0.004, 0.543]
+visual = { shape = "box", size_m = [0.483, 0.008, 0.483], color_rgba = [0.8126, 0.8126, 0.7963, 1.0] }
+
+[[objects]]
+name = "floor_96"
+translation_m = [5.109, 0.004, 1.04]
+visual = { shape = "box", size_m = [0.449, 0.008, 0.449], color_rgba = [0.3669, 0.3669, 0.3596, 1.0] }
+
+[[objects]]
+name = "floor_97"
+translation_m = [4.959, 0.004, 1.601]
+visual = { shape = "box", size_m = [0.465, 0.008, 0.465], color_rgba = [0.1534, 0.4962, 0.6836, 1.0] }
+
+[[objects]]
+name = "floor_98"
+translation_m = [5.035, 0.004, 1.98]
+visual = { shape = "box", size_m = [0.47, 0.008, 0.47], color_rgba = [0.8503, 0.8503, 0.8333, 1.0] }
+
+[[objects]]
+name = "floor_99"
+translation_m = [5.461, 0.004, -2.111]
+visual = { shape = "box", size_m = [0.42, 0.008, 0.42], color_rgba = [0.8167, 0.8167, 0.8004, 1.0] }
+
+[[objects]]
+name = "floor_100"
+translation_m = [5.444, 0.004, -1.616]
+visual = { shape = "box", size_m = [0.419, 0.008, 0.419], color_rgba = [0.2992, 0.2992, 0.2932, 1.0] }
+
+[[objects]]
+name = "floor_101"
+translation_m = [5.531, 0.004, -1.101]
+visual = { shape = "box", size_m = [0.462, 0.008, 0.462], color_rgba = [0.0603, 0.0603, 0.0591, 1.0] }
+
+[[objects]]
+name = "floor_102"
+translation_m = [5.403, 0.004, -0.541]
+visual = { shape = "box", size_m = [0.42, 0.008, 0.42], color_rgba = [0.5955, 0.5955, 0.5836, 1.0] }
+
+[[objects]]
+name = "floor_103"
+translation_m = [5.421, 0.004, -0.046]
+visual = { shape = "box", size_m = [0.451, 0.008, 0.451], color_rgba = [0.663, 0.663, 0.6497, 1.0] }
+
+[[objects]]
+name = "floor_104"
+translation_m = [5.514, 0.004, 0.406]
+visual = { shape = "box", size_m = [0.424, 0.008, 0.424], color_rgba = [0.2167, 0.2167, 0.2124, 1.0] }
+
+[[objects]]
+name = "floor_105"
+translation_m = [5.556, 0.004, 1.117]
+visual = { shape = "box", size_m = [0.489, 0.008, 0.489], color_rgba = [0.6421, 0.6421, 0.6293, 1.0] }
+
+[[objects]]
+name = "floor_106"
+translation_m = [5.462, 0.004, 1.463]
+visual = { shape = "box", size_m = [0.455, 0.008, 0.455], color_rgba = [0.8449, 0.8449, 0.828, 1.0] }
+
+[[objects]]
+name = "floor_107"
+translation_m = [5.581, 0.004, 1.889]
+visual = { shape = "box", size_m = [0.444, 0.008, 0.444], color_rgba = [0.7552, 0.1907, 0.852, 1.0] }
+
+[[objects]]
+name = "floor_108"
+translation_m = [5.928, 0.004, -2.054]
+visual = { shape = "box", size_m = [0.476, 0.008, 0.476], color_rgba = [0.2465, 0.2465, 0.2416, 1.0] }
+
+[[objects]]
+name = "floor_109"
+translation_m = [5.893, 0.004, -1.521]
+visual = { shape = "box", size_m = [0.406, 0.008, 0.406], color_rgba = [0.645, 0.645, 0.6321, 1.0] }
+
+[[objects]]
+name = "floor_110"
+translation_m = [6.044, 0.004, -0.936]
+visual = { shape = "box", size_m = [0.427, 0.008, 0.427], color_rgba = [0.1316, 0.1316, 0.129, 1.0] }
+
+[[objects]]
+name = "floor_111"
+translation_m = [6.002, 0.004, -0.495]
+visual = { shape = "box", size_m = [0.429, 0.008, 0.429], color_rgba = [0.3556, 0.3556, 0.3485, 1.0] }
+
+[[objects]]
+name = "floor_112"
+translation_m = [5.923, 0.004, 0.117]
+visual = { shape = "box", size_m = [0.478, 0.008, 0.478], color_rgba = [0.2817, 0.2817, 0.2761, 1.0] }
+
+[[objects]]
+name = "floor_113"
+translation_m = [6.107, 0.004, 0.589]
+visual = { shape = "box", size_m = [0.447, 0.008, 0.447], color_rgba = [0.1457, 0.1457, 0.1428, 1.0] }
+
+[[objects]]
+name = "floor_114"
+translation_m = [6.026, 0.004, 0.932]
+visual = { shape = "box", size_m = [0.442, 0.008, 0.442], color_rgba = [0.5072, 0.5072, 0.4971, 1.0] }
+
+[[objects]]
+name = "floor_115"
+translation_m = [6.006, 0.004, 1.503]
+visual = { shape = "box", size_m = [0.471, 0.008, 0.471], color_rgba = [0.8364, 0.8364, 0.8197, 1.0] }
+
+[[objects]]
+name = "floor_116"
+translation_m = [5.997, 0.004, 2.014]
+visual = { shape = "box", size_m = [0.476, 0.008, 0.476], color_rgba = [0.9475, 0.9475, 0.9285, 1.0] }
+
+[[objects]]
+name = "floor_117"
+translation_m = [6.474, 0.004, -1.972]
+visual = { shape = "box", size_m = [0.449, 0.008, 0.449], color_rgba = [0.5462, 0.5462, 0.5353, 1.0] }
+
+[[objects]]
+name = "floor_118"
+translation_m = [6.615, 0.004, -1.445]
+visual = { shape = "box", size_m = [0.412, 0.008, 0.412], color_rgba = [0.6413, 0.6413, 0.6285, 1.0] }
+
+[[objects]]
+name = "floor_119"
+translation_m = [6.395, 0.004, -0.96]
+visual = { shape = "box", size_m = [0.403, 0.008, 0.403], color_rgba = [0.8969, 0.8969, 0.879, 1.0] }
+
+[[objects]]
+name = "floor_120"
+translation_m = [6.423, 0.004, -0.556]
+visual = { shape = "box", size_m = [0.449, 0.008, 0.449], color_rgba = [0.4616, 0.4616, 0.4524, 1.0] }
+
+[[objects]]
+name = "floor_121"
+translation_m = [6.425, 0.004, -0.107]
+visual = { shape = "box", size_m = [0.417, 0.008, 0.417], color_rgba = [0.6271, 0.6271, 0.6146, 1.0] }
+
+[[objects]]
+name = "floor_122"
+translation_m = [6.498, 0.004, 0.511]
+visual = { shape = "box", size_m = [0.403, 0.008, 0.403], color_rgba = [0.3777, 0.3777, 0.3701, 1.0] }
+
+[[objects]]
+name = "floor_123"
+translation_m = [6.51, 0.004, 0.992]
+visual = { shape = "box", size_m = [0.467, 0.008, 0.467], color_rgba = [0.3421, 0.3421, 0.3353, 1.0] }
+
+[[objects]]
+name = "floor_124"
+translation_m = [6.552, 0.004, 1.39]
+visual = { shape = "box", size_m = [0.401, 0.008, 0.401], color_rgba = [0.5774, 0.5774, 0.5659, 1.0] }
+
+[[objects]]
+name = "floor_125"
+translation_m = [6.549, 0.004, 2.075]
+visual = { shape = "box", size_m = [0.423, 0.008, 0.423], color_rgba = [0.1974, 0.1974, 0.1935, 1.0] }
+
+[[objects]]
+name = "floor_126"
+translation_m = [6.926, 0.004, -1.924]
+visual = { shape = "box", size_m = [0.438, 0.008, 0.438], color_rgba = [0.7998, 0.7998, 0.7838, 1.0] }
+
+[[objects]]
+name = "floor_127"
+translation_m = [6.921, 0.004, -1.566]
+visual = { shape = "box", size_m = [0.487, 0.008, 0.487], color_rgba = [0.1927, 0.1927, 0.1888, 1.0] }
+
+[[objects]]
+name = "floor_128"
+translation_m = [7.118, 0.004, -1.019]
+visual = { shape = "box", size_m = [0.438, 0.008, 0.438], color_rgba = [0.6845, 0.6845, 0.6708, 1.0] }
+
+[[objects]]
+name = "floor_129"
+translation_m = [7.112, 0.004, -0.469]
+visual = { shape = "box", size_m = [0.44, 0.008, 0.44], color_rgba = [0.5959, 0.5959, 0.584, 1.0] }
+
+[[objects]]
+name = "floor_130"
+translation_m = [6.902, 0.004, 0.095]
+visual = { shape = "box", size_m = [0.467, 0.008, 0.467], color_rgba = [0.1209, 0.1209, 0.1185, 1.0] }
+
+[[objects]]
+name = "floor_131"
+translation_m = [7.052, 0.004, 0.529]
+visual = { shape = "box", size_m = [0.414, 0.008, 0.414], color_rgba = [0.627, 0.627, 0.6145, 1.0] }
+
+[[objects]]
+name = "floor_132"
+translation_m = [6.925, 0.004, 1.108]
+visual = { shape = "box", size_m = [0.488, 0.008, 0.488], color_rgba = [0.9155, 0.0966, 0.2391, 1.0] }
+
+[[objects]]
+name = "floor_133"
+translation_m = [7.069, 0.004, 1.449]
+visual = { shape = "box", size_m = [0.433, 0.008, 0.433], color_rgba = [0.0301, 0.7782, 0.8862, 1.0] }
+
+[[objects]]
+name = "floor_134"
+translation_m = [6.997, 0.004, 1.913]
+visual = { shape = "box", size_m = [0.471, 0.008, 0.471], color_rgba = [0.9227, 0.9227, 0.9042, 1.0] }
+
+[[objects]]
+name = "floor_135"
+translation_m = [7.489, 0.004, -1.974]
+visual = { shape = "box", size_m = [0.453, 0.008, 0.453], color_rgba = [0.653, 0.653, 0.6399, 1.0] }
+
+[[objects]]
+name = "floor_136"
+translation_m = [7.458, 0.004, -1.559]
+visual = { shape = "box", size_m = [0.461, 0.008, 0.461], color_rgba = [0.3613, 0.3613, 0.3541, 1.0] }
+
+[[objects]]
+name = "floor_137"
+translation_m = [7.578, 0.004, -0.994]
+visual = { shape = "box", size_m = [0.448, 0.008, 0.448], color_rgba = [0.2985, 0.2985, 0.2925, 1.0] }
+
+[[objects]]
+name = "floor_138"
+translation_m = [7.389, 0.004, -0.478]
+visual = { shape = "box", size_m = [0.406, 0.008, 0.406], color_rgba = [0.5579, 0.5579, 0.5467, 1.0] }
+
+[[objects]]
+name = "floor_139"
+translation_m = [7.473, 0.004, 0.035]
+visual = { shape = "box", size_m = [0.452, 0.008, 0.452], color_rgba = [0.4808, 0.4808, 0.4712, 1.0] }
+
+[[objects]]
+name = "floor_140"
+translation_m = [7.385, 0.004, 0.596]
+visual = { shape = "box", size_m = [0.412, 0.008, 0.412], color_rgba = [0.1327, 0.1327, 0.13, 1.0] }
+
+[[objects]]
+name = "floor_141"
+translation_m = [7.508, 0.004, 0.941]
+visual = { shape = "box", size_m = [0.487, 0.008, 0.487], color_rgba = [0.114, 0.114, 0.1117, 1.0] }
+
+[[objects]]
+name = "floor_142"
+translation_m = [7.524, 0.004, 1.409]
+visual = { shape = "box", size_m = [0.487, 0.008, 0.487], color_rgba = [0.6955, 0.6955, 0.6816, 1.0] }
+
+[[objects]]
+name = "floor_143"
+translation_m = [7.454, 0.004, 1.993]
+visual = { shape = "box", size_m = [0.429, 0.008, 0.429], color_rgba = [0.6714, 0.6714, 0.658, 1.0] }
+
+[[objects]]
+name = "floor_144"
+translation_m = [7.976, 0.004, -1.997]
+visual = { shape = "box", size_m = [0.476, 0.008, 0.476], color_rgba = [0.4901, 0.4901, 0.4803, 1.0] }
+
+[[objects]]
+name = "floor_145"
+translation_m = [8.023, 0.004, -1.515]
+visual = { shape = "box", size_m = [0.469, 0.008, 0.469], color_rgba = [0.5815, 0.5815, 0.5699, 1.0] }
+
+[[objects]]
+name = "floor_146"
+translation_m = [7.996, 0.004, -1.116]
+visual = { shape = "box", size_m = [0.485, 0.008, 0.485], color_rgba = [0.0806, 0.0806, 0.079, 1.0] }
+
+[[objects]]
+name = "floor_147"
+translation_m = [7.992, 0.004, -0.586]
+visual = { shape = "box", size_m = [0.422, 0.008, 0.422], color_rgba = [0.2906, 0.2906, 0.2848, 1.0] }
+
+[[objects]]
+name = "floor_148"
+translation_m = [7.984, 0.004, 0.056]
+visual = { shape = "box", size_m = [0.402, 0.008, 0.402], color_rgba = [0.518, 0.518, 0.5076, 1.0] }
+
+[[objects]]
+name = "floor_149"
+translation_m = [8.109, 0.004, 0.409]
+visual = { shape = "box", size_m = [0.433, 0.008, 0.433], color_rgba = [0.1184, 0.1184, 0.116, 1.0] }
+
+[[objects]]
+name = "floor_150"
+translation_m = [7.921, 0.004, 0.977]
+visual = { shape = "box", size_m = [0.41, 0.008, 0.41], color_rgba = [0.9409, 0.9409, 0.9221, 1.0] }
+
+[[objects]]
+name = "floor_151"
+translation_m = [7.976, 0.004, 1.381]
+visual = { shape = "box", size_m = [0.418, 0.008, 0.418], color_rgba = [0.7704, 0.7704, 0.755, 1.0] }
+
+[[objects]]
+name = "floor_152"
+translation_m = [8.006, 0.004, 2.099]
+visual = { shape = "box", size_m = [0.408, 0.008, 0.408], color_rgba = [0.8704, 0.8704, 0.853, 1.0] }
+
+[[objects]]
+name = "floor_153"
+translation_m = [8.432, 0.004, -1.918]
+visual = { shape = "box", size_m = [0.472, 0.008, 0.472], color_rgba = [0.8595, 0.8595, 0.8423, 1.0] }
+
+[[objects]]
+name = "floor_154"
+translation_m = [8.512, 0.004, -1.611]
+visual = { shape = "box", size_m = [0.486, 0.008, 0.486], color_rgba = [0.6745, 0.6745, 0.661, 1.0] }
+
+[[objects]]
+name = "floor_155"
+translation_m = [8.582, 0.004, -0.996]
+visual = { shape = "box", size_m = [0.484, 0.008, 0.484], color_rgba = [0.8619, 0.8619, 0.8447, 1.0] }
+
+[[objects]]
+name = "floor_156"
+translation_m = [8.612, 0.004, -0.464]
+visual = { shape = "box", size_m = [0.487, 0.008, 0.487], color_rgba = [0.132, 0.132, 0.1294, 1.0] }
+
+[[objects]]
+name = "floor_157"
+translation_m = [8.536, 0.004, -0.053]
+visual = { shape = "box", size_m = [0.401, 0.008, 0.401], color_rgba = [0.0892, 0.0892, 0.0874, 1.0] }
+
+[[objects]]
+name = "floor_158"
+translation_m = [8.602, 0.004, 0.397]
+visual = { shape = "box", size_m = [0.463, 0.008, 0.463], color_rgba = [0.5427, 0.5427, 0.5318, 1.0] }
+
+[[objects]]
+name = "floor_159"
+translation_m = [8.504, 0.004, 1.01]
+visual = { shape = "box", size_m = [0.445, 0.008, 0.445], color_rgba = [0.3668, 0.3668, 0.3595, 1.0] }
+
+[[objects]]
+name = "floor_160"
+translation_m = [8.509, 0.004, 1.491]
+visual = { shape = "box", size_m = [0.422, 0.008, 0.422], color_rgba = [0.224, 0.8199, 0.4117, 1.0] }
+
+[[objects]]
+name = "floor_161"
+translation_m = [8.423, 0.004, 1.937]
+visual = { shape = "box", size_m = [0.45, 0.008, 0.45], color_rgba = [0.3534, 0.3534, 0.3463, 1.0] }
+
+[[objects]]
+name = "floor_162"
+translation_m = [8.947, 0.004, -1.965]
+visual = { shape = "box", size_m = [0.415, 0.008, 0.415], color_rgba = [0.3599, 0.3599, 0.3527, 1.0] }
+
+[[objects]]
+name = "floor_163"
+translation_m = [9.059, 0.004, -1.589]
+visual = { shape = "box", size_m = [0.485, 0.008, 0.485], color_rgba = [0.7511, 0.7511, 0.7361, 1.0] }
+
+[[objects]]
+name = "floor_164"
+translation_m = [9.077, 0.004, -1.006]
+visual = { shape = "box", size_m = [0.462, 0.008, 0.462], color_rgba = [0.3402, 0.3402, 0.3334, 1.0] }
+
+[[objects]]
+name = "floor_165"
+translation_m = [8.999, 0.004, -0.592]
+visual = { shape = "box", size_m = [0.4, 0.008, 0.4], color_rgba = [0.9192, 0.9192, 0.9008, 1.0] }
+
+[[objects]]
+name = "floor_166"
+translation_m = [9.0, 0.004, -0.02]
+visual = { shape = "box", size_m = [0.451, 0.008, 0.451], color_rgba = [0.3704, 0.3704, 0.363, 1.0] }
+
+[[objects]]
+name = "floor_167"
+translation_m = [9.058, 0.004, 0.522]
+visual = { shape = "box", size_m = [0.459, 0.008, 0.459], color_rgba = [0.3895, 0.3895, 0.3817, 1.0] }
+
+[[objects]]
+name = "floor_168"
+translation_m = [8.939, 0.004, 0.953]
+visual = { shape = "box", size_m = [0.461, 0.008, 0.461], color_rgba = [0.5598, 0.5598, 0.5486, 1.0] }
+
+[[objects]]
+name = "floor_169"
+translation_m = [8.954, 0.004, 1.508]
+visual = { shape = "box", size_m = [0.488, 0.008, 0.488], color_rgba = [0.7126, 0.7126, 0.6983, 1.0] }
+
+[[objects]]
+name = "floor_170"
+translation_m = [9.051, 0.004, 2.022]
+visual = { shape = "box", size_m = [0.422, 0.008, 0.422], color_rgba = [0.8977, 0.8977, 0.8797, 1.0] }
+
+[[objects]]
+name = "floor_171"
+translation_m = [9.526, 0.004, -1.999]
+visual = { shape = "box", size_m = [0.46, 0.008, 0.46], color_rgba = [0.1645, 0.1645, 0.1612, 1.0] }
+
+[[objects]]
+name = "floor_172"
+translation_m = [9.527, 0.004, -1.545]
+visual = { shape = "box", size_m = [0.437, 0.008, 0.437], color_rgba = [0.4499, 0.4499, 0.4409, 1.0] }
+
+[[objects]]
+name = "floor_173"
+translation_m = [9.451, 0.004, -1.084]
+visual = { shape = "box", size_m = [0.457, 0.008, 0.457], color_rgba = [0.2393, 0.5459, 0.8828, 1.0] }
+
+[[objects]]
+name = "floor_174"
+translation_m = [9.487, 0.004, -0.604]
+visual = { shape = "box", size_m = [0.435, 0.008, 0.435], color_rgba = [0.7424, 0.7424, 0.7276, 1.0] }
+
+[[objects]]
+name = "floor_175"
+translation_m = [9.555, 0.004, 0.079]
+visual = { shape = "box", size_m = [0.423, 0.008, 0.423], color_rgba = [0.4194, 0.4194, 0.411, 1.0] }
+
+[[objects]]
+name = "floor_176"
+translation_m = [9.451, 0.004, 0.455]
+visual = { shape = "box", size_m = [0.415, 0.008, 0.415], color_rgba = [0.0776, 0.0776, 0.076, 1.0] }
+
+[[objects]]
+name = "floor_177"
+translation_m = [9.431, 0.004, 1.048]
+visual = { shape = "box", size_m = [0.464, 0.008, 0.464], color_rgba = [0.413, 0.413, 0.4047, 1.0] }
+
+[[objects]]
+name = "floor_178"
+translation_m = [9.588, 0.004, 1.54]
+visual = { shape = "box", size_m = [0.415, 0.008, 0.415], color_rgba = [0.3966, 0.3966, 0.3887, 1.0] }
+
+[[objects]]
+name = "floor_179"
+translation_m = [9.524, 0.004, 2.035]
+visual = { shape = "box", size_m = [0.436, 0.008, 0.436], color_rgba = [0.3226, 0.3226, 0.3161, 1.0] }
+
+[[objects]]
+name = "floor_180"
+translation_m = [10.01, 0.004, -1.887]
+visual = { shape = "box", size_m = [0.462, 0.008, 0.462], color_rgba = [0.88, 0.88, 0.8624, 1.0] }
+
+[[objects]]
+name = "floor_181"
+translation_m = [9.938, 0.004, -1.498]
+visual = { shape = "box", size_m = [0.403, 0.008, 0.403], color_rgba = [0.2259, 0.2259, 0.2214, 1.0] }
+
+[[objects]]
+name = "floor_182"
+translation_m = [9.921, 0.004, -1.017]
+visual = { shape = "box", size_m = [0.452, 0.008, 0.452], color_rgba = [0.3876, 0.3876, 0.3798, 1.0] }
+
+[[objects]]
+name = "floor_183"
+translation_m = [9.999, 0.004, -0.606]
+visual = { shape = "box", size_m = [0.428, 0.008, 0.428], color_rgba = [0.133, 0.3583, 0.6692, 1.0] }
+
+[[objects]]
+name = "floor_184"
+translation_m = [9.979, 0.004, 0.116]
+visual = { shape = "box", size_m = [0.457, 0.008, 0.457], color_rgba = [0.7965, 0.7965, 0.7806, 1.0] }
+
+[[objects]]
+name = "floor_185"
+translation_m = [10.107, 0.004, 0.449]
+visual = { shape = "box", size_m = [0.46, 0.008, 0.46], color_rgba = [0.5054, 0.5054, 0.4953, 1.0] }
+
+[[objects]]
+name = "floor_186"
+translation_m = [10.08, 0.004, 0.964]
+visual = { shape = "box", size_m = [0.435, 0.008, 0.435], color_rgba = [0.4292, 0.4292, 0.4206, 1.0] }
+
+[[objects]]
+name = "floor_187"
+translation_m = [9.983, 0.004, 1.529]
+visual = { shape = "box", size_m = [0.482, 0.008, 0.482], color_rgba = [0.7703, 0.7703, 0.7549, 1.0] }
+
+[[objects]]
+name = "floor_188"
+translation_m = [10.014, 0.004, 1.971]
+visual = { shape = "box", size_m = [0.478, 0.008, 0.478], color_rgba = [0.0762, 0.0762, 0.0747, 1.0] }
+
+[[objects]]
+name = "floor_189"
+translation_m = [10.437, 0.004, -2.078]
+visual = { shape = "box", size_m = [0.456, 0.008, 0.456], color_rgba = [0.7826, 0.7826, 0.7669, 1.0] }
+
+[[objects]]
+name = "floor_190"
+translation_m = [10.485, 0.004, -1.575]
+visual = { shape = "box", size_m = [0.403, 0.008, 0.403], color_rgba = [0.1413, 0.1413, 0.1385, 1.0] }
+
+[[objects]]
+name = "floor_191"
+translation_m = [10.432, 0.004, -1.09]
+visual = { shape = "box", size_m = [0.454, 0.008, 0.454], color_rgba = [0.9442, 0.9442, 0.9253, 1.0] }
+
+[[objects]]
+name = "floor_192"
+translation_m = [10.53, 0.004, -0.52]
+visual = { shape = "box", size_m = [0.429, 0.008, 0.429], color_rgba = [0.137, 0.137, 0.1343, 1.0] }
+
+[[objects]]
+name = "floor_193"
+translation_m = [10.396, 0.004, -0.038]
+visual = { shape = "box", size_m = [0.414, 0.008, 0.414], color_rgba = [0.1396, 0.1396, 0.1368, 1.0] }
+
+[[objects]]
+name = "floor_194"
+translation_m = [10.405, 0.004, 0.576]
+visual = { shape = "box", size_m = [0.479, 0.008, 0.479], color_rgba = [0.4871, 0.4871, 0.4774, 1.0] }
+
+[[objects]]
+name = "floor_195"
+translation_m = [10.523, 0.004, 0.91]
+visual = { shape = "box", size_m = [0.431, 0.008, 0.431], color_rgba = [0.4696, 0.4696, 0.4602, 1.0] }
+
+[[objects]]
+name = "floor_196"
+translation_m = [10.585, 0.004, 1.404]
+visual = { shape = "box", size_m = [0.49, 0.008, 0.49], color_rgba = [0.4312, 0.4312, 0.4226, 1.0] }
+
+[[objects]]
+name = "floor_197"
+translation_m = [10.607, 0.004, 1.902]
+visual = { shape = "box", size_m = [0.462, 0.008, 0.462], color_rgba = [0.9424, 0.9424, 0.9236, 1.0] }
+
+[[objects]]
+name = "floor_198"
+translation_m = [10.986, 0.004, -2.105]
+visual = { shape = "box", size_m = [0.443, 0.008, 0.443], color_rgba = [0.9479, 0.9479, 0.9289, 1.0] }
+
+[[objects]]
+name = "floor_199"
+translation_m = [10.978, 0.004, -1.517]
+visual = { shape = "box", size_m = [0.406, 0.008, 0.406], color_rgba = [0.5216, 0.5216, 0.5112, 1.0] }
+
+[[objects]]
+name = "floor_200"
+translation_m = [10.982, 0.004, -1.036]
+visual = { shape = "box", size_m = [0.415, 0.008, 0.415], color_rgba = [0.5923, 0.5923, 0.5805, 1.0] }
+
+[[objects]]
+name = "floor_201"
+translation_m = [11.07, 0.004, -0.558]
+visual = { shape = "box", size_m = [0.472, 0.008, 0.472], color_rgba = [0.6754, 0.6754, 0.6619, 1.0] }
+
+[[objects]]
+name = "floor_202"
+translation_m = [10.968, 0.004, 0.061]
+visual = { shape = "box", size_m = [0.437, 0.008, 0.437], color_rgba = [0.5701, 0.5701, 0.5587, 1.0] }
+
+[[objects]]
+name = "floor_203"
+translation_m = [11.028, 0.004, 0.457]
+visual = { shape = "box", size_m = [0.477, 0.008, 0.477], color_rgba = [0.3297, 0.3297, 0.3231, 1.0] }
+
+[[objects]]
+name = "floor_204"
+translation_m = [11.058, 0.004, 1.025]
+visual = { shape = "box", size_m = [0.416, 0.008, 0.416], color_rgba = [0.0806, 0.0806, 0.079, 1.0] }
+
+[[objects]]
+name = "floor_205"
+translation_m = [11.026, 0.004, 1.507]
+visual = { shape = "box", size_m = [0.426, 0.008, 0.426], color_rgba = [0.8322, 0.8322, 0.8156, 1.0] }
+
+[[objects]]
+name = "floor_206"
+translation_m = [10.93, 0.004, 2.104]
+visual = { shape = "box", size_m = [0.466, 0.008, 0.466], color_rgba = [0.372, 0.372, 0.3646, 1.0] }
+
+[[objects]]
+name = "floor_207"
+translation_m = [11.504, 0.004, -1.891]
+visual = { shape = "box", size_m = [0.428, 0.008, 0.428], color_rgba = [0.2721, 0.2721, 0.2667, 1.0] }
+
+[[objects]]
+name = "floor_208"
+translation_m = [11.6, 0.004, -1.476]
+visual = { shape = "box", size_m = [0.43, 0.008, 0.43], color_rgba = [0.879, 0.879, 0.8614, 1.0] }
+
+[[objects]]
+name = "floor_209"
+translation_m = [11.533, 0.004, -0.961]
+visual = { shape = "box", size_m = [0.437, 0.008, 0.437], color_rgba = [0.4656, 0.4656, 0.4563, 1.0] }
+
+[[objects]]
+name = "floor_210"
+translation_m = [11.47, 0.004, -0.594]
+visual = { shape = "box", size_m = [0.434, 0.008, 0.434], color_rgba = [0.4375, 0.4375, 0.4287, 1.0] }
+
+[[objects]]
+name = "floor_211"
+translation_m = [11.543, 0.004, 0.02]
+visual = { shape = "box", size_m = [0.451, 0.008, 0.451], color_rgba = [0.7346, 0.7346, 0.7199, 1.0] }
+
+[[objects]]
+name = "floor_212"
+translation_m = [11.473, 0.004, 0.464]
+visual = { shape = "box", size_m = [0.423, 0.008, 0.423], color_rgba = [0.3742, 0.3742, 0.3667, 1.0] }
+
+[[objects]]
+name = "floor_213"
+translation_m = [11.492, 0.004, 1.025]
+visual = { shape = "box", size_m = [0.478, 0.008, 0.478], color_rgba = [0.9281, 0.9281, 0.9095, 1.0] }
+
+[[objects]]
+name = "floor_214"
+translation_m = [11.57, 0.004, 1.408]
+visual = { shape = "box", size_m = [0.43, 0.008, 0.43], color_rgba = [0.32, 0.32, 0.3136, 1.0] }
+
+[[objects]]
+name = "floor_215"
+translation_m = [11.588, 0.004, 2.05]
+visual = { shape = "box", size_m = [0.4, 0.008, 0.4], color_rgba = [0.1201, 0.1201, 0.1177, 1.0] }
+
+[[objects]]
+name = "floor_216"
+translation_m = [11.922, 0.004, -1.95]
+visual = { shape = "box", size_m = [0.484, 0.008, 0.484], color_rgba = [0.5357, 0.5357, 0.525, 1.0] }
+
+[[objects]]
+name = "floor_217"
+translation_m = [11.905, 0.004, -1.473]
+visual = { shape = "box", size_m = [0.446, 0.008, 0.446], color_rgba = [0.3102, 0.3102, 0.304, 1.0] }
+
+[[objects]]
+name = "floor_218"
+translation_m = [11.906, 0.004, -1.02]
+visual = { shape = "box", size_m = [0.41, 0.008, 0.41], color_rgba = [0.867, 0.867, 0.8497, 1.0] }
+
+[[objects]]
+name = "floor_219"
+translation_m = [12.071, 0.004, -0.603]
+visual = { shape = "box", size_m = [0.453, 0.008, 0.453], color_rgba = [0.3993, 0.3993, 0.3913, 1.0] }
+
+[[objects]]
+name = "floor_220"
+translation_m = [11.913, 0.004, 0.113]
+visual = { shape = "box", size_m = [0.451, 0.008, 0.451], color_rgba = [0.6462, 0.1965, 0.9189, 1.0] }
+
+[[objects]]
+name = "floor_221"
+translation_m = [12.014, 0.004, 0.58]
+visual = { shape = "box", size_m = [0.44, 0.008, 0.44], color_rgba = [0.4232, 0.4232, 0.4147, 1.0] }
+
+[[objects]]
+name = "floor_222"
+translation_m = [11.916, 0.004, 1.033]
+visual = { shape = "box", size_m = [0.489, 0.008, 0.489], color_rgba = [0.4075, 0.4075, 0.3993, 1.0] }
+
+[[objects]]
+name = "floor_223"
+translation_m = [11.892, 0.004, 1.489]
+visual = { shape = "box", size_m = [0.452, 0.008, 0.452], color_rgba = [0.447, 0.447, 0.4381, 1.0] }
+
+[[objects]]
+name = "floor_224"
+translation_m = [12.033, 0.004, 2.068]
+visual = { shape = "box", size_m = [0.426, 0.008, 0.426], color_rgba = [0.7666, 0.7666, 0.7513, 1.0] }
+
+[[objects]]
+name = "floor_225"
+translation_m = [12.483, 0.004, -2.055]
+visual = { shape = "box", size_m = [0.467, 0.008, 0.467], color_rgba = [0.1857, 0.1857, 0.182, 1.0] }
+
+[[objects]]
+name = "floor_226"
+translation_m = [12.457, 0.004, -1.437]
+visual = { shape = "box", size_m = [0.462, 0.008, 0.462], color_rgba = [0.5808, 0.3946, 0.093, 1.0] }
+
+[[objects]]
+name = "floor_227"
+translation_m = [12.474, 0.004, -1.102]
+visual = { shape = "box", size_m = [0.489, 0.008, 0.489], color_rgba = [0.653, 0.653, 0.6399, 1.0] }
+
+[[objects]]
+name = "floor_228"
+translation_m = [12.446, 0.004, -0.567]
+visual = { shape = "box", size_m = [0.431, 0.008, 0.431], color_rgba = [0.5352, 0.5352, 0.5245, 1.0] }
+
+[[objects]]
+name = "floor_229"
+translation_m = [12.407, 0.004, 0.01]
+visual = { shape = "box", size_m = [0.462, 0.008, 0.462], color_rgba = [0.3629, 0.3629, 0.3556, 1.0] }
+
+[[objects]]
+name = "floor_230"
+translation_m = [12.568, 0.004, 0.413]
+visual = { shape = "box", size_m = [0.413, 0.008, 0.413], color_rgba = [0.6648, 0.6648, 0.6515, 1.0] }
+
+[[objects]]
+name = "floor_231"
+translation_m = [12.474, 0.004, 1.021]
+visual = { shape = "box", size_m = [0.442, 0.008, 0.442], color_rgba = [0.7341, 0.7341, 0.7194, 1.0] }
+
+[[objects]]
+name = "floor_232"
+translation_m = [12.605, 0.004, 1.494]
+visual = { shape = "box", size_m = [0.482, 0.008, 0.482], color_rgba = [0.6109, 0.6109, 0.5987, 1.0] }
+
+[[objects]]
+name = "floor_233"
+translation_m = [12.449, 0.004, 2.116]
+visual = { shape = "box", size_m = [0.448, 0.008, 0.448], color_rgba = [0.3606, 0.3606, 0.3534, 1.0] }
+
+[[objects]]
+name = "floor_234"
+translation_m = [13.105, 0.004, -1.947]
+visual = { shape = "box", size_m = [0.443, 0.008, 0.443], color_rgba = [0.8754, 0.8754, 0.8579, 1.0] }
+
+[[objects]]
+name = "floor_235"
+translation_m = [12.916, 0.004, -1.511]
+visual = { shape = "box", size_m = [0.48, 0.008, 0.48], color_rgba = [0.6923, 0.6923, 0.6785, 1.0] }
+
+[[objects]]
+name = "floor_236"
+translation_m = [12.93, 0.004, -1.09]
+visual = { shape = "box", size_m = [0.487, 0.008, 0.487], color_rgba = [0.1147, 0.1147, 0.1124, 1.0] }
+
+[[objects]]
+name = "floor_237"
+translation_m = [12.956, 0.004, -0.548]
+visual = { shape = "box", size_m = [0.487, 0.008, 0.487], color_rgba = [0.7998, 0.7998, 0.7838, 1.0] }
+
+[[objects]]
+name = "floor_238"
+translation_m = [13.102, 0.004, -0.05]
+visual = { shape = "box", size_m = [0.439, 0.008, 0.439], color_rgba = [0.6387, 0.6387, 0.6259, 1.0] }
+
+[[objects]]
+name = "floor_239"
+translation_m = [13.105, 0.004, 0.383]
+visual = { shape = "box", size_m = [0.489, 0.008, 0.489], color_rgba = [0.6135, 0.6135, 0.6012, 1.0] }
+
+[[objects]]
+name = "floor_240"
+translation_m = [12.956, 0.004, 0.941]
+visual = { shape = "box", size_m = [0.488, 0.008, 0.488], color_rgba = [0.6647, 0.6647, 0.6514, 1.0] }
+
+[[objects]]
+name = "floor_241"
+translation_m = [13.01, 0.004, 1.528]
+visual = { shape = "box", size_m = [0.404, 0.008, 0.404], color_rgba = [0.5682, 0.5682, 0.5568, 1.0] }
+
+[[objects]]
+name = "floor_242"
+translation_m = [12.998, 0.004, 2.044]
+visual = { shape = "box", size_m = [0.462, 0.008, 0.462], color_rgba = [0.636, 0.636, 0.6233, 1.0] }
+
+[[objects]]
+name = "floor_243"
+translation_m = [13.59, 0.004, -2.072]
+visual = { shape = "box", size_m = [0.484, 0.008, 0.484], color_rgba = [0.5223, 0.5223, 0.5119, 1.0] }
+
+[[objects]]
+name = "floor_244"
+translation_m = [13.571, 0.004, -1.491]
+visual = { shape = "box", size_m = [0.469, 0.008, 0.469], color_rgba = [0.8482, 0.8482, 0.8312, 1.0] }
+
+[[objects]]
+name = "floor_245"
+translation_m = [13.569, 0.004, -1.016]
+visual = { shape = "box", size_m = [0.484, 0.008, 0.484], color_rgba = [0.5886, 0.5886, 0.5768, 1.0] }
+
+[[objects]]
+name = "floor_246"
+translation_m = [13.493, 0.004, -0.412]
+visual = { shape = "box", size_m = [0.443, 0.008, 0.443], color_rgba = [0.8738, 0.8738, 0.8563, 1.0] }
+
+[[objects]]
+name = "floor_247"
+translation_m = [13.587, 0.004, 0.11]
+visual = { shape = "box", size_m = [0.424, 0.008, 0.424], color_rgba = [0.253, 0.253, 0.2479, 1.0] }
+
+[[objects]]
+name = "floor_248"
+translation_m = [13.43, 0.004, 0.617]
+visual = { shape = "box", size_m = [0.441, 0.008, 0.441], color_rgba = [0.1591, 0.1591, 0.1559, 1.0] }
+
+[[objects]]
+name = "floor_249"
+translation_m = [13.558, 0.004, 1.007]
+visual = { shape = "box", size_m = [0.432, 0.008, 0.432], color_rgba = [0.7723, 0.7723, 0.7569, 1.0] }
+
+[[objects]]
+name = "floor_250"
+translation_m = [13.534, 0.004, 1.575]
+visual = { shape = "box", size_m = [0.463, 0.008, 0.463], color_rgba = [0.327, 0.327, 0.3205, 1.0] }
+
+[[objects]]
+name = "floor_251"
+translation_m = [13.483, 0.004, 1.981]
+visual = { shape = "box", size_m = [0.439, 0.008, 0.439], color_rgba = [0.1305, 0.1305, 0.1279, 1.0] }
+
+[[objects]]
+name = "floor_252"
+translation_m = [13.97, 0.004, -2.032]
+visual = { shape = "box", size_m = [0.419, 0.008, 0.419], color_rgba = [0.5871, 0.5871, 0.5754, 1.0] }
+
+[[objects]]
+name = "floor_253"
+translation_m = [14.064, 0.004, -1.39]
+visual = { shape = "box", size_m = [0.424, 0.008, 0.424], color_rgba = [0.6928, 0.6928, 0.6789, 1.0] }
+
+[[objects]]
+name = "floor_254"
+translation_m = [14.056, 0.004, -0.926]
+visual = { shape = "box", size_m = [0.477, 0.008, 0.477], color_rgba = [0.13, 0.13, 0.1274, 1.0] }
+
+[[objects]]
+name = "floor_255"
+translation_m = [13.927, 0.004, -0.556]
+visual = { shape = "box", size_m = [0.407, 0.008, 0.407], color_rgba = [0.6996, 0.6996, 0.6856, 1.0] }
+
+[[objects]]
+name = "floor_256"
+translation_m = [13.934, 0.004, -0.046]
+visual = { shape = "box", size_m = [0.437, 0.008, 0.437], color_rgba = [0.0886, 0.0886, 0.0868, 1.0] }
+
+[[objects]]
+name = "floor_257"
+translation_m = [13.946, 0.004, 0.611]
+visual = { shape = "box", size_m = [0.48, 0.008, 0.48], color_rgba = [0.1326, 0.1326, 0.1299, 1.0] }
+
+[[objects]]
+name = "floor_258"
+translation_m = [13.891, 0.004, 1.08]
+visual = { shape = "box", size_m = [0.47, 0.008, 0.47], color_rgba = [0.7785, 0.7785, 0.7629, 1.0] }
+
+[[objects]]
+name = "floor_259"
+translation_m = [14.063, 0.004, 1.593]
+visual = { shape = "box", size_m = [0.446, 0.008, 0.446], color_rgba = [0.427, 0.427, 0.4185, 1.0] }
+
+[[objects]]
+name = "floor_260"
+translation_m = [13.909, 0.004, 2.045]
+visual = { shape = "box", size_m = [0.411, 0.008, 0.411], color_rgba = [0.8291, 0.8291, 0.8125, 1.0] }
+
+[[objects]]
+name = "floor_261"
+translation_m = [14.439, 0.004, -2.042]
+visual = { shape = "box", size_m = [0.452, 0.008, 0.452], color_rgba = [0.2533, 0.2533, 0.2482, 1.0] }
+
+[[objects]]
+name = "floor_262"
+translation_m = [14.527, 0.004, -1.555]
+visual = { shape = "box", size_m = [0.461, 0.008, 0.461], color_rgba = [0.5592, 0.5592, 0.548, 1.0] }
+
+[[objects]]
+name = "floor_263"
+translation_m = [14.446, 0.004, -1.005]
+visual = { shape = "box", size_m = [0.441, 0.008, 0.441], color_rgba = [0.6961, 0.6961, 0.6822, 1.0] }
+
+[[objects]]
+name = "floor_264"
+translation_m = [14.558, 0.004, -0.436]
+visual = { shape = "box", size_m = [0.412, 0.008, 0.412], color_rgba = [0.4079, 0.4079, 0.3997, 1.0] }
+
+[[objects]]
+name = "floor_265"
+translation_m = [14.423, 0.004, 0.111]
+visual = { shape = "box", size_m = [0.456, 0.008, 0.456], color_rgba = [0.5527, 0.5527, 0.5416, 1.0] }
+
+[[objects]]
+name = "floor_266"
+translation_m = [14.382, 0.004, 0.514]
+visual = { shape = "box", size_m = [0.406, 0.008, 0.406], color_rgba = [0.9321, 0.9321, 0.9135, 1.0] }
+
+[[objects]]
+name = "floor_267"
+translation_m = [14.39, 0.004, 0.955]
+visual = { shape = "box", size_m = [0.412, 0.008, 0.412], color_rgba = [0.9275, 0.4749, 0.2733, 1.0] }
+
+[[objects]]
+name = "floor_268"
+translation_m = [14.486, 0.004, 1.392]
+visual = { shape = "box", size_m = [0.468, 0.008, 0.468], color_rgba = [0.4935, 0.4935, 0.4836, 1.0] }
+
+[[objects]]
+name = "floor_269"
+translation_m = [14.613, 0.004, 1.889]
+visual = { shape = "box", size_m = [0.441, 0.008, 0.441], color_rgba = [0.3306, 0.3306, 0.324, 1.0] }
+
+[[objects]]
+name = "floor_270"
+translation_m = [15.116, 0.004, -2.005]
+visual = { shape = "box", size_m = [0.462, 0.008, 0.462], color_rgba = [0.1367, 0.1367, 0.134, 1.0] }
+
+[[objects]]
+name = "floor_271"
+translation_m = [14.981, 0.004, -1.449]
+visual = { shape = "box", size_m = [0.477, 0.008, 0.477], color_rgba = [0.3251, 0.3251, 0.3186, 1.0] }
+
+[[objects]]
+name = "floor_272"
+translation_m = [14.937, 0.004, -1.1]
+visual = { shape = "box", size_m = [0.4, 0.008, 0.4], color_rgba = [0.009, 0.5305, 0.5699, 1.0] }
+
+[[objects]]
+name = "floor_273"
+translation_m = [14.953, 0.004, -0.469]
+visual = { shape = "box", size_m = [0.4, 0.008, 0.4], color_rgba = [0.7272, 0.7272, 0.1752, 1.0] }
+
+[[objects]]
+name = "floor_274"
+translation_m = [14.901, 0.004, -0.017]
+visual = { shape = "box", size_m = [0.409, 0.008, 0.409], color_rgba = [0.2105, 0.2105, 0.2063, 1.0] }
+
+[[objects]]
+name = "floor_275"
+translation_m = [15.022, 0.004, 0.599]
+visual = { shape = "box", size_m = [0.407, 0.008, 0.407], color_rgba = [0.4268, 0.4268, 0.4183, 1.0] }
+
+[[objects]]
+name = "floor_276"
+translation_m = [14.89, 0.004, 1.049]
+visual = { shape = "box", size_m = [0.47, 0.008, 0.47], color_rgba = [0.826, 0.826, 0.8095, 1.0] }
+
+[[objects]]
+name = "floor_277"
+translation_m = [14.988, 0.004, 1.385]
+visual = { shape = "box", size_m = [0.431, 0.008, 0.431], color_rgba = [0.7, 0.7, 0.686, 1.0] }
+
+[[objects]]
+name = "floor_278"
+translation_m = [15.02, 0.004, 2.029]
+visual = { shape = "box", size_m = [0.418, 0.008, 0.418], color_rgba = [0.1108, 0.1108, 0.1086, 1.0] }
+
+[[objects]]
+name = "floor_279"
+translation_m = [15.591, 0.004, -2.074]
+visual = { shape = "box", size_m = [0.444, 0.008, 0.444], color_rgba = [0.9409, 0.9409, 0.9221, 1.0] }
+
+[[objects]]
+name = "floor_280"
+translation_m = [15.544, 0.004, -1.596]
+visual = { shape = "box", size_m = [0.438, 0.008, 0.438], color_rgba = [0.837, 0.837, 0.8203, 1.0] }
+
+[[objects]]
+name = "floor_281"
+translation_m = [15.412, 0.004, -0.98]
+visual = { shape = "box", size_m = [0.479, 0.008, 0.479], color_rgba = [0.8735, 0.8735, 0.856, 1.0] }
+
+[[objects]]
+name = "floor_282"
+translation_m = [15.616, 0.004, -0.398]
+visual = { shape = "box", size_m = [0.46, 0.008, 0.46], color_rgba = [0.3567, 0.3567, 0.3496, 1.0] }
+
+[[objects]]
+name = "floor_283"
+translation_m = [15.442, 0.004, 0.097]
+visual = { shape = "box", size_m = [0.405, 0.008, 0.405], color_rgba = [0.9201, 0.9201, 0.9017, 1.0] }
+
+[[objects]]
+name = "floor_284"
+translation_m = [15.576, 0.004, 0.403]
+visual = { shape = "box", size_m = [0.445, 0.008, 0.445], color_rgba = [0.5164, 0.5164, 0.5061, 1.0] }
+
+[[objects]]
+name = "floor_285"
+translation_m = [15.617, 0.004, 1.075]
+visual = { shape = "box", size_m = [0.452, 0.008, 0.452], color_rgba = [0.5439, 0.5439, 0.533, 1.0] }
+
+[[objects]]
+name = "floor_286"
+translation_m = [15.402, 0.004, 1.444]
+visual = { shape = "box", size_m = [0.441, 0.008, 0.441], color_rgba = [0.6653, 0.6653, 0.652, 1.0] }
+
+[[objects]]
+name = "floor_287"
+translation_m = [15.544, 0.004, 1.919]
+visual = { shape = "box", size_m = [0.424, 0.008, 0.424], color_rgba = [0.7244, 0.7244, 0.7099, 1.0] }
+
+[[objects]]
+name = "floor_288"
+translation_m = [15.978, 0.004, -1.926]
+visual = { shape = "box", size_m = [0.447, 0.008, 0.447], color_rgba = [0.0724, 0.0724, 0.071, 1.0] }
+
+[[objects]]
+name = "floor_289"
+translation_m = [16.038, 0.004, -1.473]
+visual = { shape = "box", size_m = [0.488, 0.008, 0.488], color_rgba = [0.2638, 0.0516, 0.6036, 1.0] }
+
+[[objects]]
+name = "floor_290"
+translation_m = [16.053, 0.004, -1.083]
+visual = { shape = "box", size_m = [0.414, 0.008, 0.414], color_rgba = [0.1724, 0.1724, 0.169, 1.0] }
+
+[[objects]]
+name = "floor_291"
+translation_m = [15.919, 0.004, -0.566]
+visual = { shape = "box", size_m = [0.442, 0.008, 0.442], color_rgba = [0.7558, 0.7558, 0.7407, 1.0] }
+
+[[objects]]
+name = "floor_292"
+translation_m = [16.044, 0.004, 0.023]
+visual = { shape = "box", size_m = [0.463, 0.008, 0.463], color_rgba = [0.1042, 0.1042, 0.1021, 1.0] }
+
+[[objects]]
+name = "floor_293"
+translation_m = [16.12, 0.004, 0.409]
+visual = { shape = "box", size_m = [0.489, 0.008, 0.489], color_rgba = [0.5494, 0.5494, 0.5384, 1.0] }
+
+[[objects]]
+name = "floor_294"
+translation_m = [15.883, 0.004, 0.909]
+visual = { shape = "box", size_m = [0.411, 0.008, 0.411], color_rgba = [0.0991, 0.0991, 0.0971, 1.0] }
+
+[[objects]]
+name = "floor_295"
+translation_m = [15.905, 0.004, 1.435]
+visual = { shape = "box", size_m = [0.456, 0.008, 0.456], color_rgba = [0.2102, 0.2102, 0.206, 1.0] }
+
+[[objects]]
+name = "floor_296"
+translation_m = [16.022, 0.004, 2.093]
+visual = { shape = "box", size_m = [0.439, 0.008, 0.439], color_rgba = [0.9386, 0.9386, 0.9198, 1.0] }
+
+[[objects]]
+name = "floor_297"
+translation_m = [16.493, 0.004, -1.894]
+visual = { shape = "box", size_m = [0.472, 0.008, 0.472], color_rgba = [0.4063, 0.4063, 0.3982, 1.0] }
+
+[[objects]]
+name = "floor_298"
+translation_m = [16.388, 0.004, -1.497]
+visual = { shape = "box", size_m = [0.409, 0.008, 0.409], color_rgba = [0.4125, 0.4125, 0.4042, 1.0] }
+
+[[objects]]
+name = "floor_299"
+translation_m = [16.406, 0.004, -1.097]
+visual = { shape = "box", size_m = [0.448, 0.008, 0.448], color_rgba = [0.1048, 0.1048, 0.1027, 1.0] }
+
+[[objects]]
+name = "floor_300"
+translation_m = [16.39, 0.004, -0.58]
+visual = { shape = "box", size_m = [0.419, 0.008, 0.419], color_rgba = [0.7357, 0.7357, 0.721, 1.0] }
+
+[[objects]]
+name = "floor_301"
+translation_m = [16.519, 0.004, 0.024]
+visual = { shape = "box", size_m = [0.43, 0.008, 0.43], color_rgba = [0.1638, 0.1638, 0.1605, 1.0] }
+
+[[objects]]
+name = "floor_302"
+translation_m = [16.451, 0.004, 0.475]
+visual = { shape = "box", size_m = [0.429, 0.008, 0.429], color_rgba = [0.1092, 0.1092, 0.107, 1.0] }
+
+[[objects]]
+name = "floor_303"
+translation_m = [16.589, 0.004, 1.059]
+visual = { shape = "box", size_m = [0.411, 0.008, 0.411], color_rgba = [0.9328, 0.9328, 0.9141, 1.0] }
+
+[[objects]]
+name = "floor_304"
+translation_m = [16.393, 0.004, 1.426]
+visual = { shape = "box", size_m = [0.479, 0.008, 0.479], color_rgba = [0.1139, 0.1139, 0.1116, 1.0] }
+
+[[objects]]
+name = "floor_305"
+translation_m = [16.552, 0.004, 2.09]
+visual = { shape = "box", size_m = [0.443, 0.008, 0.443], color_rgba = [0.1615, 0.1615, 0.1583, 1.0] }
+
+[[objects]]
+name = "floor_306"
+translation_m = [17.063, 0.004, -1.914]
+visual = { shape = "box", size_m = [0.42, 0.008, 0.42], color_rgba = [0.1154, 0.1154, 0.1131, 1.0] }
+
+[[objects]]
+name = "floor_307"
+translation_m = [16.961, 0.004, -1.532]
+visual = { shape = "box", size_m = [0.454, 0.008, 0.454], color_rgba = [0.4158, 0.4158, 0.4075, 1.0] }
+
+[[objects]]
+name = "floor_308"
+translation_m = [17.011, 0.004, -0.935]
+visual = { shape = "box", size_m = [0.429, 0.008, 0.429], color_rgba = [0.3982, 0.3982, 0.3902, 1.0] }
+
+[[objects]]
+name = "floor_309"
+translation_m = [16.89, 0.004, -0.4]
+visual = { shape = "box", size_m = [0.484, 0.008, 0.484], color_rgba = [0.3657, 0.3657, 0.3584, 1.0] }
+
+[[objects]]
+name = "floor_310"
+translation_m = [16.918, 0.004, -0.035]
+visual = { shape = "box", size_m = [0.414, 0.008, 0.414], color_rgba = [0.6962, 0.6962, 0.6823, 1.0] }
+
+[[objects]]
+name = "floor_311"
+translation_m = [16.9, 0.004, 0.508]
+visual = { shape = "box", size_m = [0.412, 0.008, 0.412], color_rgba = [0.789, 0.789, 0.7732, 1.0] }
+
+[[objects]]
+name = "floor_312"
+translation_m = [17.074, 0.004, 1.117]
+visual = { shape = "box", size_m = [0.426, 0.008, 0.426], color_rgba = [0.8249, 0.8249, 0.8084, 1.0] }
+
+[[objects]]
+name = "floor_313"
+translation_m = [16.912, 0.004, 1.431]
+visual = { shape = "box", size_m = [0.446, 0.008, 0.446], color_rgba = [0.1092, 0.1092, 0.107, 1.0] }
+
+[[objects]]
+name = "floor_314"
+translation_m = [16.935, 0.004, 2.072]
+visual = { shape = "box", size_m = [0.466, 0.008, 0.466], color_rgba = [0.1677, 0.1677, 0.1643, 1.0] }
+
+[[objects]]
+name = "floor_315"
+translation_m = [17.422, 0.004, -2.068]
+visual = { shape = "box", size_m = [0.473, 0.008, 0.473], color_rgba = [0.6482, 0.6482, 0.6352, 1.0] }
+
+[[objects]]
+name = "floor_316"
+translation_m = [17.471, 0.004, -1.503]
+visual = { shape = "box", size_m = [0.481, 0.008, 0.481], color_rgba = [0.4676, 0.4676, 0.4582, 1.0] }
+
+[[objects]]
+name = "floor_317"
+translation_m = [17.475, 0.004, -1.051]
+visual = { shape = "box", size_m = [0.401, 0.008, 0.401], color_rgba = [0.2042, 0.2042, 0.2001, 1.0] }
+
+[[objects]]
+name = "floor_318"
+translation_m = [17.582, 0.004, -0.495]
+visual = { shape = "box", size_m = [0.429, 0.008, 0.429], color_rgba = [0.2804, 0.2804, 0.2748, 1.0] }
+
+[[objects]]
+name = "floor_319"
+translation_m = [17.562, 0.004, -0.017]
+visual = { shape = "box", size_m = [0.475, 0.008, 0.475], color_rgba = [0.6847, 0.6847, 0.671, 1.0] }
+
+[[objects]]
+name = "floor_320"
+translation_m = [17.527, 0.004, 0.596]
+visual = { shape = "box", size_m = [0.457, 0.008, 0.457], color_rgba = [0.2796, 0.2796, 0.274, 1.0] }
+
+[[objects]]
+name = "floor_321"
+translation_m = [17.532, 0.004, 0.977]
+visual = { shape = "box", size_m = [0.404, 0.008, 0.404], color_rgba = [0.8785, 0.8785, 0.8609, 1.0] }
+
+[[objects]]
+name = "floor_322"
+translation_m = [17.492, 0.004, 1.434]
+visual = { shape = "box", size_m = [0.42, 0.008, 0.42], color_rgba = [0.6456, 0.6456, 0.6327, 1.0] }
+
+[[objects]]
+name = "floor_323"
+translation_m = [17.462, 0.004, 1.948]
+visual = { shape = "box", size_m = [0.435, 0.008, 0.435], color_rgba = [0.0597, 0.0597, 0.0585, 1.0] }
+
+[[objects]]
+name = "floor_324"
+translation_m = [17.979, 0.004, -2.039]
+visual = { shape = "box", size_m = [0.424, 0.008, 0.424], color_rgba = [0.233, 0.233, 0.2283, 1.0] }
+
+[[objects]]
+name = "floor_325"
+translation_m = [17.992, 0.004, -1.431]
+visual = { shape = "box", size_m = [0.461, 0.008, 0.461], color_rgba = [0.5394, 0.5394, 0.5286, 1.0] }
+
+[[objects]]
+name = "floor_326"
+translation_m = [17.996, 0.004, -1.094]
+visual = { shape = "box", size_m = [0.456, 0.008, 0.456], color_rgba = [0.4112, 0.4112, 0.403, 1.0] }
+
+[[objects]]
+name = "floor_327"
+translation_m = [17.941, 0.004, -0.524]
+visual = { shape = "box", size_m = [0.454, 0.008, 0.454], color_rgba = [0.0903, 0.0903, 0.0885, 1.0] }
+
+[[objects]]
+name = "floor_328"
+translation_m = [17.939, 0.004, -0.077]
+visual = { shape = "box", size_m = [0.428, 0.008, 0.428], color_rgba = [0.7875, 0.7875, 0.7717, 1.0] }
+
+[[objects]]
+name = "floor_329"
+translation_m = [18.1, 0.004, 0.578]
+visual = { shape = "box", size_m = [0.435, 0.008, 0.435], color_rgba = [0.0537, 0.0537, 0.0526, 1.0] }
+
+[[objects]]
+name = "floor_330"
+translation_m = [17.961, 0.004, 1.001]
+visual = { shape = "box", size_m = [0.485, 0.008, 0.485], color_rgba = [0.4181, 0.4181, 0.4097, 1.0] }
+
+[[objects]]
+name = "floor_331"
+translation_m = [17.952, 0.004, 1.394]
+visual = { shape = "box", size_m = [0.451, 0.008, 0.451], color_rgba = [0.6453, 0.6453, 0.6324, 1.0] }
+
+[[objects]]
+name = "floor_332"
+translation_m = [18.094, 0.004, 2.017]
+visual = { shape = "box", size_m = [0.415, 0.008, 0.415], color_rgba = [0.5726, 0.5726, 0.5611, 1.0] }
+
+[[objects]]
+name = "floor_333"
+translation_m = [18.508, 0.004, -2.014]
+visual = { shape = "box", size_m = [0.452, 0.008, 0.452], color_rgba = [0.8707, 0.8707, 0.8533, 1.0] }
+
+[[objects]]
+name = "floor_334"
+translation_m = [18.552, 0.004, -1.501]
+visual = { shape = "box", size_m = [0.41, 0.008, 0.41], color_rgba = [0.0903, 0.4779, 0.7499, 1.0] }
+
+[[objects]]
+name = "floor_335"
+translation_m = [18.541, 0.004, -1.113]
+visual = { shape = "box", size_m = [0.468, 0.008, 0.468], color_rgba = [0.2004, 0.2004, 0.1964, 1.0] }
+
+[[objects]]
+name = "floor_336"
+translation_m = [18.383, 0.004, -0.502]
+visual = { shape = "box", size_m = [0.485, 0.008, 0.485], color_rgba = [0.773, 0.773, 0.7575, 1.0] }
+
+[[objects]]
+name = "floor_337"
+translation_m = [18.61, 0.004, -0.085]
+visual = { shape = "box", size_m = [0.456, 0.008, 0.456], color_rgba = [0.2177, 0.2177, 0.2133, 1.0] }
+
+[[objects]]
+name = "floor_338"
+translation_m = [18.5, 0.004, 0.414]
+visual = { shape = "box", size_m = [0.463, 0.008, 0.463], color_rgba = [0.7799, 0.7799, 0.7643, 1.0] }
+
+[[objects]]
+name = "floor_339"
+translation_m = [18.446, 0.004, 0.944]
+visual = { shape = "box", size_m = [0.406, 0.008, 0.406], color_rgba = [0.4451, 0.4451, 0.4362, 1.0] }
+
+[[objects]]
+name = "floor_340"
+translation_m = [18.482, 0.004, 1.573]
+visual = { shape = "box", size_m = [0.424, 0.008, 0.424], color_rgba = [0.2369, 0.2369, 0.2322, 1.0] }
+
+[[objects]]
+name = "floor_341"
+translation_m = [18.484, 0.004, 1.994]
+visual = { shape = "box", size_m = [0.44, 0.008, 0.44], color_rgba = [0.1262, 0.1262, 0.1237, 1.0] }
+
+[[objects]]
+name = "floor_342"
+translation_m = [18.902, 0.004, -2.031]
+visual = { shape = "box", size_m = [0.486, 0.008, 0.486], color_rgba = [0.7337, 0.7337, 0.719, 1.0] }
+
+[[objects]]
+name = "floor_343"
+translation_m = [18.95, 0.004, -1.514]
+visual = { shape = "box", size_m = [0.471, 0.008, 0.471], color_rgba = [0.4047, 0.4047, 0.3966, 1.0] }
+
+[[objects]]
+name = "floor_344"
+translation_m = [18.912, 0.004, -1.036]
+visual = { shape = "box", size_m = [0.416, 0.008, 0.416], color_rgba = [0.5825, 0.5825, 0.5708, 1.0] }
+
+[[objects]]
+name = "floor_345"
+translation_m = [18.888, 0.004, -0.57]
+visual = { shape = "box", size_m = [0.415, 0.008, 0.415], color_rgba = [0.4389, 0.4389, 0.4301, 1.0] }
+
+[[objects]]
+name = "floor_346"
+translation_m = [18.975, 0.004, -0.02]
+visual = { shape = "box", size_m = [0.453, 0.008, 0.453], color_rgba = [0.1997, 0.1997, 0.1957, 1.0] }
+
+[[objects]]
+name = "floor_347"
+translation_m = [19.08, 0.004, 0.433]
+visual = { shape = "box", size_m = [0.417, 0.008, 0.417], color_rgba = [0.2047, 0.2047, 0.2006, 1.0] }
+
+[[objects]]
+name = "floor_348"
+translation_m = [19.016, 0.004, 1.058]
+visual = { shape = "box", size_m = [0.444, 0.008, 0.444], color_rgba = [0.0747, 0.0747, 0.0732, 1.0] }
+
+[[objects]]
+name = "floor_349"
+translation_m = [19.111, 0.004, 1.41]
+visual = { shape = "box", size_m = [0.467, 0.008, 0.467], color_rgba = [0.1845, 0.1845, 0.1808, 1.0] }
+
+[[objects]]
+name = "floor_350"
+translation_m = [18.923, 0.004, 1.998]
+visual = { shape = "box", size_m = [0.415, 0.008, 0.415], color_rgba = [0.3391, 0.3391, 0.3323, 1.0] }
+
+[[objects]]
+name = "floor_351"
+translation_m = [19.517, 0.004, -2.075]
+visual = { shape = "box", size_m = [0.409, 0.008, 0.409], color_rgba = [0.2454, 0.2454, 0.2405, 1.0] }
+
+[[objects]]
+name = "floor_352"
+translation_m = [19.458, 0.004, -1.517]
+visual = { shape = "box", size_m = [0.472, 0.008, 0.472], color_rgba = [0.8548, 0.8548, 0.8377, 1.0] }
+
+[[objects]]
+name = "floor_353"
+translation_m = [19.442, 0.004, -1.119]
+visual = { shape = "box", size_m = [0.477, 0.008, 0.477], color_rgba = [0.3873, 0.3873, 0.3796, 1.0] }
+
+[[objects]]
+name = "floor_354"
+translation_m = [19.608, 0.004, -0.551]
+visual = { shape = "box", size_m = [0.403, 0.008, 0.403], color_rgba = [0.4371, 0.4371, 0.4284, 1.0] }
+
+[[objects]]
+name = "floor_355"
+translation_m = [19.467, 0.004, 0.032]
+visual = { shape = "box", size_m = [0.426, 0.008, 0.426], color_rgba = [0.8758, 0.8758, 0.8583, 1.0] }
+
+[[objects]]
+name = "floor_356"
+translation_m = [19.387, 0.004, 0.532]
+visual = { shape = "box", size_m = [0.464, 0.008, 0.464], color_rgba = [0.8645, 0.8645, 0.8472, 1.0] }
+
+[[objects]]
+name = "floor_357"
+translation_m = [19.51, 0.004, 1.113]
+visual = { shape = "box", size_m = [0.41, 0.008, 0.41], color_rgba = [0.1076, 0.1076, 0.1054, 1.0] }
+
+[[objects]]
+name = "floor_358"
+translation_m = [19.568, 0.004, 1.483]
+visual = { shape = "box", size_m = [0.423, 0.008, 0.423], color_rgba = [0.5488, 0.5488, 0.5378, 1.0] }
+
+[[objects]]
+name = "floor_359"
+translation_m = [19.58, 0.004, 2.095]
+visual = { shape = "box", size_m = [0.446, 0.008, 0.446], color_rgba = [0.5982, 0.5982, 0.5862, 1.0] }
+
+[[objects]]
+name = "floor_360"
+translation_m = [20.079, 0.004, -1.933]
+visual = { shape = "box", size_m = [0.484, 0.008, 0.484], color_rgba = [0.8771, 0.8771, 0.8596, 1.0] }
+
+[[objects]]
+name = "floor_361"
+translation_m = [19.884, 0.004, -1.605]
+visual = { shape = "box", size_m = [0.452, 0.008, 0.452], color_rgba = [0.7986, 0.7986, 0.7826, 1.0] }
+
+[[objects]]
+name = "floor_362"
+translation_m = [20.051, 0.004, -0.893]
+visual = { shape = "box", size_m = [0.484, 0.008, 0.484], color_rgba = [0.1081, 0.1081, 0.1059, 1.0] }
+
+[[objects]]
+name = "floor_363"
+translation_m = [19.904, 0.004, -0.535]
+visual = { shape = "box", size_m = [0.444, 0.008, 0.444], color_rgba = [0.2726, 0.2726, 0.2671, 1.0] }
+
+[[objects]]
+name = "floor_364"
+translation_m = [20.032, 0.004, -0.088]
+visual = { shape = "box", size_m = [0.406, 0.008, 0.406], color_rgba = [0.366, 0.366, 0.3587, 1.0] }
+
+[[objects]]
+name = "floor_365"
+translation_m = [20.017, 0.004, 0.559]
+visual = { shape = "box", size_m = [0.477, 0.008, 0.477], color_rgba = [0.8032, 0.8032, 0.7871, 1.0] }
+
+[[objects]]
+name = "floor_366"
+translation_m = [20.107, 0.004, 1.082]
+visual = { shape = "box", size_m = [0.45, 0.008, 0.45], color_rgba = [0.793, 0.793, 0.7771, 1.0] }
+
+[[objects]]
+name = "floor_367"
+translation_m = [20.057, 0.004, 1.448]
+visual = { shape = "box", size_m = [0.454, 0.008, 0.454], color_rgba = [0.1181, 0.1181, 0.1157, 1.0] }
+
+[[objects]]
+name = "floor_368"
+translation_m = [19.952, 0.004, 1.933]
+visual = { shape = "box", size_m = [0.456, 0.008, 0.456], color_rgba = [0.3942, 0.3942, 0.3863, 1.0] }
+
+[[objects]]
+name = "wall_369"
+translation_m = [0.016, 0.187, -1.800]
+visual = { shape = "box", size_m = [0.429, 0.429, 0.02], color_rgba = [0.4258, 0.4258, 0.4173, 1.0] }
+
+[[objects]]
+name = "wall_370"
+translation_m = [-0.042, 0.807, -1.800]
+visual = { shape = "box", size_m = [0.413, 0.413, 0.02], color_rgba = [0.289, 0.289, 0.2832, 1.0] }
+
+[[objects]]
+name = "wall_371"
+translation_m = [0.053, 1.083, -1.800]
+visual = { shape = "box", size_m = [0.452, 0.452, 0.02], color_rgba = [0.5013, 0.5013, 0.4913, 1.0] }
+
+[[objects]]
+name = "wall_372"
+translation_m = [0.056, 1.669, -1.800]
+visual = { shape = "box", size_m = [0.447, 0.447, 0.02], color_rgba = [0.4436, 0.4436, 0.4347, 1.0] }
+
+[[objects]]
+name = "wall_373"
+translation_m = [0.074, 2.113, -1.800]
+visual = { shape = "box", size_m = [0.43, 0.43, 0.02], color_rgba = [0.3408, 0.3408, 0.334, 1.0] }
+
+[[objects]]
+name = "wall_374"
+translation_m = [0.565, 0.098, -1.800]
+visual = { shape = "box", size_m = [0.447, 0.447, 0.02], color_rgba = [0.6846, 0.6846, 0.6709, 1.0] }
+
+[[objects]]
+name = "wall_375"
+translation_m = [0.443, 0.735, -1.800]
+visual = { shape = "box", size_m = [0.436, 0.436, 0.02], color_rgba = [0.4953, 0.4953, 0.4854, 1.0] }
+
+[[objects]]
+name = "wall_376"
+translation_m = [0.467, 1.178, -1.800]
+visual = { shape = "box", size_m = [0.463, 0.463, 0.02], color_rgba = [0.6337, 0.6337, 0.621, 1.0] }
+
+[[objects]]
+name = "wall_377"
+translation_m = [0.535, 1.71, -1.800]
+visual = { shape = "box", size_m = [0.411, 0.411, 0.02], color_rgba = [0.2382, 0.2382, 0.2334, 1.0] }
+
+[[objects]]
+name = "wall_378"
+translation_m = [0.398, 2.227, -1.800]
+visual = { shape = "box", size_m = [0.482, 0.482, 0.02], color_rgba = [0.2496, 0.2496, 0.2446, 1.0] }
+
+[[objects]]
+name = "wall_379"
+translation_m = [0.887, 0.146, -1.800]
+visual = { shape = "box", size_m = [0.441, 0.441, 0.02], color_rgba = [0.6562, 0.6562, 0.6431, 1.0] }
+
+[[objects]]
+name = "wall_380"
+translation_m = [1.068, 0.705, -1.800]
+visual = { shape = "box", size_m = [0.436, 0.436, 0.02], color_rgba = [0.5338, 0.5338, 0.5231, 1.0] }
+
+[[objects]]
+name = "wall_381"
+translation_m = [0.954, 1.271, -1.800]
+visual = { shape = "box", size_m = [0.463, 0.463, 0.02], color_rgba = [0.4379, 0.4379, 0.4291, 1.0] }
+
+[[objects]]
+name = "wall_382"
+translation_m = [0.896, 1.779, -1.800]
+visual = { shape = "box", size_m = [0.459, 0.459, 0.02], color_rgba = [0.0913, 0.0913, 0.0895, 1.0] }
+
+[[objects]]
+name = "wall_383"
+translation_m = [1.099, 2.182, -1.800]
+visual = { shape = "box", size_m = [0.457, 0.457, 0.02], color_rgba = [0.2549, 0.2549, 0.2498, 1.0] }
+
+[[objects]]
+name = "wall_384"
+translation_m = [1.614, 0.125, -1.800]
+visual = { shape = "box", size_m = [0.453, 0.453, 0.02], color_rgba = [0.3751, 0.3751, 0.3676, 1.0] }
+
+[[objects]]
+name = "wall_385"
+translation_m = [1.446, 0.677, -1.800]
+visual = { shape = "box", size_m = [0.468, 0.468, 0.02], color_rgba = [0.7065, 0.7065, 0.6924, 1.0] }
+
+[[objects]]
+name = "wall_386"
+translation_m = [1.602, 1.164, -1.800]
+visual = { shape = "box", size_m = [0.439, 0.439, 0.02], color_rgba = [0.4964, 0.4964, 0.4865, 1.0] }
+
+[[objects]]
+name = "wall_387"
+translation_m = [1.611, 1.647, -1.800]
+visual = { shape = "box", size_m = [0.435, 0.435, 0.02], color_rgba = [0.2035, 0.2035, 0.1994, 1.0] }
+
+[[objects]]
+name = "wall_388"
+translation_m = [1.415, 2.315, -1.800]
+visual = { shape = "box", size_m = [0.484, 0.484, 0.02], color_rgba = [0.802, 0.802, 0.786, 1.0] }
+
+[[objects]]
+name = "wall_389"
+translation_m = [2.011, 0.111, -1.800]
+visual = { shape = "box", size_m = [0.489, 0.489, 0.02], color_rgba = [0.0699, 0.0699, 0.0685, 1.0] }
+
+[[objects]]
+name = "wall_390"
+translation_m = [1.918, 0.668, -1.800]
+visual = { shape = "box", size_m = [0.456, 0.456, 0.02], color_rgba = [0.7735, 0.7735, 0.758, 1.0] }
+
+[[objects]]
+name = "wall_391"
+translation_m = [1.987, 1.095, -1.800]
+visual = { shape = "box", size_m = [0.444, 0.444, 0.02], color_rgba = [0.4943, 0.4943, 0.4844, 1.0] }
+
+[[objects]]
+name = "wall_392"
+translation_m = [1.941, 1.718, -1.800]
+visual = { shape = "box", size_m = [0.487, 0.487, 0.02], color_rgba = [0.1581, 0.1581, 0.1549, 1.0] }
+
+[[objects]]
+name = "wall_393"
+translation_m = [2.023, 2.21, -1.800]
+visual = { shape = "box", size_m = [0.481, 0.481, 0.02], color_rgba = [0.4912, 0.4912, 0.4814, 1.0] }
+
+[[objects]]
+name = "wall_394"
+translation_m = [2.479, 0.083, -1.800]
+visual = { shape = "box", size_m = [0.433, 0.433, 0.02], color_rgba = [0.3124, 0.3124, 0.3062, 1.0] }
+
+[[objects]]
+name = "wall_395"
+translation_m = [2.507, 0.799, -1.800]
+visual = { shape = "box", size_m = [0.465, 0.465, 0.02], color_rgba = [0.6606, 0.6606, 0.6474, 1.0] }
+
+[[objects]]
+name = "wall_396"
+translation_m = [2.549, 1.248, -1.800]
+visual = { shape = "box", size_m = [0.437, 0.437, 0.02], color_rgba = [0.1041, 0.5243, 0.6856, 1.0] }
+
+[[objects]]
+name = "wall_397"
+translation_m = [2.397, 1.794, -1.800]
+visual = { shape = "box", size_m = [0.424, 0.424, 0.02], color_rgba = [0.5168, 0.5168, 0.5065, 1.0] }
+
+[[objects]]
+name = "wall_398"
+translation_m = [2.396, 2.189, -1.800]
+visual = { shape = "box", size_m = [0.447, 0.447, 0.02], color_rgba = [0.4165, 0.4165, 0.4082, 1.0] }
+
+[[objects]]
+name = "wall_399"
+translation_m = [2.947, 0.277, -1.800]
+visual = { shape = "box", size_m = [0.413, 0.413, 0.02], color_rgba = [0.1276, 0.1276, 0.125, 1.0] }
+
+[[objects]]
+name = "wall_400"
+translation_m = [2.921, 0.613, -1.800]
+visual = { shape = "box", size_m = [0.405, 0.405, 0.02], color_rgba = [0.4607, 0.4607, 0.4515, 1.0] }
+
+[[objects]]
+name = "wall_401"
+translation_m = [2.888, 1.207, -1.800]
+visual = { shape = "box", size_m = [0.443, 0.443, 0.02], color_rgba = [0.506, 0.506, 0.4959, 1.0] }
+
+[[objects]]
+name = "wall_402"
+translation_m = [3.119, 1.661, -1.800]
+visual = { shape = "box", size_m = [0.427, 0.427, 0.02], color_rgba = [0.1287, 0.1287, 0.1261, 1.0] }
+
+[[objects]]
+name = "wall_403"
+translation_m = [2.907, 2.306, -1.800]
+visual = { shape = "box", size_m = [0.435, 0.435, 0.02], color_rgba = [0.2112, 0.2112, 0.207, 1.0] }
+
+[[objects]]
+name = "wall_404"
+translation_m = [3.527, 0.258, -1.800]
+visual = { shape = "box", size_m = [0.49, 0.49, 0.02], color_rgba = [0.4513, 0.4513, 0.4423, 1.0] }
+
+[[objects]]
+name = "wall_405"
+translation_m = [3.609, 0.789, -1.800]
+visual = { shape = "box", size_m = [0.425, 0.425, 0.02], color_rgba = [0.9368, 0.9368, 0.9181, 1.0] }
+
+[[objects]]
+name = "wall_406"
+translation_m = [3.446, 1.157, -1.800]
+visual = { shape = "box", size_m = [0.411, 0.411, 0.02], color_rgba = [0.2374, 0.2374, 0.2327, 1.0] }
+
+[[objects]]
+name = "wall_407"
+translation_m = [3.532, 1.689, -1.800]
+visual = { shape = "box", size_m = [0.436, 0.436, 0.02], color_rgba = [0.7713, 0.7713, 0.7559, 1.0] }
+
+[[objects]]
+name = "wall_408"
+translation_m = [3.547, 2.153, -1.800]
+visual = { shape = "box", size_m = [0.407, 0.407, 0.02], color_rgba = [0.2259, 0.2259, 0.2214, 1.0] }
+
+[[objects]]
+name = "wall_409"
+translation_m = [3.934, 0.12, -1.800]
+visual = { shape = "box", size_m = [0.468, 0.468, 0.02], color_rgba = [0.9371, 0.9371, 0.9184, 1.0] }
+
+[[objects]]
+name = "wall_410"
+translation_m = [4.106, 0.795, -1.800]
+visual = { shape = "box", size_m = [0.48, 0.48, 0.02], color_rgba = [0.1534, 0.1534, 0.1503, 1.0] }
+
+[[objects]]
+name = "wall_411"
+translation_m = [3.922, 1.187, -1.800]
+visual = { shape = "box", size_m = [0.423, 0.423, 0.02], color_rgba = [0.0623, 0.0623, 0.0611, 1.0] }
+
+[[objects]]
+name = "wall_412"
+translation_m = [3.933, 1.589, -1.800]
+visual = { shape = "box", size_m = [0.47, 0.47, 0.02], color_rgba = [0.5179, 0.5179, 0.5075, 1.0] }
+
+[[objects]]
+name = "wall_413"
+translation_m = [3.954, 2.303, -1.800]
+visual = { shape = "box", size_m = [0.474, 0.474, 0.02], color_rgba = [0.9109, 0.9109, 0.8927, 1.0] }
+
+[[objects]]
+name = "wall_414"
+translation_m = [4.579, 0.127, -1.800]
+visual = { shape = "box", size_m = [0.452, 0.452, 0.02], color_rgba = [0.5106, 0.5106, 0.5004, 1.0] }
+
+[[objects]]
+name = "wall_415"
+translation_m = [4.563, 0.801, -1.800]
+visual = { shape = "box", size_m = [0.409, 0.409, 0.02], color_rgba = [0.6049, 0.6049, 0.5928, 1.0] }
+
+[[objects]]
+name = "wall_416"
+translation_m = [4.46, 1.194, -1.800]
+visual = { shape = "box", size_m = [0.478, 0.478, 0.02], color_rgba = [0.1159, 0.1159, 0.1136, 1.0] }
+
+[[objects]]
+name = "wall_417"
+translation_m = [4.568, 1.806, -1.800]
+visual = { shape = "box", size_m = [0.434, 0.434, 0.02], color_rgba = [0.6354, 0.6354, 0.6227, 1.0] }
+
+[[objects]]
+name = "wall_418"
+translation_m = [4.398, 2.113, -1.800]
+visual = { shape = "box", size_m = [0.462, 0.462, 0.02], color_rgba = [0.7757, 0.7757, 0.7602, 1.0] }
+
+[[objects]]
+name = "wall_419"
+translation_m = [5.05, 0.232, -1.800]
+visual = { shape = "box", size_m = [0.436, 0.436, 0.02], color_rgba = [0.1203, 0.1203, 0.1179, 1.0] }
+
+[[objects]]
+name = "wall_420"
+translation_m = [5.043, 0.769, -1.800]
+visual = { shape = "box", size_m = [0.464, 0.464, 0.02], color_rgba = [0.8643, 0.8643, 0.847, 1.0] }
+
+[[objects]]
+name = "wall_421"
+translation_m = [5.03, 1.32, -1.800]
+visual = { shape = "box", size_m = [0.449, 0.449, 0.02], color_rgba = [0.8876, 0.8876, 0.8698, 1.0] }
+
+[[objects]]
+name = "wall_422"
+translation_m = [5.027, 1.594, -1.800]
+visual = { shape = "box", size_m = [0.443, 0.443, 0.02], color_rgba = [0.9464, 0.9464, 0.9275, 1.0] }
+
+[[objects]]
+name = "wall_423"
+translation_m = [4.967, 2.209, -1.800]
+visual = { shape = "box", size_m = [0.47, 0.47, 0.02], color_rgba = [0.5723, 0.5723, 0.5609, 1.0] }
+
+[[objects]]
+name = "wall_424"
+translation_m = [5.483, 0.158, -1.800]
+visual = { shape = "box", size_m = [0.408, 0.408, 0.02], color_rgba = [0.5099, 0.5099, 0.4997, 1.0] }
+
+[[objects]]
+name = "wall_425"
+translation_m = [5.392, 0.815, -1.800]
+visual = { shape = "box", size_m = [0.457, 0.457, 0.02], color_rgba = [0.3309, 0.3309, 0.3243, 1.0] }
+
+[[objects]]
+name = "wall_426"
+translation_m = [5.472, 1.288, -1.800]
+visual = { shape = "box", size_m = [0.487, 0.487, 0.02], color_rgba = [0.2107, 0.2107, 0.2065, 1.0] }
+
+[[objects]]
+name = "wall_427"
+translation_m = [5.421, 1.783, -1.800]
+visual = { shape = "box", size_m = [0.447, 0.447, 0.02], color_rgba = [0.2578, 0.2578, 0.2526, 1.0] }
+
+[[objects]]
+name = "wall_428"
+translation_m = [5.604, 2.121, -1.800]
+visual = { shape = "box", size_m = [0.436, 0.436, 0.02], color_rgba = [0.6019, 0.6019, 0.5899, 1.0] }
+
+[[objects]]
+name = "wall_429"
+translation_m = [5.888, 0.221, -1.800]
+visual = { shape = "box", size_m = [0.415, 0.415, 0.02], color_rgba = [0.7727, 0.7727, 0.7572, 1.0] }
+
+[[objects]]
+name = "wall_430"
+translation_m = [5.93, 0.77, -1.800]
+visual = { shape = "box", size_m = [0.431, 0.431, 0.02], color_rgba = [0.696, 0.696, 0.6821, 1.0] }
+
+[[objects]]
+name = "wall_431"
+translation_m = [5.881, 1.182, -1.800]
+visual = { shape = "box", size_m = [0.482, 0.482, 0.02], color_rgba = [0.779, 0.779, 0.7634, 1.0] }
+
+[[objects]]
+name = "wall_432"
+translation_m = [5.969, 1.636, -1.800]
+visual = { shape = "box", size_m = [0.43, 0.43, 0.02], color_rgba = [0.2645, 0.2645, 0.2592, 1.0] }
+
+[[objects]]
+name = "wall_433"
+translation_m = [5.943, 2.2, -1.800]
+visual = { shape = "box", size_m = [0.428, 0.428, 0.02], color_rgba = [0.591, 0.591, 0.5792, 1.0] }
+
+[[objects]]
+name = "wall_434"
+translation_m = [6.596, 0.157, -1.800]
+visual = { shape = "box", size_m = [0.484, 0.484, 0.02], color_rgba = [0.3745, 0.3745, 0.367, 1.0] }
+
+[[objects]]
+name = "wall_435"
+translation_m = [6.532, 0.757, -1.800]
+visual = { shape = "box", size_m = [0.477, 0.477, 0.02], color_rgba = [0.9015, 0.9015, 0.8835, 1.0] }
+
+[[objects]]
+name = "wall_436"
+translation_m = [6.51, 1.191, -1.800]
+visual = { shape = "box", size_m = [0.468, 0.468, 0.02], color_rgba = [0.4162, 0.4162, 0.4079, 1.0] }
+
+[[objects]]
+name = "wall_437"
+translation_m = [6.532, 1.746, -1.800]
+visual = { shape = "box", size_m = [0.44, 0.44, 0.02], color_rgba = [0.5485, 0.8944, 0.1706, 1.0] }
+
+[[objects]]
+name = "wall_438"
+translation_m = [6.479, 2.082, -1.800]
+visual = { shape = "box", size_m = [0.444, 0.444, 0.02], color_rgba = [0.0971, 0.0971, 0.0952, 1.0] }
+
+[[objects]]
+name = "wall_439"
+translation_m = [7.056, 0.107, -1.800]
+visual = { shape = "box", size_m = [0.461, 0.461, 0.02], color_rgba = [0.2459, 0.2459, 0.241, 1.0] }
+
+[[objects]]
+name = "wall_440"
+translation_m = [7.06, 0.739, -1.800]
+visual = { shape = "box", size_m = [0.437, 0.437, 0.02], color_rgba = [0.2646, 0.2646, 0.2593, 1.0] }
+
+[[objects]]
+name = "wall_441"
+translation_m = [7.074, 1.274, -1.800]
+visual = { shape = "box", size_m = [0.464, 0.464, 0.02], color_rgba = [0.4758, 0.4758, 0.4663, 1.0] }
+
+[[objects]]
+name = "wall_442"
+translation_m = [7.046, 1.689, -1.800]
+visual = { shape = "box", size_m = [0.465, 0.465, 0.02], color_rgba = [0.0739, 0.0739, 0.0724, 1.0] }
+
+[[objects]]
+name = "wall_443"
+translation_m = [6.882, 2.092, -1.800]
+visual = { shape = "box", size_m = [0.435, 0.435, 0.02], color_rgba = [0.4704, 0.4704, 0.461, 1.0] }
+
+[[objects]]
+name = "wall_444"
+translation_m = [7.412, 0.146, -1.800]
+visual = { shape = "box", size_m = [0.425, 0.425, 0.02], color_rgba = [0.3153, 0.3153, 0.309, 1.0] }
+
+[[objects]]
+name = "wall_445"
+translation_m = [7.434, 0.732, -1.800]
+visual = { shape = "box", size_m = [0.47, 0.47, 0.02], color_rgba = [0.1575, 0.1575, 0.1543, 1.0] }
+
+[[objects]]
+name = "wall_446"
+translation_m = [7.45, 1.246, -1.800]
+visual = { shape = "box", size_m = [0.444, 0.444, 0.02], color_rgba = [0.298, 0.298, 0.292, 1.0] }
+
+[[objects]]
+name = "wall_447"
+translation_m = [7.543, 1.62, -1.800]
+visual = { shape = "box", size_m = [0.486, 0.486, 0.02], color_rgba = [0.3391, 0.3391, 0.3323, 1.0] }
+
+[[objects]]
+name = "wall_448"
+translation_m = [7.595, 2.175, -1.800]
+visual = { shape = "box", size_m = [0.458, 0.458, 0.02], color_rgba = [0.4524, 0.4524, 0.4434, 1.0] }
+
+[[objects]]
+name = "wall_449"
+translation_m = [8.07, 0.239, -1.800]
+visual = { shape = "box", size_m = [0.472, 0.472, 0.02], color_rgba = [0.069, 0.069, 0.0676, 1.0] }
+
+[[objects]]
+name = "wall_450"
+translation_m = [8.015, 0.8, -1.800]
+visual = { shape = "box", size_m = [0.408, 0.408, 0.02], color_rgba = [0.7165, 0.7165, 0.7022, 1.0] }
+
+[[objects]]
+name = "wall_451"
+translation_m = [8.009, 1.218, -1.800]
+visual = { shape = "box", size_m = [0.417, 0.417, 0.02], color_rgba = [0.1919, 0.1919, 0.1881, 1.0] }
+
+[[objects]]
+name = "wall_452"
+translation_m = [8.023, 1.587, -1.800]
+visual = { shape = "box", size_m = [0.485, 0.485, 0.02], color_rgba = [0.5926, 0.5926, 0.5807, 1.0] }
+
+[[objects]]
+name = "wall_453"
+translation_m = [7.934, 2.101, -1.800]
+visual = { shape = "box", size_m = [0.431, 0.431, 0.02], color_rgba = [0.5977, 0.1096, 0.1619, 1.0] }
+
+[[objects]]
+name = "wall_454"
+translation_m = [8.523, 0.291, -1.800]
+visual = { shape = "box", size_m = [0.487, 0.487, 0.02], color_rgba = [0.2913, 0.2913, 0.2855, 1.0] }
+
+[[objects]]
+name = "wall_455"
+translation_m = [8.488, 0.689, -1.800]
+visual = { shape = "box", size_m = [0.446, 0.446, 0.02], color_rgba = [0.5038, 0.5038, 0.4937, 1.0] }
+
+[[objects]]
+name = "wall_456"
+translation_m = [8.54, 1.302, -1.800]
+visual = { shape = "box", size_m = [0.442, 0.442, 0.02], color_rgba = [0.4388, 0.4388, 0.43, 1.0] }
+
+[[objects]]
+name = "wall_457"
+translation_m = [8.395, 1.798, -1.800]
+visual = { shape = "box", size_m = [0.479, 0.479, 0.02], color_rgba = [0.3325, 0.3325, 0.3259, 1.0] }
+
+[[objects]]
+name = "wall_458"
+translation_m = [8.549, 2.18, -1.800]
+visual = { shape = "box", size_m = [0.463, 0.463, 0.02], color_rgba = [0.1254, 0.925, 0.6172, 1.0] }
+
+[[objects]]
+name = "wall_459"
+translation_m = [8.96, 0.259, -1.800]
+visual = { shape = "box", size_m = [0.425, 0.425, 0.02], color_rgba = [0.3039, 0.3039, 0.2978, 1.0] }
+
+[[objects]]
+name = "wall_460"
+translation_m = [8.994, 0.625, -1.800]
+visual = { shape = "box", size_m = [0.457, 0.457, 0.02], color_rgba = [0.7367, 0.7367, 0.722, 1.0] }
+
+[[objects]]
+name = "wall_461"
+translation_m = [9.062, 1.181, -1.800]
+visual = { shape = "box", size_m = [0.46, 0.46, 0.02], color_rgba = [0.2202, 0.2202, 0.2158, 1.0] }
+
+[[objects]]
+name = "wall_462"
+translation_m = [9.111, 1.768, -1.800]
+visual = { shape = "box", size_m = [0.423, 0.423, 0.02], color_rgba = [0.8857, 0.8857, 0.868, 1.0] }
+
+[[objects]]
+name = "wall_463"
+translation_m = [8.909, 2.201, -1.800]
+visual = { shape = "box", size_m = [0.474, 0.474, 0.02], color_rgba = [0.4788, 0.4788, 0.4692, 1.0] }
+
+[[objects]]
+name = "wall_464"
+translation_m = [9.424, 0.093, -1.800]
+visual = { shape = "box", size_m = [0.428, 0.428, 0.02], color_rgba = [0.8628, 0.8628, 0.8455, 1.0] }
+
+[[objects]]
+name = "wall_465"
+translation_m = [9.454, 0.607, -1.800]
+visual = { shape = "box", size_m = [0.42, 0.42, 0.02], color_rgba = [0.6504, 0.6504, 0.6374, 1.0] }
+
+[[objects]]
+name = "wall_466"
+translation_m = [9.496, 1.192, -1.800]
+visual = { shape = "box", size_m = [0.464, 0.464, 0.02], color_rgba = [0.6751, 0.6751, 0.6616, 1.0] }
+
+[[objects]]
+name = "wall_467"
+translation_m = [9.539, 1.817, -1.800]
+visual = { shape = "box", size_m = [0.458, 0.458, 0.02], color_rgba = [0.2578, 0.2578, 0.2526, 1.0] }
+
+[[objects]]
+name = "wall_468"
+translation_m = [9.562, 2.164, -1.800]
+visual = { shape = "box", size_m = [0.472, 0.472, 0.02], color_rgba = [0.9041, 0.9041, 0.886, 1.0] }
+
+[[objects]]
+name = "wall_469"
+translation_m = [10.044, 0.17, -1.800]
+visual = { shape = "box", size_m = [0.457, 0.457, 0.02], color_rgba = [0.6617, 0.6617, 0.6485, 1.0] }
+
+[[objects]]
+name = "wall_470"
+translation_m = [9.958, 0.686, -1.800]
+visual = { shape = "box", size_m = [0.468, 0.468, 0.02], color_rgba = [0.4238, 0.4238, 0.4153, 1.0] }
+
+[[objects]]
+name = "wall_471"
+translation_m = [9.89, 1.307, -1.800]
+visual = { shape = "box", size_m = [0.413, 0.413, 0.02], color_rgba = [0.2081, 0.2081, 0.2039, 1.0] }
+
+[[objects]]
+name = "wall_472"
+translation_m = [9.974, 1.625, -1.800]
+visual = { shape = "box", size_m = [0.454, 0.454, 0.02], color_rgba = [0.4521, 0.4521, 0.4431, 1.0] }
+
+[[objects]]
+name = "wall_473"
+translation_m = [9.982, 2.296, -1.800]
+visual = { shape = "box", size_m = [0.455, 0.455, 0.02], color_rgba = [0.39, 0.39, 0.3822, 1.0] }
+
+[[objects]]
+name = "wall_474"
+translation_m = [10.538, 0.263, -1.800]
+visual = { shape = "box", size_m = [0.406, 0.406, 0.02], color_rgba = [0.5608, 0.5608, 0.5496, 1.0] }
+
+[[objects]]
+name = "wall_475"
+translation_m = [10.404, 0.703, -1.800]
+visual = { shape = "box", size_m = [0.425, 0.425, 0.02], color_rgba = [0.6064, 0.6064, 0.5943, 1.0] }
+
+[[objects]]
+name = "wall_476"
+translation_m = [10.523, 1.274, -1.800]
+visual = { shape = "box", size_m = [0.484, 0.484, 0.02], color_rgba = [0.6715, 0.6715, 0.6581, 1.0] }
+
+[[objects]]
+name = "wall_477"
+translation_m = [10.6, 1.692, -1.800]
+visual = { shape = "box", size_m = [0.455, 0.455, 0.02], color_rgba = [0.1725, 0.1725, 0.169, 1.0] }
+
+[[objects]]
+name = "wall_478"
+translation_m = [10.466, 2.234, -1.800]
+visual = { shape = "box", size_m = [0.401, 0.401, 0.02], color_rgba = [0.1526, 0.1526, 0.1495, 1.0] }
+
+[[objects]]
+name = "wall_479"
+translation_m = [11.067, 0.155, -1.800]
+visual = { shape = "box", size_m = [0.476, 0.476, 0.02], color_rgba = [0.0771, 0.0771, 0.0756, 1.0] }
+
+[[objects]]
+name = "wall_480"
+translation_m = [11.074, 0.619, -1.800]
+visual = { shape = "box", size_m = [0.471, 0.471, 0.02], color_rgba = [0.8981, 0.8981, 0.8801, 1.0] }
+
+[[objects]]
+name = "wall_481"
+translation_m = [11.113, 1.153, -1.800]
+visual = { shape = "box", size_m = [0.454, 0.454, 0.02], color_rgba = [0.94, 0.94, 0.9212, 1.0] }
+
+[[objects]]
+name = "wall_482"
+translation_m = [11.088, 1.651, -1.800]
+visual = { shape = "box", size_m = [0.486, 0.486, 0.02], color_rgba = [0.1397, 0.1397, 0.1369, 1.0] }
+
+[[objects]]
+name = "wall_483"
+translation_m = [10.982, 2.195, -1.800]
+visual = { shape = "box", size_m = [0.484, 0.484, 0.02], color_rgba = [0.4306, 0.4306, 0.422, 1.0] }
+
+[[objects]]
+name = "wall_484"
+translation_m = [11.432, 0.107, -1.800]
+visual = { shape = "box", size_m = [0.453, 0.453, 0.02], color_rgba = [0.1284, 0.9069, 0.7721, 1.0] }
+
+[[objects]]
+name = "wall_485"
+translation_m = [11.614, 0.777, -1.800]
+visual = { shape = "box", size_m = [0.465, 0.465, 0.02], color_rgba = [0.0899, 0.0899, 0.0881, 1.0] }
+
+[[objects]]
+name = "wall_486"
+translation_m = [11.61, 1.223, -1.800]
+visual = { shape = "box", size_m = [0.452, 0.452, 0.02], color_rgba = [0.5819, 0.5819, 0.5703, 1.0] }
+
+[[objects]]
+name = "wall_487"
+translation_m = [11.475, 1.809, -1.800]
+visual = { shape = "box", size_m = [0.412, 0.412, 0.02], color_rgba = [0.2123, 0.2123, 0.2081, 1.0] }
+
+[[objects]]
+name = "wall_488"
+translation_m = [11.516, 2.108, -1.800]
+visual = { shape = "box", size_m = [0.44, 0.44, 0.02], color_rgba = [0.4568, 0.4568, 0.4477, 1.0] }
+
+[[objects]]
+name = "wall_489"
+translation_m = [12.094, 0.255, -1.800]
+visual = { shape = "box", size_m = [0.427, 0.427, 0.02], color_rgba = [0.5657, 0.5657, 0.5544, 1.0] }
+
+[[objects]]
+name = "wall_490"
+translation_m = [12.082, 0.711, -1.800]
+visual = { shape = "box", size_m = [0.467, 0.467, 0.02], color_rgba = [0.8702, 0.8702, 0.8528, 1.0] }
+
+[[objects]]
+name = "wall_491"
+translation_m = [11.943, 1.157, -1.800]
+visual = { shape = "box", size_m = [0.412, 0.412, 0.02], color_rgba = [0.3583, 0.3583, 0.3511, 1.0] }
+
+[[objects]]
+name = "wall_492"
+translation_m = [11.886, 1.642, -1.800]
+visual = { shape = "box", size_m = [0.421, 0.421, 0.02], color_rgba = [0.8716, 0.8716, 0.8542, 1.0] }
+
+[[objects]]
+name = "wall_493"
+translation_m = [12.018, 2.181, -1.800]
+visual = { shape = "box", size_m = [0.404, 0.404, 0.02], color_rgba = [0.2369, 0.2369, 0.2322, 1.0] }
+
+[[objects]]
+name = "wall_494"
+translation_m = [12.401, 0.186, -1.800]
+visual = { shape = "box", size_m = [0.471, 0.471, 0.02], color_rgba = [0.54, 0.54, 0.5292, 1.0] }
+
+[[objects]]
+name = "wall_495"
+translation_m = [12.524, 0.769, -1.800]
+visual = { shape = "box", size_m = [0.435, 0.435, 0.02], color_rgba = [0.1404, 0.1404, 0.1376, 1.0] }
+
+[[objects]]
+name = "wall_496"
+translation_m = [12.55, 1.185, -1.800]
+visual = { shape = "box", size_m = [0.416, 0.416, 0.02], color_rgba = [0.2855, 0.2855, 0.2798, 1.0] }
+
+[[objects]]
+name = "wall_497"
+translation_m = [12.407, 1.637, -1.800]
+visual = { shape = "box", size_m = [0.429, 0.429, 0.02], color_rgba = [0.4806, 0.4806, 0.471, 1.0] }
+
+[[objects]]
+name = "wall_498"
+translation_m = [12.488, 2.129, -1.800]
+visual = { shape = "box", size_m = [0.403, 0.403, 0.02], color_rgba = [0.88, 0.1027, 0.7208, 1.0] }
+
+[[objects]]
+name = "wall_499"
+translation_m = [13.116, 0.255, -1.800]
+visual = { shape = "box", size_m = [0.483, 0.483, 0.02], color_rgba = [0.3265, 0.3265, 0.32, 1.0] }
+
+[[objects]]
+name = "wall_500"
+translation_m = [13.008, 0.71, -1.800]
+visual = { shape = "box", size_m = [0.403, 0.403, 0.02], color_rgba = [0.5043, 0.5043, 0.4942, 1.0] }
+
+[[objects]]
+name = "wall_501"
+translation_m = [12.891, 1.314, -1.800]
+visual = { shape = "box", size_m = [0.412, 0.412, 0.02], color_rgba = [0.7016, 0.7016, 0.6876, 1.0] }
+
+[[objects]]
+name = "wall_502"
+translation_m = [12.894, 1.67, -1.800]
+visual = { shape = "box", size_m = [0.424, 0.424, 0.02], color_rgba = [0.8374, 0.8374, 0.8207, 1.0] }
+
+[[objects]]
+name = "wall_503"
+translation_m = [13.0, 2.11, -1.800]
+visual = { shape = "box", size_m = [0.421, 0.421, 0.02], color_rgba = [0.1938, 0.1938, 0.1899, 1.0] }
+
+[[objects]]
+name = "wall_504"
+translation_m = [13.58, 0.208, -1.800]
+visual = { shape = "box", size_m = [0.444, 0.444, 0.02], color_rgba = [0.7576, 0.7576, 0.7424, 1.0] }
+
+[[objects]]
+name = "wall_505"
+translation_m = [13.389, 0.644, -1.800]
+visual = { shape = "box", size_m = [0.477, 0.477, 0.02], color_rgba = [0.8936, 0.8936, 0.8757, 1.0] }
+
+[[objects]]
+name = "wall_506"
+translation_m = [13.396, 1.108, -1.800]
+visual = { shape = "box", size_m = [0.45, 0.45, 0.02], color_rgba = [0.7368, 0.7368, 0.7221, 1.0] }
+
+[[objects]]
+name = "wall_507"
+translation_m = [13.589, 1.625, -1.800]
+visual = { shape = "box", size_m = [0.436, 0.436, 0.02], color_rgba = [0.0787, 0.0787, 0.0771, 1.0] }
+
+[[objects]]
+name = "wall_508"
+translation_m = [13.402, 2.119, -1.800]
+visual = { shape = "box", size_m = [0.416, 0.416, 0.02], color_rgba = [0.6756, 0.6756, 0.6621, 1.0] }
+
+[[objects]]
+name = "wall_509"
+translation_m = [13.972, 0.183, -1.800]
+visual = { shape = "box", size_m = [0.413, 0.413, 0.02], color_rgba = [0.1823, 0.7758, 0.1547, 1.0] }
+
+[[objects]]
+name = "wall_510"
+translation_m = [14.065, 0.636, -1.800]
+visual = { shape = "box", size_m = [0.414, 0.414, 0.02], color_rgba = [0.9363, 0.9363, 0.9176, 1.0] }
+
+[[objects]]
+name = "wall_511"
+translation_m = [13.885, 1.241, -1.800]
+visual = { shape = "box", size_m = [0.471, 0.471, 0.02], color_rgba = [0.4183, 0.4183, 0.4099, 1.0] }
+
+[[objects]]
+name = "wall_512"
+translation_m = [13.987, 1.595, -1.800]
+visual = { shape = "box", size_m = [0.486, 0.486, 0.02], color_rgba = [0.6793, 0.6793, 0.6657, 1.0] }
+
+[[objects]]
+name = "wall_513"
+translation_m = [13.94, 2.101, -1.800]
+visual = { shape = "box", size_m = [0.46, 0.46, 0.02], color_rgba = [0.1598, 0.1598, 0.1566, 1.0] }
+
+[[objects]]
+name = "wall_514"
+translation_m = [14.552, 0.249, -1.800]
+visual = { shape = "box", size_m = [0.459, 0.459, 0.02], color_rgba = [0.2058, 0.2058, 0.2017, 1.0] }
+
+[[objects]]
+name = "wall_515"
+translation_m = [14.43, 0.77, -1.800]
+visual = { shape = "box", size_m = [0.43, 0.43, 0.02], color_rgba = [0.5061, 0.5061, 0.496, 1.0] }
+
+[[objects]]
+name = "wall_516"
+translation_m = [14.51, 1.235, -1.800]
+visual = { shape = "box", size_m = [0.443, 0.443, 0.02], color_rgba = [0.7617, 0.7617, 0.7465, 1.0] }
+
+[[objects]]
+name = "wall_517"
+translation_m = [14.578, 1.629, -1.800]
+visual = { shape = "box", size_m = [0.452, 0.452, 0.02], color_rgba = [0.1479, 0.1479, 0.1449, 1.0] }
+
+[[objects]]
+name = "wall_518"
+translation_m = [14.612, 2.121, -1.800]
+visual = { shape = "box", size_m = [0.426, 0.426, 0.02], color_rgba = [0.9481, 0.9481, 0.9291, 1.0] }
+
+[[objects]]
+name = "wall_519"
+translation_m = [14.952, 0.318, -1.800]
+visual = { shape = "box", size_m = [0.479, 0.479, 0.02], color_rgba = [0.7623, 0.7623, 0.7471, 1.0] }
+
+[[objects]]
+name = "wall_520"
+translation_m = [14.956, 0.693, -1.800]
+visual = { shape = "box", size_m = [0.442, 0.442, 0.02], color_rgba = [0.8987, 0.8987, 0.8807, 1.0] }
+
+[[objects]]
+name = "wall_521"
+translation_m = [15.012, 1.277, -1.800]
+visual = { shape = "box", size_m = [0.481, 0.481, 0.02], color_rgba = [0.4554, 0.4554, 0.4463, 1.0] }
+
+[[objects]]
+name = "wall_522"
+translation_m = [15.061, 1.762, -1.800]
+visual = { shape = "box", size_m = [0.453, 0.453, 0.02], color_rgba = [0.1595, 0.1595, 0.1563, 1.0] }
+
+[[objects]]
+name = "wall_523"
+translation_m = [15.027, 2.248, -1.800]
+visual = { shape = "box", size_m = [0.417, 0.417, 0.02], color_rgba = [0.3558, 0.3558, 0.3487, 1.0] }
+
+[[objects]]
+name = "wall_524"
+translation_m = [15.414, 0.108, -1.800]
+visual = { shape = "box", size_m = [0.459, 0.459, 0.02], color_rgba = [0.7509, 0.7509, 0.7359, 1.0] }
+
+[[objects]]
+name = "wall_525"
+translation_m = [15.479, 0.697, -1.800]
+visual = { shape = "box", size_m = [0.413, 0.413, 0.02], color_rgba = [0.2871, 0.2871, 0.2814, 1.0] }
+
+[[objects]]
+name = "wall_526"
+translation_m = [15.406, 1.157, -1.800]
+visual = { shape = "box", size_m = [0.437, 0.437, 0.02], color_rgba = [0.8362, 0.8362, 0.8195, 1.0] }
+
+[[objects]]
+name = "wall_527"
+translation_m = [15.586, 1.607, -1.800]
+visual = { shape = "box", size_m = [0.477, 0.477, 0.02], color_rgba = [0.9106, 0.9106, 0.8924, 1.0] }
+
+[[objects]]
+name = "wall_528"
+translation_m = [15.554, 2.294, -1.800]
+visual = { shape = "box", size_m = [0.479, 0.479, 0.02], color_rgba = [0.3054, 0.3054, 0.2993, 1.0] }
+
+[[objects]]
+name = "wall_529"
+translation_m = [15.964, 0.23, -1.800]
+visual = { shape = "box", size_m = [0.463, 0.463, 0.02], color_rgba = [0.1114, 0.1114, 0.1092, 1.0] }
+
+[[objects]]
+name = "wall_530"
+translation_m = [15.959, 0.593, -1.800]
+visual = { shape = "box", size_m = [0.47, 0.47, 0.02], color_rgba = [0.0761, 0.0761, 0.0746, 1.0] }
+
+[[objects]]
+name = "wall_531"
+translation_m = [16.009, 1.259, -1.800]
+visual = { shape = "box", size_m = [0.453, 0.453, 0.02], color_rgba = [0.3217, 0.3217, 0.3153, 1.0] }
+
+[[objects]]
+name = "wall_532"
+translation_m = [16.033, 1.722, -1.800]
+visual = { shape = "box", size_m = [0.484, 0.484, 0.02], color_rgba = [0.6191, 0.6191, 0.6067, 1.0] }
+
+[[objects]]
+name = "wall_533"
+translation_m = [15.905, 2.081, -1.800]
+visual = { shape = "box", size_m = [0.402, 0.402, 0.02], color_rgba = [0.4809, 0.4809, 0.4713, 1.0] }
+
+[[objects]]
+name = "wall_534"
+translation_m = [16.443, 0.272, -1.800]
+visual = { shape = "box", size_m = [0.459, 0.459, 0.02], color_rgba = [0.8566, 0.039, 0.6877, 1.0] }
+
+[[objects]]
+name = "wall_535"
+translation_m = [16.448, 0.752, -1.800]
+visual = { shape = "box", size_m = [0.406, 0.406, 0.02], color_rgba = [0.3598, 0.3598, 0.3526, 1.0] }
+
+[[objects]]
+name = "wall_536"
+translation_m = [16.592, 1.161, -1.800]
+visual = { shape = "box", size_m = [0.467, 0.467, 0.02], color_rgba = [0.1436, 0.1436, 0.1407, 1.0] }
+
+[[objects]]
+name = "wall_537"
+translation_m = [16.52, 1.673, -1.800]
+visual = { shape = "box", size_m = [0.413, 0.413, 0.02], color_rgba = [0.1188, 0.1982, 0.6596, 1.0] }
+
+[[objects]]
+name = "wall_538"
+translation_m = [16.381, 2.128, -1.800]
+visual = { shape = "box", size_m = [0.403, 0.403, 0.02], color_rgba = [0.3072, 0.3072, 0.3011, 1.0] }
+
+[[objects]]
+name = "wall_539"
+translation_m = [16.967, 0.152, -1.800]
+visual = { shape = "box", size_m = [0.443, 0.443, 0.02], color_rgba = [0.3518, 0.3518, 0.3448, 1.0] }
+
+[[objects]]
+name = "wall_540"
+translation_m = [16.935, 0.659, -1.800]
+visual = { shape = "box", size_m = [0.413, 0.413, 0.02], color_rgba = [0.6875, 0.6875, 0.6737, 1.0] }
+
+[[objects]]
+name = "wall_541"
+translation_m = [16.894, 1.319, -1.800]
+visual = { shape = "box", size_m = [0.402, 0.402, 0.02], color_rgba = [0.3411, 0.3411, 0.3343, 1.0] }
+
+[[objects]]
+name = "wall_542"
+translation_m = [16.934, 1.7, -1.800]
+visual = { shape = "box", size_m = [0.401, 0.401, 0.02], color_rgba = [0.0609, 0.0609, 0.0597, 1.0] }
+
+[[objects]]
+name = "wall_543"
+translation_m = [17.116, 2.107, -1.800]
+visual = { shape = "box", size_m = [0.462, 0.462, 0.02], color_rgba = [0.8284, 0.8284, 0.8118, 1.0] }
+
+[[objects]]
+name = "wall_544"
+translation_m = [17.593, 0.083, -1.800]
+visual = { shape = "box", size_m = [0.441, 0.441, 0.02], color_rgba = [0.1615, 0.1615, 0.1583, 1.0] }
+
+[[objects]]
+name = "wall_545"
+translation_m = [17.492, 0.612, -1.800]
+visual = { shape = "box", size_m = [0.466, 0.466, 0.02], color_rgba = [0.7789, 0.7789, 0.7633, 1.0] }
+
+[[objects]]
+name = "wall_546"
+translation_m = [17.448, 1.29, -1.800]
+visual = { shape = "box", size_m = [0.405, 0.405, 0.02], color_rgba = [0.5616, 0.5616, 0.5504, 1.0] }
+
+[[objects]]
+name = "wall_547"
+translation_m = [17.439, 1.601, -1.800]
+visual = { shape = "box", size_m = [0.417, 0.417, 0.02], color_rgba = [0.9222, 0.9222, 0.9038, 1.0] }
+
+[[objects]]
+name = "wall_548"
+translation_m = [17.381, 2.235, -1.800]
+visual = { shape = "box", size_m = [0.414, 0.414, 0.02], color_rgba = [0.2913, 0.2913, 0.2855, 1.0] }
+
+[[objects]]
+name = "wall_549"
+translation_m = [18.031, 0.108, -1.800]
+visual = { shape = "box", size_m = [0.438, 0.438, 0.02], color_rgba = [0.2358, 0.2358, 0.2311, 1.0] }
+
+[[objects]]
+name = "wall_550"
+translation_m = [17.889, 0.671, -1.800]
+visual = { shape = "box", size_m = [0.435, 0.435, 0.02], color_rgba = [0.2425, 0.2425, 0.2377, 1.0] }
+
+[[objects]]
+name = "wall_551"
+translation_m = [18.079, 1.225, -1.800]
+visual = { shape = "box", size_m = [0.485, 0.485, 0.02], color_rgba = [0.3711, 0.3711, 0.3637, 1.0] }
+
+[[objects]]
+name = "wall_552"
+translation_m = [18.047, 1.68, -1.800]
+visual = { shape = "box", size_m = [0.46, 0.46, 0.02], color_rgba = [0.5745, 0.5745, 0.563, 1.0] }
+
+[[objects]]
+name = "wall_553"
+translation_m = [18.03, 2.19, -1.800]
+visual = { shape = "box", size_m = [0.425, 0.425, 0.02], color_rgba = [0.8802, 0.8802, 0.8626, 1.0] }
+
+[[objects]]
+name = "wall_554"
+translation_m = [18.407, 0.09, -1.800]
+visual = { shape = "box", size_m = [0.474, 0.474, 0.02], color_rgba = [0.1655, 0.1655, 0.1622, 1.0] }
+
+[[objects]]
+name = "wall_555"
+translation_m = [18.58, 0.777, -1.800]
+visual = { shape = "box", size_m = [0.429, 0.429, 0.02], color_rgba = [0.6641, 0.6641, 0.6508, 1.0] }
+
+[[objects]]
+name = "wall_556"
+translation_m = [18.524, 1.088, -1.800]
+visual = { shape = "box", size_m = [0.468, 0.468, 0.02], color_rgba = [0.8892, 0.8892, 0.8714, 1.0] }
+
+[[objects]]
+name = "wall_557"
+translation_m = [18.45, 1.646, -1.800]
+visual = { shape = "box", size_m = [0.42, 0.42, 0.02], color_rgba = [0.8566, 0.8566, 0.8395, 1.0] }
+
+[[objects]]
+name = "wall_558"
+translation_m = [18.487, 2.162, -1.800]
+visual = { shape = "box", size_m = [0.444, 0.444, 0.02], color_rgba = [0.9028, 0.9028, 0.8847, 1.0] }
+
+[[objects]]
+name = "wall_559"
+translation_m = [18.945, 0.271, -1.800]
+visual = { shape = "box", size_m = [0.432, 0.432, 0.02], color_rgba = [0.2435, 0.2435, 0.2386, 1.0] }
+
+[[objects]]
+name = "wall_560"
+translation_m = [18.905, 0.719, -1.800]
+visual = { shape = "box", size_m = [0.424, 0.424, 0.02], color_rgba = [0.1177, 0.1177, 0.1153, 1.0] }
+
+[[objects]]
+name = "wall_561"
+translation_m = [18.925, 1.145, -1.800]
+visual = { shape = "box", size_m = [0.466, 0.466, 0.02], color_rgba = [0.1402, 0.1402, 0.1374, 1.0] }
+
+[[objects]]
+name = "wall_562"
+translation_m = [18.917, 1.792, -1.800]
+visual = { shape = "box", size_m = [0.458, 0.458, 0.02], color_rgba = [0.3561, 0.3561, 0.349, 1.0] }
+
+[[objects]]
+name = "wall_563"
+translation_m = [19.086, 2.231, -1.800]
+visual = { shape = "box", size_m = [0.456, 0.456, 0.02], color_rgba = [0.8236, 0.8236, 0.8071, 1.0] }
+
+[[objects]]
+name = "wall_564"
+translation_m = [19.587, 0.149, -1.800]
+visual = { shape = "box", size_m = [0.433, 0.433, 0.02], color_rgba = [0.1854, 0.1854, 0.1817, 1.0] }
+
+[[objects]]
+name = "wall_565"
+translation_m = [19.479, 0.809, -1.800]
+visual = { shape = "box", size_m = [0.43, 0.43, 0.02], color_rgba = [0.6942, 0.6942, 0.6803, 1.0] }
+
+[[objects]]
+name = "wall_566"
+translation_m = [19.411, 1.13, -1.800]
+visual = { shape = "box", size_m = [0.434, 0.434, 0.02], color_rgba = [0.8684, 0.8684, 0.851, 1.0] }
+
+[[objects]]
+name = "wall_567"
+translation_m = [19.562, 1.678, -1.800]
+visual = { shape = "box", size_m = [0.434, 0.434, 0.02], color_rgba = [0.3538, 0.3538, 0.3467, 1.0] }
+
+[[objects]]
+name = "wall_568"
+translation_m = [19.415, 2.159, -1.800]
+visual = { shape = "box", size_m = [0.408, 0.408, 0.02], color_rgba = [0.2505, 0.2505, 0.2455, 1.0] }
+
+[[objects]]
+name = "wall_569"
+translation_m = [20.036, 0.182, -1.800]
+visual = { shape = "box", size_m = [0.46, 0.46, 0.02], color_rgba = [0.3711, 0.3711, 0.3637, 1.0] }
+
+[[objects]]
+name = "wall_570"
+translation_m = [20.004, 0.655, -1.800]
+visual = { shape = "box", size_m = [0.412, 0.412, 0.02], color_rgba = [0.4319, 0.4319, 0.4233, 1.0] }
+
+[[objects]]
+name = "wall_571"
+translation_m = [19.959, 1.211, -1.800]
+visual = { shape = "box", size_m = [0.479, 0.479, 0.02], color_rgba = [0.1699, 0.1699, 0.1665, 1.0] }
+
+[[objects]]
+name = "wall_572"
+translation_m = [19.999, 1.77, -1.800]
+visual = { shape = "box", size_m = [0.433, 0.433, 0.02], color_rgba = [0.116, 0.0445, 0.6514, 1.0] }
+
+[[objects]]
+name = "wall_573"
+translation_m = [19.98, 2.289, -1.800]
+visual = { shape = "box", size_m = [0.403, 0.403, 0.02], color_rgba = [0.2405, 0.2405, 0.2357, 1.0] }
+
+[[objects]]
+name = "wall_574"
+translation_m = [0.091, 0.255, 1.800]
+visual = { shape = "box", size_m = [0.463, 0.463, 0.02], color_rgba = [0.6614, 0.6614, 0.6482, 1.0] }
+
+[[objects]]
+name = "wall_575"
+translation_m = [-0.063, 0.696, 1.800]
+visual = { shape = "box", size_m = [0.428, 0.428, 0.02], color_rgba = [0.8584, 0.8584, 0.8412, 1.0] }
+
+[[objects]]
+name = "wall_576"
+translation_m = [0.092, 1.12, 1.800]
+visual = { shape = "box", size_m = [0.456, 0.456, 0.02], color_rgba = [0.2912, 0.2912, 0.2854, 1.0] }
+
+[[objects]]
+name = "wall_577"
+translation_m = [0.007, 1.661, 1.800]
+visual = { shape = "box", size_m = [0.415, 0.415, 0.02], color_rgba = [0.7691, 0.7691, 0.7537, 1.0] }
+
+[[objects]]
+name = "wall_578"
+translation_m = [0.042, 2.113, 1.800]
+visual = { shape = "box", size_m = [0.448, 0.448, 0.02], color_rgba = [0.5943, 0.5943, 0.5824, 1.0] }
+
+[[objects]]
+name = "wall_579"
+translation_m = [0.52, 0.203, 1.800]
+visual = { shape = "box", size_m = [0.456, 0.456, 0.02], color_rgba = [0.212, 0.212, 0.2078, 1.0] }
+
+[[objects]]
+name = "wall_580"
+translation_m = [0.59, 0.73, 1.800]
+visual = { shape = "box", size_m = [0.419, 0.419, 0.02], color_rgba = [0.0738, 0.7275, 0.1022, 1.0] }
+
+[[objects]]
+name = "wall_581"
+translation_m = [0.614, 1.083, 1.800]
+visual = { shape = "box", size_m = [0.412, 0.412, 0.02], color_rgba = [0.3643, 0.3643, 0.357, 1.0] }
+
+[[objects]]
+name = "wall_582"
+translation_m = [0.588, 1.6, 1.800]
+visual = { shape = "box", size_m = [0.437, 0.437, 0.02], color_rgba = [0.2931, 0.2931, 0.2872, 1.0] }
+
+[[objects]]
+name = "wall_583"
+translation_m = [0.443, 2.181, 1.800]
+visual = { shape = "box", size_m = [0.421, 0.421, 0.02], color_rgba = [0.2467, 0.2467, 0.2418, 1.0] }
+
+[[objects]]
+name = "wall_584"
+translation_m = [1.073, 0.281, 1.800]
+visual = { shape = "box", size_m = [0.473, 0.473, 0.02], color_rgba = [0.5729, 0.5729, 0.5614, 1.0] }
+
+[[objects]]
+name = "wall_585"
+translation_m = [1.042, 0.73, 1.800]
+visual = { shape = "box", size_m = [0.464, 0.464, 0.02], color_rgba = [0.9293, 0.9293, 0.9107, 1.0] }
+
+[[objects]]
+name = "wall_586"
+translation_m = [1.065, 1.181, 1.800]
+visual = { shape = "box", size_m = [0.483, 0.483, 0.02], color_rgba = [0.2023, 0.7864, 0.1696, 1.0] }
+
+[[objects]]
+name = "wall_587"
+translation_m = [1.086, 1.701, 1.800]
+visual = { shape = "box", size_m = [0.424, 0.424, 0.02], color_rgba = [0.2477, 0.2477, 0.2427, 1.0] }
+
+[[objects]]
+name = "wall_588"
+translation_m = [1.056, 2.173, 1.800]
+visual = { shape = "box", size_m = [0.437, 0.437, 0.02], color_rgba = [0.3481, 0.3481, 0.3411, 1.0] }
+
+[[objects]]
+name = "wall_589"
+translation_m = [1.517, 0.254, 1.800]
+visual = { shape = "box", size_m = [0.482, 0.482, 0.02], color_rgba = [0.6958, 0.6958, 0.6819, 1.0] }
+
+[[objects]]
+name = "wall_590"
+translation_m = [1.564, 0.803, 1.800]
+visual = { shape = "box", size_m = [0.482, 0.482, 0.02], color_rgba = [0.2343, 0.2343, 0.2296, 1.0] }
+
+[[objects]]
+name = "wall_591"
+translation_m = [1.438, 1.317, 1.800]
+visual = { shape = "box", size_m = [0.451, 0.451, 0.02], color_rgba = [0.7674, 0.7674, 0.7521, 1.0] }
+
+[[objects]]
+name = "wall_592"
+translation_m = [1.477, 1.676, 1.800]
+visual = { shape = "box", size_m = [0.467, 0.467, 0.02], color_rgba = [0.5397, 0.5397, 0.5289, 1.0] }
+
+[[objects]]
+name = "wall_593"
+translation_m = [1.392, 2.182, 1.800]
+visual = { shape = "box", size_m = [0.411, 0.411, 0.02], color_rgba = [0.8971, 0.8971, 0.8792, 1.0] }
+
+[[objects]]
+name = "wall_594"
+translation_m = [2.016, 0.155, 1.800]
+visual = { shape = "box", size_m = [0.432, 0.432, 0.02], color_rgba = [0.6879, 0.6879, 0.6741, 1.0] }
+
+[[objects]]
+name = "wall_595"
+translation_m = [1.909, 0.702, 1.800]
+visual = { shape = "box", size_m = [0.466, 0.466, 0.02], color_rgba = [0.8916, 0.8916, 0.8738, 1.0] }
+
+[[objects]]
+name = "wall_596"
+translation_m = [2.039, 1.098, 1.800]
+visual = { shape = "box", size_m = [0.443, 0.443, 0.02], color_rgba = [0.1441, 0.1441, 0.1412, 1.0] }
+
+[[objects]]
+name = "wall_597"
+translation_m = [1.883, 1.746, 1.800]
+visual = { shape = "box", size_m = [0.481, 0.481, 0.02], color_rgba = [0.0744, 0.0744, 0.0729, 1.0] }
+
+[[objects]]
+name = "wall_598"
+translation_m = [1.992, 2.264, 1.800]
+visual = { shape = "box", size_m = [0.424, 0.424, 0.02], color_rgba = [0.5906, 0.5906, 0.5788, 1.0] }
+
+[[objects]]
+name = "wall_599"
+translation_m = [2.387, 0.216, 1.800]
+visual = { shape = "box", size_m = [0.48, 0.48, 0.02], color_rgba = [0.556, 0.556, 0.5449, 1.0] }
+
+[[objects]]
+name = "wall_600"
+translation_m = [2.454, 0.658, 1.800]
+visual = { shape = "box", size_m = [0.468, 0.468, 0.02], color_rgba = [0.8894, 0.8894, 0.8716, 1.0] }
+
+[[objects]]
+name = "wall_601"
+translation_m = [2.615, 1.173, 1.800]
+visual = { shape = "box", size_m = [0.444, 0.444, 0.02], color_rgba = [0.928, 0.928, 0.9094, 1.0] }
+
+[[objects]]
+name = "wall_602"
+translation_m = [2.473, 1.675, 1.800]
+visual = { shape = "box", size_m = [0.473, 0.473, 0.02], color_rgba = [0.2536, 0.2536, 0.2485, 1.0] }
+
+[[objects]]
+name = "wall_603"
+translation_m = [2.505, 2.146, 1.800]
+visual = { shape = "box", size_m = [0.422, 0.422, 0.02], color_rgba = [0.6727, 0.6727, 0.6592, 1.0] }
+
+[[objects]]
+name = "wall_604"
+translation_m = [2.945, 0.135, 1.800]
+visual = { shape = "box", size_m = [0.401, 0.401, 0.02], color_rgba = [0.3195, 0.3195, 0.3131, 1.0] }
+
+[[objects]]
+name = "wall_605"
+translation_m = [3.031, 0.6, 1.800]
+visual = { shape = "box", size_m = [0.409, 0.409, 0.02], color_rgba = [0.3036, 0.3036, 0.2975, 1.0] }
+
+[[objects]]
+name = "wall_606"
+translation_m = [2.969, 1.146, 1.800]
+visual = { shape = "box", size_m = [0.448, 0.448, 0.02], color_rgba = [0.0575, 0.0575, 0.0564, 1.0] }
+
+[[objects]]
+name = "wall_607"
+translation_m = [2.92, 1.589, 1.800]
+visual = { shape = "box", size_m = [0.438, 0.438, 0.02], color_rgba = [0.5855, 0.5855, 0.5738, 1.0] }
+
+[[objects]]
+name = "wall_608"
+translation_m = [2.884, 2.259, 1.800]
+visual = { shape = "box", size_m = [0.412, 0.412, 0.02], color_rgba = [0.7994, 0.7994, 0.7834, 1.0] }
+
+[[objects]]
+name = "wall_609"
+translation_m = [3.495, 0.286, 1.800]
+visual = { shape = "box", size_m = [0.456, 0.456, 0.02], color_rgba = [0.825, 0.825, 0.8085, 1.0] }
+
+[[objects]]
+name = "wall_610"
+translation_m = [3.542, 0.701, 1.800]
+visual = { shape = "box", size_m = [0.468, 0.468, 0.02], color_rgba = [0.6623, 0.1218, 0.7726, 1.0] }
+
+[[objects]]
+name = "wall_611"
+translation_m = [3.552, 1.18, 1.800]
+visual = { shape = "box", size_m = [0.45, 0.45, 0.02], color_rgba = [0.6256, 0.6256, 0.6131, 1.0] }
+
+[[objects]]
+name = "wall_612"
+translation_m = [3.592, 1.81, 1.800]
+visual = { shape = "box", size_m = [0.434, 0.434, 0.02], color_rgba = [0.7166, 0.7166, 0.7023, 1.0] }
+
+[[objects]]
+name = "wall_613"
+translation_m = [3.386, 2.091, 1.800]
+visual = { shape = "box", size_m = [0.442, 0.442, 0.02], color_rgba = [0.6048, 0.6048, 0.5927, 1.0] }
+
+[[objects]]
+name = "wall_614"
+translation_m = [4.024, 0.221, 1.800]
+visual = { shape = "box", size_m = [0.408, 0.408, 0.02], color_rgba = [0.1395, 0.7905, 0.2308, 1.0] }
+
+[[objects]]
+name = "wall_615"
+translation_m = [4.013, 0.677, 1.800]
+visual = { shape = "box", size_m = [0.43, 0.43, 0.02], color_rgba = [0.8825, 0.8825, 0.8648, 1.0] }
+
+[[objects]]
+name = "wall_616"
+translation_m = [4.047, 1.1, 1.800]
+visual = { shape = "box", size_m = [0.431, 0.431, 0.02], color_rgba = [0.2751, 0.2751, 0.2696, 1.0] }
+
+[[objects]]
+name = "wall_617"
+translation_m = [3.905, 1.614, 1.800]
+visual = { shape = "box", size_m = [0.447, 0.447, 0.02], color_rgba = [0.5456, 0.5456, 0.5347, 1.0] }
+
+[[objects]]
+name = "wall_618"
+translation_m = [4.081, 2.227, 1.800]
+visual = { shape = "box", size_m = [0.481, 0.481, 0.02], color_rgba = [0.4156, 0.4156, 0.4073, 1.0] }
+
+[[objects]]
+name = "wall_619"
+translation_m = [4.529, 0.172, 1.800]
+visual = { shape = "box", size_m = [0.424, 0.424, 0.02], color_rgba = [0.8944, 0.8944, 0.8765, 1.0] }
+
+[[objects]]
+name = "wall_620"
+translation_m = [4.408, 0.808, 1.800]
+visual = { shape = "box", size_m = [0.423, 0.423, 0.02], color_rgba = [0.5106, 0.5106, 0.5004, 1.0] }
+
+[[objects]]
+name = "wall_621"
+translation_m = [4.558, 1.316, 1.800]
+visual = { shape = "box", size_m = [0.416, 0.416, 0.02], color_rgba = [0.7296, 0.7296, 0.715, 1.0] }
+
+[[objects]]
+name = "wall_622"
+translation_m = [4.467, 1.816, 1.800]
+visual = { shape = "box", size_m = [0.424, 0.424, 0.02], color_rgba = [0.9161, 0.9161, 0.8978, 1.0] }
+
+[[objects]]
+name = "wall_623"
+translation_m = [4.55, 2.222, 1.800]
+visual = { shape = "box", size_m = [0.419, 0.419, 0.02], color_rgba = [0.4952, 0.4952, 0.4853, 1.0] }
+
+[[objects]]
+name = "wall_624"
+translation_m = [4.978, 0.2, 1.800]
+visual = { shape = "box", size_m = [0.424, 0.424, 0.02], color_rgba = [0.0822, 0.0822, 0.0806, 1.0] }
+
+[[objects]]
+name = "wall_625"
+translation_m = [5.057, 0.782, 1.800]
+visual = { shape = "box", size_m = [0.445, 0.445, 0.02], color_rgba = [0.1817, 0.1817, 0.1781, 1.0] }
+
+[[objects]]
+name = "wall_626"
+translation_m = [4.919, 1.283, 1.800]
+visual = { shape = "box", size_m = [0.47, 0.47, 0.02], color_rgba = [0.2035, 0.2035, 0.1994, 1.0] }
+
+[[objects]]
+name = "wall_627"
+translation_m = [5.117, 1.727, 1.800]
+visual = { shape = "box", size_m = [0.447, 0.447, 0.02], color_rgba = [0.7885, 0.7885, 0.7727, 1.0] }
+
+[[objects]]
+name = "wall_628"
+translation_m = [5.033, 2.207, 1.800]
+visual = { shape = "box", size_m = [0.442, 0.442, 0.02], color_rgba = [0.763, 0.763, 0.7477, 1.0] }
+
+[[objects]]
+name = "wall_629"
+translation_m = [5.443, 0.254, 1.800]
+visual = { shape = "box", size_m = [0.403, 0.403, 0.02], color_rgba = [0.3337, 0.3337, 0.327, 1.0] }
+
+[[objects]]
+name = "wall_630"
+translation_m = [5.446, 0.708, 1.800]
+visual = { shape = "box", size_m = [0.488, 0.488, 0.02], color_rgba = [0.9257, 0.9257, 0.9072, 1.0] }
+
+[[objects]]
+name = "wall_631"
+translation_m = [5.602, 1.199, 1.800]
+visual = { shape = "box", size_m = [0.456, 0.456, 0.02], color_rgba = [0.7819, 0.7819, 0.7663, 1.0] }
+
+[[objects]]
+name = "wall_632"
+translation_m = [5.415, 1.719, 1.800]
+visual = { shape = "box", size_m = [0.41, 0.41, 0.02], color_rgba = [0.4999, 0.4999, 0.4899, 1.0] }
+
+[[objects]]
+name = "wall_633"
+translation_m = [5.39, 2.301, 1.800]
+visual = { shape = "box", size_m = [0.404, 0.404, 0.02], color_rgba = [0.4861, 0.4861, 0.4764, 1.0] }
+
+[[objects]]
+name = "wall_634"
+translation_m = [6.11, 0.281, 1.800]
+visual = { shape = "box", size_m = [0.444, 0.444, 0.02], color_rgba = [0.4294, 0.4294, 0.4208, 1.0] }
+
+[[objects]]
+name = "wall_635"
+translation_m = [5.98, 0.628, 1.800]
+visual = { shape = "box", size_m = [0.424, 0.424, 0.02], color_rgba = [0.545, 0.545, 0.5341, 1.0] }
+
+[[objects]]
+name = "wall_636"
+translation_m = [5.881, 1.301, 1.800]
+visual = { shape = "box", size_m = [0.419, 0.419, 0.02], color_rgba = [0.8403, 0.8403, 0.8235, 1.0] }
+
+[[objects]]
+name = "wall_637"
+translation_m = [5.886, 1.585, 1.800]
+visual = { shape = "box", size_m = [0.429, 0.429, 0.02], color_rgba = [0.4561, 0.4561, 0.447, 1.0] }
+
+[[objects]]
+name = "wall_638"
+translation_m = [6.049, 2.166, 1.800]
+visual = { shape = "box", size_m = [0.415, 0.415, 0.02], color_rgba = [0.315, 0.315, 0.3087, 1.0] }
+
+[[objects]]
+name = "wall_639"
+translation_m = [6.43, 0.121, 1.800]
+visual = { shape = "box", size_m = [0.471, 0.471, 0.02], color_rgba = [0.74, 0.74, 0.7252, 1.0] }
+
+[[objects]]
+name = "wall_640"
+translation_m = [6.521, 0.682, 1.800]
+visual = { shape = "box", size_m = [0.443, 0.443, 0.02], color_rgba = [0.4918, 0.4918, 0.482, 1.0] }
+
+[[objects]]
+name = "wall_641"
+translation_m = [6.547, 1.276, 1.800]
+visual = { shape = "box", size_m = [0.468, 0.468, 0.02], color_rgba = [0.7467, 0.7467, 0.7318, 1.0] }
+
+[[objects]]
+name = "wall_642"
+translation_m = [6.404, 1.748, 1.800]
+visual = { shape = "box", size_m = [0.455, 0.455, 0.02], color_rgba = [0.4907, 0.4907, 0.4809, 1.0] }
+
+[[objects]]
+name = "wall_643"
+translation_m = [6.394, 2.1, 1.800]
+visual = { shape = "box", size_m = [0.42, 0.42, 0.02], color_rgba = [0.1338, 0.1338, 0.1311, 1.0] }
+
+[[objects]]
+name = "wall_644"
+translation_m = [6.942, 0.104, 1.800]
+visual = { shape = "box", size_m = [0.469, 0.469, 0.02], color_rgba = [0.3573, 0.3573, 0.3502, 1.0] }
+
+[[objects]]
+name = "wall_645"
+translation_m = [7.1, 0.642, 1.800]
+visual = { shape = "box", size_m = [0.462, 0.462, 0.02], color_rgba = [0.7109, 0.7109, 0.6967, 1.0] }
+
+[[objects]]
+name = "wall_646"
+translation_m = [6.887, 1.31, 1.800]
+visual = { shape = "box", size_m = [0.476, 0.476, 0.02], color_rgba = [0.7141, 0.7141, 0.6998, 1.0] }
+
+[[objects]]
+name = "wall_647"
+translation_m = [7.068, 1.756, 1.800]
+visual = { shape = "box", size_m = [0.458, 0.458, 0.02], color_rgba = [0.8822, 0.8822, 0.8646, 1.0] }
+
+[[objects]]
+name = "wall_648"
+translation_m = [6.945, 2.291, 1.800]
+visual = { shape = "box", size_m = [0.429, 0.429, 0.02], color_rgba = [0.3279, 0.6725, 0.0532, 1.0] }
+
+[[objects]]
+name = "wall_649"
+translation_m = [7.458, 0.103, 1.800]
+visual = { shape = "box", size_m = [0.487, 0.487, 0.02], color_rgba = [0.8083, 0.072, 0.196, 1.0] }
+
+[[objects]]
+name = "wall_650"
+translation_m = [7.406, 0.721, 1.800]
+visual = { shape = "box", size_m = [0.419, 0.419, 0.02], color_rgba = [0.7412, 0.7412, 0.7264, 1.0] }
+
+[[objects]]
+name = "wall_651"
+translation_m = [7.447, 1.268, 1.800]
+visual = { shape = "box", size_m = [0.431, 0.431, 0.02], color_rgba = [0.2191, 0.2191, 0.2147, 1.0] }
+
+[[objects]]
+name = "wall_652"
+translation_m = [7.549, 1.803, 1.800]
+visual = { shape = "box", size_m = [0.419, 0.419, 0.02], color_rgba = [0.1952, 0.1952, 0.1913, 1.0] }
+
+[[objects]]
+name = "wall_653"
+translation_m = [7.607, 2.303, 1.800]
+visual = { shape = "box", size_m = [0.444, 0.444, 0.02], color_rgba = [0.9186, 0.9186, 0.9002, 1.0] }
+
+[[objects]]
+name = "wall_654"
+translation_m = [7.97, 0.28, 1.800]
+visual = { shape = "box", size_m = [0.416, 0.416, 0.02], color_rgba = [0.1759, 0.1759, 0.1724, 1.0] }
+
+[[objects]]
+name = "wall_655"
+translation_m = [8.087, 0.649, 1.800]
+visual = { shape = "box", size_m = [0.45, 0.45, 0.02], color_rgba = [0.6422, 0.6422, 0.6294, 1.0] }
+
+[[objects]]
+name = "wall_656"
+translation_m = [7.884, 1.291, 1.800]
+visual = { shape = "box", size_m = [0.469, 0.469, 0.02], color_rgba = [0.2543, 0.2543, 0.2492, 1.0] }
+
+[[objects]]
+name = "wall_657"
+translation_m = [7.889, 1.626, 1.800]
+visual = { shape = "box", size_m = [0.452, 0.452, 0.02], color_rgba = [0.357, 0.357, 0.3499, 1.0] }
+
+[[objects]]
+name = "wall_658"
+translation_m = [8.043, 2.186, 1.800]
+visual = { shape = "box", size_m = [0.404, 0.404, 0.02], color_rgba = [0.3709, 0.3709, 0.3635, 1.0] }
+
+[[objects]]
+name = "wall_659"
+translation_m = [8.439, 0.209, 1.800]
+visual = { shape = "box", size_m = [0.421, 0.421, 0.02], color_rgba = [0.0746, 0.0746, 0.0731, 1.0] }
+
+[[objects]]
+name = "wall_660"
+translation_m = [8.573, 0.604, 1.800]
+visual = { shape = "box", size_m = [0.439, 0.439, 0.02], color_rgba = [0.9235, 0.9235, 0.905, 1.0] }
+
+[[objects]]
+name = "wall_661"
+translation_m = [8.454, 1.251, 1.800]
+visual = { shape = "box", size_m = [0.484, 0.484, 0.02], color_rgba = [0.0761, 0.7053, 0.4361, 1.0] }
+
+[[objects]]
+name = "wall_662"
+translation_m = [8.474, 1.651, 1.800]
+visual = { shape = "box", size_m = [0.447, 0.447, 0.02], color_rgba = [0.8512, 0.8512, 0.8342, 1.0] }
+
+[[objects]]
+name = "wall_663"
+translation_m = [8.402, 2.281, 1.800]
+visual = { shape = "box", size_m = [0.424, 0.424, 0.02], color_rgba = [0.2892, 0.2892, 0.2834, 1.0] }
+
+[[objects]]
+name = "wall_664"
+translation_m = [8.899, 0.318, 1.800]
+visual = { shape = "box", size_m = [0.434, 0.434, 0.02], color_rgba = [0.3824, 0.3824, 0.3748, 1.0] }
+
+[[objects]]
+name = "wall_665"
+translation_m = [8.913, 0.7, 1.800]
+visual = { shape = "box", size_m = [0.464, 0.464, 0.02], color_rgba = [0.2664, 0.2664, 0.2611, 1.0] }
+
+[[objects]]
+name = "wall_666"
+translation_m = [9.069, 1.26, 1.800]
+visual = { shape = "box", size_m = [0.468, 0.468, 0.02], color_rgba = [0.5688, 0.5688, 0.5574, 1.0] }
+
+[[objects]]
+name = "wall_667"
+translation_m = [8.909, 1.761, 1.800]
+visual = { shape = "box", size_m = [0.43, 0.43, 0.02], color_rgba = [0.4374, 0.4374, 0.4287, 1.0] }
+
+[[objects]]
+name = "wall_668"
+translation_m = [8.92, 2.292, 1.800]
+visual = { shape = "box", size_m = [0.419, 0.419, 0.02], color_rgba = [0.9165, 0.9165, 0.8982, 1.0] }
+
+[[objects]]
+name = "wall_669"
+translation_m = [9.464, 0.229, 1.800]
+visual = { shape = "box", size_m = [0.427, 0.427, 0.02], color_rgba = [0.5694, 0.5694, 0.558, 1.0] }
+
+[[objects]]
+name = "wall_670"
+translation_m = [9.524, 0.696, 1.800]
+visual = { shape = "box", size_m = [0.449, 0.449, 0.02], color_rgba = [0.451, 0.451, 0.442, 1.0] }
+
+[[objects]]
+name = "wall_671"
+translation_m = [9.43, 1.082, 1.800]
+visual = { shape = "box", size_m = [0.45, 0.45, 0.02], color_rgba = [0.278, 0.278, 0.2724, 1.0] }
+
+[[objects]]
+name = "wall_672"
+translation_m = [9.42, 1.748, 1.800]
+visual = { shape = "box", size_m = [0.426, 0.426, 0.02], color_rgba = [0.3508, 0.3508, 0.3438, 1.0] }
+
+[[objects]]
+name = "wall_673"
+translation_m = [9.619, 2.196, 1.800]
+visual = { shape = "box", size_m = [0.43, 0.43, 0.02], color_rgba = [0.9259, 0.2351, 0.7714, 1.0] }
+
+[[objects]]
+name = "wall_674"
+translation_m = [10.118, 0.129, 1.800]
+visual = { shape = "box", size_m = [0.467, 0.467, 0.02], color_rgba = [0.1408, 0.1408, 0.138, 1.0] }
+
+[[objects]]
+name = "wall_675"
+translation_m = [10.079, 0.617, 1.800]
+visual = { shape = "box", size_m = [0.431, 0.431, 0.02], color_rgba = [0.3441, 0.0239, 0.7375, 1.0] }
+
+[[objects]]
+name = "wall_676"
+translation_m = [10.004, 1.237, 1.800]
+visual = { shape = "box", size_m = [0.482, 0.482, 0.02], color_rgba = [0.7052, 0.7052, 0.6911, 1.0] }
+
+[[objects]]
+name = "wall_677"
+translation_m = [10.11, 1.82, 1.800]
+visual = { shape = "box", size_m = [0.485, 0.485, 0.02], color_rgba = [0.5515, 0.5515, 0.5405, 1.0] }
+
+[[objects]]
+name = "wall_678"
+translation_m = [9.989, 2.232, 1.800]
+visual = { shape = "box", size_m = [0.467, 0.467, 0.02], color_rgba = [0.7515, 0.7515, 0.7365, 1.0] }
+
+[[objects]]
+name = "wall_679"
+translation_m = [10.582, 0.193, 1.800]
+visual = { shape = "box", size_m = [0.436, 0.436, 0.02], color_rgba = [0.1177, 0.1177, 0.1153, 1.0] }
+
+[[objects]]
+name = "wall_680"
+translation_m = [10.591, 0.618, 1.800]
+visual = { shape = "box", size_m = [0.445, 0.445, 0.02], color_rgba = [0.6409, 0.6409, 0.6281, 1.0] }
+
+[[objects]]
+name = "wall_681"
+translation_m = [10.575, 1.219, 1.800]
+visual = { shape = "box", size_m = [0.411, 0.411, 0.02], color_rgba = [0.3385, 0.3385, 0.3317, 1.0] }
+
+[[objects]]
+name = "wall_682"
+translation_m = [10.411, 1.664, 1.800]
+visual = { shape = "box", size_m = [0.425, 0.425, 0.02], color_rgba = [0.6604, 0.6604, 0.6472, 1.0] }
+
+[[objects]]
+name = "wall_683"
+translation_m = [10.535, 2.185, 1.800]
+visual = { shape = "box", size_m = [0.469, 0.469, 0.02], color_rgba = [0.873, 0.873, 0.8555, 1.0] }
+
+[[objects]]
+name = "wall_684"
+translation_m = [11.001, 0.109, 1.800]
+visual = { shape = "box", size_m = [0.415, 0.415, 0.02], color_rgba = [0.7592, 0.7592, 0.744, 1.0] }
+
+[[objects]]
+name = "wall_685"
+translation_m = [10.964, 0.741, 1.800]
+visual = { shape = "box", size_m = [0.407, 0.407, 0.02], color_rgba = [0.8887, 0.8887, 0.8709, 1.0] }
+
+[[objects]]
+name = "wall_686"
+translation_m = [10.936, 1.17, 1.800]
+visual = { shape = "box", size_m = [0.427, 0.427, 0.02], color_rgba = [0.3023, 0.3023, 0.2963, 1.0] }
+
+[[objects]]
+name = "wall_687"
+translation_m = [11.115, 1.629, 1.800]
+visual = { shape = "box", size_m = [0.416, 0.416, 0.02], color_rgba = [0.2499, 0.2499, 0.2449, 1.0] }
+
+[[objects]]
+name = "wall_688"
+translation_m = [10.887, 2.092, 1.800]
+visual = { shape = "box", size_m = [0.453, 0.453, 0.02], color_rgba = [0.8191, 0.8191, 0.8027, 1.0] }
+
+[[objects]]
+name = "wall_689"
+translation_m = [11.58, 0.199, 1.800]
+visual = { shape = "box", size_m = [0.489, 0.489, 0.02], color_rgba = [0.4879, 0.4879, 0.4781, 1.0] }
+
+[[objects]]
+name = "wall_690"
+translation_m = [11.536, 0.618, 1.800]
+visual = { shape = "box", size_m = [0.484, 0.484, 0.02], color_rgba = [0.1072, 0.1072, 0.1051, 1.0] }
+
+[[objects]]
+name = "wall_691"
+translation_m = [11.613, 1.173, 1.800]
+visual = { shape = "box", size_m = [0.482, 0.482, 0.02], color_rgba = [0.8237, 0.8237, 0.8072, 1.0] }
+
+[[objects]]
+name = "wall_692"
+translation_m = [11.566, 1.748, 1.800]
+visual = { shape = "box", size_m = [0.428, 0.428, 0.02], color_rgba = [0.7556, 0.7556, 0.7405, 1.0] }
+
+[[objects]]
+name = "wall_693"
+translation_m = [11.559, 2.268, 1.800]
+visual = { shape = "box", size_m = [0.447, 0.447, 0.02], color_rgba = [0.3278, 0.3278, 0.3212, 1.0] }
+
+[[objects]]
+name = "wall_694"
+translation_m = [11.955, 0.268, 1.800]
+visual = { shape = "box", size_m = [0.468, 0.468, 0.02], color_rgba = [0.7199, 0.7199, 0.7055, 1.0] }
+
+[[objects]]
+name = "wall_695"
+translation_m = [12.063, 0.771, 1.800]
+visual = { shape = "box", size_m = [0.474, 0.474, 0.02], color_rgba = [0.3282, 0.3282, 0.3216, 1.0] }
+
+[[objects]]
+name = "wall_696"
+translation_m = [11.924, 1.152, 1.800]
+visual = { shape = "box", size_m = [0.447, 0.447, 0.02], color_rgba = [0.2037, 0.2037, 0.1996, 1.0] }
+
+[[objects]]
+name = "wall_697"
+translation_m = [11.906, 1.8, 1.800]
+visual = { shape = "box", size_m = [0.471, 0.471, 0.02], color_rgba = [0.4775, 0.4775, 0.4679, 1.0] }
+
+[[objects]]
+name = "wall_698"
+translation_m = [11.904, 2.26, 1.800]
+visual = { shape = "box", size_m = [0.458, 0.458, 0.02], color_rgba = [0.3201, 0.3201, 0.3137, 1.0] }
+
+[[objects]]
+name = "wall_699"
+translation_m = [12.613, 0.117, 1.800]
+visual = { shape = "box", size_m = [0.485, 0.485, 0.02], color_rgba = [0.862, 0.0597, 0.5779, 1.0] }
+
+[[objects]]
+name = "wall_700"
+translation_m = [12.586, 0.813, 1.800]
+visual = { shape = "box", size_m = [0.471, 0.471, 0.02], color_rgba = [0.5244, 0.5244, 0.5139, 1.0] }
+
+[[objects]]
+name = "wall_701"
+translation_m = [12.588, 1.101, 1.800]
+visual = { shape = "box", size_m = [0.447, 0.447, 0.02], color_rgba = [0.2705, 0.2705, 0.2651, 1.0] }
+
+[[objects]]
+name = "wall_702"
+translation_m = [12.604, 1.769, 1.800]
+visual = { shape = "box", size_m = [0.487, 0.487, 0.02], color_rgba = [0.6607, 0.6607, 0.6475, 1.0] }
+
+[[objects]]
+name = "wall_703"
+translation_m = [12.53, 2.242, 1.800]
+visual = { shape = "box", size_m = [0.475, 0.475, 0.02], color_rgba = [0.3144, 0.3144, 0.3081, 1.0] }
+
+[[objects]]
+name = "wall_704"
+translation_m = [12.908, 0.179, 1.800]
+visual = { shape = "box", size_m = [0.434, 0.434, 0.02], color_rgba = [0.5036, 0.5036, 0.4935, 1.0] }
+
+[[objects]]
+name = "wall_705"
+translation_m = [12.922, 0.767, 1.800]
+visual = { shape = "box", size_m = [0.474, 0.474, 0.02], color_rgba = [0.5508, 0.5508, 0.5398, 1.0] }
+
+[[objects]]
+name = "wall_706"
+translation_m = [13.068, 1.26, 1.800]
+visual = { shape = "box", size_m = [0.443, 0.443, 0.02], color_rgba = [0.6559, 0.6559, 0.6428, 1.0] }
+
+[[objects]]
+name = "wall_707"
+translation_m = [13.009, 1.62, 1.800]
+visual = { shape = "box", size_m = [0.453, 0.453, 0.02], color_rgba = [0.5169, 0.5169, 0.5066, 1.0] }
+
+[[objects]]
+name = "wall_708"
+translation_m = [13.103, 2.246, 1.800]
+visual = { shape = "box", size_m = [0.465, 0.465, 0.02], color_rgba = [0.6069, 0.6069, 0.5948, 1.0] }
+
+[[objects]]
+name = "wall_709"
+translation_m = [13.381, 0.248, 1.800]
+visual = { shape = "box", size_m = [0.42, 0.42, 0.02], color_rgba = [0.6525, 0.6525, 0.6394, 1.0] }
+
+[[objects]]
+name = "wall_710"
+translation_m = [13.408, 0.691, 1.800]
+visual = { shape = "box", size_m = [0.456, 0.456, 0.02], color_rgba = [0.3236, 0.3236, 0.3171, 1.0] }
+
+[[objects]]
+name = "wall_711"
+translation_m = [13.469, 1.276, 1.800]
+visual = { shape = "box", size_m = [0.482, 0.482, 0.02], color_rgba = [0.3796, 0.3796, 0.372, 1.0] }
+
+[[objects]]
+name = "wall_712"
+translation_m = [13.442, 1.669, 1.800]
+visual = { shape = "box", size_m = [0.478, 0.478, 0.02], color_rgba = [0.7369, 0.7369, 0.7222, 1.0] }
+
+[[objects]]
+name = "wall_713"
+translation_m = [13.606, 2.305, 1.800]
+visual = { shape = "box", size_m = [0.476, 0.476, 0.02], color_rgba = [0.4478, 0.4478, 0.4388, 1.0] }
+
+[[objects]]
+name = "wall_714"
+translation_m = [13.957, 0.227, 1.800]
+visual = { shape = "box", size_m = [0.484, 0.484, 0.02], color_rgba = [0.1426, 0.2948, 0.6128, 1.0] }
+
+[[objects]]
+name = "wall_715"
+translation_m = [13.961, 0.628, 1.800]
+visual = { shape = "box", size_m = [0.476, 0.476, 0.02], color_rgba = [0.8219, 0.8219, 0.8055, 1.0] }
+
+[[objects]]
+name = "wall_716"
+translation_m = [13.932, 1.293, 1.800]
+visual = { shape = "box", size_m = [0.459, 0.459, 0.02], color_rgba = [0.2902, 0.2902, 0.2844, 1.0] }
+
+[[objects]]
+name = "wall_717"
+translation_m = [13.971, 1.771, 1.800]
+visual = { shape = "box", size_m = [0.415, 0.415, 0.02], color_rgba = [0.563, 0.563, 0.5517, 1.0] }
+
+[[objects]]
+name = "wall_718"
+translation_m = [13.954, 2.219, 1.800]
+visual = { shape = "box", size_m = [0.484, 0.484, 0.02], color_rgba = [0.6683, 0.6683, 0.6549, 1.0] }
+
+[[objects]]
+name = "wall_719"
+translation_m = [14.495, 0.289, 1.800]
+visual = { shape = "box", size_m = [0.45, 0.45, 0.02], color_rgba = [0.2037, 0.2037, 0.1996, 1.0] }
+
+[[objects]]
+name = "wall_720"
+translation_m = [14.537, 0.79, 1.800]
+visual = { shape = "box", size_m = [0.477, 0.477, 0.02], color_rgba = [0.2019, 0.2019, 0.1979, 1.0] }
+
+[[objects]]
+name = "wall_721"
+translation_m = [14.555, 1.089, 1.800]
+visual = { shape = "box", size_m = [0.414, 0.414, 0.02], color_rgba = [0.5523, 0.5523, 0.5413, 1.0] }
+
+[[objects]]
+name = "wall_722"
+translation_m = [14.399, 1.652, 1.800]
+visual = { shape = "box", size_m = [0.447, 0.447, 0.02], color_rgba = [0.249, 0.5555, 0.1515, 1.0] }
+
+[[objects]]
+name = "wall_723"
+translation_m = [14.562, 2.192, 1.800]
+visual = { shape = "box", size_m = [0.445, 0.445, 0.02], color_rgba = [0.4758, 0.4758, 0.4663, 1.0] }
+
+[[objects]]
+name = "wall_724"
+translation_m = [15.022, 0.114, 1.800]
+visual = { shape = "box", size_m = [0.478, 0.478, 0.02], color_rgba = [0.0718, 0.0718, 0.0704, 1.0] }
+
+[[objects]]
+name = "wall_725"
+translation_m = [15.103, 0.787, 1.800]
+visual = { shape = "box", size_m = [0.459, 0.459, 0.02], color_rgba = [0.1613, 0.1613, 0.1581, 1.0] }
+
+[[objects]]
+name = "wall_726"
+translation_m = [14.96, 1.211, 1.800]
+visual = { shape = "box", size_m = [0.461, 0.461, 0.02], color_rgba = [0.4176, 0.4176, 0.4092, 1.0] }
+
+[[objects]]
+name = "wall_727"
+translation_m = [15.051, 1.797, 1.800]
+visual = { shape = "box", size_m = [0.459, 0.459, 0.02], color_rgba = [0.3302, 0.3302, 0.3236, 1.0] }
+
+[[objects]]
+name = "wall_728"
+translation_m = [15.042, 2.096, 1.800]
+visual = { shape = "box", size_m = [0.448, 0.448, 0.02], color_rgba = [0.1667, 0.1667, 0.1634, 1.0] }
+
+[[objects]]
+name = "wall_729"
+translation_m = [15.387, 0.249, 1.800]
+visual = { shape = "box", size_m = [0.438, 0.438, 0.02], color_rgba = [0.2582, 0.2582, 0.253, 1.0] }
+
+[[objects]]
+name = "wall_730"
+translation_m = [15.451, 0.711, 1.800]
+visual = { shape = "box", size_m = [0.43, 0.43, 0.02], color_rgba = [0.0613, 0.0613, 0.0601, 1.0] }
+
+[[objects]]
+name = "wall_731"
+translation_m = [15.518, 1.267, 1.800]
+visual = { shape = "box", size_m = [0.417, 0.417, 0.02], color_rgba = [0.0912, 0.0912, 0.0894, 1.0] }
+
+[[objects]]
+name = "wall_732"
+translation_m = [15.59, 1.632, 1.800]
+visual = { shape = "box", size_m = [0.477, 0.477, 0.02], color_rgba = [0.5959, 0.5959, 0.584, 1.0] }
+
+[[objects]]
+name = "wall_733"
+translation_m = [15.617, 2.113, 1.800]
+visual = { shape = "box", size_m = [0.456, 0.456, 0.02], color_rgba = [0.2206, 0.2206, 0.2162, 1.0] }
+
+[[objects]]
+name = "wall_734"
+translation_m = [16.014, 0.256, 1.800]
+visual = { shape = "box", size_m = [0.476, 0.476, 0.02], color_rgba = [0.7819, 0.7819, 0.7663, 1.0] }
+
+[[objects]]
+name = "wall_735"
+translation_m = [16.071, 0.633, 1.800]
+visual = { shape = "box", size_m = [0.48, 0.48, 0.02], color_rgba = [0.3737, 0.3737, 0.3662, 1.0] }
+
+[[objects]]
+name = "wall_736"
+translation_m = [16.0, 1.285, 1.800]
+visual = { shape = "box", size_m = [0.443, 0.443, 0.02], color_rgba = [0.3333, 0.3333, 0.3266, 1.0] }
+
+[[objects]]
+name = "wall_737"
+translation_m = [16.032, 1.646, 1.800]
+visual = { shape = "box", size_m = [0.408, 0.408, 0.02], color_rgba = [0.8871, 0.8871, 0.8694, 1.0] }
+
+[[objects]]
+name = "wall_738"
+translation_m = [16.002, 2.277, 1.800]
+visual = { shape = "box", size_m = [0.474, 0.474, 0.02], color_rgba = [0.097, 0.097, 0.0951, 1.0] }
+
+[[objects]]
+name = "wall_739"
+translation_m = [16.491, 0.297, 1.800]
+visual = { shape = "box", size_m = [0.427, 0.427, 0.02], color_rgba = [0.3272, 0.3272, 0.3207, 1.0] }
+
+[[objects]]
+name = "wall_740"
+translation_m = [16.463, 0.646, 1.800]
+visual = { shape = "box", size_m = [0.446, 0.446, 0.02], color_rgba = [0.5041, 0.5041, 0.494, 1.0] }
+
+[[objects]]
+name = "wall_741"
+translation_m = [16.423, 1.166, 1.800]
+visual = { shape = "box", size_m = [0.403, 0.403, 0.02], color_rgba = [0.235, 0.235, 0.2303, 1.0] }
+
+[[objects]]
+name = "wall_742"
+translation_m = [16.584, 1.805, 1.800]
+visual = { shape = "box", size_m = [0.424, 0.424, 0.02], color_rgba = [0.1755, 0.1755, 0.172, 1.0] }
+
+[[objects]]
+name = "wall_743"
+translation_m = [16.388, 2.224, 1.800]
+visual = { shape = "box", size_m = [0.488, 0.488, 0.02], color_rgba = [0.6154, 0.6154, 0.6031, 1.0] }
+
+[[objects]]
+name = "wall_744"
+translation_m = [17.093, 0.249, 1.800]
+visual = { shape = "box", size_m = [0.457, 0.457, 0.02], color_rgba = [0.1324, 0.1324, 0.1298, 1.0] }
+
+[[objects]]
+name = "wall_745"
+translation_m = [17.019, 0.806, 1.800]
+visual = { shape = "box", size_m = [0.406, 0.406, 0.02], color_rgba = [0.9214, 0.9214, 0.903, 1.0] }
+
+[[objects]]
+name = "wall_746"
+translation_m = [16.956, 1.083, 1.800]
+visual = { shape = "box", size_m = [0.445, 0.445, 0.02], color_rgba = [0.1409, 0.1409, 0.1381, 1.0] }
+
+[[objects]]
+name = "wall_747"
+translation_m = [16.989, 1.66, 1.800]
+visual = { shape = "box", size_m = [0.463, 0.463, 0.02], color_rgba = [0.706, 0.706, 0.6919, 1.0] }
+
+[[objects]]
+name = "wall_748"
+translation_m = [17.075, 2.143, 1.800]
+visual = { shape = "box", size_m = [0.451, 0.451, 0.02], color_rgba = [0.3714, 0.3714, 0.364, 1.0] }
+
+[[objects]]
+name = "wall_749"
+translation_m = [17.539, 0.239, 1.800]
+visual = { shape = "box", size_m = [0.437, 0.437, 0.02], color_rgba = [0.1566, 0.1566, 0.1535, 1.0] }
+
+[[objects]]
+name = "wall_750"
+translation_m = [17.51, 0.632, 1.800]
+visual = { shape = "box", size_m = [0.442, 0.442, 0.02], color_rgba = [0.5317, 0.5317, 0.5211, 1.0] }
+
+[[objects]]
+name = "wall_751"
+translation_m = [17.52, 1.318, 1.800]
+visual = { shape = "box", size_m = [0.439, 0.439, 0.02], color_rgba = [0.8044, 0.8044, 0.7883, 1.0] }
+
+[[objects]]
+name = "wall_752"
+translation_m = [17.511, 1.792, 1.800]
+visual = { shape = "box", size_m = [0.413, 0.413, 0.02], color_rgba = [0.6819, 0.6819, 0.6683, 1.0] }
+
+[[objects]]
+name = "wall_753"
+translation_m = [17.531, 2.186, 1.800]
+visual = { shape = "box", size_m = [0.416, 0.416, 0.02], color_rgba = [0.3624, 0.3624, 0.3552, 1.0] }
+
+[[objects]]
+name = "wall_754"
+translation_m = [18.007, 0.281, 1.800]
+visual = { shape = "box", size_m = [0.472, 0.472, 0.02], color_rgba = [0.7448, 0.7448, 0.7299, 1.0] }
+
+[[objects]]
+name = "wall_755"
+translation_m = [18.106, 0.684, 1.800]
+visual = { shape = "box", size_m = [0.427, 0.427, 0.02], color_rgba = [0.285, 0.285, 0.2793, 1.0] }
+
+[[objects]]
+name = "wall_756"
+translation_m = [18.036, 1.169, 1.800]
+visual = { shape = "box", size_m = [0.444, 0.444, 0.02], color_rgba = [0.3014, 0.3014, 0.2954, 1.0] }
+
+[[objects]]
+name = "wall_757"
+translation_m = [18.056, 1.671, 1.800]
+visual = { shape = "box", size_m = [0.478, 0.478, 0.02], color_rgba = [0.6626, 0.6626, 0.6493, 1.0] }
+
+[[objects]]
+name = "wall_758"
+translation_m = [17.997, 2.189, 1.800]
+visual = { shape = "box", size_m = [0.484, 0.484, 0.02], color_rgba = [0.3652, 0.3652, 0.3579, 1.0] }
+
+[[objects]]
+name = "wall_759"
+translation_m = [18.517, 0.244, 1.800]
+visual = { shape = "box", size_m = [0.463, 0.463, 0.02], color_rgba = [0.2093, 0.2093, 0.2051, 1.0] }
+
+[[objects]]
+name = "wall_760"
+translation_m = [18.491, 0.663, 1.800]
+visual = { shape = "box", size_m = [0.472, 0.472, 0.02], color_rgba = [0.9159, 0.9159, 0.8976, 1.0] }
+
+[[objects]]
+name = "wall_761"
+translation_m = [18.415, 1.282, 1.800]
+visual = { shape = "box", size_m = [0.438, 0.438, 0.02], color_rgba = [0.1554, 0.1554, 0.1523, 1.0] }
+
+[[objects]]
+name = "wall_762"
+translation_m = [18.547, 1.764, 1.800]
+visual = { shape = "box", size_m = [0.431, 0.431, 0.02], color_rgba = [0.4744, 0.4744, 0.4649, 1.0] }
+
+[[objects]]
+name = "wall_763"
+translation_m = [18.575, 2.301, 1.800]
+visual = { shape = "box", size_m = [0.445, 0.445, 0.02], color_rgba = [0.69, 0.69, 0.6762, 1.0] }
+
+[[objects]]
+name = "wall_764"
+translation_m = [18.925, 0.25, 1.800]
+visual = { shape = "box", size_m = [0.433, 0.433, 0.02], color_rgba = [0.3284, 0.3284, 0.3218, 1.0] }
+
+[[objects]]
+name = "wall_765"
+translation_m = [18.91, 0.75, 1.800]
+visual = { shape = "box", size_m = [0.432, 0.432, 0.02], color_rgba = [0.6106, 0.6106, 0.5984, 1.0] }
+
+[[objects]]
+name = "wall_766"
+translation_m = [18.891, 1.263, 1.800]
+visual = { shape = "box", size_m = [0.412, 0.412, 0.02], color_rgba = [0.4985, 0.4985, 0.4885, 1.0] }
+
+[[objects]]
+name = "wall_767"
+translation_m = [19.097, 1.719, 1.800]
+visual = { shape = "box", size_m = [0.434, 0.434, 0.02], color_rgba = [0.8642, 0.8642, 0.8469, 1.0] }
+
+[[objects]]
+name = "wall_768"
+translation_m = [19.051, 2.151, 1.800]
+visual = { shape = "box", size_m = [0.463, 0.463, 0.02], color_rgba = [0.7523, 0.7523, 0.7373, 1.0] }
+
+[[objects]]
+name = "wall_769"
+translation_m = [19.484, 0.191, 1.800]
+visual = { shape = "box", size_m = [0.408, 0.408, 0.02], color_rgba = [0.6305, 0.6305, 0.6179, 1.0] }
+
+[[objects]]
+name = "wall_770"
+translation_m = [19.5, 0.585, 1.800]
+visual = { shape = "box", size_m = [0.482, 0.482, 0.02], color_rgba = [0.7567, 0.7567, 0.7416, 1.0] }
+
+[[objects]]
+name = "wall_771"
+translation_m = [19.607, 1.283, 1.800]
+visual = { shape = "box", size_m = [0.453, 0.453, 0.02], color_rgba = [0.6993, 0.6993, 0.6853, 1.0] }
+
+[[objects]]
+name = "wall_772"
+translation_m = [19.62, 1.657, 1.800]
+visual = { shape = "box", size_m = [0.44, 0.44, 0.02], color_rgba = [0.4517, 0.4517, 0.4427, 1.0] }
+
+[[objects]]
+name = "wall_773"
+translation_m = [19.467, 2.279, 1.800]
+visual = { shape = "box", size_m = [0.43, 0.43, 0.02], color_rgba = [0.0736, 0.0736, 0.0721, 1.0] }
+
+[[objects]]
+name = "wall_774"
+translation_m = [19.9, 0.164, 1.800]
+visual = { shape = "box", size_m = [0.452, 0.452, 0.02], color_rgba = [0.7138, 0.7138, 0.6995, 1.0] }
+
+[[objects]]
+name = "wall_775"
+translation_m = [20.014, 0.754, 1.800]
+visual = { shape = "box", size_m = [0.41, 0.41, 0.02], color_rgba = [0.9444, 0.9444, 0.9255, 1.0] }
+
+[[objects]]
+name = "wall_776"
+translation_m = [20.049, 1.192, 1.800]
+visual = { shape = "box", size_m = [0.453, 0.453, 0.02], color_rgba = [0.356, 0.356, 0.3489, 1.0] }
+
+[[objects]]
+name = "wall_777"
+translation_m = [19.903, 1.61, 1.800]
+visual = { shape = "box", size_m = [0.404, 0.404, 0.02], color_rgba = [0.148, 0.148, 0.145, 1.0] }
+
+[[objects]]
+name = "wall_778"
+translation_m = [20.008, 2.168, 1.800]
+visual = { shape = "box", size_m = [0.466, 0.466, 0.02], color_rgba = [0.0928, 0.0928, 0.0909, 1.0] }
+
+[[objects]]
+name = "landmark_779"
+translation_m = [18.51, 0.377, -1.258]
+visual = { shape = "box", size_m = [0.524, 0.754, 0.57], color_rgba = [0.8044, 0.0813, 0.8593, 1.0] }
+
+[[objects]]
+name = "landmark_780"
+translation_m = [3.729, 0.399, -1.016]
+visual = { shape = "box", size_m = [0.525, 0.798, 0.638], color_rgba = [0.0033, 0.653, 0.7302, 1.0] }
+
+[[objects]]
+name = "landmark_781"
+translation_m = [7.564, 0.571, -1.283]
+visual = { shape = "box", size_m = [0.622, 1.141, 0.637], color_rgba = [0.0328, 0.796, 0.8728, 1.0] }
+
+[[objects]]
+name = "landmark_782"
+translation_m = [16.536, 0.287, 1.086]
+visual = { shape = "box", size_m = [0.505, 0.574, 0.436], color_rgba = [0.1848, 0.6276, 0.3508, 1.0] }
+
+[[objects]]
+name = "landmark_783"
+translation_m = [3.196, 0.415, 1.538]
+visual = { shape = "box", size_m = [0.645, 0.83, 0.658], color_rgba = [0.7489, 0.1644, 0.529, 1.0] }
+
+[[objects]]
+name = "landmark_784"
+translation_m = [13.194, 0.43, -1.29]
+visual = { shape = "box", size_m = [0.575, 0.861, 0.802], color_rgba = [0.5688, 0.4352, 0.1629, 1.0] }
+
+[[objects]]
+name = "landmark_785"
+translation_m = [7.953, 0.59, 1.489]
+visual = { shape = "box", size_m = [0.86, 1.179, 0.465], color_rgba = [0.0996, 0.9293, 0.2388, 1.0] }
+
+[[objects]]
+name = "landmark_786"
+translation_m = [17.558, 0.461, 1.057]
+visual = { shape = "box", size_m = [0.413, 0.921, 0.563], color_rgba = [0.5916, 0.61, 0.1118, 1.0] }
+
+[[objects]]
+name = "landmark_787"
+translation_m = [7.655, 0.399, 1.448]
+visual = { shape = "box", size_m = [0.634, 0.797, 0.637], color_rgba = [0.1061, 0.1085, 0.6195, 1.0] }
+
+[[objects]]
+name = "landmark_788"
+translation_m = [5.103, 0.449, -1.187]
+visual = { shape = "box", size_m = [0.659, 0.897, 0.606], color_rgba = [0.856, 0.1639, 0.1084, 1.0] }
+
+[[objects]]
+name = "landmark_789"
+translation_m = [13.558, 0.421, 1.295]
+visual = { shape = "box", size_m = [0.718, 0.843, 0.628], color_rgba = [0.1148, 0.7274, 0.484, 1.0] }
+
+[[objects]]
+name = "landmark_790"
+translation_m = [18.269, 0.366, 1.384]
+visual = { shape = "box", size_m = [0.508, 0.733, 0.484], color_rgba = [0.2307, 0.8041, 0.7197, 1.0] }
+
+[[objects]]
+name = "landmark_791"
+translation_m = [18.954, 0.294, 1.082]
+visual = { shape = "box", size_m = [0.766, 0.588, 0.404], color_rgba = [0.26, 0.2232, 0.818, 1.0] }
+
+[[objects]]
+name = "landmark_792"
+translation_m = [7.915, 0.481, 1.211]
+visual = { shape = "box", size_m = [0.651, 0.963, 0.856], color_rgba = [0.8025, 0.2906, 0.2376, 1.0] }
+
+[[objects]]
+name = "landmark_793"
+translation_m = [4.294, 0.645, -1.561]
+visual = { shape = "box", size_m = [0.585, 1.291, 0.829], color_rgba = [0.1585, 0.822, 0.5685, 1.0] }
+
+[[objects]]
+name = "landmark_794"
+translation_m = [18.055, 0.424, -1.077]
+visual = { shape = "box", size_m = [0.657, 0.849, 0.468], color_rgba = [0.9328, 0.6198, 0.1775, 1.0] }
+
+[[objects]]
+name = "landmark_795"
+translation_m = [18.139, 0.582, 1.484]
+visual = { shape = "box", size_m = [0.813, 1.163, 0.52], color_rgba = [0.5649, 0.221, 0.7841, 1.0] }
+
+[[objects]]
+name = "landmark_796"
+translation_m = [11.7, 0.373, 1.565]
+visual = { shape = "box", size_m = [0.516, 0.747, 0.418], color_rgba = [0.7367, 0.4742, 0.1281, 1.0] }
+
+[[objects]]
+name = "landmark_797"
+translation_m = [8.956, 0.441, 1.476]
+visual = { shape = "box", size_m = [0.682, 0.881, 0.648], color_rgba = [0.0464, 0.585, 0.2628, 1.0] }
+
+[[objects]]
+name = "landmark_798"
+translation_m = [8.219, 0.561, 1.293]
+visual = { shape = "box", size_m = [0.835, 1.122, 0.449], color_rgba = [0.8159, 0.6016, 0.1558, 1.0] }
+
+[[objects]]
+name = "landmark_799"
+translation_m = [5.374, 0.523, -1.428]
+visual = { shape = "box", size_m = [0.856, 1.047, 0.604], color_rgba = [0.538, 0.1875, 0.8061, 1.0] }
+
+[[objects]]
+name = "landmark_800"
+translation_m = [18.547, 0.507, 1.578]
+visual = { shape = "box", size_m = [0.466, 1.015, 0.406], color_rgba = [0.8442, 0.1408, 0.3769, 1.0] }
+
+[[objects]]
+name = "landmark_801"
+translation_m = [17.652, 0.428, 1.334]
+visual = { shape = "box", size_m = [0.476, 0.856, 0.419], color_rgba = [0.4028, 0.6566, 0.1305, 1.0] }
+
+[[objects]]
+name = "landmark_802"
+translation_m = [4.716, 0.58, -1.046]
+visual = { shape = "box", size_m = [0.485, 1.16, 0.52], color_rgba = [0.105, 0.6304, 0.2379, 1.0] }
