@@ -40,10 +40,13 @@ All notable changes to Robot Native Engine are documented in this file.
   contract.
 
 - `examples/112_go2_wbc_stance` whole-body-control diagnostic on a
-  declared-inertial-mass Go2 scene. At a 240 Hz fixed-delta plant a posture-only
-  `rne_wbc` solve holds an upright stance and tracks the scripted trot for 5 s
-  without falling; the same configuration collapses at 60 Hz, and enabling the
-  CoM or attitude task destabilizes the solve at both rates. New
+  declared-inertial-mass Go2 scene. Findings: at 60 Hz every configuration
+  collapses, including pure gravity hold; at a 240 Hz fixed-delta plant a
+  posture-only `rne_wbc` solve holds an upright stance and stays upright on the
+  scripted trot, but all four point contacts stay no-slip so the forward motion
+  is a one-off transient rather than continuous walking. Feeding the measured
+  base velocity into the WBC (any twist convention) or enabling the CoM/attitude
+  task destabilizes that stance. New
   `assets/robots/unitree_go2_declared.rne.robot.toml` and its scene opt the Go2
   into URDF-declared inertial masses, ruling out scene/URDF mass mismatch as the
   cause of the earlier divergence.

@@ -7,15 +7,19 @@
 //!
 //! Measured results (see `docs/PLAN_LEGGED_LOCOMOTION_FRONTIER.md`):
 //! - At 60 Hz every task combination collapses, including pure gravity hold.
-//! - At 240 Hz posture-only WBC (no CoM/attitude task) holds an upright stance
-//!   and tracks the scripted trot without falling.
-//! - Enabling the CoM or attitude task destabilizes the solve at both rates, and
-//!   stance-only contacts transport farther but fall.
+//! - At 240 Hz a posture-only WBC (no CoM/attitude task, zero base velocity)
+//!   holds an upright stance. With the trot as its posture reference it stays
+//!   upright but does not transport continuously, because all four point
+//!   contacts stay no-slip and the swing feet never lift.
+//! - Feeding the measured base velocity into the WBC destabilizes that stance in
+//!   every convention, and the CoM/attitude tasks destabilize it too; both need
+//!   the base velocity to damp.
 //!
-//! Knobs: `RNE_WBC_HZ` (plant rate, default 240), `RNE_STRIDE`, `RNE_LIFT`,
-//! `RNE_POSTURE_KP`/`RNE_POSTURE_KD`, `RNE_COM_KP`/`RNE_COM_KD`,
-//! `RNE_ATT_KP`/`RNE_ATT_KD`; flags `--walk`, `--stance-contacts`, `--force-com`,
-//! `--force-att`, `--hybrid`.
+//! Knobs: `RNE_WBC_HZ` (plant rate, default 240), `RNE_QD_MODE` (0 zero base,
+//! 1 world twist, 2 body twist, 3/4 their negations), `RNE_WALK_STEPS`,
+//! `RNE_STRIDE`, `RNE_LIFT`, `RNE_POSTURE_KP`/`RNE_POSTURE_KD`,
+//! `RNE_COM_KP`/`RNE_COM_KD`, `RNE_ATT_KP`/`RNE_ATT_KD`; flags `--walk`,
+//! `--stance-contacts`, `--force-com`, `--force-att`, `--hybrid`.
 //!
 //! Run with `cargo run -p go2_wbc_stance --example 112_go2_wbc_stance`.
 
@@ -100,7 +104,44 @@ impl Model {
     }
 
     fn qd(&self, sim: &UrdfSceneSim) -> Vec<f64> {
+        // The floating-base generalized velocity convention is selected for the
+        // experiment: 0 = zero base, 1 = world-frame twist, 2 = body-frame twist.
+        let mode = std::env::var("RNE_QD_MODE")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0);
+        let observation = sim.observe();
+        let base_rotation = sim.named_transform("base").expect("base").rotation;
+        let linear_world = Vec3::new(
+            observation.base_linear_velocity_x_m_s,
+            observation.base_linear_velocity_y_m_s,
+            observation.base_linear_velocity_z_m_s,
+        );
+        let angular_world = Vec3::new(
+            observation.base_angular_velocity_x_rad_s,
+            observation.base_angular_velocity_y_rad_s,
+            observation.base_angular_velocity_z_rad_s,
+        );
+        let (linear, angular) = match mode {
+            1 => (linear_world, angular_world),
+            2 => (
+                base_rotation.inverse() * linear_world,
+                base_rotation.inverse() * angular_world,
+            ),
+            3 => (
+                -(base_rotation.inverse() * linear_world),
+                -(base_rotation.inverse() * angular_world),
+            ),
+            4 => (-linear_world, -angular_world),
+            _ => (Vec3::ZERO, Vec3::ZERO),
+        };
         let mut qd = vec![0.0; self.articulated.nv()];
+        qd[0] = linear.x;
+        qd[1] = linear.y;
+        qd[2] = linear.z;
+        qd[3] = angular.x;
+        qd[4] = angular.y;
+        qd[5] = angular.z;
         for (dof, link) in self.joint_links.iter().enumerate() {
             qd[6 + dof] = sim.named_joint_velocity(link).unwrap_or(0.0);
         }
@@ -187,7 +228,11 @@ fn run(
     let start_x = sim.observe().base_x_m;
     let mut min_height = f64::MAX;
     let mut max_tilt: f64 = 0.0;
-    let iterations = if walk { WALK_STEPS } else { RUN_STEPS };
+    let iterations = if walk {
+        env_f64("RNE_WALK_STEPS", WALK_STEPS as f64) as u64
+    } else {
+        RUN_STEPS
+    };
     for step in 0..iterations {
         let q = model.q(sim);
         let qd = model.qd(sim);

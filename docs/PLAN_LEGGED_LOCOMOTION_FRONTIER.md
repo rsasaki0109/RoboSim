@@ -64,15 +64,28 @@ hypothesis".
 
 **First result on the 240 Hz plant (example 112).** `go2_wbc_stance` loads a
 declared-inertial-mass Go2 scene (so the WBC model and the plant share the same
-masses) and drives it with `rne_wbc` torques. At 60 Hz every configuration
-collapses within 5 s, including a pure gravity hold, even though the same robot
-is stable under the position motors. At 240 Hz a posture-only WBC (no CoM and no
-attitude task) holds an upright stance (`minH` 0.226 m, tilt 0.05 rad) and
-tracks the scripted trot for 5 s without falling. Enabling the CoM task or the
-attitude task destabilizes the solve at both rates, and stance-only contacts
-transport farther but topple. This confirms the 60 Hz torque path as the primary
-wall and makes the 240 Hz posture-only plant the new baseline for the WBC
-campaign; the next step is a contact-consistent balance task on top of it.
+masses) and drives it with `rne_wbc` torques. Findings:
+
+- At 60 Hz every configuration collapses within 5 s, including a pure gravity
+  hold, even though the same robot is stable under the position motors.
+- At 240 Hz a posture-only WBC (no CoM and no attitude task, `qd` base zero)
+  holds an upright stance (`minH` 0.226 m, tilt 0.05 rad). With the scripted
+  trot as the posture reference it stays upright for the full run, but all four
+  point contacts remain no-slip, so the forward motion is a one-off startup
+  transient (0.059 m) that does not accumulate: this is stable WBC stance, not
+  continuous walking.
+- Feeding the measured base velocity into `qd` destabilizes the otherwise stable
+  240 Hz stance in every convention tried (world-frame twist, body-frame twist,
+  and both signs), so the model's floating-base velocity parametrization is
+  currently left at zero. This is a library-level blocker to contact-consistent
+  balance: the CoM/attitude tasks need the base velocity to damp.
+- Enabling the CoM or the attitude task destabilizes the solve at both rates,
+  consistent with the missing base-velocity term.
+- Stance-only contacts transport farther (`~0.10 m`) but topple.
+
+The next step is to establish and test the floating-base velocity convention in
+`rne_dynamics`/`rne_wbc` (so `qd` can carry the body twist), then retry the
+CoM/attitude tasks and the contact schedule on the 240 Hz plant.
 
 ### Theme B — contact-schedule redesign above the joint targets (active)
 
