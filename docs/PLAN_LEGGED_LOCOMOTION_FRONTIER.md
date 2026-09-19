@@ -101,10 +101,10 @@ masses) and drives it with `rne_wbc` torques. Findings:
   gained `contact_compliance` (`J qdd + bias = compliance * f`), pinned by
   `contact_compliance_relaxes_the_no_slip_constraint`. On the Go2 stance it cuts
   the worst tilt from `2.88` to `1.27` rad at `compliance ~1e-4` (posture-only),
-  which is the first mechanism so far that moves the needle, but the stance still
-  tips within the 1 s run. Adding a CoM or attitude task on top makes it worse
-  again. Bandwidth knobs (posture gain `1..100`, torque filter `0..0.95`,
-  `contact_weight 1e6..1`) do not help.
+  which is the first mechanism so far that moves the needle, but it only delays
+  the fall: the stance is still down by 5 s. Adding a CoM or attitude task, or
+  more joint-velocity damping, makes it worse again. Bandwidth knobs (posture
+  gain `1..100`, torque filter `0..0.95`, `contact_weight 1e6..1`) do not help.
 - The next step is to feed the plant's measured contact wrenches back into the
   WBC (which needs a directional contact-force API; the current
   `link_contact_impulse_ns` is scalar) or to fit the compliance and damping to

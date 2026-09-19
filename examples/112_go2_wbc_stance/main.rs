@@ -243,7 +243,7 @@ fn run(
     let iterations = if walk {
         env_f64("RNE_WALK_STEPS", WALK_STEPS as f64) as u64
     } else {
-        RUN_STEPS
+        env_f64("RNE_RUN_STEPS", RUN_STEPS as f64) as u64
     };
     let torque_filter = env_f64("RNE_TORQUE_FILTER", 0.0).clamp(0.0, 0.999_999);
     let mut held_torques = vec![0.0; model.joint_links.len()];
