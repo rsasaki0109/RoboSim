@@ -74,18 +74,19 @@ masses) and drives it with `rne_wbc` torques. Findings:
   point contacts remain no-slip, so the forward motion is a one-off startup
   transient (0.059 m) that does not accumulate: this is stable WBC stance, not
   continuous walking.
-- Feeding the measured base velocity into `qd` destabilizes the otherwise stable
-  240 Hz stance in every convention tried (world-frame twist, body-frame twist,
-  and both signs), so the model's floating-base velocity parametrization is
-  currently left at zero. This is a library-level blocker to contact-consistent
-  balance: the CoM/attitude tasks need the base velocity to damp.
-- Enabling the CoM or the attitude task destabilizes the solve at both rates,
-  consistent with the missing base-velocity term.
+- `rne_dynamics::base_velocity_map` documents the generalized base velocity as
+  the **body-frame twist** (body linear and angular velocity). Feeding that
+  correct twist into `qd` still destabilizes the otherwise stable 240 Hz stance,
+  as do the world-twist and negated variants; `qd` base is therefore left at
+  zero. The residual base velocity after the stance settle is only `~5e-4 m/s`,
+  so this is a `rne_wbc` robustness gap with nonzero base velocity (Coriolis /
+  bias handling), not a frame-convention bug. The CoM and attitude tasks fail for
+  the same reason: both need the base velocity to damp.
 - Stance-only contacts transport farther (`~0.10 m`) but topple.
 
-The next step is to establish and test the floating-base velocity convention in
-`rne_dynamics`/`rne_wbc` (so `qd` can carry the body twist), then retry the
-CoM/attitude tasks and the contact schedule on the 240 Hz plant.
+The next step is to harden `rne_wbc` for a nonzero body-twist base velocity
+(bias/Coriolis handling and solver regularization), then retry the CoM/attitude
+tasks and the contact schedule on the 240 Hz plant.
 
 ### Theme B — contact-schedule redesign above the joint targets (active)
 

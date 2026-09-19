@@ -44,9 +44,11 @@ All notable changes to Robot Native Engine are documented in this file.
   collapses, including pure gravity hold; at a 240 Hz fixed-delta plant a
   posture-only `rne_wbc` solve holds an upright stance and stays upright on the
   scripted trot, but all four point contacts stay no-slip so the forward motion
-  is a one-off transient rather than continuous walking. Feeding the measured
-  base velocity into the WBC (any twist convention) or enabling the CoM/attitude
-  task destabilizes that stance. New
+  is a one-off transient rather than continuous walking. The generalized base
+  velocity is the body-frame twist (`rne_dynamics::base_velocity_map`), but
+  feeding that correct twist into the WBC — or enabling the CoM/attitude task —
+  destabilizes the stance, a `rne_wbc` robustness gap with nonzero base velocity.
+  New
   `assets/robots/unitree_go2_declared.rne.robot.toml` and its scene opt the Go2
   into URDF-declared inertial masses, ruling out scene/URDF mass mismatch as the
   cause of the earlier divergence.

@@ -11,12 +11,16 @@
 //!   holds an upright stance. With the trot as its posture reference it stays
 //!   upright but does not transport continuously, because all four point
 //!   contacts stay no-slip and the swing feet never lift.
-//! - Feeding the measured base velocity into the WBC destabilizes that stance in
-//!   every convention, and the CoM/attitude tasks destabilize it too; both need
-//!   the base velocity to damp.
+//! - `rne_dynamics::base_velocity_map` documents the generalized base velocity
+//!   as the body-frame twist. Feeding that correct twist (or the world/negated
+//!   variants) into the WBC destabilizes the stance, so the base velocity is
+//!   left at zero: this is a `rne_wbc` robustness gap, not a frame bug. The
+//!   CoM/attitude tasks fail for the same reason, since they need the base
+//!   velocity to damp.
 //!
 //! Knobs: `RNE_WBC_HZ` (plant rate, default 240), `RNE_QD_MODE` (0 zero base,
-//! 1 world twist, 2 body twist, 3/4 their negations), `RNE_WALK_STEPS`,
+//! 1 world twist, 2 body twist, 3/4 their negations), `RNE_QD_SCALE`
+//! (fraction of the base velocity fed to the WBC), `RNE_WALK_STEPS`,
 //! `RNE_STRIDE`, `RNE_LIFT`, `RNE_POSTURE_KP`/`RNE_POSTURE_KD`,
 //! `RNE_COM_KP`/`RNE_COM_KD`, `RNE_ATT_KP`/`RNE_ATT_KD`; flags `--walk`,
 //! `--stance-contacts`, `--force-com`, `--force-att`, `--hybrid`.
@@ -135,13 +139,17 @@ impl Model {
             4 => (-linear_world, -angular_world),
             _ => (Vec3::ZERO, Vec3::ZERO),
         };
+        let scale = std::env::var("RNE_QD_SCALE")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(1.0);
         let mut qd = vec![0.0; self.articulated.nv()];
-        qd[0] = linear.x;
-        qd[1] = linear.y;
-        qd[2] = linear.z;
-        qd[3] = angular.x;
-        qd[4] = angular.y;
-        qd[5] = angular.z;
+        qd[0] = scale * linear.x;
+        qd[1] = scale * linear.y;
+        qd[2] = scale * linear.z;
+        qd[3] = scale * angular.x;
+        qd[4] = scale * angular.y;
+        qd[5] = scale * angular.z;
         for (dof, link) in self.joint_links.iter().enumerate() {
             qd[6 + dof] = sim.named_joint_velocity(link).unwrap_or(0.0);
         }
@@ -400,6 +408,17 @@ fn main() {
         .sum();
     settle(&mut sim);
     println!("declared-scene model mass = {mass:.3} kg");
+    let after_settle = sim.observe();
+    println!(
+        "settled base v=({:.4},{:.4},{:.4}) m/s omega=({:.4},{:.4},{:.4}) rad/s y={:.3}",
+        after_settle.base_linear_velocity_x_m_s,
+        after_settle.base_linear_velocity_y_m_s,
+        after_settle.base_linear_velocity_z_m_s,
+        after_settle.base_angular_velocity_x_rad_s,
+        after_settle.base_angular_velocity_y_rad_s,
+        after_settle.base_angular_velocity_z_rad_s,
+        after_settle.base_y_m,
+    );
 
     if std::env::args().any(|argument| argument == "--walk") {
         settle(&mut sim);
