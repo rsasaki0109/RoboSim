@@ -60,6 +60,17 @@ All notable changes to Robot Native Engine are documented in this file.
   validates the controller's core solve against
   `rne_dynamics::constrained_forward_dynamics` with a nonzero base twist.
 
+- `examples/113_g1_backflip` research probe and `examples/114_g1_backflip_gif`
+  render-only reference. Example 113 runs native FDDP over crouch/push/flight
+  and drives the base through a full `-2*pi` rotation, but that coordinate is a
+  **world-vertical spin**, not a sagittal backflip; the solver reaches the
+  rotation without converging (dynamics gap ~2.3 at 29 DoF with
+  central-difference derivatives). Example 114 is a clearly labeled
+  forward-kinematics backflip animation (`--smoke` headless gate, `--gif` writes
+  `docs/media/unitree-g1-backflip.gif`). A physically simulated backflip needs a
+  singularity-free quaternion/SE(3) floating base and a flight-phase controller,
+  neither of which exists yet.
+
 ### Fixed
 
 - `rne_dynamics::link_motions` was missing the frame-rotation term

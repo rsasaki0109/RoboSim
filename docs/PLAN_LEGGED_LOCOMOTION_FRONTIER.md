@@ -211,3 +211,34 @@ measurement with `--scan` (torque sweep) and `--trace` (per-step telemetry).
   Consistent with the base contact-schedule/closing wall, this keeps Theme B
   (foot placement) and a whole-body jump trajectory as the prerequisites for
   any parkour capture.
+
+### Theme F — 3D acrobatics and the floating-base chart (measured)
+
+Requested target: a Unitree G1 backflip. Literature review: Unitree's
+open-sourced **OmniXtreme** (flow-matching pretraining plus actuation-aware
+post-training) reports a 96.36% G1 backflip success rate, and trajectory
+optimization work (Konishi et al., IROS 2025; `se3_trajopt`; Crocoddyl-based
+`humanoid-trajopt-playground`) solves whole-body takeoff/flight/landing. Both
+rely on a singularity-free floating-base representation and a flight-phase
+controller.
+
+- **The Euler chart cannot represent a sagittal backflip.**
+  `rne_dynamics::base_velocity_map` inverts the Euler-rate map, whose
+  determinant vanishes at `pitch = ±pi/2`. A backflip is a rotation about the
+  world lateral axis, which maps into that singular roll/pitch region. A
+  rotation about the world vertical axis (a spin) maps to yaw and is fine, which
+  is why the FDDP probe (example 113) can drive a full `-2*pi` "rotation" but it
+  is an aerial **spin**, not a backflip.
+- **Whole-body FDDP is too slow and does not converge.** Example 113 finds a
+  `2*pi` spin but the dynamics gap stays ~2.3 after 800 iterations (21 min); a
+  no-spin jump still leaves a gap of `7e-2` after 150 iterations (3 min). The
+  native solver has central-difference derivatives only, no analytic dynamics
+  derivatives, no articulated centroidal/angular-momentum API, and no
+  flight-phase controller (`rne_wbc` rejects empty contacts).
+- **Deliverable:** example 114 renders a clearly labeled forward-kinematics
+  backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
+  accuracy. A physically simulated backflip requires, in order: (1) a
+  singularity-free floating-base state (quaternion/SE(3)) with a consistent
+  acceleration map, (2) analytic dynamics derivatives, (3) an articulated
+  centroidal-momentum term for aerial rotation, and (4) a flight-phase
+  controller and a landing catch.

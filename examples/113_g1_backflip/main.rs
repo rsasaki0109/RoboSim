@@ -2,12 +2,19 @@
 //! FDDP solver.
 //!
 //! The sequence is crouch (both feet) -> push (both feet) -> flight (no
-//! contacts). In this model the floating base root carries the URDF's Z-up to
-//! Y-up rotation, so a backflip about the world lateral axis is a continuous
-//! change of the base **yaw** coordinate and avoids the roll/pitch chart
-//! singularity. The flight cost drives that yaw to a full `-2*pi` rotation while
-//! tracking a ballistic height arc, and the terminal cost asks for a landed
-//! pose at the start height.
+//! contacts). The flight cost drives the base yaw coordinate through a full
+//! `-2*pi` rotation while tracking a ballistic height arc, and the terminal cost
+//! asks for a landed pose at the start height.
+//!
+//! Important: the floating base root carries the URDF's Z-up to Y-up rotation,
+//! so this model's base **yaw is a rotation about the world vertical axis** — it
+//! is an aerial spin, *not* a sagittal backflip. A backflip is a rotation about
+//! the world lateral (Z) axis, which maps to a roll/pitch configuration where
+//! the Euler chart is singular (`rne_dynamics::base_velocity_map` inverts the
+//! Euler-rate map, whose determinant vanishes at `pitch = ±pi/2`). A real
+//! backflip therefore needs a singularity-free floating-base representation
+//! (quaternion/SE(3)) that this engine does not have yet; see example 114 for a
+//! render-only kinematic reference animation.
 //!
 //! Run with `cargo run --release -p g1_backflip --example 113_g1_backflip`.
 
@@ -165,7 +172,7 @@ fn main() {
         .collect();
     assert_eq!(contacts.len(), 2, "expected two foot contacts");
     let horizon = CROUCH_STEPS + PUSH_STEPS + FLIGHT_STEPS;
-    println!("g1 backflip: nv={nv} control_dim={control_dim} horizon={horizon}");
+    println!("g1 FDDP probe (world-vertical spin, not a backflip): nv={nv} control_dim={control_dim} horizon={horizon}");
 
     let phases = [
         ContactPhase {
