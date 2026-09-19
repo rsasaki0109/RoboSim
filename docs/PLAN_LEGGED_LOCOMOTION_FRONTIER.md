@@ -18,6 +18,12 @@ below is an observed result, not an assumption. Detailed evidence lives in
   sign and a bounded integrated yaw. Pinned by
   `v03_sustained_envelope_walks_50s_without_falling`; hero-captured by example
   92 (`docs/media/unitree-g1-sustained-walk.gif`).
+- **Scripted-locomotion CLI and CI gates.** Examples 110 (`go2_walk`) and 111
+  (`g1_walk`) expose the two scripted walks as runnable, headless gates. The Go2
+  forward-trot regression
+  (`official_unitree_go2_dynamic_trot_walks_forward_without_falling`) is now a
+  600-step forward/straightness/determinism contract rather than a short
+  upright-only smoke, and both examples join the headless smoke set.
 
 ## What is blocked, and the measured reason
 

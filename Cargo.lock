@@ -1422,6 +1422,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "g1_walk"
+version = "0.1.0"
+dependencies = [
+ "rne_ai",
+]
+
+[[package]]
 name = "g1_workbench_mission"
 version = "0.3.0"
 dependencies = [
@@ -1750,6 +1757,18 @@ version = "0.3.0"
 dependencies = [
  "rne_ai",
  "rne_math",
+]
+
+[[package]]
+name = "go2_walk"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "png",
+ "rne_ai",
+ "rne_math",
+ "rne_render",
+ "rne_render_wgpu",
 ]
 
 [[package]]

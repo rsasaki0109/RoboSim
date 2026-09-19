@@ -2733,39 +2733,66 @@ mod tests {
     }
 
     #[test]
-    fn official_unitree_go2_dynamic_trot_remains_upright() {
-        let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
-            .expect("spawn trotting Unitree Go2");
-        sim.configure_position_motors(180.0, 18.0, 23.7);
-        let stand = unitree_go2_trot_targets(
-            0,
-            UnitreeGo2GaitCommand {
-                stride_rad: 0.0,
-                foot_lift_rad: 0.0,
-                cycle_steps: 90,
-                ..UnitreeGo2GaitCommand::default()
-            },
-        );
-        for _ in 0..120 {
-            sim.step_joint_position_targets(&stand);
+    fn official_unitree_go2_dynamic_trot_walks_forward_without_falling() {
+        fn settled_trot_sim() -> UrdfSceneSim {
+            let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+                .expect("spawn trotting Unitree Go2");
+            sim.configure_position_motors(180.0, 18.0, 23.7);
+            let stand = unitree_go2_trot_targets(
+                0,
+                UnitreeGo2GaitCommand {
+                    stride_rad: 0.0,
+                    foot_lift_rad: 0.0,
+                    cycle_steps: 90,
+                    ..UnitreeGo2GaitCommand::default()
+                },
+            );
+            for _ in 0..120 {
+                sim.step_joint_position_targets(&stand);
+            }
+            sim
         }
+
+        const TROT_STEPS: u64 = 600;
+        let mut sim = settled_trot_sim();
         let initial = sim.observe();
-        for step in 0..120 {
+        let mut min_height_m = f64::MAX;
+        for step in 0..TROT_STEPS {
             sim.step_joint_position_targets(&unitree_go2_trot_targets(
                 step,
                 UnitreeGo2GaitCommand::default(),
             ));
+            min_height_m = min_height_m.min(sim.observe().base_y_m);
         }
-        let observation = sim.observe();
+        let walked = sim.observe();
+        let forward_m = walked.base_x_m - initial.base_x_m;
+        let lateral_m = walked.base_z_m - initial.base_z_m;
+        assert!(walked.base_y_m > 0.18, "Go2 trot fell: {walked:?}");
         assert!(
-            observation.base_y_m > 0.18,
-            "Go2 trot fell: {observation:?}"
+            min_height_m > 0.15,
+            "Go2 trot dropped too low: {min_height_m:.3} m"
         );
-        assert!(observation.base_x_m.is_finite());
         assert!(
-            (observation.base_x_m - initial.base_x_m).abs() > 0.01,
-            "Go2 trot should translate through contact: {observation:?}"
+            forward_m.abs() > 0.4,
+            "Go2 trot should translate through contact: forward {forward_m:.3} m"
         );
+        assert!(
+            lateral_m.abs() < 0.25,
+            "Go2 trot should stay roughly straight: lateral {lateral_m:.3} m"
+        );
+
+        // Deterministic replay: the same command sequence reproduces the state.
+        let mut replay = settled_trot_sim();
+        for step in 0..TROT_STEPS {
+            replay.step_joint_position_targets(&unitree_go2_trot_targets(
+                step,
+                UnitreeGo2GaitCommand::default(),
+            ));
+        }
+        let replayed = replay.observe();
+        assert!((replayed.base_x_m - walked.base_x_m).abs() < 1.0e-9);
+        assert!((replayed.base_y_m - walked.base_y_m).abs() < 1.0e-9);
+        assert!((replayed.base_z_m - walked.base_z_m).abs() < 1.0e-9);
     }
 
     #[test]
