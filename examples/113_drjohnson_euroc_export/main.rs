@@ -14,12 +14,12 @@ use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
 
 use rne_ai::{
-    DiffDriveAction, DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveRewardConfig, Episode,
+    build_visual_render_scene, DiffDriveAction, DiffDriveEpisode, DiffDriveEpisodeConfig,
+    DiffDriveRewardConfig, Episode,
 };
 use rne_math::{Quat, Transform3, Vec3};
 use rne_render::{
-    validate_gaussian_splat_manifest_with_override, Camera, HybridRenderScene, PbrMaterial,
-    RenderScene, RenderSceneItem, VisualShape,
+    validate_gaussian_splat_manifest_with_override, Camera, HybridRenderScene, RenderScene,
 };
 use rne_render_3dgs::{load_gaussian_splat_background, render_hybrid_scene_camera};
 use rne_render_wgpu::WgpuRenderBackend;
@@ -40,87 +40,6 @@ const FIXED_PERIOD_STEPS: u64 = 6;
 const FIXED_FOV_Y_RAD: f64 = 0.9;
 const FIXED_POS: [f64; 3] = [0.3, 2.0, -1.0];
 const FIXED_TARGET: [f64; 3] = [-2.2, 0.3, -4.0];
-
-/// Full robot model (base, wheels, sensor mast + stereo bar) in the base frame.
-/// Hand-placed primitives for third-person views with correct colors and
-/// scale (the URDF importer drops materials and misplaces joint visuals).
-/// Physics still uses the URDF model. Never in the onboard foreground.
-fn robot_model_items(base: &Transform3) -> Vec<RenderSceneItem> {
-    const BASE_HALF_HEIGHT_M: f64 = 0.15;
-    let blue = [0.20, 0.35, 0.75, 1.0];
-    let dark = [0.15, 0.15, 0.17, 1.0];
-    let black = [0.05, 0.05, 0.06, 1.0];
-    let glass = [0.05, 0.10, 0.30, 1.0];
-    let mast_h = CAMERA_HEIGHT_OFFSET_M - BASE_HALF_HEIGHT_M;
-    let mast_y = (BASE_HALF_HEIGHT_M + CAMERA_HEIGHT_OFFSET_M) / 2.0;
-    let mut items = Vec::new();
-    let mut push_box = |offset: [f64; 3], size: [f64; 3], color: [f32; 4]| {
-        let local = Transform3::from_translation_rotation(
-            Vec3::new(offset[0], offset[1], offset[2]),
-            Quat::IDENTITY,
-        );
-        let mut world = base.mul_transform(&local);
-        world.scale = Vec3::new(size[0], size[1], size[2]);
-        items.push(RenderSceneItem {
-            transform: world,
-            shape: VisualShape::Box {
-                size_m: Vec3::new(size[0], size[1], size[2]),
-            },
-            color_rgba: color,
-            mesh: None,
-            base_color_texture: None,
-            material: PbrMaterial::default(),
-        });
-    };
-    push_box([0.0, 0.0, 0.0], [0.50, 0.30, 0.40], blue);
-    push_box([CAMERA_FORWARD_M, mast_y, 0.0], [0.03, mast_h, 0.03], dark);
-    push_box(
-        [CAMERA_FORWARD_M, CAMERA_HEIGHT_OFFSET_M, 0.0],
-        [0.05, 0.04, 0.17],
-        dark,
-    );
-    push_box(
-        [CAMERA_FORWARD_M, CAMERA_HEIGHT_OFFSET_M, -0.03],
-        [0.04, 0.05, 0.06],
-        black,
-    );
-    push_box(
-        [CAMERA_FORWARD_M, CAMERA_HEIGHT_OFFSET_M, 0.03],
-        [0.04, 0.05, 0.06],
-        black,
-    );
-    push_box(
-        [CAMERA_FORWARD_M + 0.0225, CAMERA_HEIGHT_OFFSET_M, -0.03],
-        [0.005, 0.03, 0.04],
-        glass,
-    );
-    push_box(
-        [CAMERA_FORWARD_M + 0.0225, CAMERA_HEIGHT_OFFSET_M, 0.03],
-        [0.005, 0.03, 0.04],
-        glass,
-    );
-    for side in [-0.225, 0.225] {
-        let local = Transform3 {
-            translation: Vec3::new(0.0, -0.15, side),
-            rotation: Quat::from_rotation_x(std::f64::consts::FRAC_PI_2),
-            scale: Vec3::ONE,
-        };
-        let mut world = base.mul_transform(&local);
-        world.scale = Vec3::new(0.20, 0.20, 0.05);
-        items.push(RenderSceneItem {
-            transform: world,
-            shape: VisualShape::Cylinder {
-                radius_m: 0.10,
-                length_m: 0.05,
-            },
-            color_rgba: dark,
-            mesh: None,
-            base_color_texture: None,
-            material: PbrMaterial::default(),
-        });
-    }
-    items
-}
 
 /// Look-at view for an RNE camera (forward -Z, up +Y).
 fn fixed_view() -> Transform3 {
@@ -193,25 +112,19 @@ fn robot_preview(output: &Path) -> Result<(), Box<dyn Error>> {
         rng_seed: 7,
         ..DiffDriveEpisodeConfig::default()
     });
-    let initial = environment.reset();
-    let observation = initial.observation;
-    let base = Transform3::from_translation_rotation(
-        Vec3::new(
-            observation.base_x_m,
-            observation.base_y_m,
-            observation.base_z_m,
-        ),
-        Quat::from_rotation_y(observation.base_yaw_rad),
-    );
+    environment.reset();
+    let world = environment.simulation().world();
     let mut backend = WgpuRenderBackend::new()
         .map_err(|error| io::Error::other(format!("wgpu unavailable: {error}")))?;
     let splat_env = validate_gaussian_splat_manifest_with_override(&manifest, None)
         .map_err(|error| io::Error::other(format!("splat manifest: {error}")))?;
     let mut background = load_gaussian_splat_background(backend.device(), &splat_env)
         .map_err(|error| io::Error::other(format!("splat background: {error}")))?;
-    let foreground = RenderScene {
-        items: robot_model_items(&base),
-    };
+    let mut foreground = build_visual_render_scene(world);
+    foreground.items.retain(|item| {
+        let s = item.transform.scale;
+        s.x.max(s.y).max(s.z) < 2.0
+    });
     let hybrid = HybridRenderScene::new(splat_env, foreground);
     let camera = Camera::new(CAMERA_WIDTH, CAMERA_HEIGHT, FIXED_FOV_Y_RAD);
     let pass = render_hybrid_scene_camera(
@@ -436,14 +349,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             frames += 1;
         }
 
-        // Fixed overview camera with the hand-placed robot model (URDF visuals
-        // are unreliable: materials dropped, joint visuals misplaced).
+        // Fixed overview camera: URDF LinkVisuals (base mesh, mast, bar).
         if step % FIXED_PERIOD_STEPS == 0 {
             let fixed_view = fixed_view();
             let fixed_camera = Camera::new(CAMERA_WIDTH, CAMERA_HEIGHT, FIXED_FOV_Y_RAD);
-            let foreground = RenderScene {
-                items: robot_model_items(&base),
-            };
+            let mut foreground = build_visual_render_scene(world);
+            foreground.items.retain(|item| {
+                let s = item.transform.scale;
+                s.x.max(s.y).max(s.z) < 2.0
+            });
             let hybrid_fixed =
                 HybridRenderScene::new(splat_env.clone(), foreground);
             let fixed = render_hybrid_scene_camera(

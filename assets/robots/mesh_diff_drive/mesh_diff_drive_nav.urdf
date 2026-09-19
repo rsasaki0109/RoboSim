@@ -1,72 +1,97 @@
 <?xml version="1.0"?>
-<!-- mesh_diff_drive with a sensor mast + stereo camera bar (visual only).
-     ROS Z-up convention (x forward, y left, z up); RNE converts on import.
-     The stereo baseline matches the navigation calibration (lenses at y=±0.03,
-     optical centers at x=0.20, z=0.35 in base frame). Physics/collision are
-     identical to mesh_diff_drive. -->
+<!-- mesh_diff_drive_nav: sensor mast + stereo bar, authored for RNE.
+     RNE's URDF importer (a) only reads INLINE <material><color> (named
+     references fall back to gray), and (b) maps base_link visuals by identity,
+     so origins below are in RNE Y-up metres (x forward, y up, z lateral with
+     left = -Z) to match the navigation calibration (lenses at z=+/-0.03,
+     optical centers at x=0.20, y=0.35 in base frame). Wheel links are kept
+     without visuals for spawn compatibility; wheels are static visuals here
+     (joint visual placement is unreliable in the importer). Physics and
+     collision are unchanged from mesh_diff_drive. -->
 <robot name="mesh_diff_drive_nav">
-  <material name="dark_gray">
-    <color rgba="0.15 0.15 0.17 1.0"/>
-  </material>
-  <material name="robot_blue">
-    <color rgba="0.20 0.35 0.75 1.0"/>
-  </material>
-  <material name="black">
-    <color rgba="0.05 0.05 0.06 1.0"/>
-  </material>
-  <material name="lens_blue">
-    <color rgba="0.05 0.10 0.30 1.0"/>
-  </material>
-
   <link name="base_link">
+    <!-- Box primitive instead of the STL: RNE's importer mis-scales mesh
+         visuals, while primitives render at the authored size. -->
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="package://mesh_diff_drive/meshes/base_link.stl" scale="1 1 1"/>
+        <box size="0.50 0.30 0.40"/>
       </geometry>
-      <material name="robot_blue"/>
+      <material>
+        <color rgba="0.20 0.35 0.75 1.0"/>
+      </material>
     </visual>
     <visual>
-      <origin xyz="0.20 0 0.25" rpy="0 0 0"/>
+      <origin xyz="0.20 0.25 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.03 0.03 0.20"/>
+        <box size="0.03 0.20 0.03"/>
       </geometry>
-      <material name="dark_gray"/>
+      <material>
+        <color rgba="0.15 0.15 0.17 1.0"/>
+      </material>
     </visual>
     <visual>
-      <origin xyz="0.20 0 0.35" rpy="0 0 0"/>
+      <origin xyz="0.20 0.35 0" rpy="0 0 0"/>
       <geometry>
-        <box size="0.05 0.17 0.04"/>
+        <box size="0.05 0.04 0.17"/>
       </geometry>
-      <material name="dark_gray"/>
+      <material>
+        <color rgba="0.15 0.15 0.17 1.0"/>
+      </material>
     </visual>
     <visual>
-      <origin xyz="0.20 0.03 0.35" rpy="0 0 0"/>
+      <origin xyz="0.20 0.35 -0.03" rpy="0 0 0"/>
       <geometry>
-        <box size="0.04 0.06 0.05"/>
+        <box size="0.04 0.05 0.06"/>
       </geometry>
-      <material name="black"/>
+      <material>
+        <color rgba="0.05 0.05 0.06 1.0"/>
+      </material>
     </visual>
     <visual>
-      <origin xyz="0.20 -0.03 0.35" rpy="0 0 0"/>
+      <origin xyz="0.20 0.35 0.03" rpy="0 0 0"/>
       <geometry>
-        <box size="0.04 0.06 0.05"/>
+        <box size="0.04 0.05 0.06"/>
       </geometry>
-      <material name="black"/>
+      <material>
+        <color rgba="0.05 0.05 0.06 1.0"/>
+      </material>
     </visual>
     <visual>
-      <origin xyz="0.2225 0.03 0.35" rpy="0 0 0"/>
+      <origin xyz="0.2225 0.35 -0.03" rpy="0 0 0"/>
       <geometry>
-        <box size="0.005 0.04 0.03"/>
+        <box size="0.005 0.03 0.04"/>
       </geometry>
-      <material name="lens_blue"/>
+      <material>
+        <color rgba="0.05 0.10 0.30 1.0"/>
+      </material>
     </visual>
     <visual>
-      <origin xyz="0.2225 -0.03 0.35" rpy="0 0 0"/>
+      <origin xyz="0.2225 0.35 0.03" rpy="0 0 0"/>
       <geometry>
-        <box size="0.005 0.04 0.03"/>
+        <box size="0.005 0.03 0.04"/>
       </geometry>
-      <material name="lens_blue"/>
+      <material>
+        <color rgba="0.05 0.10 0.30 1.0"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 -0.15 -0.225" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.10" length="0.05"/>
+      </geometry>
+      <material>
+        <color rgba="0.15 0.15 0.17 1.0"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="0 -0.15 0.225" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.10" length="0.05"/>
+      </geometry>
+      <material>
+        <color rgba="0.15 0.15 0.17 1.0"/>
+      </material>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -77,12 +102,6 @@
   </link>
 
   <link name="left_wheel">
-    <visual>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
-      <geometry>
-        <cylinder radius="0.1" length="0.05"/>
-      </geometry>
-    </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.5708 0 0"/>
       <geometry>
@@ -92,12 +111,6 @@
   </link>
 
   <link name="right_wheel">
-    <visual>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
-      <geometry>
-        <cylinder radius="0.1" length="0.05"/>
-      </geometry>
-    </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.5708 0 0"/>
       <geometry>
