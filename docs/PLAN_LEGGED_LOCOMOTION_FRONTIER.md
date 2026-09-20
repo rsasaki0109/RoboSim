@@ -289,9 +289,14 @@ controller.
   cost 140, jump 0.23 m, and a full 6.29 rad flip. But the contact-addition
   `impulse_velocity` reset at the flight-to-landing boundary produces a state
   discontinuity the warm start does not satisfy, and the dynamics gap explodes
-  to ~57 on an ankle joint. The rigid impact projection is correct physics, so
-  the fix is to make the solver impulse-aware (include the reset in the
-  dynamics Jacobian and the warm start), not to remove it.
+  to ~57 on an ankle joint. The `ContactSequenceDynamics` reset is already
+  seen by the finite-difference Jacobian, so the failure is the warm start, not
+  the derivative. Seeding the landing nodes with the post-impact velocity from
+  `rne_dynamics::impulse_velocity` cuts the gap from ~57 to ~15, but the impact
+  map is a non-smooth velocity projection and the solver still does not close
+  it. The next step is a landing impulse treated explicitly in the DDP
+  (impulse-aware backward pass or a non-smooth transition model), not a
+  kinematic warm start.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
