@@ -28,12 +28,12 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
-- `rne_dynamics::algorithms::xup_hessian` computes the exact second derivative
-  of the child-in-parent motion transform with respect to the configuration
-  (`d²(xup)/dq_k dq_l`), the third-order kinematic input needed for an exact
-  Hessian of the mass matrix and of the contact constraints. It is verified
-  against central differences of `xup_derivatives` on both a fixed and a
-  floating chain.
+- `rne_dynamics` gains the exact second-order kinematic and inertial
+  derivatives needed for an exact Hessian of the dynamics: `xup_hessian`
+  (`d²(xup)/dq_k dq_l`) and `mass_matrix_hessian` (`d²M/dq_k dq_l`, the exact
+  derivative of `mass_matrix_gradient`). Both are verified against central
+  differences on a fixed two-link chain and a floating base chain. They are the
+  third-order kinematic input for the contact-constraint derivatives.
 
 - `ContactImplicitArticulatedDynamics::with_substeps` splits each outer step into
   explicit sub-steps so a physically stiff compliant-contact law stays stable at

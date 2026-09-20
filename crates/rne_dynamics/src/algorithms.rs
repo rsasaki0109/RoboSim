@@ -269,6 +269,139 @@ pub fn mass_matrix_gradient(
     Ok(gradient)
 }
 
+/// Analytical second derivative of the mass matrix, `d²M/dq_k dq_l`.
+///
+/// Entry `[k][l]` is the `nv x nv` matrix `d²M(q)/dq_k dq_l`. It is the exact
+/// derivative of [`mass_matrix_gradient`] and the second-order input needed for
+/// an exact Hessian of the forward dynamics. The construction mirrors the
+/// gradient recursion one order higher: the composite inertia is differentiated
+/// twice, then each joint column is propagated to the root with the product and
+/// chain rules.
+#[allow(clippy::needless_range_loop)]
+pub fn mass_matrix_hessian(
+    model: &ArticulatedModel,
+    q: &[f64],
+) -> Result<Vec<Vec<DenseMatrix>>, DynamicsError> {
+    validate(model, q, "q")?;
+    let kinematics = model.kinematic.forward_kinematics(q)?;
+    let xup = xup_transforms(model, kinematics.transforms());
+    let xup_gradient = xup_derivatives(model, q)?;
+    let xup_second = xup_hessian(model, q)?;
+    let link_count = model.link_count();
+    let nv = model.nv();
+
+    let mut composite = inertia_matrices(model);
+    let mut composite_gradient: Vec<Vec<Mat6>> = vec![vec![mat6_zero(); nv]; link_count];
+    let mut composite_second: Vec<Vec<Vec<Mat6>>> =
+        vec![vec![vec![mat6_zero(); nv]; nv]; link_count];
+
+    for index in (1..link_count).rev() {
+        let Some(parent) = model.links[index].parent else {
+            continue;
+        };
+        let x = xup[index];
+        let xt = mat6_transpose(&x);
+        let c = composite[index];
+        composite[parent] = mat6_add(&composite[parent], &mat6_mul(&xt, &mat6_mul(&c, &x)));
+        for k in 0..nv {
+            let d_x = xup_gradient[index][k];
+            let d_c = composite_gradient[index][k];
+            let first = mat6_mul(&mat6_transpose(&d_x), &mat6_mul(&c, &x));
+            let inner = mat6_add(&mat6_mul(&d_c, &x), &mat6_mul(&c, &d_x));
+            let second = mat6_mul(&xt, &inner);
+            composite_gradient[parent][k] =
+                mat6_add(&composite_gradient[parent][k], &mat6_add(&first, &second));
+        }
+        for k in 0..nv {
+            let x_k = xup_gradient[index][k];
+            let c_k = composite_gradient[index][k];
+            for l in 0..nv {
+                let x_l = xup_gradient[index][l];
+                let c_l = composite_gradient[index][l];
+                let x_kl = xup_second[index][k][l];
+                let c_kl = composite_second[index][k][l];
+                // d²(X^T C X) = X_kl^T C X + X^T C X_kl + X_k^T C_l X
+                //   + X_l^T C_k X + X_k^T C X_l + X_l^T C X_k
+                //   + X^T C_k X_l + X^T C_l X_k + X^T C_kl X.
+                let mut sum = mat6_mul(&mat6_transpose(&x_kl), &mat6_mul(&c, &x));
+                sum = mat6_add(&sum, &mat6_mul(&xt, &mat6_mul(&c, &x_kl)));
+                sum = mat6_add(&sum, &mat6_mul(&mat6_transpose(&x_k), &mat6_mul(&c_l, &x)));
+                sum = mat6_add(&sum, &mat6_mul(&mat6_transpose(&x_l), &mat6_mul(&c_k, &x)));
+                sum = mat6_add(&sum, &mat6_mul(&mat6_transpose(&x_k), &mat6_mul(&c, &x_l)));
+                sum = mat6_add(&sum, &mat6_mul(&mat6_transpose(&x_l), &mat6_mul(&c, &x_k)));
+                sum = mat6_add(&sum, &mat6_mul(&xt, &mat6_mul(&c_k, &x_l)));
+                sum = mat6_add(&sum, &mat6_mul(&xt, &mat6_mul(&c_l, &x_k)));
+                sum = mat6_add(&sum, &mat6_mul(&xt, &mat6_mul(&c_kl, &x)));
+                composite_second[parent][k][l] =
+                    mat6_add(&composite_second[parent][k][l], &sum);
+            }
+        }
+    }
+
+    let mut hessian: Vec<Vec<DenseMatrix>> = (0..nv)
+        .map(|_| (0..nv).map(|_| DenseMatrix::zeros(nv, nv)).collect())
+        .collect();
+
+    for dof in 0..nv {
+        let link = model.dofs[dof].link;
+        let column = model.dofs[dof].s;
+        let mut force = mat6_mul_vec(&composite[link], &column);
+        let mut d_force: Vec<SpatialVec> = (0..nv)
+            .map(|k| mat6_mul_vec(&composite_gradient[link][k], &column))
+            .collect();
+        let mut d2_force: Vec<Vec<SpatialVec>> = (0..nv)
+            .map(|k| {
+                (0..nv)
+                    .map(|l| mat6_mul_vec(&composite_second[link][k][l], &column))
+                    .collect()
+            })
+            .collect();
+
+        let mut current = link;
+        loop {
+            for &other in &model.link_dofs[current] {
+                for k in 0..nv {
+                    for l in 0..nv {
+                        let value = dot6(&model.dofs[other].s, &d2_force[k][l]);
+                        hessian[k][l].set(dof, other, value);
+                        hessian[k][l].set(other, dof, value);
+                    }
+                }
+            }
+            let Some(parent) = model.links[current].parent else {
+                break;
+            };
+            let x = xup[current];
+            let next_force = mat6_transpose_mul_vec(&x, &force);
+            let mut next_d_force: Vec<SpatialVec> = Vec::with_capacity(nv);
+            for k in 0..nv {
+                next_d_force.push(add6(
+                    &mat6_transpose_mul_vec(&xup_gradient[current][k], &force),
+                    &mat6_transpose_mul_vec(&x, &d_force[k]),
+                ));
+            }
+            let mut next_d2_force: Vec<Vec<SpatialVec>> = Vec::with_capacity(nv);
+            for k in 0..nv {
+                let mut row: Vec<SpatialVec> = Vec::with_capacity(nv);
+                for l in 0..nv {
+                    let first = mat6_transpose_mul_vec(&xup_second[current][k][l], &force);
+                    let second = mat6_transpose_mul_vec(&xup_gradient[current][k], &d_force[l]);
+                    let third = mat6_transpose_mul_vec(&xup_gradient[current][l], &d_force[k]);
+                    let fourth = mat6_transpose_mul_vec(&x, &d2_force[k][l]);
+                    row.push(add6(&add6(&first, &second), &add6(&third, &fourth)));
+                }
+                next_d2_force.push(row);
+            }
+            current = parent;
+            force = next_force;
+            d_force = next_d_force;
+            d2_force = next_d2_force;
+        }
+    }
+
+    Ok(hessian)
+}
+
 /// Recursive Newton-Euler inverse dynamics.
 ///
 /// Returns the generalized force that realizes `qdd` at state `(q, qd)`,
@@ -3058,5 +3191,48 @@ mod tests {
         let (world, robot) = floating_chain_world();
         let model = ArticulatedModel::from_robot(&world, robot).expect("model");
         assert_xup_hessian(&model, &[0.3, 0.2, -0.1, 0.5, -0.4, 0.9, 0.6]);
+    }
+
+    fn assert_mass_matrix_hessian(model: &ArticulatedModel, q: &[f64]) {
+        let nv = model.nv();
+        let hessian = mass_matrix_hessian(model, q).expect("hessian");
+        let epsilon = 1.0e-5;
+        for k in 0..nv {
+            for l in 0..nv {
+                let mut plus = q.to_vec();
+                plus[l] += epsilon;
+                let mut minus = q.to_vec();
+                minus[l] -= epsilon;
+                let plus_gradient = mass_matrix_gradient(model, &plus).expect("plus");
+                let minus_gradient = mass_matrix_gradient(model, &minus).expect("minus");
+                for row in 0..nv {
+                    for col in 0..nv {
+                        let fd = (plus_gradient[k].get(row, col)
+                            - minus_gradient[k].get(row, col))
+                            / (2.0 * epsilon);
+                        assert_relative_eq!(
+                            hessian[k][l].get(row, col),
+                            fd,
+                            epsilon = 2.0e-4,
+                            max_relative = 2.0e-4
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mass_matrix_hessian_matches_finite_difference_on_a_fixed_chain() {
+        let (world, robot) = two_link_world(2.0, 1.5, 0.7, 0.5);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        assert_mass_matrix_hessian(&model, &[0.4, -0.7]);
+    }
+
+    #[test]
+    fn mass_matrix_hessian_matches_finite_difference_on_a_floating_chain() {
+        let (world, robot) = floating_chain_world();
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        assert_mass_matrix_hessian(&model, &[0.3, 0.2, -0.1, 0.5, -0.4, 0.9, 0.6]);
     }
 }
