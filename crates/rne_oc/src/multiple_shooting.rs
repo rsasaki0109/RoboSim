@@ -106,9 +106,10 @@ fn local_step(
     node: usize,
     states: &[Vec<f64>],
     controls: &[Vec<f64>],
+    lambdas: &[Vec<f64>],
     penalty: f64,
     regularization: f64,
-    epsilon: f64,
+    config: &MultipleShootingConfig,
 ) -> Result<(Vec<f64>, Vec<f64>), OcError> {
     let nx = dynamics.state_dim();
     let nu = dynamics.control_dim();
@@ -118,7 +119,7 @@ fn local_step(
     let previous_u = &controls[node - 1];
     let next = &states[node + 1];
 
-    let derivatives = derivatives_at(dynamics, node, x, u, epsilon)?;
+    let derivatives = derivatives_at(dynamics, node, x, u, config.epsilon)?;
     let predicted = dynamics.step_at(node, x, u)?;
     let previous_predicted = dynamics.step_at(node - 1, previous, previous_u)?;
     // `r_prev` is affine in the node state (derivative identity); `r_cur`
@@ -128,19 +129,25 @@ fn local_step(
     let running = cost.running_derivatives(node, x, u);
 
     let mut gradient = vec![0.0; nx + nu];
+    let lambda_prev = &lambdas[node - 1];
+    let lambda_cur = &lambdas[node];
     for i in 0..nx {
         let mut fx_t_r = 0.0;
+        let mut fx_t_lambda = 0.0;
         for row in 0..nx {
             fx_t_r += derivatives.fx[row][i] * r_cur[row];
+            fx_t_lambda += derivatives.fx[row][i] * lambda_cur[row];
         }
-        gradient[i] = running.lx[i] + penalty * (r_prev[i] - fx_t_r);
+        gradient[i] = running.lx[i] + lambda_prev[i] + penalty * (r_prev[i] - fx_t_r) - fx_t_lambda;
     }
     for j in 0..nu {
         let mut fu_t_r = 0.0;
+        let mut fu_t_lambda = 0.0;
         for row in 0..nx {
             fu_t_r += derivatives.fu[row][j] * r_cur[row];
+            fu_t_lambda += derivatives.fu[row][j] * lambda_cur[row];
         }
-        gradient[nx + j] = running.lu[j] - penalty * fu_t_r;
+        gradient[nx + j] = running.lu[j] - penalty * fu_t_r - fu_t_lambda;
     }
 
     // Gauss-Newton Hessian of the local penalty plus the cost Hessian.
@@ -180,15 +187,52 @@ fn local_step(
 
     let inverse = invert(&hessian).ok_or(OcError::Singular)?;
     let step = mat_vec(&inverse, &gradient);
-    let mut delta_x = vec![0.0; nx];
-    let mut delta_u = vec![0.0; nu];
-    for i in 0..nx {
-        delta_x[i] = -step[i];
+    let delta_x: Vec<f64> = (0..nx).map(|i| -step[i]).collect();
+    let delta_u: Vec<f64> = (0..nu).map(|j| -step[nx + j]).collect();
+
+    // Backtracking on the local penalized objective with the control clamped at
+    // every trial, so the bounds are respected without destabilizing the sweep.
+    let local_objective = |x: &[f64], u: &[f64]| -> Option<f64> {
+        let predicted_cur = dynamics.step_at(node, x, u).ok()?;
+        let predicted_prev = dynamics.step_at(node - 1, previous, previous_u).ok()?;
+        let mut residual = 0.0_f64;
+        let mut multiplier = 0.0_f64;
+        for i in 0..nx {
+            let d = x[i] - predicted_prev[i];
+            residual += d * d;
+            multiplier += lambda_prev[i] * d;
+            let d = next[i] - predicted_cur[i];
+            residual += d * d;
+            multiplier += lambda_cur[i] * d;
+        }
+        Some(cost.running(node, x, u) + multiplier + 0.5 * penalty * residual)
+    };
+    let base_objective = local_objective(x, u).unwrap_or(f64::NEG_INFINITY);
+    let mut alpha = 1.0_f64;
+    for _ in 0..20 {
+        let trial_x: Vec<f64> = (0..nx).map(|i| x[i] + alpha * delta_x[i]).collect();
+        let trial_u = clamp_control(
+            &(0..nu)
+                .map(|j| u[j] + alpha * delta_u[j])
+                .collect::<Vec<f64>>(),
+            config,
+        );
+        if trial_x
+            .iter()
+            .all(|value| value.is_finite() && value.abs() < 1.0e6)
+        {
+            if let Some(value) = local_objective(&trial_x, &trial_u) {
+                if value < base_objective {
+                    return Ok((
+                        (0..nx).map(|i| alpha * delta_x[i]).collect(),
+                        (0..nu).map(|j| alpha * delta_u[j]).collect(),
+                    ));
+                }
+            }
+        }
+        alpha *= 0.5;
     }
-    for j in 0..nu {
-        delta_u[j] = -step[nx + j];
-    }
-    Ok((delta_x, delta_u))
+    Ok((vec![0.0; nx], vec![0.0; nu]))
 }
 
 /// Solves the shooting problem by direct multiple shooting.
@@ -221,12 +265,19 @@ pub fn solve_multiple_shooting(
 
     let mut xs = initial_states.to_vec();
     let mut us = initial_controls.to_vec();
+    // Augmented-Lagrangian multipliers on the defects.
+    let mut lambdas: Vec<Vec<f64>> = vec![vec![0.0; nx]; horizon];
     let mut penalty = config.initial_penalty;
+    let mut regularization = config.regularization;
     let mut converged = false;
     let mut iterations = 0;
 
     for iteration in 0..config.max_iterations {
         iterations = iteration + 1;
+        let defect_before = max_defect(dynamics, &xs, &us);
+        let backup_xs = xs.clone();
+        let backup_us = us.clone();
+        let backup_lambdas = lambdas.clone();
         // Gauss-Seidel sweep: correct each node with its neighbours fixed.
         for node in 1..horizon {
             let (delta_x, delta_u) = match local_step(
@@ -235,9 +286,10 @@ pub fn solve_multiple_shooting(
                 node,
                 &xs,
                 &us,
+                &lambdas,
                 penalty,
-                config.regularization,
-                config.epsilon,
+                regularization,
+                config,
             ) {
                 Ok(step) => step,
                 Err(_) => continue,
@@ -260,7 +312,24 @@ pub fn solve_multiple_shooting(
                 us[node] = clamp_control(&us[node], config);
             }
         }
-        let defect = max_defect(dynamics, &xs, &us);
+        let mut defect = max_defect(dynamics, &xs, &us);
+        if !defect.is_finite() || defect > defect_before * 1.5 {
+            // The sweep made the defects worse; reject it and regularize more.
+            xs = backup_xs;
+            us = backup_us;
+            lambdas = backup_lambdas;
+            regularization = (regularization * 4.0).min(1.0e3);
+            defect = defect_before;
+            continue;
+        }
+        // Update the multipliers from the current defects, then the penalty.
+        for k in 0..horizon {
+            if let Ok(predicted) = dynamics.step_at(k, &xs[k], &us[k]) {
+                for i in 0..nx {
+                    lambdas[k][i] += penalty * (xs[k + 1][i] - predicted[i]);
+                }
+            }
+        }
         if defect < config.tolerance {
             converged = true;
             break;
@@ -327,5 +396,27 @@ mod tests {
             solve_multiple_shooting(&dynamics, &cost, &states, &controls, &config).expect("solve");
         let defect = max_defect(&dynamics, &solution.states, &solution.controls);
         assert!(defect < 1.0e-3, "defect {defect}");
+    }
+
+    #[test]
+    fn respects_control_bounds() {
+        let dynamics = DoubleIntegrator { dt: 0.1 };
+        let mut cost = QuadraticCost::new(vec![0.01, 0.01], vec![0.001], vec![200.0, 20.0]);
+        cost.state_reference = vec![1.0, 0.0];
+        cost.running_scale = 0.1;
+        let horizon = 30;
+        let states = vec![vec![0.0, 0.0]; horizon + 1];
+        let controls = vec![vec![0.0]; horizon];
+        let config = MultipleShootingConfig {
+            control_lower: Some(vec![-0.3]),
+            control_upper: Some(vec![0.3]),
+            ..MultipleShootingConfig::default()
+        };
+        let solution =
+            solve_multiple_shooting(&dynamics, &cost, &states, &controls, &config).expect("solve");
+        assert!(solution
+            .controls
+            .iter()
+            .all(|control| control[0] >= -0.3 - 1.0e-9 && control[0] <= 0.3 + 1.0e-9));
     }
 }
