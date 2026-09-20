@@ -264,9 +264,13 @@ fn main() {
             crouch.clone()
         } else if node < CROUCH_STEPS + PUSH_STEPS {
             let push = (node - CROUCH_STEPS) as f64;
-            let t = (push + 1.0) / PUSH_STEPS as f64;
+            let linear = (push + 1.0) / PUSH_STEPS as f64;
+            // Ease-out so the joint velocity reaches zero at the push-to-flight
+            // boundary, matching the flight ease-in and keeping the transition
+            // continuous.
+            let t = linear * linear * (3.0 - 2.0 * linear);
             let mut extended = initial.clone();
-            extended[1] = BASE_START_Y_M + 0.05 * t.sin();
+            extended[1] = BASE_START_Y_M + 0.05 * linear.sin();
             extended[nv + 1] = launch_velocity_m_s;
             for (dof, name) in joint_names.iter().enumerate() {
                 extended[6 + dof] =
@@ -286,7 +290,10 @@ fn main() {
             // Blend the legs from the push extension into the tuck over the
             // first third of flight so the push-to-flight joint velocity is
             // continuous instead of a step.
-            let blend = (t / 0.33).min(1.0);
+            let ramp = (t / 0.33).min(1.0);
+            // Ease-in so the joint velocity starts at zero and matches the push
+            // ease-out at the boundary.
+            let blend = ramp * ramp * (3.0 - 2.0 * ramp);
             for (dof, name) in joint_names.iter().enumerate() {
                 let start = stand_angle(name);
                 tucked[6 + dof] = start + (tuck_angle(name) - start) * blend;
@@ -355,8 +362,20 @@ fn main() {
             Err(_) => failed_nodes += 1,
         }
     }
+    let worst_label = if worst_component < nv {
+        format!("q[{}]", worst_component)
+    } else if worst_component < nv + 6 {
+        format!("base_qd[{}]", worst_component - nv)
+    } else {
+        let joint = worst_component - nv - 6;
+        format!(
+            "qd[{}] ({})",
+            joint,
+            joint_names.get(joint).map(String::as_str).unwrap_or("?")
+        )
+    };
     println!(
-        "worst gap {worst_gap:.3e} at node {worst_node} component {worst_component} (crouch<{CROUCH_STEPS}, push<{})",
+        "worst gap {worst_gap:.3e} at node {worst_node} component {worst_component} {worst_label} (crouch<{CROUCH_STEPS}, push<{})",
         CROUCH_STEPS + PUSH_STEPS
     );
     let feasible = max_gap < 1.0e-4 && failed_nodes == 0;

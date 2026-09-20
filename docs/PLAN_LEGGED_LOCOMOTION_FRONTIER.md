@@ -245,12 +245,17 @@ controller.
   at the last push node (node 13 of 36), on a base or leg joint velocity. That
   node is the push-to-flight boundary: a rigid double-contact push cannot
   produce the stored launch velocity, so the phase transition, not the
-  derivatives, is now the blocker. A per-component diagnostic showed the gap was
-  first exactly the base yaw rate, which the planted feet cannot supply; ramping
-  the warm-start spin from zero and blending the legs into the tuck cut the gap
-  from ~8 to ~3.9. Landing-impact resets at phase boundaries are applied to
-  contact additions (`ContactSequenceDynamics` applies `impulse_velocity`), but
-  there is no flight-phase controller (`rne_wbc` rejects empty contacts).
+  derivatives, is now the blocker. A per-component diagnostic shows the residual
+  gap is the left ankle-pitch velocity at the last double-contact push node: a
+  fully constrained double-foot push determines the ankle velocity through the
+  contact, so a kinematic warm start cannot make it continuous. Ramping the spin
+  from zero, blending the legs into the tuck with a smooth ease-in/ease-out, and
+  giving the push an eased extension cut the gap from ~8 to ~3.5 and the cost
+  from 74096 to 1185. Further progress needs a redesigned push (for example a
+  single toe contact that lets the ankle plantarflex) or a flight-phase
+  controller; `rne_wbc` rejects empty contacts, so aerial control is still open.
+  Landing-impact resets for contact additions work through
+  `ContactSequenceDynamics`'s `impulse_velocity`.
   `rne_dynamics::centroidal_momentum` exists to shape the aerial rotation.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
