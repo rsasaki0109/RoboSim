@@ -105,7 +105,8 @@ All notable changes to Robot Native Engine are documented in this file.
   defect constraint, corrected by Gauss-Seidel sweeps of local Gauss-Newton
   steps. An infeasible warm start is repaired by moving the states instead of
   replaying unstable controls, which single-shooting DDP cannot do. Verified on
-  a deliberately inconsistent double-integrator warm start, and on the G1
+  a deliberately inconsistent double-integrator warm start and on a one-link
+  pendulum from `rne_dynamics`, both to a dynamics gap below 1e-3, and on the G1
   backflip it reaches a full 6.28 rad flip with a dynamics gap of ~0.12, an
   order of magnitude below the FDDP single-shooting gap. Control bounds are
   handled by a backtracking line search on the local penalized objective, and
