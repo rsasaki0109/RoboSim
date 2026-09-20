@@ -273,7 +273,7 @@ controller.
   reading is that the aerial phase has uncontrolled angular momentum, which
   makes the problem ill-conditioned; the next step is a flight cost on
   `rne_dynamics::centroidal_momentum` and a feasibility QP or flight-phase
-  controller (`rne_wbc` rejects empty contacts). Landing-impact resets for
+  controller; `rne_wbc::WholeBodyController` now accepts an empty contact set (flight phase), so only the flight-phase task and controller design remain. Landing-impact resets for
   contact additions work through `ContactSequenceDynamics`'s
   `impulse_velocity`.
   `rne_dynamics::centroidal_momentum` now drives an optional flight cost in
@@ -301,6 +301,6 @@ controller.
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
   dynamics derivatives (the central-difference solver does not converge), (2) a
-  flight-phase controller and a landing catch (`rne_wbc` rejects empty contacts),
+  flight-phase controller and a landing catch (`rne_wbc` now supports the empty-contact flight phase),
   and (3) an articulated centroidal-momentum term to shape the aerial rotation
   (`centroidal_momentum` is now available).
