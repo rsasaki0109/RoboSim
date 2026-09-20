@@ -279,6 +279,36 @@ pub fn solve_multiple_shooting(
         let backup_us = us.clone();
         let backup_lambdas = lambdas.clone();
         // Gauss-Seidel sweep: correct each node with its neighbours fixed.
+        // The terminal state is a decision variable too: move it under the
+        // terminal cost and the last defect.
+        if let Ok(last_predicted) =
+            dynamics.step_at(horizon - 1, &xs[horizon - 1], &us[horizon - 1])
+        {
+            let terminal = cost.terminal_derivatives(&xs[horizon]);
+            let lambda = &lambdas[horizon - 1];
+            let mut gradient = vec![0.0; nx];
+            for i in 0..nx {
+                let defect = xs[horizon][i] - last_predicted[i];
+                gradient[i] = terminal.lx[i] + lambda[i] + penalty * defect;
+            }
+            let mut hessian = terminal.lxx.clone();
+            for (index, row) in hessian.iter_mut().enumerate() {
+                row[index] += penalty + regularization;
+            }
+            if let Some(inverse) = invert(&hessian) {
+                let step = mat_vec(&inverse, &gradient);
+                let mut trial = xs[horizon].clone();
+                for i in 0..nx {
+                    trial[i] -= step[i];
+                }
+                if trial
+                    .iter()
+                    .all(|value| value.is_finite() && value.abs() < 1.0e6)
+                {
+                    xs[horizon] = trial;
+                }
+            }
+        }
         for node in 1..horizon {
             let (delta_x, delta_u) = match local_step(
                 dynamics,
