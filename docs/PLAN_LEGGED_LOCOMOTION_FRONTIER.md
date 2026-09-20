@@ -335,6 +335,15 @@ controller.
   are dropped, so the actual base motion does not follow the reference and the
   gap is ~5. The base reaction must be part of the solve, which again points to
   a multiple-shooting or centroidal formulation.
+- **Multiple shooting repairs the warm start.** `rne_oc::solve_multiple_shooting`
+  makes the whole state trajectory a decision variable with the dynamics as a
+  defect constraint `x_{k+1} - f(x_k, u_k) = 0`, corrected by Gauss-Seidel
+  sweeps of local Gauss-Newton steps. On the G1 backflip it repairs the
+  computed-torque warm start to a full 6.28 rad flip with a dynamics gap of
+  ~0.12, an order of magnitude below the FDDP single-shooting gap (1.76), which
+  validates the direction. Remaining issues are solution quality (the base
+  barely jumps) and control bounds: naive clamping destabilizes the sweep, so
+  the next step is a box-constrained SQP or an active-set local solve.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
