@@ -29,6 +29,9 @@ use rne_robot::{FloatingBase, Transform3};
 const G1_URDF: &str = include_str!("../../assets/robots/g1_description/g1_23dof.urdf");
 const BASE_ROTATION_X_RAD: f64 = -std::f64::consts::FRAC_PI_2;
 const SOLE_OFFSET_LOCAL_M: Vec3 = Vec3::new(0.0, 0.0, -0.035);
+/// Toe contact, forward of the sole in the foot frame. The push phase uses it
+/// instead of the full sole so the ankle can plantarflex and the heel can lift.
+const TOE_OFFSET_LOCAL_M: Vec3 = Vec3::new(0.09, 0.0, -0.035);
 const FOOT_LINKS: [&str; 2] = ["left_ankle_roll_link", "right_ankle_roll_link"];
 
 const STEP_TIME_S: f64 = 0.03;
@@ -170,16 +173,30 @@ fn main() {
         })
         .collect();
     assert_eq!(contacts.len(), 2, "expected two foot contacts");
+    // The push rolls onto the toes so the ankle can extend and launch.
+    let toe_contacts: Vec<ContactSpec> = FOOT_LINKS
+        .iter()
+        .filter_map(|name| {
+            model
+                .kinematic()
+                .link_entity_by_name(name)
+                .map(|link| ContactSpec {
+                    link,
+                    point_local_m: TOE_OFFSET_LOCAL_M,
+                })
+        })
+        .collect();
+    assert_eq!(toe_contacts.len(), 2, "expected two toe contacts");
     let horizon = CROUCH_STEPS + PUSH_STEPS + FLIGHT_STEPS;
     println!("g1 backflip FDDP probe: nv={nv} control_dim={control_dim} horizon={horizon}");
 
     let phases = [
         ContactPhase {
-            contacts: contacts.clone(),
+            contacts: toe_contacts.clone(),
             steps: CROUCH_STEPS,
         },
         ContactPhase {
-            contacts: contacts.clone(),
+            contacts: toe_contacts.clone(),
             steps: PUSH_STEPS,
         },
         ContactPhase {

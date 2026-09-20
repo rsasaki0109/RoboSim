@@ -251,11 +251,15 @@ controller.
   contact, so a kinematic warm start cannot make it continuous. Ramping the spin
   from zero, blending the legs into the tuck with a smooth ease-in/ease-out, and
   giving the push an eased extension cut the gap from ~8 to ~3.5 and the cost
-  from 74096 to 1185. Further progress needs a redesigned push (for example a
-  single toe contact that lets the ankle plantarflex) or a flight-phase
-  controller; `rne_wbc` rejects empty contacts, so aerial control is still open.
-  Landing-impact resets for contact additions work through
-  `ContactSequenceDynamics`'s `impulse_velocity`.
+  from 74096 to 1185. Redesigning the push to a single toe contact and keeping
+  that contact across crouch and push removed the contact-set change at the
+  boundary, dropping the gap to ~1.8 and moving it to the terminal node on a
+  wrist joint. An earlier attempt that switched from sole to toe at crouch
+  introduced a spurious `impulse_velocity` reset and moved the gap to node 0,
+  so the contact set must stay constant until takeoff. The remaining blocker is
+  the terminal arm pose and the absence of a flight-phase controller
+  (`rne_wbc` rejects empty contacts). Landing-impact resets for contact
+  additions work through `ContactSequenceDynamics`'s `impulse_velocity`.
   `rne_dynamics::centroidal_momentum` exists to shape the aerial rotation.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
