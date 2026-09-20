@@ -1,7 +1,7 @@
 schema_version = 1
-release_version = "0.3.0"
-baseline_revision = "d0139576c232fed66d2f0b97ea7b01b0773b83b8"
-baseline_tree = "6269a96cdc26c3ddd6f22ad097e4c14af21600ae"
+release_version = "0.3.1"
+baseline_revision = "407acbad5079aa93c22752612b985f689c033ae2"
+baseline_tree = "f43503bb33e7688031cb13b4825e51de9d9ded8f"
 cargo_semver_checks_version = "0.49.0"
 
 [[package]]

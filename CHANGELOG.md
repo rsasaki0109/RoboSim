@@ -6,6 +6,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- Retarget the immutable Rust API baseline to `0.3.1`, moving the frozen
+  commit/tree to `407acba`/`f43503b` (the tip of `main` at retarget time). This
+  absorbs the breaking `rne_robot` public-struct field additions merged in
+  #308 (`VehicleDynamics`, `LongitudinalMobilityPlantSpec`,
+  `LongitudinalMobilityPlantState`, and related four-wheel fields) into the
+  baseline instead of reverting them, restoring the `semver` CI job.
+
 - `examples/109_go2_jump_sim` whole-body stance now feeds the measured joint
   velocities to `rne_wbc` and pulls its posture task toward the planned joint
   angles. The previous all-zero velocity feed over-drove the center of mass and
