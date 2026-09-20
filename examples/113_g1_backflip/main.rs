@@ -269,6 +269,7 @@ fn main() {
             tucked[1] = BASE_START_Y_M
                 + (TARGET_APEX_Y_M - BASE_START_Y_M) * (std::f64::consts::PI * t).sin();
             tucked[5] = -2.0 * std::f64::consts::PI * t;
+            tucked[nv + 5] = -2.0 * std::f64::consts::PI / (FLIGHT_STEPS as f64 * STEP_TIME_S);
             for (dof, name) in joint_names.iter().enumerate() {
                 tucked[6 + dof] = tuck_angle(name);
             }
@@ -281,65 +282,18 @@ fn main() {
 
     let controls = vec![vec![0.0; control_dim]; horizon];
     let limits: Vec<f64> = joint_names.iter().map(|name| torque_limit(name)).collect();
+    // FDDP keeps the warm-start gaps open on the first pass, so the kinematic
+    // reference can seed a solve that the analytic Jacobians then close.
     let config = DdpConfig {
         max_iterations: 300,
         tolerance: 1.0e-7,
-        keep_gaps_open: false,
+        keep_gaps_open: true,
         control_lower: Some(limits.iter().map(|limit| -limit).collect()),
         control_upper: Some(limits.clone()),
         ..DdpConfig::default()
     };
-    // The DDP's first rollout replaces the caller's state trajectory, so only the
-    // initial state and the initial controls seed the solve.
-    let initial_states = vec![initial.clone(); horizon + 1];
-    let mut solution = {
-        let mut result = None;
-        let mut tweak = config.clone();
-        for extra in [1.0, 0.1] {
-            tweak.initial_regularization =
-                (config.initial_regularization * extra).max(config.min_regularization);
-            if let Ok(solved) = solve(&dynamics, &cost, &initial_states, &controls, &tweak) {
-                result = Some(solved);
-                break;
-            }
-        }
-        let Some(solved) = result else {
-            eprintln!("FDDP failed to produce a feasible rollout from the initial controls");
-            return;
-        };
-        solved
-    };
-
-    // A failed line search can leave non-finite states; retry from the last
-    // finite node's controls if so.
-    if solution
-        .states
-        .iter()
-        .flatten()
-        .any(|value| !value.is_finite())
-    {
-        for (node, state) in solution.states.iter().enumerate() {
-            if state.iter().all(|value| value.is_finite()) {
-                continue;
-            }
-            let mut restart_states = vec![initial.clone(); horizon + 1];
-            let mut restart_controls = solution.controls.clone();
-            for control in restart_controls.iter_mut().skip(node) {
-                *control = vec![0.0; control_dim];
-            }
-            if let Ok(resolved) = solve(
-                &dynamics,
-                &cost,
-                &restart_states,
-                &restart_controls,
-                &config,
-            ) {
-                solution = resolved;
-            }
-            let _ = &mut restart_states;
-            break;
-        }
-    }
+    println!("solving FDDP...");
+    let solution = solve(&dynamics, &cost, &states, &controls, &config).expect("solve");
 
     let apex_y = solution
         .states
