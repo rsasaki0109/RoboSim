@@ -1546,6 +1546,39 @@ pub fn impulse_velocity(
     Ok((post_impact, impulses))
 }
 
+/// Jacobian of the impulsive velocity reset with respect to the pre-impact
+/// velocity.
+///
+/// The reset `qd+ = P(q) qd-` is linear in `qd-` because the KKT matrix does
+/// not depend on `qd-`, so the returned `nv x nv` matrix has column `i` equal
+/// to `impulse_velocity(model, q, e_i, contacts)`. An impulse-aware DDP uses
+/// this as the transition Jacobian at a contact-addition node. With no contacts
+/// the reset is the identity.
+pub fn impulse_velocity_gradient(
+    model: &ArticulatedModel,
+    q: &[f64],
+    contacts: &[ContactSpec],
+) -> Result<DenseMatrix, DynamicsError> {
+    validate(model, q, "q")?;
+    let nv = model.nv();
+    let mut matrix = DenseMatrix::zeros(nv, nv);
+    if contacts.is_empty() {
+        for index in 0..nv {
+            matrix.set(index, index, 1.0);
+        }
+        return Ok(matrix);
+    }
+    for column in 0..nv {
+        let mut basis = vec![0.0; nv];
+        basis[column] = 1.0;
+        let (post_impact, _) = impulse_velocity(model, q, &basis, contacts)?;
+        for (row, value) in post_impact.iter().enumerate().take(nv) {
+            matrix.set(row, column, *value);
+        }
+    }
+    Ok(matrix)
+}
+
 fn mat6_transpose(matrix: &Mat6) -> Mat6 {
     let mut out = mat6_zero();
     for row in 0..6 {
@@ -1958,6 +1991,47 @@ mod tests {
                         finite_difference[component]
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn impulse_velocity_gradient_matches_finite_difference() {
+        let (world, robot) = floating_two_link_world(2.0, 1.5, 0.7, 0.5, 4.0);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let q = vec![0.3, -0.2, 0.1, 0.4, -0.3, 0.25, 0.5, -0.7];
+        let link = model.link_entity(2).expect("link");
+        let contacts = vec![
+            ContactSpec {
+                link,
+                point_local_m: Vec3::new(0.2, 0.0, 0.0),
+            },
+            ContactSpec {
+                link,
+                point_local_m: Vec3::new(0.0, 0.1, 0.0),
+            },
+        ];
+        let gradient = impulse_velocity_gradient(&model, &q, &contacts).expect("gradient");
+        let nv = model.nv();
+        let qd = vec![0.2, -0.1, 0.3, 0.15, -0.25, 0.1, 0.4, -0.3];
+        let h = 1.0e-6;
+        for column in 0..nv {
+            let mut plus = qd.clone();
+            plus[column] += h;
+            let mut minus = qd.clone();
+            minus[column] -= h;
+            let (plus_impact, _) = impulse_velocity(&model, &q, &plus, &contacts).expect("impact");
+            let (minus_impact, _) =
+                impulse_velocity(&model, &q, &minus, &contacts).expect("impact");
+            for row in 0..nv {
+                let finite_difference = (plus_impact[row] - minus_impact[row]) / (2.0 * h);
+                assert_relative_eq!(
+                    gradient.get(row, column),
+                    finite_difference,
+                    epsilon = 1.0e-5,
+                    max_relative = 1.0e-6
+                );
             }
         }
     }

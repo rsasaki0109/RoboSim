@@ -77,6 +77,10 @@ All notable changes to Robot Native Engine are documented in this file.
   infeasible) state guess, and falls back to the caller's trajectory if the
   rollout is non-finite. Previously a cheap but infeasible warm start made the
   line search unable to improve and the solver returned it.
+- `rne_dynamics::impulse_velocity_gradient` returns the Jacobian of the impact
+  velocity reset with respect to the pre-impact velocity, the transition
+  Jacobian an impulse-aware solver needs at a contact-addition node. Verified
+  against finite differences.
 - The native optimal-control integrators (`rne_oc::ArticulatedDynamics` and
   `ConstrainedArticulatedDynamics`) treated the floating-base body twist as Euler
   rates (`q += qd * dt`), which is inconsistent with `rne_dynamics` and
