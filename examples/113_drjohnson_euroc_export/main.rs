@@ -56,12 +56,7 @@ const DRIVE_TURN_GAIN: f64 = 4.0;
 const DRIVE_TURN_MAX_RAD_S: f64 = 4.0;
 
 /// Differential-drive waypoint follower. Returns wheel velocities.
-fn follow_route(
-    waypoint_index: &mut usize,
-    x: f64,
-    z: f64,
-    yaw: f64,
-) -> DiffDriveAction {
+fn follow_route(waypoint_index: &mut usize, x: f64, z: f64, yaw: f64) -> DiffDriveAction {
     let target = WAYPOINTS[*waypoint_index % WAYPOINTS.len()];
     let dx = target[0] - x;
     let dz = target[1] - z;
@@ -129,7 +124,10 @@ fn write_gray_png(path: &Path, width: u32, height: u32, luma: &[u8]) -> Result<(
 }
 
 fn write_rgb_png(path: &Path, width: u32, height: u32, rgba8: &[u8]) -> Result<(), Box<dyn Error>> {
-    let rgb: Vec<u8> = rgba8.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    let rgb: Vec<u8> = rgba8
+        .chunks_exact(4)
+        .flat_map(|p| [p[0], p[1], p[2]])
+        .collect();
     let file = File::create(path)?;
     let writer = BufWriter::new(file);
     let mut encoder = png::Encoder::new(writer, width, height);
@@ -145,8 +143,8 @@ fn robot_preview(output: &Path) -> Result<(), Box<dyn Error>> {
     fs::create_dir_all(output)?;
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let scene_path = workspace.join("assets/scenes/drjohnson_nav.rne.scene.toml");
-    let manifest =
-        workspace.join("assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml");
+    let manifest = workspace
+        .join("assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml");
     let mut environment = DiffDriveEpisode::new(DiffDriveEpisodeConfig {
         max_steps: MAX_STEPS,
         goal_x_m: 1.0e9,
@@ -194,8 +192,8 @@ fn fixed_test(output: &Path) -> Result<(), Box<dyn Error>> {
     fs::create_dir_all(output)?;
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let scene_path = workspace.join("assets/scenes/drjohnson_nav.rne.scene.toml");
-    let manifest =
-        workspace.join("assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml");
+    let manifest = workspace
+        .join("assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml");
     let mut environment = DiffDriveEpisode::new(DiffDriveEpisodeConfig {
         max_steps: MAX_STEPS,
         goal_x_m: 1.0e9,
@@ -226,9 +224,8 @@ fn fixed_test(output: &Path) -> Result<(), Box<dyn Error>> {
         ([0.2, 3.0, -0.8], [-0.3, 0.1, -3.3]),
     ];
     for (index, (pos, target)) in candidates.iter().enumerate() {
-        let dir = (Vec3::new(target[0], target[1], target[2])
-            - Vec3::new(pos[0], pos[1], pos[2]))
-        .normalize();
+        let dir = (Vec3::new(target[0], target[1], target[2]) - Vec3::new(pos[0], pos[1], pos[2]))
+            .normalize();
         let yaw = (-dir.x).atan2(-dir.z);
         let pitch = dir.y.asin();
         let view = Transform3::from_translation_rotation(
@@ -251,7 +248,11 @@ fn fixed_test(output: &Path) -> Result<(), Box<dyn Error>> {
             &pass.color.rgba8,
         )?;
     }
-    println!("wrote {} fixed candidates to {}", candidates.len(), output.display());
+    println!(
+        "wrote {} fixed candidates to {}",
+        candidates.len(),
+        output.display()
+    );
     Ok(())
 }
 
@@ -294,8 +295,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let scene_path = workspace.join("assets/scenes/drjohnson_nav.rne.scene.toml");
-    let manifest =
-        workspace.join("assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml");
+    let manifest = workspace
+        .join("assets/environments/voxel51_drjohnson_3dgs/voxel51_drjohnson.rne.splat.toml");
 
     // Start pose comes from the scene robot asset
     // (dataset_diff_drive_drjohnson: calibrated Dr Johnson spawn).
@@ -410,8 +411,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let s = item.transform.scale;
                 s.x.max(s.y).max(s.z) < 2.0
             });
-            let hybrid_fixed =
-                HybridRenderScene::new(splat_env.clone(), foreground);
+            let hybrid_fixed = HybridRenderScene::new(splat_env.clone(), foreground);
             let fixed = render_hybrid_scene_camera(
                 &mut backend,
                 &mut background,
@@ -432,13 +432,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let q = Quat::from_rotation_y(observation.base_yaw_rad);
         gt_tum.push_str(&format!(
             "{timestamp_ns} {} {} {} {} {} {} {}\n",
-            observation.base_x_m,
-            observation.base_y_m,
-            observation.base_z_m,
-            q.x,
-            q.y,
-            q.z,
-            q.w,
+            observation.base_x_m, observation.base_y_m, observation.base_z_m, q.x, q.y, q.z, q.w,
         ));
 
         if result.is_done() {

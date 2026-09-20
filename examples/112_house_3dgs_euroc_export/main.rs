@@ -13,9 +13,13 @@ use std::fs::{self, File};
 use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
 
-use rne_ai::{DiffDriveAction, DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveRewardConfig, Episode};
+use rne_ai::{
+    DiffDriveAction, DiffDriveEpisode, DiffDriveEpisodeConfig, DiffDriveRewardConfig, Episode,
+};
 use rne_math::{Quat, Transform3, Vec3};
-use rne_render::{validate_gaussian_splat_manifest_with_override, Camera, HybridRenderScene, RenderScene};
+use rne_render::{
+    validate_gaussian_splat_manifest_with_override, Camera, HybridRenderScene, RenderScene,
+};
 use rne_render_3dgs::{load_gaussian_splat_background, render_hybrid_scene_camera};
 use rne_render_wgpu::WgpuRenderBackend;
 use rne_sensor::{sample_imu, ImuSpec};
@@ -65,7 +69,10 @@ fn write_gray_png(path: &Path, width: u32, height: u32, luma: &[u8]) -> Result<(
 }
 
 fn write_rgb_png(path: &Path, width: u32, height: u32, rgba8: &[u8]) -> Result<(), Box<dyn Error>> {
-    let rgb: Vec<u8> = rgba8.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    let rgb: Vec<u8> = rgba8
+        .chunks_exact(4)
+        .flat_map(|p| [p[0], p[1], p[2]])
+        .collect();
     let file = File::create(path)?;
     let writer = BufWriter::new(file);
     let mut encoder = png::Encoder::new(writer, width, height);
@@ -93,8 +100,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let scene_path = workspace.join("assets/scenes/house_3dgs_nav.rne.scene.toml");
-    let manifest =
-        workspace.join("assets/environments/house_3dgs/house_3dgs.rne.splat.toml");
+    let manifest = workspace.join("assets/environments/house_3dgs/house_3dgs.rne.splat.toml");
 
     let mut environment = DiffDriveEpisode::new(DiffDriveEpisodeConfig {
         max_steps: MAX_STEPS,
@@ -208,13 +214,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let q = Quat::from_rotation_y(observation.base_yaw_rad);
         gt_tum.push_str(&format!(
             "{timestamp_ns} {} {} {} {} {} {} {}\n",
-            observation.base_x_m,
-            observation.base_y_m,
-            observation.base_z_m,
-            q.x,
-            q.y,
-            q.z,
-            q.w,
+            observation.base_x_m, observation.base_y_m, observation.base_z_m, q.x, q.y, q.z, q.w,
         ));
 
         if result.is_done() {

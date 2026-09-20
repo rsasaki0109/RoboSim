@@ -171,8 +171,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 (1_u16, 0.5 * STEREO_BASELINE_M, &mut cam1_csv),
             ] {
                 let pose = camera_pose(base, lateral);
-                let sample =
-                    sample_camera_rgbd_keyed(&mut render, &pose, &spec, sim.sim_time(), &render_scene, key);
+                let sample = sample_camera_rgbd_keyed(
+                    &mut render,
+                    &pose,
+                    &spec,
+                    sim.sim_time(),
+                    &render_scene,
+                    key,
+                );
                 let luma = rgba_to_luma(&sample.rgb.rgba8);
                 let name = format!("{timestamp_ns}.png");
                 let dir = if camera == 0 { "cam0" } else { "cam1" };
@@ -190,13 +196,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let q = Quat::from_rotation_y(observation.base_yaw_rad);
         gt_tum.push_str(&format!(
             "{timestamp_ns} {} {} {} {} {} {} {}\n",
-            observation.base_x_m,
-            observation.base_y_m,
-            observation.base_z_m,
-            q.x,
-            q.y,
-            q.z,
-            q.w,
+            observation.base_x_m, observation.base_y_m, observation.base_z_m, q.x, q.y, q.z, q.w,
         ));
 
         if result.is_done() {
