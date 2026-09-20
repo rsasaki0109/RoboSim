@@ -260,12 +260,15 @@ controller.
   the terminal transition on a wrist velocity and is insensitive to the terminal
   weight. The FDDP path already projects the warm start onto a feasible rollout
   and polishes with standard DDP, and a doubled polish budget changes nothing,
-  so the residual is a local minimum of the current cost with a slightly
-  infeasible trajectory. Closing it needs a gap/feasibility penalty or a
-  constrained DDP, not more warm-start tuning. There is also no flight-phase
-  controller (`rne_wbc` rejects empty contacts). Landing-impact resets for
-  contact additions work through `ContactSequenceDynamics`'s
-  `impulse_velocity`.
+  and the FDDP feasibility projection is the real failure: the forward rollout
+  from the initial state diverges at the first or second flight node, so the
+  solver never applies the feasible polish and returns the open-gap trajectory.
+  A `DdpConfig::gap_weight` was added to penalize open gaps during the line
+  search; it lowers the raw gap (2.05 to 1.31 on a 60-iteration run) but does
+  not yet stabilize the projection, which still diverges in flight. The next
+  step is a feasibility QP or a flight-phase controller (`rne_wbc` rejects empty
+  contacts). Landing-impact resets for contact additions work through
+  `ContactSequenceDynamics`'s `impulse_velocity`.
   `rne_dynamics::centroidal_momentum` exists to shape the aerial rotation.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical

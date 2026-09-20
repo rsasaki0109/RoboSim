@@ -370,6 +370,15 @@ pub struct DdpConfig {
     pub epsilon: f64,
     /// Keep dynamics gaps open in the forward pass (FDDP-style infeasible warm start).
     pub keep_gaps_open: bool,
+    /// Penalty on the square of the open dynamics gap during the forward pass.
+    ///
+    /// FDDP damps the warm-start gap by `(1 - alpha)` on each line-search step
+    /// but otherwise does not reward closing it, so the solve can stall at an
+    /// infeasible local minimum and the final feasibility projection can
+    /// diverge. A positive weight adds `0.5 * gap_weight * ||gap||^2` to the
+    /// line-search cost so the solver is driven to a feasible trajectory. Zero
+    /// reproduces the classical FDDP behavior.
+    pub gap_weight: f64,
     /// Optional per-control lower bounds for control-limited DDP.
     pub control_lower: Option<Vec<f64>>,
     /// Optional per-control upper bounds for control-limited DDP.
@@ -388,6 +397,7 @@ impl Default for DdpConfig {
             line_search_steps: 12,
             epsilon: 1.0e-6,
             keep_gaps_open: false,
+            gap_weight: 0.0,
             control_lower: None,
             control_upper: None,
         }
@@ -579,6 +589,16 @@ pub fn solve(
             Vec::new()
         };
 
+        // With a gap penalty the current cost must count the same penalty that
+        // the candidates do, or the line search compares inconsistent values.
+        if config.keep_gaps_open && config.gap_weight > 0.0 && !gaps.is_empty() {
+            let penalty: f64 = gaps
+                .iter()
+                .map(|gap| gap.iter().map(|value| value * value).sum::<f64>())
+                .sum();
+            current_cost = trajectory_cost(&states, &controls) + 0.5 * config.gap_weight * penalty;
+        }
+
         let mut improved = false;
         for step in 0..config.line_search_steps {
             let alpha = 0.5_f64.powi(step as i32);
@@ -603,6 +623,13 @@ pub fn solve(
                 };
                 if config.keep_gaps_open && !gaps.is_empty() {
                     next = vec_add(&next, &vec_scale(&gaps[k], 1.0 - alpha));
+                    if config.gap_weight > 0.0 {
+                        // The candidate carries the damped gap `(1 - alpha) * g`,
+                        // so penalize its squared norm to push `alpha` toward 1.
+                        let carried = 1.0 - alpha;
+                        let squared: f64 = gaps[k].iter().map(|value| value * value).sum();
+                        candidate_cost += 0.5 * config.gap_weight * carried * carried * squared;
+                    }
                 }
                 candidate_cost += cost.running(k, &candidate_states[k], &u);
                 candidate_controls[k] = u;
@@ -649,17 +676,28 @@ pub fn solve(
             match dynamics.step_at(k, &feasible[k], &controls[k]) {
                 Ok(next) => feasible[k + 1] = next,
                 Err(_) => {
+                    if std::env::var("RNE_OC_DEBUG").is_ok() {
+                        eprintln!("[rne_oc] projection step failed at node {k}");
+                    }
                     ok = false;
                     break;
                 }
             }
         }
+        let debug = std::env::var("RNE_OC_DEBUG").is_ok();
         if ok {
             let mut polish = config.clone();
             polish.keep_gaps_open = false;
-            if let Ok(solution) = solve(dynamics, cost, &feasible, &controls, &polish) {
-                return Ok(solution);
+            match solve(dynamics, cost, &feasible, &controls, &polish) {
+                Ok(solution) => return Ok(solution),
+                Err(error) => {
+                    if debug {
+                        eprintln!("[rne_oc] feasibility polish failed: {error}");
+                    }
+                }
             }
+        } else if debug {
+            eprintln!("[rne_oc] FDDP projection failed; returning the open-gap trajectory");
         }
     }
 
@@ -749,6 +787,39 @@ mod tests {
             (final_position - 1.0).abs() < 0.05,
             "position {final_position}"
         );
+        let mut max_gap: f64 = 0.0;
+        for k in 0..horizon {
+            let predicted = dynamics
+                .step(&solution.states[k], &solution.controls[k])
+                .expect("step");
+            for index in 0..2 {
+                max_gap = max_gap.max((solution.states[k + 1][index] - predicted[index]).abs());
+            }
+        }
+        assert!(max_gap < 1.0e-3, "unclosed gap {max_gap}");
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn gap_penalty_still_closes_the_final_gap() {
+        let dynamics = DoubleIntegrator { dt: 0.1 };
+        let mut cost = QuadraticCost::new(vec![0.01, 0.01], vec![0.001], vec![200.0, 20.0]);
+        cost.state_reference = vec![1.0, 0.0];
+        cost.running_scale = 0.1;
+        let horizon = 60;
+        let mut states = Vec::new();
+        for k in 0..=horizon {
+            let t = k as f64 / horizon as f64;
+            states.push(vec![t, 0.0]);
+        }
+        let controls = vec![vec![0.0]; horizon];
+        let config = DdpConfig {
+            max_iterations: 200,
+            keep_gaps_open: true,
+            gap_weight: 50.0,
+            ..DdpConfig::default()
+        };
+        let solution = solve(&dynamics, &cost, &states, &controls, &config).expect("solve");
         let mut max_gap: f64 = 0.0;
         for k in 0..horizon {
             let predicted = dynamics
