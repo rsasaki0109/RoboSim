@@ -258,10 +258,14 @@ controller.
   introduced a spurious `impulse_velocity` reset and moved the gap to node 0,
   so the contact set must stay constant until takeoff. The residual gap sits at
   the terminal transition on a wrist velocity and is insensitive to the terminal
-  weight, so it is FDDP not fully closing its gaps rather than a cost tradeoff,
-  together with the absence of a flight-phase controller (`rne_wbc` rejects
-  empty contacts). Landing-impact resets for contact additions work through
-  `ContactSequenceDynamics`'s `impulse_velocity`.
+  weight. The FDDP path already projects the warm start onto a feasible rollout
+  and polishes with standard DDP, and a doubled polish budget changes nothing,
+  so the residual is a local minimum of the current cost with a slightly
+  infeasible trajectory. Closing it needs a gap/feasibility penalty or a
+  constrained DDP, not more warm-start tuning. There is also no flight-phase
+  controller (`rne_wbc` rejects empty contacts). Landing-impact resets for
+  contact additions work through `ContactSequenceDynamics`'s
+  `impulse_velocity`.
   `rne_dynamics::centroidal_momentum` exists to shape the aerial rotation.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
