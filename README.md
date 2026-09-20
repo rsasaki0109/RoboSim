@@ -280,6 +280,31 @@ member, and committed command logs before either adoption slot can count.
 
 ## Selected demos
 
+### Camera-based localization with visloc-rs
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/triple_demo.png">
+    <img src="docs/media/triple_demo.gif" alt="Third-person 3DGS view of a URDF diff-drive robot carrying a stereo camera, the first-person view, and a 2D map with ground truth and the localized trail" width="640">
+  </picture>
+  <br>
+  <sub>A URDF mobile base with a stereo camera drives a U-shaped route through the real-capture Dr Johnson 3DGS interior. Top: third-person view. Bottom-left: first-person (the exported cameras). Bottom-right: the prebuilt COLMAP map, ground truth (black), and the localized trail (red). Stereo + IMU VIO reaches 0.029 m ATE; map matching relocalizes 377/400 frames at 0.058 m.</sub>
+</p>
+
+Example 113 runs a deterministic diff-drive episode in a photo-derived 3DGS
+interior and exports an EuRoC-format stereo + IMU dataset (cameras at 20 Hz,
+IMU at 60 Hz, ground truth, Double-Sphere calibration). The RNE side owns the
+scene, the robot, and the sensors; [visloc-rs](https://github.com/rsasaki0109/visloc-rs)
+consumes the export for VIO and map-matching relocalization against a map built
+from a separate episode.
+
+```bash
+cargo run -p drjohnson_euroc_export --example 113_drjohnson_euroc_export -- target/drjohnson_euroc
+```
+
+Details: [navigation integration plan](docs/VISLOC_NAVIGATION_PLAN.md),
+[source](examples/113_drjohnson_euroc_export/main.rs).
+
 ### PLATEAU city and sensors
 
 <p align="center">
