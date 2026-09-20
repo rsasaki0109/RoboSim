@@ -329,6 +329,12 @@ controller.
   sub-stepping removes the replay instability that blocked feasibility, and the
   remaining problem is the trajectory quality and the landing, which still needs
   a multiple-shooting or otherwise better-conditioned formulation.
+  Initializing the controls by inverse dynamics of the warm-start trajectory
+  (`rnea`) gives a much more natural trajectory (cost 1848, jump 0.23 m, a full
+  6.28 rad flip, peak torque ~21 Nm instead of ~73) but the floating-base rows
+  are dropped, so the actual base motion does not follow the reference and the
+  gap is ~5. The base reaction must be part of the solve, which again points to
+  a multiple-shooting or centroidal formulation.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
