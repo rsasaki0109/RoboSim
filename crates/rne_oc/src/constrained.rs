@@ -163,6 +163,13 @@ impl<'a> ContactSequenceDynamics<'a> {
         }
     }
 
+    /// Sets the number of inner integration steps per step and returns `self`,
+    /// so it composes with [`Self::new_without_impact`].
+    pub fn with_substeps(mut self, substeps: usize) -> Self {
+        self.substeps = substeps.max(1);
+        self
+    }
+
     /// Number of steps in the sequence.
     pub fn node_count(&self) -> usize {
         self.contacts_per_node.len()

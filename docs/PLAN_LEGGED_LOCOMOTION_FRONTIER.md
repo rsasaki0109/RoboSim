@@ -320,6 +320,15 @@ controller.
   reproduced by any open-loop or feedback rollout. The remaining work is a
   multiple-shooting solver with an implicit or much finer contact integration,
   not more parameter tuning.
+- **Sub-stepping makes the projection feasible, but the solution is poor.**
+  `ContactSequenceDynamics::new_with_substeps` integrates each planner step with
+  several inner steps, and on the no-landing backflip the FDDP feasibility
+  projection now succeeds and returns a trajectory with a **zero dynamics gap**
+  for the first time. The trajectory is dynamically consistent but degenerate:
+  it crouches and then free-falls instead of launching, at a high cost. So
+  sub-stepping removes the replay instability that blocked feasibility, and the
+  remaining problem is the trajectory quality and the landing, which still needs
+  a multiple-shooting or otherwise better-conditioned formulation.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
