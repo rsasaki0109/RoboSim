@@ -276,7 +276,14 @@ controller.
   controller (`rne_wbc` rejects empty contacts). Landing-impact resets for
   contact additions work through `ContactSequenceDynamics`'s
   `impulse_velocity`.
-  `rne_dynamics::centroidal_momentum` exists to shape the aerial rotation.
+  `rne_dynamics::centroidal_momentum` now drives an optional flight cost in
+  example 113 (`G1_MOMENTUM_WEIGHT`), a Boston Dynamics-style centroidal
+  angular-momentum tracker. At weight 50 the optimizer keeps the flip and cuts
+  the peak joint torque from 68 Nm to under 9 Nm while increasing the jump to
+  0.21 m, which is the efficient, momentum-driven motion the reference uses. The
+  dynamics gap grows to ~3.2 because the cost trades feasibility for momentum
+  tracking, so the flight cost and the feasibility projection must be solved
+  together, not one after the other.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
