@@ -972,6 +972,60 @@ pub fn centroidal_momentum(
     ])
 }
 
+/// Centroidal momentum matrix `A(q)`, `6 x nv`, such that `L = A(q) qd`.
+///
+/// The rows are `[linear; angular]` about the whole-body center of mass, in the
+/// world frame, matching [`centroidal_momentum`]. The momentum is linear in
+/// `qd` with no bias, so the columns are exact unit perturbations. An aerial
+/// controller uses this as the task Jacobian for a momentum-rate objective.
+pub fn centroidal_momentum_matrix(
+    model: &ArticulatedModel,
+    q: &[f64],
+) -> Result<DenseMatrix, DynamicsError> {
+    validate(model, q, "q")?;
+    let nv = model.nv();
+    let mut matrix = DenseMatrix::zeros(6, nv);
+    for column in 0..nv {
+        let mut qd = vec![0.0; nv];
+        qd[column] = 1.0;
+        let momentum = centroidal_momentum(model, q, &qd)?;
+        for (row, value) in momentum.iter().enumerate() {
+            matrix.set(row, column, *value);
+        }
+    }
+    Ok(matrix)
+}
+
+/// Centroidal momentum rate bias `c(q, qd)` with `Ldot = A(q) qdd + c`.
+///
+/// This is `(dL/dq) qd` for `L = A(q) qd`, computed by central-differencing
+/// [`centroidal_momentum`] in `q`. An aerial controller adds it so the momentum
+/// rate task is exact at the acceleration level.
+#[allow(clippy::needless_range_loop)]
+pub fn centroidal_momentum_bias(
+    model: &ArticulatedModel,
+    q: &[f64],
+    qd: &[f64],
+) -> Result<SpatialVec, DynamicsError> {
+    validate(model, q, "q")?;
+    validate(model, qd, "qd")?;
+    let nv = model.nv();
+    let epsilon = 1.0e-6;
+    let mut bias = [0.0; 6];
+    for index in 0..nv {
+        let mut plus = q.to_vec();
+        plus[index] += epsilon;
+        let mut minus = q.to_vec();
+        minus[index] -= epsilon;
+        let plus_momentum = centroidal_momentum(model, &plus, qd)?;
+        let minus_momentum = centroidal_momentum(model, &minus, qd)?;
+        for row in 0..6 {
+            bias[row] += (plus_momentum[row] - minus_momentum[row]) / (2.0 * epsilon) * qd[index];
+        }
+    }
+    Ok(bias)
+}
+
 /// Transforms a spatial motion vector by the adjoint of a pose.
 ///
 /// `adjoint` maps a body-frame motion vector into the parent frame, so it is
@@ -1992,6 +2046,51 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn centroidal_momentum_matrix_reproduces_the_momentum() {
+        let (world, robot) = floating_two_link_world(2.0, 1.5, 0.7, 0.5, 4.0);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let q = vec![0.3, -0.2, 0.1, 0.4, -0.3, 0.25, 0.5, -0.7];
+        let qd = vec![0.2, -0.1, 0.3, 0.15, -0.25, 0.1, 0.4, -0.3];
+        let matrix = centroidal_momentum_matrix(&model, &q).expect("matrix");
+        let predicted = matrix.mul_vec(&qd);
+        let momentum = centroidal_momentum(&model, &q, &qd).expect("momentum");
+        for row in 0..6 {
+            assert_relative_eq!(predicted[row], momentum[row], epsilon = 1.0e-9);
+        }
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn centroidal_momentum_bias_matches_finite_difference() {
+        let (world, robot) = floating_two_link_world(2.0, 1.5, 0.7, 0.5, 4.0);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let q = vec![0.3, -0.2, 0.1, 0.4, -0.3, 0.25, 0.5, -0.7];
+        let qd = vec![0.2, -0.1, 0.3, 0.15, -0.25, 0.1, 0.4, -0.3];
+        let qdd = vec![0.1, 0.05, -0.2, 0.12, 0.08, -0.15, 0.2, -0.1];
+        let nv = model.nv();
+        let matrix = centroidal_momentum_matrix(&model, &q).expect("matrix");
+        let bias = centroidal_momentum_bias(&model, &q, &qd).expect("bias");
+        let predicted = matrix.mul_vec(&qdd);
+        let h = 1.0e-6;
+        let plus_q: Vec<f64> = (0..nv).map(|i| q[i] + h * qd[i]).collect();
+        let minus_q: Vec<f64> = (0..nv).map(|i| q[i] - h * qd[i]).collect();
+        let plus_qd: Vec<f64> = (0..nv).map(|i| qd[i] + h * qdd[i]).collect();
+        let minus_qd: Vec<f64> = (0..nv).map(|i| qd[i] - h * qdd[i]).collect();
+        let plus = centroidal_momentum(&model, &plus_q, &plus_qd).expect("momentum");
+        let minus = centroidal_momentum(&model, &minus_q, &minus_qd).expect("momentum");
+        for row in 0..6 {
+            let finite_difference = (plus[row] - minus[row]) / (2.0 * h);
+            assert_relative_eq!(
+                predicted[row] + bias[row],
+                finite_difference,
+                epsilon = 1.0e-4,
+                max_relative = 1.0e-4
+            );
         }
     }
 

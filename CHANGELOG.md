@@ -77,6 +77,11 @@ All notable changes to Robot Native Engine are documented in this file.
   infeasible) state guess, and falls back to the caller's trajectory if the
   rollout is non-finite. Previously a cheap but infeasible warm start made the
   line search unable to improve and the solver returned it.
+- `rne_dynamics::centroidal_momentum_matrix` returns the `6 x nv` matrix
+  `A(q)` with `L = A(q) qd`, and `centroidal_momentum_bias` returns
+  `(dL/dq) qd` so `Ldot = A(q) qdd + c`. Both are verified against finite
+  differences and are the task Jacobian and bias for an aerial momentum-rate
+  controller.
 - `rne_wbc::WholeBodyController` accepts an empty contact set. This is the
   flight phase: the floating base is unactuated and only the actuated joints and
   the configured tasks act, so the contact rows are simply absent. The posture
