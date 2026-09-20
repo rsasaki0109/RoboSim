@@ -547,6 +547,105 @@ pub fn centroidal_momentum(
     ])
 }
 
+/// Transforms a spatial motion vector by the adjoint of a pose.
+///
+/// `adjoint` maps a body-frame motion vector into the parent frame, so it is
+/// the same matrix as [`motion_transform`] applied to the pose itself.
+fn adjoint(pose: &Transform3) -> Mat6 {
+    motion_transform(pose)
+}
+
+/// Derivative of a link world pose with respect to every generalized
+/// coordinate, expressed as a body-frame twist.
+///
+/// Entry `[link][k]` is the 6-vector `[linear; angular]` such that, to first
+/// order, `dpose/dq_k = pose * twist^` in the body frame. This chart composes
+/// additively along the forward-kinematics recursion, which makes it the right
+/// input for differentiating the mass matrix. The result is in topological link
+/// order, matching [`ArticulatedModel::link_entity`].
+#[allow(clippy::needless_range_loop)]
+pub fn link_pose_body_twist_derivatives(
+    model: &ArticulatedModel,
+    q: &[f64],
+) -> Result<Vec<Vec<SpatialVec>>, DynamicsError> {
+    validate(model, q, "q")?;
+    let kinematics = model.kinematic.forward_kinematics(q)?;
+    let transforms = kinematics.transforms();
+    let base = model.base_dof();
+    let nv = model.nv();
+    let link_count = model.link_count();
+
+    let mut result: Vec<Vec<SpatialVec>> = vec![vec![[0.0; 6]; nv]; link_count];
+
+    if base == 6 {
+        // `pose[0]` translation is `q[0..3]`; the body twist of a translation
+        // derivative is the world axis rotated into the body frame.
+        let rotation = transforms[0].rotation;
+        let inverse_rotation = rotation.conjugate();
+        for k in 0..3 {
+            let mut axis = [0.0; 6];
+            let world_axis = match k {
+                0 => Vec3::X,
+                1 => Vec3::Y,
+                _ => Vec3::Z,
+            };
+            let body_axis = inverse_rotation * world_axis;
+            axis[0] = body_axis.x;
+            axis[1] = body_axis.y;
+            axis[2] = body_axis.z;
+            result[0][k] = axis;
+        }
+        // Body-frame angular velocity columns of the ZYX Euler chart
+        // `R = Rz(yaw) Ry(pitch) Rx(roll)`.
+        let (roll, pitch) = (q[3], q[4]);
+        let body_angular = [
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, roll.cos(), -roll.sin()),
+            Vec3::new(
+                -pitch.sin(),
+                pitch.cos() * roll.sin(),
+                pitch.cos() * roll.cos(),
+            ),
+        ];
+        for (offset, body_axis) in body_angular.iter().enumerate() {
+            let mut axis = [0.0; 6];
+            axis[3] = body_axis.x;
+            axis[4] = body_axis.y;
+            axis[5] = body_axis.z;
+            result[0][3 + offset] = axis;
+        }
+    }
+
+    // `pose[i] = pose[parent] * child_in_parent`, where `child_in_parent`
+    // depends on `q_k` only through link `i`'s own joint. With body twists,
+    // `d(pose[i])/dq_k = pose[i] * (Ad_{child_in_parent^-1} xi_parent + xi_joint)`
+    // and the joint contribution is the motion subspace at unit velocity.
+    for index in 1..link_count {
+        let parent = model.links[index]
+            .parent
+            .expect("non-root link has a parent");
+        let child_in_parent =
+            inverse_transform(&transforms[parent]).mul_transform(&transforms[index]);
+        let inverse_child = inverse_transform(&child_in_parent);
+        let adjoint_inverse_child = adjoint(&inverse_child);
+        let joint_dof = model.links[index]
+            .joint
+            .as_ref()
+            .and_then(|joint| joint.dof);
+        for k in 0..nv {
+            let conveyed = mat6_mul_vec(&adjoint_inverse_child, &result[parent][k]);
+            let mut twist = conveyed;
+            if joint_dof == Some(k) {
+                let subspaces = model.dofs[k].s;
+                twist = add6(&twist, &subspaces);
+            }
+            result[index][k] = twist;
+        }
+    }
+
+    Ok(result)
+}
+
 /// Derivative of a link world pose with respect to every generalized
 /// coordinate, in a translation/rotation-vector convention.
 ///
@@ -1281,6 +1380,87 @@ mod tests {
             Vec3::ZERO
         } else {
             vector * (2.0 * length.atan2(scalar) / length)
+        }
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn link_pose_body_twist_derivatives_match_finite_difference() {
+        let (world, robot) = floating_two_link_world(2.0, 1.5, 0.7, 0.5, 4.0);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let q = vec![0.3, -0.2, 0.1, 0.4, -0.3, 0.25, 0.5, -0.7];
+        let derivatives = link_pose_body_twist_derivatives(&model, &q).expect("derivatives");
+        let nv = model.nv();
+        let h = 1.0e-6;
+
+        for link in 0..model.link_count() {
+            for dof in 0..nv {
+                let mut plus = q.clone();
+                plus[dof] += h;
+                let mut minus = q.clone();
+                minus[dof] -= h;
+                let pose = model
+                    .kinematic
+                    .forward_kinematics(&q)
+                    .expect("fk")
+                    .transform_at(link)
+                    .copied()
+                    .expect("pose");
+                let pose_plus = model
+                    .kinematic
+                    .forward_kinematics(&plus)
+                    .expect("fk")
+                    .transform_at(link)
+                    .copied()
+                    .expect("pose");
+                let pose_minus = model
+                    .kinematic
+                    .forward_kinematics(&minus)
+                    .expect("fk")
+                    .transform_at(link)
+                    .copied()
+                    .expect("pose");
+
+                // Body twist: pose^-1 * dpose. The translation part is
+                // R^-1 * d(translation); the rotation part is the vector of the
+                // skew matrix R^-1 * d(R).
+                let inverse_rotation = pose.rotation.conjugate();
+                let translation_fd = inverse_rotation
+                    * ((pose_plus.translation - pose_minus.translation) / (2.0 * h));
+                let r = crate::spatial::rotation_matrix(pose.rotation);
+                let r_plus = crate::spatial::rotation_matrix(pose_plus.rotation);
+                let r_minus = crate::spatial::rotation_matrix(pose_minus.rotation);
+                let mut delta = [[0.0_f64; 3]; 3];
+                for row in 0..3 {
+                    for column in 0..3 {
+                        delta[row][column] =
+                            (r_plus[row][column] - r_minus[row][column]) / (2.0 * h);
+                    }
+                }
+                let body_delta =
+                    crate::spatial::mat3_mul(&crate::spatial::mat3_transpose(&r), &delta);
+                // Extract the skew vector of `R^-1 dR`: for a skew matrix `S`,
+                // `S[2][1] = v.x`, `S[0][2] = v.y`, `S[1][0] = v.z`.
+                let rotation_fd = Vec3::new(body_delta[2][1], body_delta[0][2], body_delta[1][0]);
+                let finite_difference: SpatialVec = [
+                    translation_fd.x,
+                    translation_fd.y,
+                    translation_fd.z,
+                    rotation_fd.x,
+                    rotation_fd.y,
+                    rotation_fd.z,
+                ];
+                for component in 0..6 {
+                    let error =
+                        (derivatives[link][dof][component] - finite_difference[component]).abs();
+                    assert!(
+                        error < 1.0e-5,
+                        "link {link} dof {dof} component {component}: {} vs {}",
+                        derivatives[link][dof][component],
+                        finite_difference[component]
+                    );
+                }
+            }
         }
     }
 
