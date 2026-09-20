@@ -373,6 +373,21 @@ controller.
   backflip is therefore at a research boundary: below ~0.2 requires an implicit
   contact formulation or an exact-Hessian/FD second derivative that this solver
   does not yet have.
+- **A compliant penalty contact was tried as the smooth contact model and does
+  not resolve it at the 30 ms step.** Example 115 (a compliant contact-implicit
+  model with the multiple-shooting and DDP solvers) shows the penalty law needs
+  `p = sqrt(F/k)` of penetration to carry the few-hundred-newton ground force of
+  a backflip push. A step-stable `k` (~1e3) implies 0.15-0.25 m of penetration,
+  which is unphysical, and the physically intended `k` (1e5-1e6) is unstable at
+  30 ms. With the contact chart fixed, the multiple-shooting gap settles near 0.4
+  and the single-shooting rollout diverges once the feet sink; the hard-contact
+  multiple shooting (~0.18 gap, no penetration) remains the best result. The
+  probe did find a real bug: `ContactImplicitArticulatedDynamics::step_state`
+  integrated the base with the raw body twist instead of through
+  `integrate_configuration`, so a rotated base drifted its world position; this
+  is fixed with a regression test. The remaining unlock is a genuine
+  complementarity contact formulation at a small enough step (or a variable-step
+  integrator), not a softer penalty.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic

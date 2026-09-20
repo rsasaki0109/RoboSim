@@ -1,0 +1,19 @@
+[package]
+name = "g1_backflip_compliant"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rne_dynamics = { workspace = true }
+rne_ecs = { workspace = true }
+rne_math = { workspace = true }
+rne_oc = { workspace = true }
+rne_robot = { workspace = true }
+rne_urdf_import = { workspace = true }
+
+[[example]]
+name = "115_g1_backflip_compliant"
+path = "main.rs"
