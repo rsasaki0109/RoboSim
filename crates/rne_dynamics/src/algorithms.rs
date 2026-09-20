@@ -180,7 +180,97 @@ pub fn mass_matrix(model: &ArticulatedModel, q: &[f64]) -> Result<DenseMatrix, D
     Ok(matrix)
 }
 
+/// Analytical derivative of the joint-space mass matrix with respect to `q`.
+///
+/// Entry `[k]` is the dense matrix `dM/dq_k`. The computation mirrors
+/// [`mass_matrix`] exactly, propagating the analytic `d(xup)/dq` through the
+/// composite-inertia recursion and then through the per-DoF assembly, so it
+/// needs no finite differencing.
+#[allow(clippy::needless_range_loop)]
+pub fn mass_matrix_gradient(
+    model: &ArticulatedModel,
+    q: &[f64],
+) -> Result<Vec<DenseMatrix>, DynamicsError> {
+    validate(model, q, "q")?;
+    let kinematics = model.kinematic.forward_kinematics(q)?;
+    let xup = xup_transforms(model, kinematics.transforms());
+    let xup_gradient = xup_derivatives(model, q)?;
+    let link_count = model.link_count();
+    let nv = model.nv();
+
+    let mut composite = inertia_matrices(model);
+    let mut composite_gradient: Vec<Vec<Mat6>> = vec![vec![mat6_zero(); nv]; link_count];
+
+    for index in (1..link_count).rev() {
+        let Some(parent) = model.links[index].parent else {
+            continue;
+        };
+        let x = xup[index];
+        let c = composite[index];
+        let transformed = mat6_mul(&mat6_transpose(&x), &mat6_mul(&c, &x));
+        composite[parent] = mat6_add(&composite[parent], &transformed);
+        for k in 0..nv {
+            // d(X^T C X) = dX^T C X + X^T (dC X + C dX).
+            let d_x = xup_gradient[index][k];
+            let d_c = composite_gradient[index][k];
+            let first = mat6_mul(&mat6_transpose(&d_x), &mat6_mul(&c, &x));
+            let inner = mat6_add(&mat6_mul(&d_c, &x), &mat6_mul(&c, &d_x));
+            let second = mat6_mul(&mat6_transpose(&x), &inner);
+            composite_gradient[parent][k] =
+                mat6_add(&composite_gradient[parent][k], &mat6_add(&first, &second));
+        }
+    }
+
+    let mut gradient: Vec<DenseMatrix> = (0..nv).map(|_| DenseMatrix::zeros(nv, nv)).collect();
+    for dof in 0..nv {
+        let link = model.dofs[dof].link;
+        let column = model.dofs[dof].s;
+        // `force = composite[link] * S`; its derivative uses
+        // `d(composite[link])/dq_k * S` because `S` does not depend on q.
+        // `force` and `d_force[k]` are propagated together: the derivative of
+        // `X^T f` needs both `f` and `d f`.
+        let mut force = mat6_mul_vec(&composite[link], &column);
+        let mut d_force: Vec<SpatialVec> = (0..nv)
+            .map(|k| mat6_mul_vec(&composite_gradient[link][k], &column))
+            .collect();
+        for &other in &model.link_dofs[link] {
+            for k in 0..nv {
+                let value = dot6(&model.dofs[other].s, &d_force[k]);
+                gradient[k].set(dof, other, value);
+                gradient[k].set(other, dof, value);
+            }
+        }
+
+        let mut current = link;
+        while let Some(parent) = model.links[current].parent {
+            let x = xup[current];
+            let d_x = &xup_gradient[current];
+            let next_force = mat6_transpose_mul_vec(&x, &force);
+            let mut next_d_force: Vec<SpatialVec> = Vec::with_capacity(nv);
+            for k in 0..nv {
+                next_d_force.push(add6(
+                    &mat6_transpose_mul_vec(&d_x[k], &force),
+                    &mat6_transpose_mul_vec(&x, &d_force[k]),
+                ));
+            }
+            current = parent;
+            force = next_force;
+            d_force = next_d_force;
+            for &other in &model.link_dofs[current] {
+                for k in 0..nv {
+                    let value = dot6(&model.dofs[other].s, &d_force[k]);
+                    gradient[k].set(dof, other, value);
+                    gradient[k].set(other, dof, value);
+                }
+            }
+        }
+    }
+
+    Ok(gradient)
+}
+
 /// Recursive Newton-Euler inverse dynamics.
+////// Recursive Newton-Euler inverse dynamics.
 ///
 /// Returns the generalized force that realizes `qdd` at state `(q, qd)`,
 /// including gravity. For a floating base the first six entries are the base
@@ -553,6 +643,79 @@ pub fn centroidal_momentum(
 /// the same matrix as [`motion_transform`] applied to the pose itself.
 fn adjoint(pose: &Transform3) -> Mat6 {
     motion_transform(pose)
+}
+
+/// Derivative of the child-in-parent motion transform `xup` with respect to
+/// every generalized coordinate.
+///
+/// Entry `[link][k]` is the `6x6` matrix `d(xup[link])/dq_k`, where
+/// `xup[link]` is the same transform used by [`mass_matrix`]. It uses the
+/// identity `xup = Ad_{M^-1}` and `d(Ad_{M^-1}) = -ad_{xi} Ad_{M^-1}`, with
+/// `xi` the body twist of `M`. The result is in topological link order and has
+/// one matrix per generalized coordinate.
+#[allow(clippy::needless_range_loop)]
+pub fn xup_derivatives(
+    model: &ArticulatedModel,
+    q: &[f64],
+) -> Result<Vec<Vec<Mat6>>, DynamicsError> {
+    validate(model, q, "q")?;
+    let kinematic = model.kinematic.forward_kinematics(q)?;
+    let transforms = kinematic.transforms();
+    let twists = link_pose_body_twist_derivatives(model, q)?;
+    let nv = model.nv();
+    let link_count = model.link_count();
+
+    let mut result: Vec<Vec<Mat6>> = vec![vec![mat6_zero(); nv]; link_count];
+    for index in 1..link_count {
+        let parent = model.links[index]
+            .parent
+            .expect("non-root link has a parent");
+        let child_in_parent =
+            inverse_transform(&transforms[parent]).mul_transform(&transforms[index]);
+        let xup = motion_transform(&inverse_transform(&child_in_parent));
+        for k in 0..nv {
+            // Body twist of `M = P^-1 Q` is `xi_Q - Ad_{M^-1} xi_P`, where
+            // `xup = Ad_{M^-1}`. This cancels the parent motion so a base
+            // translation produces no `xup` derivative.
+            let conveyed = mat6_mul_vec(&xup, &twists[parent][k]);
+            let twist = {
+                let mut value = twists[index][k];
+                for component in 0..6 {
+                    value[component] -= conveyed[component];
+                }
+                value
+            };
+            let ad = motion_cross_matrix(&twist);
+            result[index][k] = negate_mat6(&mat6_mul(&ad, &xup));
+        }
+    }
+
+    Ok(result)
+}
+
+/// The `6x6` motion cross-product matrix `ad_v` such that `ad_v m =
+/// cross_motion(v, m)`.
+fn motion_cross_matrix(v: &SpatialVec) -> Mat6 {
+    let mut matrix = mat6_zero();
+    for column in 0..6 {
+        let mut basis = [0.0; 6];
+        basis[column] = 1.0;
+        let image = cross_motion(v, &basis);
+        for row in 0..6 {
+            matrix[row][column] = image[row];
+        }
+    }
+    matrix
+}
+
+fn negate_mat6(matrix: &Mat6) -> Mat6 {
+    let mut out = *matrix;
+    for row in out.iter_mut() {
+        for value in row.iter_mut() {
+            *value = -*value;
+        }
+    }
+    out
 }
 
 /// Derivative of a link world pose with respect to every generalized
@@ -1459,6 +1622,79 @@ mod tests {
                         derivatives[link][dof][component],
                         finite_difference[component]
                     );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn mass_matrix_gradient_matches_finite_difference() {
+        let (world, robot) = floating_two_link_world(2.0, 1.5, 0.7, 0.5, 4.0);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let q = vec![0.3, -0.2, 0.1, 0.4, -0.3, 0.25, 0.5, -0.7];
+        let gradient = mass_matrix_gradient(&model, &q).expect("gradient");
+        let nv = model.nv();
+        let h = 1.0e-6;
+        for dof in 0..nv {
+            let mut plus = q.clone();
+            plus[dof] += h;
+            let mut minus = q.clone();
+            minus[dof] -= h;
+            let m_plus = mass_matrix(&model, &plus).expect("mass");
+            let m_minus = mass_matrix(&model, &minus).expect("mass");
+            for row in 0..nv {
+                for column in 0..nv {
+                    let finite_difference =
+                        (m_plus.get(row, column) - m_minus.get(row, column)) / (2.0 * h);
+                    let error = (gradient[dof].get(row, column) - finite_difference).abs();
+                    assert!(
+                        error < 1.0e-5,
+                        "dof {dof} [{row}][{column}]: {} vs {}",
+                        gradient[dof].get(row, column),
+                        finite_difference
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn xup_derivatives_match_finite_difference() {
+        let (world, robot) = floating_two_link_world(2.0, 1.5, 0.7, 0.5, 4.0);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let q = vec![0.3, -0.2, 0.1, 0.4, -0.3, 0.25, 0.5, -0.7];
+        let derivatives = xup_derivatives(&model, &q).expect("derivatives");
+        let nv = model.nv();
+        let h = 1.0e-6;
+
+        let xup_at = |values: &[f64]| {
+            let kinematics = model.kinematic.forward_kinematics(values).expect("fk");
+            xup_transforms(&model, kinematics.transforms())
+        };
+
+        for link in 1..model.link_count() {
+            for dof in 0..nv {
+                let mut plus = q.clone();
+                plus[dof] += h;
+                let mut minus = q.clone();
+                minus[dof] -= h;
+                let plus_xup = xup_at(&plus);
+                let minus_xup = xup_at(&minus);
+                for row in 0..6 {
+                    for column in 0..6 {
+                        let finite_difference = (plus_xup[link][row][column]
+                            - minus_xup[link][row][column])
+                            / (2.0 * h);
+                        let error = (derivatives[link][dof][row][column] - finite_difference).abs();
+                        assert!(
+                            error < 1.0e-5,
+                            "link {link} dof {dof} [{row}][{column}]: {} vs {}",
+                            derivatives[link][dof][row][column],
+                            finite_difference
+                        );
+                    }
                 }
             }
         }

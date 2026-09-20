@@ -216,6 +216,70 @@ pub fn motion_transform(a_from_b: &Transform3) -> Mat6 {
     out
 }
 
+/// World-frame first-order perturbation of a rigid transform.
+///
+/// `translation` is the derivative of the transform translation and
+/// `angular_velocity` is the derivative of the rotation such that
+/// `d(rotation_matrix) = skew(angular_velocity) * rotation_matrix`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TransformPerturbation {
+    /// Derivative of the translation, in the parent frame.
+    pub translation: Vec3,
+    /// World-frame angular velocity of the rotation.
+    pub angular_velocity: Vec3,
+}
+
+impl TransformPerturbation {
+    /// Zero perturbation.
+    pub const ZERO: Self = Self {
+        translation: Vec3::ZERO,
+        angular_velocity: Vec3::ZERO,
+    };
+}
+
+/// Builds the world-frame perturbation of `pose` from a body-frame twist.
+pub fn perturbation_from_body_twist(
+    pose: &Transform3,
+    twist: &SpatialVec,
+) -> TransformPerturbation {
+    let rotation = pose.rotation;
+    TransformPerturbation {
+        translation: rotation * Vec3::new(twist[0], twist[1], twist[2]),
+        angular_velocity: rotation * Vec3::new(twist[3], twist[4], twist[5]),
+    }
+}
+
+/// Derivative of [`motion_transform`] under a world-frame perturbation.
+///
+/// The blocks of `Ad(a_from_b)` are `R`, `skew(p) R`, and `R`. Given
+/// `dR = skew(omega) R` and `dp`, the derivative is assembled block-wise.
+pub fn motion_transform_derivative(
+    a_from_b: &Transform3,
+    perturbation: &TransformPerturbation,
+) -> Mat6 {
+    let r = rotation_matrix(a_from_b.rotation);
+    let omega = perturbation.angular_velocity;
+    let d_r = {
+        let s = skew(omega);
+        mat3_mul(&s, &r)
+    };
+    // d(skew(p) R) = skew(dp) R + skew(p) dR.
+    let d_pr = {
+        let left = mat3_mul(&skew(perturbation.translation), &r);
+        let right = mat3_mul(&skew(a_from_b.translation), &d_r);
+        mat3_add(&left, &right)
+    };
+    let mut out = mat6_zero();
+    for row in 0..3 {
+        for column in 0..3 {
+            out[row][column] = d_r[row][column];
+            out[row][column + 3] = d_pr[row][column];
+            out[row + 3][column + 3] = d_r[row][column];
+        }
+    }
+    out
+}
+
 /// Spatial motion cross product `v x m`.
 pub fn cross_motion(v: &SpatialVec, m: &SpatialVec) -> SpatialVec {
     let vl = Vec3::new(v[0], v[1], v[2]);
