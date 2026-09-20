@@ -100,12 +100,25 @@ pub struct ContactSequenceDynamics<'a> {
     contacts_per_node: Vec<Vec<ContactSpec>>,
     reset_per_node: Vec<Option<Vec<ContactSpec>>>,
     impact_reset: bool,
+    substeps: usize,
 }
 
 impl<'a> ContactSequenceDynamics<'a> {
     /// Expands a phase list into a per-node contact schedule.
     pub fn new(model: &'a ArticulatedModel, step_time_s: f64, phases: &[ContactPhase]) -> Self {
-        Self::build(model, step_time_s, phases, true)
+        Self::build(model, step_time_s, phases, true, 1)
+    }
+
+    /// Like [`Self::new`] but integrates each step with `substeps` inner steps,
+    /// which stabilizes stiff contact modes at the cost of more dynamics
+    /// evaluations per step.
+    pub fn new_with_substeps(
+        model: &'a ArticulatedModel,
+        step_time_s: f64,
+        phases: &[ContactPhase],
+        substeps: usize,
+    ) -> Self {
+        Self::build(model, step_time_s, phases, true, substeps.max(1))
     }
 
     /// Like [`Self::new`] but without the impulsive velocity reset at contact
@@ -115,7 +128,7 @@ impl<'a> ContactSequenceDynamics<'a> {
         step_time_s: f64,
         phases: &[ContactPhase],
     ) -> Self {
-        Self::build(model, step_time_s, phases, false)
+        Self::build(model, step_time_s, phases, false, 1)
     }
 
     fn build(
@@ -123,6 +136,7 @@ impl<'a> ContactSequenceDynamics<'a> {
         step_time_s: f64,
         phases: &[ContactPhase],
         impact_reset: bool,
+        substeps: usize,
     ) -> Self {
         let mut contacts_per_node = Vec::new();
         for phase in phases {
@@ -145,6 +159,7 @@ impl<'a> ContactSequenceDynamics<'a> {
             contacts_per_node,
             reset_per_node,
             impact_reset,
+            substeps,
         }
     }
 
@@ -168,7 +183,14 @@ impl ShootingDynamics for ContactSequenceDynamics<'_> {
             .contacts_per_node
             .get(node)
             .ok_or(OcError::Dimension("contact sequence node"))?;
-        let mut next = integrate(self.model, self.step_time_s, state, control, contacts)?;
+        // Sub-stepping holds the control over the step but integrates the
+        // constrained dynamics at a finer resolution, which stabilizes the
+        // stiff contact modes a single semi-implicit Euler step cannot.
+        let mut next = state.to_vec();
+        let sub_dt = self.step_time_s / self.substeps as f64;
+        for _ in 0..self.substeps {
+            next = integrate(self.model, sub_dt, &next, control, contacts)?;
+        }
         if self.impact_reset {
             if let Some(reset) = &self.reset_per_node[node] {
                 let nv = self.model.nv();
@@ -382,6 +404,22 @@ mod tests {
                 assert!(velocity.abs() < 1.0e-6, "contact velocity {velocity}");
             }
         }
+    }
+
+    #[test]
+    fn substepping_keeps_a_contact_body_stable() {
+        let (_world, model, base) = floating_body();
+        let phases = [ContactPhase {
+            contacts: contacts(base),
+            steps: 50,
+        }];
+        let fine = ContactSequenceDynamics::new_with_substeps(&model, 0.02, &phases, 5);
+        let mut state = vec![0.0; 12];
+        for node in 0..50 {
+            state = fine.step_at(node, &state, &[]).expect("step");
+        }
+        // The body stays on its contacts under the finer integration.
+        assert!(state.iter().all(|value| value.abs() < 1.0e-6), "{state:?}");
     }
 
     #[test]

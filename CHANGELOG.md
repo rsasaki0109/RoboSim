@@ -100,6 +100,11 @@ All notable changes to Robot Native Engine are documented in this file.
   so a push or landing can command a spin rate through the contact reaction. The
   existing `solve` API is unchanged. Verified with a task that tracks a
   commanded angular momentum rate.
+- `rne_oc::ContactSequenceDynamics::new_with_substeps` integrates each step with
+  a configurable number of inner steps, holding the control over the step. This
+  stabilizes the stiff contact modes that a single semi-implicit Euler step at
+  the planner time step cannot, and makes the FDDP feasibility projection
+  succeed on the G1 backflip where the one-step integration diverges.
 - `rne_oc::ContactSequenceDynamics::new_without_impact` builds a contact sequence
   without the impulsive velocity reset at contact additions, so the regularized
   constrained dynamics absorbs the contact and the transition is smooth for a
