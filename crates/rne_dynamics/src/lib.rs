@@ -34,8 +34,8 @@ pub mod spatial;
 pub use algorithms::{
     center_of_mass, centroidal_momentum, com_jacobian, constrained_forward_dynamics,
     forward_dynamics, frame_jacobian, gravity_torque, impulse_velocity, integrate_configuration,
-    link_motions, mass_matrix, non_linear_effects, rnea, ContactSpec, DenseMatrix, LinkMotion,
-    CONTACT_REGULARIZATION,
+    link_motions, link_pose_derivatives, mass_matrix, non_linear_effects, rnea, ContactSpec,
+    DenseMatrix, LinkMotion, LinkPoseDerivative, CONTACT_REGULARIZATION,
 };
 pub use model::{ArticulatedModel, DynamicsError};
 pub use spatial::{SpatialInertia, SpatialVec};

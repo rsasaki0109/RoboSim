@@ -9,7 +9,7 @@ use crate::spatial::{
     add6, cross_force, cross_motion, dot6, inverse_transform, mat6_add, mat6_mul, mat6_mul_vec,
     mat6_transpose_mul_vec, mat6_zero, motion_transform, scale6, transform_point, Mat6, SpatialVec,
 };
-use rne_math::Vec3;
+use rne_math::{Quat, Vec3};
 use rne_world::Transform3;
 
 /// A dense row-major matrix with deterministic arithmetic.
@@ -545,6 +545,123 @@ pub fn centroidal_momentum(
     Ok([
         linear.x, linear.y, linear.z, angular.x, angular.y, angular.z,
     ])
+}
+
+/// Derivative of a link world pose with respect to every generalized
+/// coordinate, in a translation/rotation-vector convention.
+///
+/// The translation part is `d(pose.translation)/dq_k`. The rotation part is
+/// `d(rotation_vector)/dq_k`, where `rotation_vector = axis * angle` is the
+/// logarithm of `pose.rotation`. This is the chart whose finite difference of
+/// the pose matches exactly, which is what a solver differentiates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinkPoseDerivative {
+    /// `d(translation)/dq_k` for each generalized coordinate, in meters/unit.
+    pub translation: Vec<Vec3>,
+    /// `d(rotation_vector)/dq_k`, in radians/unit.
+    pub rotation_vector: Vec<Vec3>,
+}
+
+/// Computes the derivative of every link world pose with respect to `q`.
+///
+/// The result is in topological link order, matching
+/// [`ArticulatedModel::link_entity`], and each entry has one `Vec3` per
+/// generalized coordinate. The computation is exact for the same forward
+/// kinematics used by [`mass_matrix`]: it propagates the pose derivative down
+/// the tree instead of finite-differencing.
+pub fn link_pose_derivatives(
+    model: &ArticulatedModel,
+    q: &[f64],
+) -> Result<Vec<LinkPoseDerivative>, DynamicsError> {
+    validate(model, q, "q")?;
+    let kinematics = model.kinematic.forward_kinematics(q)?;
+    let transforms = kinematics.transforms();
+    let base = model.base_dof();
+    let nv = model.nv();
+    let link_count = model.link_count();
+
+    let mut result: Vec<LinkPoseDerivative> = (0..link_count)
+        .map(|_| LinkPoseDerivative {
+            translation: vec![Vec3::ZERO; nv],
+            rotation_vector: vec![Vec3::ZERO; nv],
+        })
+        .collect();
+
+    // Only the floating base root carries a direct dependence on the first six
+    // coordinates; every other link inherits it through the tree recursion.
+    if base == 6 {
+        result[0].translation[0] = Vec3::X;
+        result[0].translation[1] = Vec3::Y;
+        result[0].translation[2] = Vec3::Z;
+        // The root orientation uses the ZYX Euler chart, so the world-frame
+        // rotation derivative of coordinates 3, 4, 5 is not the identity.
+        let yaw = Quat::from_rotation_z(q[5]);
+        result[0].rotation_vector[3] =
+            (yaw * Quat::from_rotation_y(q[4]) * Vec3::X).normalize_or_zero();
+        result[0].rotation_vector[4] = (yaw * Vec3::Y).normalize_or_zero();
+        result[0].rotation_vector[5] = Vec3::Z;
+    }
+
+    // A link's pose factorizes as `pose[i] = prefix_i * motion_i(q_k)`, where
+    // `prefix_i` is the pose with the joint displacement removed. `motion_i`
+    // only depends on the link's own DoF, so `prefix_i` is constant during the
+    // differentiation and can be recovered from forward kinematics evaluated at
+    // zero displacement for that DoF.
+    for index in 1..link_count {
+        let parent = model.links[index]
+            .parent
+            .expect("non-root link has a parent");
+        let joint_dof = model.links[index]
+            .joint
+            .as_ref()
+            .and_then(|joint| joint.dof);
+        let prefix = match joint_dof {
+            Some(dof) => {
+                let mut zeroed = q.to_vec();
+                zeroed[dof] = 0.0;
+                model
+                    .kinematic
+                    .forward_kinematics(&zeroed)?
+                    .transform_at(index)
+                    .copied()
+                    .unwrap_or(Transform3::IDENTITY)
+            }
+            None => transforms[index],
+        };
+        let prefix_rotation = prefix.rotation;
+        let prefix_translation = prefix.translation;
+        for k in 0..nv {
+            let parent_translation = result[parent].translation[k];
+            let parent_rotation = result[parent].rotation_vector[k];
+            // `pose[parent]` moves the whole chain rigidly: its translation
+            // derivative propagates directly, and its rotation derivative adds
+            // the cross term for the lever arm from the parent origin to the
+            // child origin.
+            let lever = prefix_translation - transforms[parent].translation;
+            let mut translation = parent_translation + parent_rotation.cross(lever);
+            let mut rotation_vector = parent_rotation;
+
+            if let Some(dof) = joint_dof {
+                if dof == k {
+                    // d(motion_i)/dq_i at zero displacement is the joint motion
+                    // subspace referred to the parent frame.
+                    let subspaces = model.dofs[dof].s;
+                    let axis_parent = Vec3::new(subspaces[3], subspaces[4], subspaces[5]);
+                    let linear_parent = Vec3::new(subspaces[0], subspaces[1], subspaces[2]);
+                    if axis_parent.length_squared() > 0.0 {
+                        rotation_vector += prefix_rotation * axis_parent;
+                    }
+                    if linear_parent.length_squared() > 0.0 {
+                        translation += prefix_rotation * linear_parent;
+                    }
+                }
+            }
+            result[index].translation[k] = translation;
+            result[index].rotation_vector[k] = rotation_vector;
+        }
+    }
+
+    Ok(result)
 }
 
 /// World-frame motion and bias acceleration of one link at state `(q, qd)`.
@@ -1145,6 +1262,59 @@ mod tests {
         world.entity_mut(joint1).insert(joint(robot, base, link1));
         world.entity_mut(joint2).insert(joint(robot, link1, link2));
         (world, robot)
+    }
+
+    fn assert_vec3_close(actual: Vec3, expected: Vec3, tolerance: f64) {
+        let difference = (actual - expected).length();
+        let scale = 1.0 + expected.length();
+        assert!(
+            difference <= tolerance * scale,
+            "expected {expected:?}, got {actual:?} (|diff| {difference})"
+        );
+    }
+
+    fn quaternion_log(quaternion: Quat) -> Vec3 {
+        let q = quaternion.normalize();
+        let (vector, scalar) = (Vec3::new(q.x, q.y, q.z), q.w);
+        let length = vector.length();
+        if length < 1.0e-12 {
+            Vec3::ZERO
+        } else {
+            vector * (2.0 * length.atan2(scalar) / length)
+        }
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn link_pose_derivatives_match_finite_difference() {
+        let (world, robot) = floating_two_link_world(2.0, 1.5, 0.7, 0.5, 4.0);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let q = vec![0.3, -0.2, 0.1, 0.4, -0.3, 0.25, 0.5, -0.7];
+        let derivatives = link_pose_derivatives(&model, &q).expect("derivatives");
+        let nv = model.nv();
+        let h = 1.0e-6;
+
+        for link in 0..model.link_count() {
+            for dof in 0..nv {
+                let mut plus = q.clone();
+                plus[dof] += h;
+                let mut minus = q.clone();
+                minus[dof] -= h;
+                let fk_plus = model.kinematic.forward_kinematics(&plus).expect("fk");
+                let fk_minus = model.kinematic.forward_kinematics(&minus).expect("fk");
+                let pose_plus = fk_plus.transform_at(link).expect("pose");
+                let pose_minus = fk_minus.transform_at(link).expect("pose");
+
+                let translation_fd = (pose_plus.translation - pose_minus.translation) / (2.0 * h);
+                assert_vec3_close(derivatives[link].translation[dof], translation_fd, 1.0e-6);
+
+                // World-frame rotation chart: log(R_plus * R_minus^T) is a
+                // second-order-accurate difference of the rotation itself.
+                let delta_rotation = pose_plus.rotation * pose_minus.rotation.conjugate();
+                let rotation_fd = quaternion_log(delta_rotation) / (2.0 * h);
+                assert_vec3_close(derivatives[link].rotation_vector[dof], rotation_fd, 1.0e-6);
+            }
+        }
     }
 
     #[test]
