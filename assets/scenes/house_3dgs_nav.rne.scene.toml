@@ -1,0 +1,35 @@
+[world]
+gravity_m_s2 = [0.0, -9.81, 0.0]
+seed = 2026
+
+[ground]
+enabled = true
+
+[[robots]]
+path = "../robots/dataset_diff_drive.rne.robot.toml"
+
+# Invisible collision walls matching the house 3DGS shell (x,z in [-3.2, 3.2]).
+# Rendering comes from the 3DGS background; these only constrain physics.
+[[obstacles]]
+name = "wall_px"
+translation_m = [3.3, 1.0, 0.0]
+half_extents_m = [0.1, 1.0, 3.3]
+body_type = "fixed"
+
+[[obstacles]]
+name = "wall_nx"
+translation_m = [-3.3, 1.0, 0.0]
+half_extents_m = [0.1, 1.0, 3.3]
+body_type = "fixed"
+
+[[obstacles]]
+name = "wall_pz"
+translation_m = [0.0, 1.0, 3.3]
+half_extents_m = [3.3, 1.0, 0.1]
+body_type = "fixed"
+
+[[obstacles]]
+name = "wall_nz"
+translation_m = [0.0, 1.0, -3.3]
+half_extents_m = [3.3, 1.0, 0.1]
+body_type = "fixed"
