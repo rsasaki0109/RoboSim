@@ -70,6 +70,21 @@ All notable changes to Robot Native Engine are documented in this file.
   writes `docs/media/unitree-g1-backflip.gif`). A physically simulated backflip
   still needs analytic derivatives and a flight-phase controller.
 
+- `rne_dynamics` gains an analytic derivative suite for whole-body optimal
+  control: `link_pose_derivatives`, `link_pose_body_twist_derivatives`,
+  `xup_derivatives`, `mass_matrix_gradient` (`dM/dq`),
+  `non_linear_effects_gradient` (`dh/dq`, `dh/dqd`) and
+  `forward_dynamics_gradient` (`d(qdd)/d(q, qd, tau)`). Each is verified
+  against central finite differences. `rne_oc` uses them through the new
+  `analytic_derivatives` hook on `DiscreteDynamics`/`ShootingDynamics`, so
+  `ArticulatedDynamics` no longer needs Richardson-extrapolated central
+  differences.
+- `DdpConfig::gap_weight` penalizes the squared open dynamics gap in the FDDP
+  line search, so the solver is driven toward feasibility instead of stalling at
+  an infeasible local minimum. The feasibility projection is also bounded
+  (`MAX_PROJECTED_STATE_MAGNITUDE`) so an unstable open-loop replay is damped
+  instead of fabricating a warm start.
+
 ### Fixed
 
 - Standard DDP (`keep_gaps_open = false`) now rolls the initial controls forward
