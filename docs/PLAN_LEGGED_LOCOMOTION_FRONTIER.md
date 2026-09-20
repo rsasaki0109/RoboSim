@@ -241,13 +241,16 @@ controller.
   through the `analytic_derivatives` hook instead of central differences.
   With the FDDP warm start restored, example 113 now runs its full iteration
   budget and reaches cost 1494 (was 74096), a 0.138 m jump, a 6.15 rad yaw span,
-  and realistic 45 Nm torques. The dynamics gap is still ~5.8 and concentrates
-  at the last push node (node 13 of 36). That node is the push-to-flight
-  boundary: a rigid double-contact push cannot produce the stored launch
-  velocity, so the phase transition, not the derivatives, is now the blocker.
-  Landing-impact resets at phase boundaries are still not applied
-  (`ContactSequenceDynamics` documents this), and there is no flight-phase
-  controller (`rne_wbc` rejects empty contacts).
+  and realistic 45 Nm torques. The dynamics gap is still ~3.9 and concentrates
+  at the last push node (node 13 of 36), on a base or leg joint velocity. That
+  node is the push-to-flight boundary: a rigid double-contact push cannot
+  produce the stored launch velocity, so the phase transition, not the
+  derivatives, is now the blocker. A per-component diagnostic showed the gap was
+  first exactly the base yaw rate, which the planted feet cannot supply; ramping
+  the warm-start spin from zero and blending the legs into the tuck cut the gap
+  from ~8 to ~3.9. Landing-impact resets at phase boundaries are applied to
+  contact additions (`ContactSequenceDynamics` applies `impulse_velocity`), but
+  there is no flight-phase controller (`rne_wbc` rejects empty contacts).
   `rne_dynamics::centroidal_momentum` exists to shape the aerial rotation.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical

@@ -280,9 +280,16 @@ fn main() {
             tucked[1] = BASE_START_Y_M
                 + (TARGET_APEX_Y_M - BASE_START_Y_M) * (std::f64::consts::PI * t).sin();
             tucked[5] = -2.0 * std::f64::consts::PI * t;
-            tucked[nv + 5] = -2.0 * std::f64::consts::PI / (FLIGHT_STEPS as f64 * STEP_TIME_S);
+            // The spin is built during flight; do not impose the full rate at
+            // the push boundary, where the planted feet cannot supply it.
+            tucked[nv + 5] = -2.0 * std::f64::consts::PI * t / (FLIGHT_STEPS as f64 * STEP_TIME_S);
+            // Blend the legs from the push extension into the tuck over the
+            // first third of flight so the push-to-flight joint velocity is
+            // continuous instead of a step.
+            let blend = (t / 0.33).min(1.0);
             for (dof, name) in joint_names.iter().enumerate() {
-                tucked[6 + dof] = tuck_angle(name);
+                let start = stand_angle(name);
+                tucked[6 + dof] = start + (tuck_angle(name) - start) * blend;
             }
             tucked
         };
@@ -323,26 +330,33 @@ fn main() {
     let mut failed_nodes = 0_usize;
     let mut worst_node = 0_usize;
     let mut worst_gap = 0.0_f64;
+    let mut worst_component = 0_usize;
     for node in 0..horizon {
         match dynamics.step_at(node, &solution.states[node], &solution.controls[node]) {
             Ok(predicted) => {
                 for (a, b) in solution.states[node + 1].iter().zip(&predicted) {
                     max_gap = max_gap.max((a - b).abs());
                 }
-                let node_gap = solution.states[node + 1]
-                    .iter()
-                    .zip(&predicted)
-                    .fold(0.0_f64, |maximum, (a, b)| maximum.max((a - b).abs()));
+                let mut node_gap = 0.0_f64;
+                let mut node_gap_index = 0_usize;
+                for (index, (a, b)) in solution.states[node + 1].iter().zip(&predicted).enumerate()
+                {
+                    if (a - b).abs() > node_gap {
+                        node_gap = (a - b).abs();
+                        node_gap_index = index;
+                    }
+                }
                 if node_gap > worst_gap {
                     worst_gap = node_gap;
                     worst_node = node;
+                    worst_component = node_gap_index;
                 }
             }
             Err(_) => failed_nodes += 1,
         }
     }
     println!(
-        "worst gap {worst_gap:.3e} at node {worst_node} (crouch<{CROUCH_STEPS}, push<{}) ",
+        "worst gap {worst_gap:.3e} at node {worst_node} component {worst_component} (crouch<{CROUCH_STEPS}, push<{})",
         CROUCH_STEPS + PUSH_STEPS
     );
     let feasible = max_gap < 1.0e-4 && failed_nodes == 0;
