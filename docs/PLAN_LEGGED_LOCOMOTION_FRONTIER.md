@@ -341,9 +341,14 @@ controller.
   sweeps of local Gauss-Newton steps. On the G1 backflip it repairs the
   computed-torque warm start to a full 6.28 rad flip with a dynamics gap of
   ~0.12, an order of magnitude below the FDDP single-shooting gap (1.76), which
-  validates the direction. Remaining issues are solution quality (the base
-  barely jumps) and control bounds: naive clamping destabilizes the sweep, so
-  the next step is a box-constrained SQP or an active-set local solve.
+  validates the direction. Bounds are handled by backtracking on the local
+  penalized objective with the control clamped at each trial, and the defect
+  penalty now carries an augmented-Lagrangian multiplier so the cost keeps
+  shaping the trajectory. With torque bounds the G1 backflip returns a natural
+  trajectory: a full 6.33 rad flip, a 0.19 m jump, and a 31 Nm peak torque, at a
+  dynamics gap of ~0.33. The remaining work is closing that gap to the 1e-4
+  level (more multiplier iterations or a full SQP step), after which the
+  trajectory is a physically simulated backflip.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
