@@ -1,7 +1,9 @@
 //! Discrete dynamics for a floating- or fixed-base articulated model.
 
-use crate::ddp::{DiscreteDynamics, OcError};
-use rne_dynamics::{forward_dynamics, integrate_configuration, ArticulatedModel};
+use crate::ddp::{DiscreteDynamics, DynamicsDerivatives, OcError};
+use rne_dynamics::{
+    forward_dynamics, forward_dynamics_gradient, integrate_configuration, ArticulatedModel,
+};
 
 /// Semi-implicit Euler dynamics for an [`ArticulatedModel`].
 ///
@@ -53,6 +55,132 @@ impl DiscreteDynamics for ArticulatedDynamics<'_> {
             next[nv + index] = qd[index] + acceleration[index] * dt;
         }
         Ok(next)
+    }
+
+    fn analytic_derivatives(
+        &self,
+        state: &[f64],
+        control: &[f64],
+    ) -> Option<Result<DynamicsDerivatives, OcError>> {
+        Some(self.analytic_derivatives_inner(state, control))
+    }
+}
+
+impl ArticulatedDynamics<'_> {
+    /// Builds `(df/dx, df/du)` from the analytical forward-dynamics gradient.
+    ///
+    /// The state layout is `[q, qd]` and the control is the actuated-joint
+    /// torque. `d(qdd)/d(q, qd, tau)` is analytic; the configuration step maps
+    /// `qdd` through `integrate_configuration`, whose chart Jacobian for a
+    /// floating base is taken by a small central difference of that map alone
+    /// (it does not re-solve the dynamics).
+    #[allow(clippy::needless_range_loop)]
+    fn analytic_derivatives_inner(
+        &self,
+        state: &[f64],
+        control: &[f64],
+    ) -> Result<DynamicsDerivatives, OcError> {
+        let nv = self.model.nv();
+        let base = self.model.base_dof();
+        if state.len() != 2 * nv || control.len() != nv - base {
+            return Err(OcError::Dimension("articulated state or control"));
+        }
+        let (q, qd) = state.split_at(nv);
+        let mut torque = vec![0.0; nv];
+        torque[base..].copy_from_slice(control);
+
+        let gradient =
+            forward_dynamics_gradient(self.model, q, qd, &torque).map_err(|_| OcError::Dynamics)?;
+        let acceleration =
+            forward_dynamics(self.model, q, qd, &torque).map_err(|_| OcError::Dynamics)?;
+
+        let nx = 2 * nv;
+        let nu = nv - base;
+        let mut fx = vec![vec![0.0; nx]; nx];
+        let mut fu = vec![vec![0.0; nu]; nx];
+
+        // Position rows: `q_next = integrate_configuration(q, qd, qdd, dt)`.
+        // The joint block is exact (`q + qd dt + 0.5 qdd dt^2`); the floating
+        // base chart derivative is a small central difference of the map.
+        let dt = self.step_time_s;
+        let epsilon = 1.0e-7;
+        let integrate_at = |q_value: &[f64], qd_value: &[f64], qdd_value: &[f64]| {
+            integrate_configuration(self.model, q_value, qd_value, qdd_value, dt)
+        };
+
+        for k in 0..nv {
+            let mut q_shift = q.to_vec();
+            q_shift[k] += epsilon;
+            let mut qdd_shift = acceleration.clone();
+            for row in 0..nv {
+                qdd_shift[row] += gradient.with_respect_to_q[k][row] * epsilon;
+            }
+            let plus = integrate_at(&q_shift, qd, &qdd_shift).map_err(|_| OcError::Dynamics)?;
+            let mut q_shift = q.to_vec();
+            q_shift[k] -= epsilon;
+            let mut qdd_shift = acceleration.clone();
+            for row in 0..nv {
+                qdd_shift[row] -= gradient.with_respect_to_q[k][row] * epsilon;
+            }
+            let minus = integrate_at(&q_shift, qd, &qdd_shift).map_err(|_| OcError::Dynamics)?;
+            for row in 0..nv {
+                fx[row][k] = (plus[row] - minus[row]) / (2.0 * epsilon);
+            }
+        }
+        for k in 0..nv {
+            let mut qd_shift = qd.to_vec();
+            qd_shift[k] += epsilon;
+            let mut qdd_shift = acceleration.clone();
+            for row in 0..nv {
+                qdd_shift[row] += gradient.with_respect_to_qd[k][row] * epsilon;
+            }
+            let plus = integrate_at(q, &qd_shift, &qdd_shift).map_err(|_| OcError::Dynamics)?;
+            let mut qd_shift = qd.to_vec();
+            qd_shift[k] -= epsilon;
+            let mut qdd_shift = acceleration.clone();
+            for row in 0..nv {
+                qdd_shift[row] -= gradient.with_respect_to_qd[k][row] * epsilon;
+            }
+            let minus = integrate_at(q, &qd_shift, &qdd_shift).map_err(|_| OcError::Dynamics)?;
+            for row in 0..nv {
+                fx[row][nv + k] = (plus[row] - minus[row]) / (2.0 * epsilon);
+            }
+        }
+        for j in 0..nu {
+            let mut tau_shift = torque.clone();
+            tau_shift[base + j] += epsilon;
+            let mut qdd_shift = acceleration.clone();
+            for row in 0..nv {
+                qdd_shift[row] += gradient.with_respect_to_control[base + j][row] * epsilon;
+            }
+            let plus = integrate_at(q, qd, &qdd_shift).map_err(|_| OcError::Dynamics)?;
+            let mut tau_shift = torque.clone();
+            tau_shift[base + j] -= epsilon;
+            let mut qdd_shift = acceleration.clone();
+            for row in 0..nv {
+                qdd_shift[row] -= gradient.with_respect_to_control[base + j][row] * epsilon;
+            }
+            let minus = integrate_at(q, qd, &qdd_shift).map_err(|_| OcError::Dynamics)?;
+            for row in 0..nv {
+                fu[row][j] = (plus[row] - minus[row]) / (2.0 * epsilon);
+            }
+        }
+
+        // Velocity rows: `qd_next = qd + qdd dt`, entirely analytic.
+        for k in 0..nv {
+            for row in 0..nv {
+                fx[nv + row][k] = gradient.with_respect_to_q[k][row] * dt;
+                fx[nv + row][nv + k] =
+                    if row == k { 1.0 } else { 0.0 } + gradient.with_respect_to_qd[k][row] * dt;
+            }
+        }
+        for j in 0..nu {
+            for row in 0..nv {
+                fu[nv + row][j] = gradient.with_respect_to_control[base + j][row] * dt;
+            }
+        }
+
+        Ok(DynamicsDerivatives { fx, fu })
     }
 }
 
@@ -120,6 +248,106 @@ mod tests {
             velocity: 0.0,
         });
         ArticulatedModel::from_robot(&world, robot).expect("model")
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn analytic_derivatives_match_finite_difference() {
+        use crate::ddp::dynamics_derivatives;
+        let mut world = World::new();
+        let robot = spawn_named(&mut world, "robot");
+        let base = spawn_named(&mut world, "base");
+        let link1 = spawn_named(&mut world, "link1");
+        let link2 = spawn_named(&mut world, "link2");
+        let joint1 = spawn_named(&mut world, "joint1");
+        let joint2 = spawn_named(&mut world, "joint2");
+        world.entity_mut(robot).insert(Robot {
+            robot_id: RobotId::new_v4(),
+            model_name: "floating_two_link".into(),
+            base_link: base,
+        });
+        world.entity_mut(base).insert((
+            Link {
+                robot,
+                name: "base".into(),
+            },
+            Transform3::IDENTITY,
+            rne_robot::FloatingBase,
+            RigidBody {
+                mass_kg: 2.0,
+                ..RigidBody::default()
+            },
+            RigidBodyInertia {
+                center_of_mass_local_m: Vec3::new(0.1, 0.0, 0.0),
+                ixx_kg_m2: 0.1,
+                ixy_kg_m2: 0.0,
+                ixz_kg_m2: 0.0,
+                iyy_kg_m2: 0.1,
+                iyz_kg_m2: 0.0,
+                izz_kg_m2: 0.1,
+            },
+        ));
+        for (entity, offset) in [(link1, Vec3::ZERO), (link2, Vec3::new(0.4, 0.0, 0.0))] {
+            world.entity_mut(entity).insert((
+                Link {
+                    robot,
+                    name: "link".into(),
+                },
+                Transform3::from_translation_rotation(offset, rne_math::Quat::IDENTITY),
+                RigidBody {
+                    mass_kg: 1.0,
+                    ..RigidBody::default()
+                },
+                RigidBodyInertia {
+                    center_of_mass_local_m: Vec3::new(0.2, 0.0, 0.0),
+                    ixx_kg_m2: 0.02,
+                    ixy_kg_m2: 0.0,
+                    ixz_kg_m2: 0.0,
+                    iyy_kg_m2: 0.02,
+                    iyz_kg_m2: 0.0,
+                    izz_kg_m2: 0.02,
+                },
+            ));
+        }
+        for (entity, parent, child) in [(joint1, base, link1), (joint2, link1, link2)] {
+            world.entity_mut(entity).insert(Joint {
+                robot,
+                parent_link: parent,
+                child_link: child,
+                kind: JointKind::Revolute,
+                limits: JointLimits::default(),
+                axis: Vec3::Z,
+                position: 0.0,
+                velocity: 0.0,
+            });
+        }
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let dynamics = ArticulatedDynamics::new(&model, 0.02);
+        let nv = model.nv();
+        let state: Vec<f64> = vec![
+            0.3, -0.2, 0.1, 0.4, -0.3, 0.25, 0.5, -0.7, 0.2, -0.1, 0.3, 0.15, -0.25, 0.1, 0.4, -0.3,
+        ];
+        let control = vec![0.35, -0.2];
+        let analytic = dynamics
+            .analytic_derivatives(&state, &control)
+            .expect("analytic")
+            .expect("some");
+        let finite = dynamics_derivatives(&dynamics, 0, &state, &control, 1.0e-6).expect("fd");
+
+        let mut max_fx = 0.0_f64;
+        for row in 0..2 * nv {
+            for column in 0..2 * nv {
+                max_fx = max_fx.max((analytic.fx[row][column] - finite.fx[row][column]).abs());
+            }
+        }
+        let mut max_fu = 0.0_f64;
+        for row in 0..2 * nv {
+            for column in 0..nv - model.base_dof() {
+                max_fu = max_fu.max((analytic.fu[row][column] - finite.fu[row][column]).abs());
+            }
+        }
+        assert!(max_fx < 1.0e-4, "fx error {max_fx}");
+        assert!(max_fu < 1.0e-4, "fu error {max_fu}");
     }
 
     #[test]

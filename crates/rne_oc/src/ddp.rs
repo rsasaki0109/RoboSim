@@ -31,6 +31,18 @@ pub trait DiscreteDynamics {
     fn control_dim(&self) -> usize;
     /// Advances the state by one step.
     fn step(&self, state: &[f64], control: &[f64]) -> Result<Vec<f64>, OcError>;
+
+    /// Optional analytical Jacobians `(df/dx, df/du)`.
+    ///
+    /// The default returns `None` so the solver falls back to central
+    /// differences. Models with closed-form derivatives override this.
+    fn analytic_derivatives(
+        &self,
+        _state: &[f64],
+        _control: &[f64],
+    ) -> Option<Result<DynamicsDerivatives, OcError>> {
+        None
+    }
 }
 
 /// A node-dependent dynamics model for a shooting problem.
@@ -45,6 +57,20 @@ pub trait ShootingDynamics {
     fn control_dim(&self) -> usize;
     /// Advances the state at node `node` by one step.
     fn step_at(&self, node: usize, state: &[f64], control: &[f64]) -> Result<Vec<f64>, OcError>;
+
+    /// Optional analytical Jacobians `(df/dx, df/du)` at a node.
+    ///
+    /// Implementors with closed-form derivatives return them here so the solver
+    /// can skip central differences. The default returns `None`, which keeps the
+    /// finite-difference path for models that do not provide them.
+    fn analytic_derivatives(
+        &self,
+        _node: usize,
+        _state: &[f64],
+        _control: &[f64],
+    ) -> Option<Result<DynamicsDerivatives, OcError>> {
+        None
+    }
 }
 
 impl<T: DiscreteDynamics + ?Sized> ShootingDynamics for T {
@@ -58,6 +84,15 @@ impl<T: DiscreteDynamics + ?Sized> ShootingDynamics for T {
 
     fn step_at(&self, _node: usize, state: &[f64], control: &[f64]) -> Result<Vec<f64>, OcError> {
         self.step(state, control)
+    }
+
+    fn analytic_derivatives(
+        &self,
+        _node: usize,
+        state: &[f64],
+        control: &[f64],
+    ) -> Option<Result<DynamicsDerivatives, OcError>> {
+        DiscreteDynamics::analytic_derivatives(self, state, control)
     }
 }
 
@@ -470,14 +505,18 @@ pub fn solve(
         let mut failed = false;
 
         for k in (0..horizon).rev() {
-            let derivatives =
-                match dynamics_derivatives(dynamics, k, &states[k], &controls[k], config.epsilon) {
-                    Ok(derivatives) => derivatives,
-                    Err(_) => {
-                        failed = true;
-                        break;
-                    }
-                };
+            let evaluated = dynamics
+                .analytic_derivatives(k, &states[k], &controls[k])
+                .unwrap_or_else(|| {
+                    dynamics_derivatives(dynamics, k, &states[k], &controls[k], config.epsilon)
+                });
+            let derivatives = match evaluated {
+                Ok(derivatives) => derivatives,
+                Err(_) => {
+                    failed = true;
+                    break;
+                }
+            };
             let fx = derivatives.fx;
             let fu = derivatives.fu;
             let derivative = cost.running_derivatives(k, &states[k], &controls[k]);

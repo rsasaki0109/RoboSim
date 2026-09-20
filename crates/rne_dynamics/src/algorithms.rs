@@ -687,6 +687,80 @@ pub fn forward_dynamics(
     matrix.solve(&rhs).ok_or(DynamicsError::SingularMassMatrix)
 }
 
+/// Analytical gradient of the forward dynamics `qdd = M(q)^-1 (tau - h(q, qd))`.
+///
+/// The entries are built from [`mass_matrix_gradient`] and
+/// [`non_linear_effects_gradient`]: differentiating `M qdd = tau - h` gives
+/// `dM/dq_k qdd + M dqdd/dq_k = -dh/dq_k`, and the control columns are the mass
+/// matrix inverse. No finite differencing is used.
+#[allow(clippy::needless_range_loop)]
+pub fn forward_dynamics_gradient(
+    model: &ArticulatedModel,
+    q: &[f64],
+    qd: &[f64],
+    tau: &[f64],
+) -> Result<ForwardDynamicsGradient, DynamicsError> {
+    validate(model, tau, "tau")?;
+    let nv = model.nv();
+    let matrix = mass_matrix(model, q)?;
+    let acceleration = forward_dynamics(model, q, qd, tau)?;
+    let mass_gradient = mass_matrix_gradient(model, q)?;
+    let bias_gradient = non_linear_effects_gradient(model, q, qd)?;
+
+    let mut with_respect_to_q = vec![vec![0.0; nv]; nv];
+    let mut with_respect_to_qd = vec![vec![0.0; nv]; nv];
+    let mut with_respect_to_control = vec![vec![0.0; nv]; nv];
+    for k in 0..nv {
+        let mut rhs = vec![0.0; nv];
+        for row in 0..nv {
+            let mut product = 0.0;
+            for column in 0..nv {
+                product += mass_gradient[k].get(row, column) * acceleration[column];
+            }
+            rhs[row] = -bias_gradient.with_respect_to_q[k][row] - product;
+        }
+        let column = matrix
+            .solve(&rhs)
+            .ok_or(DynamicsError::SingularMassMatrix)?;
+        with_respect_to_q[k][..nv].copy_from_slice(&column[..nv]);
+
+        let rhs_qd: Vec<f64> = bias_gradient.with_respect_to_qd[k]
+            .iter()
+            .map(|value| -value)
+            .collect();
+        let column_qd = matrix
+            .solve(&rhs_qd)
+            .ok_or(DynamicsError::SingularMassMatrix)?;
+        with_respect_to_qd[k][..nv].copy_from_slice(&column_qd[..nv]);
+    }
+    // d(qdd)/dtau_j = M^-1 e_j.
+    for j in 0..nv {
+        let mut basis = vec![0.0; nv];
+        basis[j] = 1.0;
+        let column = matrix
+            .solve(&basis)
+            .ok_or(DynamicsError::SingularMassMatrix)?;
+        with_respect_to_control[j][..nv].copy_from_slice(&column[..nv]);
+    }
+
+    Ok(ForwardDynamicsGradient {
+        with_respect_to_q,
+        with_respect_to_qd,
+        with_respect_to_control,
+    })
+}
+
+/// Jacobians of the forward dynamics with respect to state and control.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForwardDynamicsGradient {
+    /// `d(qdd)/dq_k`, one vector per generalized coordinate.
+    pub with_respect_to_q: Vec<Vec<f64>>,
+    /// `d(qdd)/dqd_k`, one vector per generalized coordinate.
+    pub with_respect_to_qd: Vec<Vec<f64>>,
+    /// `d(qdd)/dtau_j`, one vector per generalized force.
+    pub with_respect_to_control: Vec<Vec<f64>>,
+}
+
 /// Center of mass of the model at configuration `q`, in world coordinates.
 pub fn center_of_mass(model: &ArticulatedModel, q: &[f64]) -> Result<Vec3, DynamicsError> {
     validate(model, q, "q")?;
@@ -1884,6 +1958,74 @@ mod tests {
                         finite_difference[component]
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn forward_dynamics_gradient_matches_finite_difference() {
+        let (world, robot) = floating_two_link_world(2.0, 1.5, 0.7, 0.5, 4.0);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let q = vec![0.3, -0.2, 0.1, 0.4, -0.3, 0.25, 0.5, -0.7];
+        let qd = vec![0.2, -0.1, 0.3, 0.15, -0.25, 0.1, 0.4, -0.3];
+        let tau = vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.35, -0.2];
+        let gradient = forward_dynamics_gradient(&model, &q, &qd, &tau).expect("gradient");
+        let nv = model.nv();
+        let h = 1.0e-6;
+
+        for k in 0..nv {
+            let mut q_plus = q.clone();
+            q_plus[k] += h;
+            let mut q_minus = q.clone();
+            q_minus[k] -= h;
+            let plus = forward_dynamics(&model, &q_plus, &qd, &tau).expect("qdd");
+            let minus = forward_dynamics(&model, &q_minus, &qd, &tau).expect("qdd");
+            for row in 0..nv {
+                let finite_difference = (plus[row] - minus[row]) / (2.0 * h);
+                let error = (gradient.with_respect_to_q[k][row] - finite_difference).abs();
+                assert!(
+                    error < 1.0e-5,
+                    "dqdd/dq {k} row {row}: {} vs {}",
+                    gradient.with_respect_to_q[k][row],
+                    finite_difference
+                );
+            }
+
+            let mut qd_plus = qd.clone();
+            qd_plus[k] += h;
+            let mut qd_minus = qd.clone();
+            qd_minus[k] -= h;
+            let plus = forward_dynamics(&model, &q, &qd_plus, &tau).expect("qdd");
+            let minus = forward_dynamics(&model, &q, &qd_minus, &tau).expect("qdd");
+            for row in 0..nv {
+                let finite_difference = (plus[row] - minus[row]) / (2.0 * h);
+                let error = (gradient.with_respect_to_qd[k][row] - finite_difference).abs();
+                assert!(
+                    error < 1.0e-5,
+                    "dqdd/dqd {k} row {row}: {} vs {}",
+                    gradient.with_respect_to_qd[k][row],
+                    finite_difference
+                );
+            }
+        }
+
+        for j in 0..nv {
+            let mut tau_plus = tau.clone();
+            tau_plus[j] += h;
+            let mut tau_minus = tau.clone();
+            tau_minus[j] -= h;
+            let plus = forward_dynamics(&model, &q, &qd, &tau_plus).expect("qdd");
+            let minus = forward_dynamics(&model, &q, &qd, &tau_minus).expect("qdd");
+            for row in 0..nv {
+                let finite_difference = (plus[row] - minus[row]) / (2.0 * h);
+                let error = (gradient.with_respect_to_control[j][row] - finite_difference).abs();
+                assert!(
+                    error < 1.0e-5,
+                    "dqdd/dtau {j} row {row}: {} vs {}",
+                    gradient.with_respect_to_control[j][row],
+                    finite_difference
+                );
             }
         }
     }
