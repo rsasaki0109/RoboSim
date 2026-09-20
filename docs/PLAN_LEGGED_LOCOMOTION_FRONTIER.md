@@ -359,6 +359,13 @@ controller.
   linearization is too poor for the merit-function line search to accept a step,
   so the Gauss-Seidel sweep remains the better engine there. The Riccati step
   needs a trust region or an exact-Hessian term before it helps on this problem.
+  A trust-region version was then implemented (step scaled into a shrinking
+  radius, accepted only on a merit decrease) and still does not beat the
+  Gauss-Seidel sweep on the G1 contact dynamics: it drives the cost down to ~565
+  but leaves a defect of ~11, because the contact linearization is too poor for
+  the Riccati step to reduce defects and the merit line search accepts
+  cost-improving steps that barely move them. A numerical exact-Hessian term or
+  an implicit contact linearization is the prerequisite for a Riccati SQP here.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
