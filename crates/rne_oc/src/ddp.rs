@@ -449,23 +449,47 @@ const MAX_PROJECTED_STATE_MAGNITUDE: f64 = 1.0e6;
 /// advanced with a zero control. Returns the feasible states and the controls
 /// actually used, or `None` only if even the initial state cannot advance.
 #[allow(clippy::needless_range_loop, clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
 fn project_feasible_rollout(
     dynamics: &dyn ShootingDynamics,
     nx: usize,
     _nu: usize,
     initial: &[f64],
+    reference_states: &[Vec<f64>],
     controls: &[Vec<f64>],
+    feedforward: &[Vec<f64>],
+    feedback: &[Vec<Vec<f64>>],
     config: &DdpConfig,
 ) -> Option<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
     let horizon = controls.len();
+    let has_policy = feedforward.len() == horizon && feedback.len() == horizon;
     let mut feasible = vec![vec![0.0; nx]; horizon + 1];
     feasible[0] = initial.to_vec();
     let mut used = vec![vec![0.0; controls[0].len()]; horizon];
     for k in 0..horizon {
-        let mut accepted: Option<Vec<f64>> = None;
+        let mut candidates: Vec<Vec<f64>> = Vec::new();
+        if has_policy {
+            // Roll out the DDP control law `u = u* + k + K (x - x*)`: it tracks
+            // the reference trajectory, so the rollout stays near it instead of
+            // diverging the way an open-loop replay of the (infeasible-state)
+            // controls does.
+            let policy: Vec<f64> = (0..controls[k].len())
+                .map(|j| {
+                    let correction: f64 = (0..nx)
+                        .map(|i| feedback[k][j][i] * (feasible[k][i] - reference_states[k][i]))
+                        .sum();
+                    controls[k][j] + feedforward[k][j] + correction
+                })
+                .collect();
+            candidates.push(policy);
+        }
+        // Fall back to damped open-loop controls.
         for factor in [1.0, 0.5, 0.25, 0.125, 0.05] {
-            let mut trial: Vec<f64> = controls[k].iter().map(|value| value * factor).collect();
-            trial = clamp_control(&trial, config);
+            candidates.push(controls[k].iter().map(|value| value * factor).collect());
+        }
+        let mut accepted: Option<Vec<f64>> = None;
+        for candidate in candidates {
+            let trial = clamp_control(&candidate, config);
             if let Ok(next) = dynamics.step_at(k, &feasible[k], &trial) {
                 // Reject a state that has already exploded: a finite but
                 // enormous state (for example 1e157 from an unstable open-loop
@@ -569,6 +593,12 @@ pub fn solve(
     }
     let mut converged = false;
     let mut iterations = 0;
+    // The most recent successful feedback policy, kept so the FDDP feasibility
+    // projection can roll out the policy instead of replaying controls
+    // open-loop, which diverges when the controls are tuned to infeasible
+    // states.
+    let mut last_feedforward: Vec<Vec<f64>> = Vec::new();
+    let mut last_feedback: Vec<Vec<Vec<f64>>> = Vec::new();
 
     for iteration in 0..config.max_iterations {
         iterations = iteration + 1;
@@ -632,6 +662,9 @@ pub fn solve(
             }
             continue;
         }
+        // The backward pass produced a usable policy around the current nodes.
+        last_feedforward = feedforward.clone();
+        last_feedback = feedback.clone();
 
         let gaps: Vec<Vec<f64>> = if config.keep_gaps_open {
             let mut gaps = Vec::with_capacity(horizon);
@@ -737,9 +770,17 @@ pub fn solve(
     // the projection damps a control until the step stays finite, which keeps
     // the warm start feasible instead of discarding it.
     if config.keep_gaps_open {
-        if let Some((feasible, projected_controls)) =
-            project_feasible_rollout(dynamics, nx, nu, &states[0], &controls, config)
-        {
+        if let Some((feasible, projected_controls)) = project_feasible_rollout(
+            dynamics,
+            nx,
+            nu,
+            &states[0],
+            &states,
+            &controls,
+            &last_feedforward,
+            &last_feedback,
+            config,
+        ) {
             let mut polish = config.clone();
             polish.keep_gaps_open = false;
             match solve(dynamics, cost, &feasible, &projected_controls, &polish) {
@@ -912,9 +953,18 @@ mod tests {
     fn projection_damps_a_diverging_control() {
         let dynamics = ExplodingDynamics;
         let controls = vec![vec![1.0]; 3];
-        let (states, used) =
-            project_feasible_rollout(&dynamics, 1, 1, &[0.0], &controls, &DdpConfig::default())
-                .expect("projection");
+        let (states, used) = project_feasible_rollout(
+            &dynamics,
+            1,
+            1,
+            &[0.0],
+            &[],
+            &controls,
+            &[],
+            &[],
+            &DdpConfig::default(),
+        )
+        .expect("projection");
         // The raw control explodes, so the projection damps it to 0.5 and keeps
         // every state finite and small.
         for control in &used {

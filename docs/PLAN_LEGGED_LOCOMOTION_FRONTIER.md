@@ -299,8 +299,11 @@ controller.
   kinematic warm start. With the landing phase in the horizon the FDDP solve
   itself diverges (the state reaches ~5e4 by node 11) and the feasibility
   projection, now bounded by `MAX_PROJECTED_STATE_MAGNITUDE`, correctly refuses
-  to return it. A hard impact on a 46-step 29-DoF horizon needs a dedicated
-  non-smooth or multiple-shooting solver.
+  to return it. Rolling out the FDDP feedback policy instead of the controls
+  does not help either: the reference trajectory is itself infeasible, so the
+  linearization around it makes the policy amplify the deviation (the rollout
+  reaches ~3e4 by node 6). A hard impact on a 46-step 29-DoF horizon needs a
+  dedicated non-smooth or multiple-shooting solver.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic

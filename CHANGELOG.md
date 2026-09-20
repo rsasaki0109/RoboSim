@@ -83,7 +83,10 @@ All notable changes to Robot Native Engine are documented in this file.
   line search, so the solver is driven toward feasibility instead of stalling at
   an infeasible local minimum. The feasibility projection is also bounded
   (`MAX_PROJECTED_STATE_MAGNITUDE`) so an unstable open-loop replay is damped
-  instead of fabricating a warm start.
+  instead of fabricating a warm start. The projection also rolls out the last
+  successful DDP feedback policy when one is available, falling back to damped
+  open-loop controls, which is more stable than a pure replay for a warm start
+  that is close to feasible.
 
 ### Fixed
 
