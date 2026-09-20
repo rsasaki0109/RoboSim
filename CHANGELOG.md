@@ -100,6 +100,14 @@ All notable changes to Robot Native Engine are documented in this file.
   so a push or landing can command a spin rate through the contact reaction. The
   existing `solve` API is unchanged. Verified with a task that tracks a
   commanded angular momentum rate.
+- `rne_oc::solve_multiple_shooting` adds a direct multiple-shooting solver: the
+  whole state trajectory is a decision variable and the dynamics enters as a
+  defect constraint, corrected by Gauss-Seidel sweeps of local Gauss-Newton
+  steps. An infeasible warm start is repaired by moving the states instead of
+  replaying unstable controls, which single-shooting DDP cannot do. Verified on
+  a deliberately inconsistent double-integrator warm start, and on the G1
+  backflip it reaches a full 6.28 rad flip with a dynamics gap of ~0.12, an
+  order of magnitude below the FDDP single-shooting gap.
 - `rne_oc::ContactSequenceDynamics::new_with_substeps` integrates each step with
   a configurable number of inner steps, holding the control over the step. This
   stabilizes the stiff contact modes that a single semi-implicit Euler step at

@@ -19,6 +19,7 @@ pub mod ddp;
 pub mod implicit;
 pub mod limits;
 pub mod matrix;
+pub mod multiple_shooting;
 
 pub use articulated::ArticulatedDynamics;
 pub use constrained::{ConstrainedArticulatedDynamics, ContactPhase, ContactSequenceDynamics};
@@ -29,3 +30,4 @@ pub use ddp::{
 };
 pub use implicit::{CompliantContactModel, ContactImplicitArticulatedDynamics};
 pub use limits::ActuatorLimitCost;
+pub use multiple_shooting::{max_defect, solve_multiple_shooting, MultipleShootingConfig};
