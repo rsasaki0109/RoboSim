@@ -366,6 +366,13 @@ controller.
   the Riccati step to reduce defects and the merit line search accepts
   cost-improving steps that barely move them. A numerical exact-Hessian term or
   an implicit contact linearization is the prerequisite for a Riccati SQP here.
+  A compliant (penalty) contact model with the multiple-shooting solver was also
+  tried, hoping the smooth force law would help; its high stiffness makes the
+  Gauss-Seidel sweep worse (gap ~24), so the hard-contact sequence with the
+  Gauss-Seidel multiple shooting (gap ~0.18) remains the best result. The G1
+  backflip is therefore at a research boundary: below ~0.2 requires an implicit
+  contact formulation or an exact-Hessian/FD second derivative that this solver
+  does not yet have.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
