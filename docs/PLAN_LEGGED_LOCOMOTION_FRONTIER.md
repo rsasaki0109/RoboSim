@@ -352,7 +352,12 @@ controller.
   remaining work is closing the gap to the 1e-4 level: the Gauss-Seidel sweep
   is the bottleneck, so the next step is a banded SQP or a Riccati-based
   multiple-shooting solve that exploits the block-tridiagonal structure and
-  converges in a handful of Newton steps.
+  converges in a handful of Newton steps. A Riccati SQP step (backward pass with
+  the defect as an affine forcing, then a projected forward pass) was implemented
+  and passes the unit tests, but on the stiff 29-DoF G1 contact dynamics the
+  linearization is too poor for the merit-function line search to accept a step,
+  so the Gauss-Seidel sweep remains the better engine there. The Riccati step
+  needs a trust region or an exact-Hessian term before it helps on this problem.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
