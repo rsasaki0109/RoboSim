@@ -1,9 +1,9 @@
 //! Contact-constrained articulated dynamics and contact sequences.
 
-use crate::ddp::{DiscreteDynamics, OcError, ShootingDynamics};
+use crate::ddp::{DiscreteDynamics, DynamicsDerivatives, OcError, ShootingDynamics};
 use rne_dynamics::{
-    constrained_forward_dynamics, impulse_velocity, integrate_configuration, ArticulatedModel,
-    ContactSpec,
+    constrained_forward_dynamics, impulse_velocity, impulse_velocity_gradient,
+    integrate_configuration, ArticulatedModel, ContactSpec,
 };
 
 fn integrate(
@@ -153,6 +153,95 @@ impl ShootingDynamics for ContactSequenceDynamics<'_> {
         }
         Ok(next)
     }
+
+    /// Analytical Jacobians with an exact impulse reset.
+    ///
+    /// The smooth integration is central-differenced and the contact-addition
+    /// reset is composed on top through
+    /// [`rne_dynamics::impulse_velocity_gradient`]. Differencing across the
+    /// reset is what makes the transition non-smooth, so this keeps the
+    /// Jacobian exact at an impact node.
+    #[allow(clippy::needless_range_loop)]
+    fn analytic_derivatives(
+        &self,
+        node: usize,
+        state: &[f64],
+        control: &[f64],
+    ) -> Option<Result<DynamicsDerivatives, OcError>> {
+        let contacts = self.contacts_per_node.get(node)?;
+        let nv = self.model.nv();
+        let nx = 2 * nv;
+        let nu = nv - self.model.base_dof();
+        if state.len() != nx || control.len() != nu {
+            return Some(Err(OcError::Dimension("contact sequence state or control")));
+        }
+        let epsilon = 1.0e-6;
+        let evaluate = |state: &[f64], control: &[f64]| {
+            integrate(self.model, self.step_time_s, state, control, contacts)
+        };
+        let mut fx = vec![vec![0.0; nx]; nx];
+        let mut fu = vec![vec![0.0; nu]; nx];
+        for column in 0..nx {
+            let mut plus = state.to_vec();
+            plus[column] += epsilon;
+            let mut minus = state.to_vec();
+            minus[column] -= epsilon;
+            let (plus_value, minus_value) =
+                match (evaluate(&plus, control), evaluate(&minus, control)) {
+                    (Ok(plus_value), Ok(minus_value)) => (plus_value, minus_value),
+                    _ => return Some(Err(OcError::Dynamics)),
+                };
+            for row in 0..nx {
+                fx[row][column] = (plus_value[row] - minus_value[row]) / (2.0 * epsilon);
+            }
+        }
+        for column in 0..nu {
+            let mut plus = control.to_vec();
+            plus[column] += epsilon;
+            let mut minus = control.to_vec();
+            minus[column] -= epsilon;
+            let (plus_value, minus_value) = match (evaluate(state, &plus), evaluate(state, &minus))
+            {
+                (Ok(plus_value), Ok(minus_value)) => (plus_value, minus_value),
+                _ => return Some(Err(OcError::Dynamics)),
+            };
+            for row in 0..nx {
+                fu[row][column] = (plus_value[row] - minus_value[row]) / (2.0 * epsilon);
+            }
+        }
+        if let Some(reset) = &self.reset_per_node[node] {
+            let next = evaluate(state, control).ok()?;
+            let (q, _) = next.split_at(nv);
+            let reset_jacobian = impulse_velocity_gradient(self.model, q, reset).ok()?;
+            // The reset leaves positions and applies `P` to the velocity rows.
+            // Read the original velocity rows before overwriting them.
+            let velocity_rows: Vec<Vec<f64>> = (0..nv)
+                .map(|row| (0..nx).map(|column| fx[nv + row][column]).collect())
+                .collect();
+            for column in 0..nx {
+                for row in 0..nv {
+                    let value: f64 = (0..nv)
+                        .map(|index| reset_jacobian.get(row, index) * velocity_rows[index][column])
+                        .sum();
+                    fx[nv + row][column] = value;
+                }
+            }
+            let velocity_rows_u: Vec<Vec<f64>> = (0..nv)
+                .map(|row| (0..nu).map(|column| fu[nv + row][column]).collect())
+                .collect();
+            for column in 0..nu {
+                for row in 0..nv {
+                    let value: f64 = (0..nv)
+                        .map(|index| {
+                            reset_jacobian.get(row, index) * velocity_rows_u[index][column]
+                        })
+                        .sum();
+                    fu[nv + row][column] = value;
+                }
+            }
+        }
+        Some(Ok(DynamicsDerivatives { fx, fu }))
+    }
 }
 
 #[cfg(test)]
@@ -263,6 +352,43 @@ mod tests {
                 assert!(velocity.abs() < 1.0e-6, "contact velocity {velocity}");
             }
         }
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn impact_node_jacobian_matches_finite_difference() {
+        use crate::ddp::dynamics_derivatives;
+        let (_world, model, base) = floating_body();
+        let phases = [
+            ContactPhase {
+                contacts: Vec::new(),
+                steps: 5,
+            },
+            ContactPhase {
+                contacts: contacts(base),
+                steps: 5,
+            },
+        ];
+        let dynamics = ContactSequenceDynamics::new(&model, 0.01, &phases);
+        // Node 4 is the last free node; its step applies the impact reset.
+        let mut state = vec![0.0; 12];
+        state[1] = 0.2;
+        state[7] = -2.0;
+        for node in 0..4 {
+            state = dynamics.step_at(node, &state, &[]).expect("free step");
+        }
+        let analytic = dynamics
+            .analytic_derivatives(4, &state, &[])
+            .expect("analytic")
+            .expect("some");
+        let finite = dynamics_derivatives(&dynamics, 4, &state, &[], 1.0e-7).expect("fd");
+        let mut max_fx = 0.0_f64;
+        for row in 0..12 {
+            for column in 0..12 {
+                max_fx = max_fx.max((analytic.fx[row][column] - finite.fx[row][column]).abs());
+            }
+        }
+        assert!(max_fx < 1.0e-3, "impact fx error {max_fx}");
     }
 
     #[test]

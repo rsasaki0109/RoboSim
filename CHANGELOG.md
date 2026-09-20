@@ -77,6 +77,11 @@ All notable changes to Robot Native Engine are documented in this file.
   infeasible) state guess, and falls back to the caller's trajectory if the
   rollout is non-finite. Previously a cheap but infeasible warm start made the
   line search unable to improve and the solver returned it.
+- `rne_oc::ContactSequenceDynamics` now provides analytic Jacobians that compose
+  the smooth integration with the exact impact reset
+  (`rne_dynamics::impulse_velocity_gradient`) instead of differencing across the
+  non-smooth reset. Verified against the finite-difference path at an impact
+  node.
 - `rne_dynamics::impulse_velocity_gradient` returns the Jacobian of the impact
   velocity reset with respect to the pre-impact velocity, the transition
   Jacobian an impulse-aware solver needs at a contact-addition node. Verified
