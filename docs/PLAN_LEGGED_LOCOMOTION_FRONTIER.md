@@ -256,10 +256,12 @@ controller.
   boundary, dropping the gap to ~1.8 and moving it to the terminal node on a
   wrist joint. An earlier attempt that switched from sole to toe at crouch
   introduced a spurious `impulse_velocity` reset and moved the gap to node 0,
-  so the contact set must stay constant until takeoff. The remaining blocker is
-  the terminal arm pose and the absence of a flight-phase controller
-  (`rne_wbc` rejects empty contacts). Landing-impact resets for contact
-  additions work through `ContactSequenceDynamics`'s `impulse_velocity`.
+  so the contact set must stay constant until takeoff. The residual gap sits at
+  the terminal transition on a wrist velocity and is insensitive to the terminal
+  weight, so it is FDDP not fully closing its gaps rather than a cost tradeoff,
+  together with the absence of a flight-phase controller (`rne_wbc` rejects
+  empty contacts). Landing-impact resets for contact additions work through
+  `ContactSequenceDynamics`'s `impulse_velocity`.
   `rne_dynamics::centroidal_momentum` exists to shape the aerial rotation.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical

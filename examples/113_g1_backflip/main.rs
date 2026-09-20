@@ -252,8 +252,14 @@ fn main() {
     if !no_flip {
         terminal_weights[5] = 1.0e3;
     }
-    for dof in 0..nv {
-        terminal_weights[nv + dof] = 40.0;
+    for index in 0..6 {
+        terminal_weights[nv + index] = 40.0;
+    }
+    for (dof, name) in joint_names.iter().enumerate() {
+        // The wrist joints have low torque authority, so a hard zero terminal
+        // velocity is not achievable in the last step and leaves a residual
+        // gap. Ask for a soft stop there and a firm stop on the body.
+        terminal_weights[nv + 6 + dof] = if name.contains("wrist") { 5.0 } else { 40.0 };
     }
     let mut terminal = QuadraticCost::new(zero.clone(), vec![0.0; control_dim], terminal_weights);
     let mut terminal_reference = vec![0.0; 2 * nv];
