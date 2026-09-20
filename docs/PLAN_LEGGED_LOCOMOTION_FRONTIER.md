@@ -312,6 +312,14 @@ controller.
   spin is carried into the landing and the joint blend is a smoothstep, but it
   does not close and the feasibility projection still diverges, so a
   multiple-shooting or otherwise non-smooth-aware solver is still required.
+  A strong `gap_weight` on the smooth model reaches a near-feasible trajectory
+  (gap ~1.4e-3), and dropping the control bounds or refining the step to 0.01 s
+  both help (the gap falls to ~0.1 and ~0.7 respectively), but the feasibility
+  rollout still diverges. The replay is exponentially unstable: a 0.1 defect
+  grows to ~1e4 within a few nodes, so the stored open-gap trajectory cannot be
+  reproduced by any open-loop or feedback rollout. The remaining work is a
+  multiple-shooting solver with an implicit or much finer contact integration,
+  not more parameter tuning.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
