@@ -100,6 +100,11 @@ All notable changes to Robot Native Engine are documented in this file.
   so a push or landing can command a spin rate through the contact reaction. The
   existing `solve` API is unchanged. Verified with a task that tracks a
   commanded angular momentum rate.
+- `rne_oc::ContactSequenceDynamics::new_without_impact` builds a contact sequence
+  without the impulsive velocity reset at contact additions, so the regularized
+  constrained dynamics absorbs the contact and the transition is smooth for a
+  trajectory optimizer. The default `new` keeps the physically correct hard
+  impact.
 - `rne_dynamics::centroidal_momentum_matrix` returns the `6 x nv` matrix
   `A(q)` with `L = A(q) qd`, and `centroidal_momentum_bias` returns
   `(dL/dq) qd` so `Ldot = A(q) qdd + c`. Both are verified against finite

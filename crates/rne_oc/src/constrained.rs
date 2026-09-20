@@ -85,9 +85,13 @@ pub struct ContactPhase {
 
 /// A node-dependent dynamics model over a contact sequence.
 ///
-/// Each node uses the active contacts of its phase. Impact reset maps at phase
-/// boundaries are not applied yet, so a sequence must be initialized with a
-/// configuration whose velocities are consistent with the new contact set.
+/// Each node uses the active contacts of its phase. When a node adds contacts,
+/// the impulsive velocity reset projects the pre-impact velocity onto the new
+/// contact set by default. This is the physically correct hard impact, but it
+/// makes the transition non-smooth, which trajectory optimization handles
+/// poorly. [`Self::new_without_impact`] disables the reset so the regularized
+/// constrained dynamics at the next node absorbs the contact instead, which is
+/// a common smoothing choice for planning.
 pub struct ContactSequenceDynamics<'a> {
     /// Model to integrate.
     pub model: &'a ArticulatedModel,
@@ -95,11 +99,31 @@ pub struct ContactSequenceDynamics<'a> {
     pub step_time_s: f64,
     contacts_per_node: Vec<Vec<ContactSpec>>,
     reset_per_node: Vec<Option<Vec<ContactSpec>>>,
+    impact_reset: bool,
 }
 
 impl<'a> ContactSequenceDynamics<'a> {
     /// Expands a phase list into a per-node contact schedule.
     pub fn new(model: &'a ArticulatedModel, step_time_s: f64, phases: &[ContactPhase]) -> Self {
+        Self::build(model, step_time_s, phases, true)
+    }
+
+    /// Like [`Self::new`] but without the impulsive velocity reset at contact
+    /// additions, so the transition is smooth for a trajectory optimizer.
+    pub fn new_without_impact(
+        model: &'a ArticulatedModel,
+        step_time_s: f64,
+        phases: &[ContactPhase],
+    ) -> Self {
+        Self::build(model, step_time_s, phases, false)
+    }
+
+    fn build(
+        model: &'a ArticulatedModel,
+        step_time_s: f64,
+        phases: &[ContactPhase],
+        impact_reset: bool,
+    ) -> Self {
         let mut contacts_per_node = Vec::new();
         for phase in phases {
             for _ in 0..phase.steps {
@@ -120,6 +144,7 @@ impl<'a> ContactSequenceDynamics<'a> {
             step_time_s,
             contacts_per_node,
             reset_per_node,
+            impact_reset,
         }
     }
 
@@ -144,12 +169,14 @@ impl ShootingDynamics for ContactSequenceDynamics<'_> {
             .get(node)
             .ok_or(OcError::Dimension("contact sequence node"))?;
         let mut next = integrate(self.model, self.step_time_s, state, control, contacts)?;
-        if let Some(reset) = &self.reset_per_node[node] {
-            let nv = self.model.nv();
-            let (q, qd) = next.split_at(nv);
-            let (post_impact, _) =
-                impulse_velocity(self.model, q, qd, reset).map_err(|_| OcError::Dynamics)?;
-            next[nv..].copy_from_slice(&post_impact);
+        if self.impact_reset {
+            if let Some(reset) = &self.reset_per_node[node] {
+                let nv = self.model.nv();
+                let (q, qd) = next.split_at(nv);
+                let (post_impact, _) =
+                    impulse_velocity(self.model, q, qd, reset).map_err(|_| OcError::Dynamics)?;
+                next[nv..].copy_from_slice(&post_impact);
+            }
         }
         Ok(next)
     }
@@ -208,6 +235,9 @@ impl ShootingDynamics for ContactSequenceDynamics<'_> {
             for row in 0..nx {
                 fu[row][column] = (plus_value[row] - minus_value[row]) / (2.0 * epsilon);
             }
+        }
+        if !self.impact_reset {
+            return Some(Ok(DynamicsDerivatives { fx, fu }));
         }
         if let Some(reset) = &self.reset_per_node[node] {
             let next = evaluate(state, control).ok()?;
@@ -352,6 +382,41 @@ mod tests {
                 assert!(velocity.abs() < 1.0e-6, "contact velocity {velocity}");
             }
         }
+    }
+
+    #[test]
+    fn without_impact_the_transition_stays_free() {
+        let (_world, model, base) = floating_body();
+        let phases = [
+            ContactPhase {
+                contacts: Vec::new(),
+                steps: 5,
+            },
+            ContactPhase {
+                contacts: contacts(base),
+                steps: 5,
+            },
+        ];
+        let with_impact = ContactSequenceDynamics::new(&model, 0.01, &phases);
+        let without_impact = ContactSequenceDynamics::new_without_impact(&model, 0.01, &phases);
+        let mut state = vec![0.0; 12];
+        state[1] = 0.2;
+        state[7] = -2.0;
+        for node in 0..4 {
+            state = without_impact
+                .step_at(node, &state, &[])
+                .expect("free step");
+        }
+        let with = with_impact.step_at(4, &state, &[]).expect("impact step");
+        let without = without_impact.step_at(4, &state, &[]).expect("smooth step");
+        // The hard impact arrests the downward velocity; the smooth transition
+        // leaves it free so the constrained node can absorb it over the step.
+        assert!(
+            with[7] > without[7],
+            "reset {} did not arrest more than smooth {}",
+            with[7],
+            without[7]
+        );
     }
 
     #[test]

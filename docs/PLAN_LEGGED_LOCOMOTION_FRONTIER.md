@@ -304,6 +304,14 @@ controller.
   linearization around it makes the policy amplify the deviation (the rollout
   reaches ~3e4 by node 6). A hard impact on a 46-step 29-DoF horizon needs a
   dedicated non-smooth or multiple-shooting solver.
+- **Smooth landing via `ContactSequenceDynamics::new_without_impact`.** Dropping
+  the impulsive reset and letting the regularized constrained dynamics absorb
+  the contact makes the objective far better: with a landing phase the cost
+  falls to ~65, the jump is 0.23 m, the flip is a full 6.28 rad, and the peak
+  torque is ~1.1 Nm. The transition gap falls from ~57 to ~3.9 once the incoming
+  spin is carried into the landing and the joint blend is a smoothstep, but it
+  does not close and the feasibility projection still diverges, so a
+  multiple-shooting or otherwise non-smooth-aware solver is still required.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
