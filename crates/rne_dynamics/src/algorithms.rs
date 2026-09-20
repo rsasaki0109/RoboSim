@@ -1082,6 +1082,188 @@ pub fn xup_derivatives(
     Ok(result)
 }
 
+fn cross3(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3::new(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x,
+    )
+}
+
+/// Second derivative of the body-twist pose derivative with respect to `q`.
+///
+/// Entry `[link][k][l]` is `d²(twist[link][k])/dq_l`, where `twist[link][k]` is
+/// the quantity returned by [`link_pose_body_twist_derivatives`]. It is the
+/// building block for [`xup_hessian`] and is kept private because it is only
+/// meaningful as the derivative of that specific chart.
+#[allow(clippy::needless_range_loop)]
+fn link_pose_body_twist_hessian(
+    model: &ArticulatedModel,
+    q: &[f64],
+) -> Result<Vec<Vec<Vec<SpatialVec>>>, DynamicsError> {
+    validate(model, q, "q")?;
+    let kinematics = model.kinematic.forward_kinematics(q)?;
+    let transforms = kinematics.transforms();
+    let twists = link_pose_body_twist_derivatives(model, q)?;
+    let base = model.base_dof();
+    let nv = model.nv();
+    let link_count = model.link_count();
+    let mut result: Vec<Vec<Vec<SpatialVec>>> =
+        vec![vec![vec![[0.0; 6]; nv]; nv]; link_count];
+
+    if base == 6 {
+        let rotation = transforms[0].rotation;
+        let inverse_rotation = rotation.conjugate();
+        let (roll, pitch) = (q[3], q[4]);
+        let body_angular = [
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, roll.cos(), -roll.sin()),
+            Vec3::new(
+                -pitch.sin(),
+                pitch.cos() * roll.sin(),
+                pitch.cos() * roll.cos(),
+            ),
+        ];
+        // `d(R^T e_k)/dq_m = -omega_m x (R^T e_k)` for the rotation columns.
+        for k in 0..3 {
+            let world_axis = match k {
+                0 => Vec3::X,
+                1 => Vec3::Y,
+                _ => Vec3::Z,
+            };
+            let body_axis = inverse_rotation * world_axis;
+            for (offset, omega) in body_angular.iter().enumerate() {
+                let m = 3 + offset;
+                let crossed = cross3(*omega, body_axis);
+                let mut value = [0.0; 6];
+                value[0] = -crossed.x;
+                value[1] = -crossed.y;
+                value[2] = -crossed.z;
+                result[0][k][m] = value;
+                result[0][m][k] = value;
+            }
+        }
+        // Second derivatives of the ZYX Euler body angular-velocity columns.
+        let derivatives = [
+            (4_usize, 3_usize, Vec3::new(0.0, -roll.sin(), -roll.cos())),
+            (
+                5_usize,
+                3_usize,
+                Vec3::new(0.0, pitch.cos() * roll.cos(), -pitch.cos() * roll.sin()),
+            ),
+            (
+                5_usize,
+                4_usize,
+                Vec3::new(
+                    -pitch.cos(),
+                    -pitch.sin() * roll.sin(),
+                    -pitch.sin() * roll.cos(),
+                ),
+            ),
+        ];
+        for (row, column, value) in derivatives {
+            let mut entry = [0.0; 6];
+            entry[3] = value.x;
+            entry[4] = value.y;
+            entry[5] = value.z;
+            result[0][row][column] = entry;
+            result[0][column][row] = entry;
+        }
+    }
+
+    for index in 1..link_count {
+        let parent = model.links[index]
+            .parent
+            .expect("non-root link has a parent");
+        let child_in_parent =
+            inverse_transform(&transforms[parent]).mul_transform(&transforms[index]);
+        let adjoint_inverse_child = adjoint(&inverse_transform(&child_in_parent));
+        let joint_dof = model.links[index]
+            .joint
+            .as_ref()
+            .and_then(|joint| joint.dof);
+        // `d(Ad_{c^-1})/dq_joint = -ad_{S_joint} Ad_{c^-1}`; the relative
+        // transform depends on no other coordinate.
+        let joint_adjoint = joint_dof.map(|dof| {
+            let subspace = model.dofs[dof].s;
+            negate_mat6(&mat6_mul(
+                &motion_cross_matrix(&subspace),
+                &adjoint_inverse_child,
+            ))
+        });
+        for k in 0..nv {
+            for l in 0..nv {
+                let mut value = mat6_mul_vec(&adjoint_inverse_child, &result[parent][k][l]);
+                if Some(l) == joint_dof {
+                    if let Some(adjoint_gradient) = &joint_adjoint {
+                        value = add6(
+                            &value,
+                            &mat6_mul_vec(adjoint_gradient, &twists[parent][k]),
+                        );
+                    }
+                }
+                result[index][k][l] = value;
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Second derivative of the child-in-parent motion transform `xup`.
+///
+/// Entry `[link][k][l]` is `d²(xup[link])/dq_k dq_l`, the exact derivative of
+/// [`xup_derivatives`]. It is the third-order kinematic input needed for an
+/// exact Hessian of the mass matrix and of the contact constraints.
+#[allow(clippy::needless_range_loop)]
+pub fn xup_hessian(
+    model: &ArticulatedModel,
+    q: &[f64],
+) -> Result<Vec<Vec<Vec<Mat6>>>, DynamicsError> {
+    validate(model, q, "q")?;
+    let kinematics = model.kinematic.forward_kinematics(q)?;
+    let transforms = kinematics.transforms();
+    let twists = link_pose_body_twist_derivatives(model, q)?;
+    let twist_hessian = link_pose_body_twist_hessian(model, q)?;
+    let xup_first = xup_derivatives(model, q)?;
+    let nv = model.nv();
+    let link_count = model.link_count();
+    let mut result: Vec<Vec<Vec<Mat6>>> = vec![vec![vec![mat6_zero(); nv]; nv]; link_count];
+
+    for index in 1..link_count {
+        let parent = model.links[index]
+            .parent
+            .expect("non-root link has a parent");
+        let child_in_parent =
+            inverse_transform(&transforms[parent]).mul_transform(&transforms[index]);
+        let xup = motion_transform(&inverse_transform(&child_in_parent));
+        for k in 0..nv {
+            // Relative body twist `w_k = T_k - Ad_{M^-1} T_parent_k`.
+            let conveyed = mat6_mul_vec(&xup, &twists[parent][k]);
+            let mut relative = twists[index][k];
+            for component in 0..6 {
+                relative[component] -= conveyed[component];
+            }
+            let relative_cross = motion_cross_matrix(&relative);
+            for l in 0..nv {
+                // `dw_k/dq_l = T'_kl - xup_l T_parent_k - xup T'_parent_kl`.
+                let mut derivative = twist_hessian[index][k][l];
+                let from_xup = mat6_mul_vec(&xup_first[index][l], &twists[parent][k]);
+                let from_parent = mat6_mul_vec(&xup, &twist_hessian[parent][k][l]);
+                for component in 0..6 {
+                    derivative[component] -= from_xup[component] + from_parent[component];
+                }
+                // `xup_kl = -ad_{dw/dq_l} xup - ad_{w_k} xup_l`.
+                let first = mat6_mul(&motion_cross_matrix(&derivative), &xup);
+                let second = mat6_mul(&relative_cross, &xup_first[index][l]);
+                result[index][k][l] = negate_mat6(&mat6_add(&first, &second));
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 /// The `6x6` motion cross-product matrix `ad_v` such that `ad_v m =
 /// cross_motion(v, m)`.
 fn motion_cross_matrix(v: &SpatialVec) -> Mat6 {
@@ -2784,5 +2966,97 @@ mod tests {
         assert!(acceleration.y.abs() < 1.0e-10);
         assert!(acceleration.z.abs() < 1.0e-10);
         assert_relative_eq!(link1.angular_velocity_world_rad_s.z, 2.0, epsilon = 1.0e-10);
+    }
+
+    fn floating_chain_world() -> (World, rne_ecs::Entity) {
+        let mut world = World::new();
+        let robot = spawn_named(&mut world, "robot");
+        let base = spawn_named(&mut world, "base");
+        let link1 = spawn_named(&mut world, "link1");
+        let joint1 = spawn_named(&mut world, "joint1");
+        world.entity_mut(robot).insert(Robot {
+            robot_id: RobotId::new_v4(),
+            model_name: "floating_chain".into(),
+            base_link: base,
+        });
+        world.entity_mut(base).insert((
+            Link {
+                robot,
+                name: "base".into(),
+            },
+            Transform3::IDENTITY,
+            FloatingBase,
+            RigidBody {
+                mass_kg: 3.0,
+                ..RigidBody::default()
+            },
+            RigidBodyInertia {
+                center_of_mass_local_m: Vec3::ZERO,
+                ixx_kg_m2: 0.1,
+                ixy_kg_m2: 0.0,
+                ixz_kg_m2: 0.0,
+                iyy_kg_m2: 0.1,
+                iyz_kg_m2: 0.0,
+                izz_kg_m2: 0.1,
+            },
+        ));
+        world.entity_mut(link1).insert((
+            Link {
+                robot,
+                name: "link1".into(),
+            },
+            Transform3::from_translation_rotation(Vec3::new(0.0, -0.2, 0.0), Quat::IDENTITY),
+            RigidBody {
+                mass_kg: 1.0,
+                ..RigidBody::default()
+            },
+            point_mass_inertia(Vec3::new(0.2, 0.0, 0.0)),
+        ));
+        world.entity_mut(joint1).insert(joint(robot, base, link1));
+        (world, robot)
+    }
+
+    fn assert_xup_hessian(model: &ArticulatedModel, q: &[f64]) {
+        let nv = model.nv();
+        let hessian = xup_hessian(model, q).expect("hessian");
+        let epsilon = 1.0e-5;
+        for link in 0..model.link_count() {
+            for k in 0..nv {
+                for l in 0..nv {
+                    let mut plus = q.to_vec();
+                    plus[l] += epsilon;
+                    let mut minus = q.to_vec();
+                    minus[l] -= epsilon;
+                    let plus_d = xup_derivatives(model, &plus).expect("plus");
+                    let minus_d = xup_derivatives(model, &minus).expect("minus");
+                    for row in 0..6 {
+                        for col in 0..6 {
+                            let fd = (plus_d[link][k][row][col] - minus_d[link][k][row][col])
+                                / (2.0 * epsilon);
+                            assert_relative_eq!(
+                                hessian[link][k][l][row][col],
+                                fd,
+                                epsilon = 2.0e-4,
+                                max_relative = 2.0e-4
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn xup_hessian_matches_finite_difference_on_a_fixed_chain() {
+        let (world, robot) = two_link_world(2.0, 1.5, 0.7, 0.5);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        assert_xup_hessian(&model, &[0.4, -0.7]);
+    }
+
+    #[test]
+    fn xup_hessian_matches_finite_difference_on_a_floating_chain() {
+        let (world, robot) = floating_chain_world();
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        assert_xup_hessian(&model, &[0.3, 0.2, -0.1, 0.5, -0.4, 0.9, 0.6]);
     }
 }

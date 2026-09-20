@@ -28,6 +28,13 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_dynamics::algorithms::xup_hessian` computes the exact second derivative
+  of the child-in-parent motion transform with respect to the configuration
+  (`d²(xup)/dq_k dq_l`), the third-order kinematic input needed for an exact
+  Hessian of the mass matrix and of the contact constraints. It is verified
+  against central differences of `xup_derivatives` on both a fixed and a
+  floating chain.
+
 - `ContactImplicitArticulatedDynamics::with_substeps` splits each outer step into
   explicit sub-steps so a physically stiff compliant-contact law stays stable at
   the 30 ms planning step (a single step diverges above `k ~ 1e5`). Example 115
