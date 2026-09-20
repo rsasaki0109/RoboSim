@@ -350,9 +350,10 @@ controller.
   with cost 577, a 6.10 rad flip, a 0.15 m jump, and a 98 Nm peak torque), but
   a stronger penalty makes the gap worse because the sweeps roll back. The
   remaining work is closing the gap to the 1e-4 level: the Gauss-Seidel sweep
-  is the bottleneck, so the next step is a banded SQP or a Riccati-based
-  multiple-shooting solve that exploits the block-tridiagonal structure and
-  converges in a handful of Newton steps. A Riccati SQP step (backward pass with
+  is the bottleneck, and 2500 sweeps give the same gap as 1000, so the
+  augmented-Lagrangian sweep has plateaued at ~0.18. The next step is a banded
+  SQP or a Riccati-based multiple-shooting solve that exploits the
+  block-tridiagonal structure and converges in a handful of Newton steps. A Riccati SQP step (backward pass with
   the defect as an affine forcing, then a projected forward pass) was implemented
   and passes the unit tests, but on the stiff 29-DoF G1 contact dynamics the
   linearization is too poor for the merit-function line search to accept a step,
