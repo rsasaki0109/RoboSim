@@ -284,6 +284,14 @@ controller.
   dynamics gap grows to ~3.2 because the cost trades feasibility for momentum
   tracking, so the flight cost and the feasibility projection must be solved
   together, not one after the other.
+- **Landing impact needs impulse-aware DDP.** Adding a landing phase after
+  re-contact (legs extend, then bend to absorb) improves the objective a lot:
+  cost 140, jump 0.23 m, and a full 6.29 rad flip. But the contact-addition
+  `impulse_velocity` reset at the flight-to-landing boundary produces a state
+  discontinuity the warm start does not satisfy, and the dynamics gap explodes
+  to ~57 on an ankle joint. The rigid impact projection is correct physics, so
+  the fix is to make the solver impulse-aware (include the reset in the
+  dynamics Jacobian and the warm start), not to remove it.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
