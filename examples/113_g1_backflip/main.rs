@@ -254,13 +254,24 @@ fn main() {
     for (dof, name) in joint_names.iter().enumerate() {
         crouch[6 + dof] = crouch_angle(name);
     }
+    // Launch velocity implied by the ballistic arc: the vertical speed needed
+    // at takeoff to reach the apex over the flight time.
+    let flight_time_s = FLIGHT_STEPS as f64 * STEP_TIME_S;
+    let launch_velocity_m_s = 2.0 * (TARGET_APEX_Y_M - BASE_START_Y_M) / flight_time_s;
     let mut states = Vec::with_capacity(horizon + 1);
     for node in 0..=horizon {
         let mut state = if node < CROUCH_STEPS {
             crouch.clone()
         } else if node < CROUCH_STEPS + PUSH_STEPS {
+            let push = (node - CROUCH_STEPS) as f64;
+            let t = (push + 1.0) / PUSH_STEPS as f64;
             let mut extended = initial.clone();
-            extended[1] = BASE_START_Y_M + 0.05;
+            extended[1] = BASE_START_Y_M + 0.05 * t.sin();
+            extended[nv + 1] = launch_velocity_m_s;
+            for (dof, name) in joint_names.iter().enumerate() {
+                extended[6 + dof] =
+                    stand_angle(name) + (crouch_angle(name) - stand_angle(name)) * (1.0 - t);
+            }
             extended
         } else {
             let flight = (node - CROUCH_STEPS - PUSH_STEPS) as f64;
@@ -310,16 +321,30 @@ fn main() {
         .fold(f64::MIN, |maximum, state| maximum.max(state[5]));
     let mut max_gap = 0.0_f64;
     let mut failed_nodes = 0_usize;
+    let mut worst_node = 0_usize;
+    let mut worst_gap = 0.0_f64;
     for node in 0..horizon {
         match dynamics.step_at(node, &solution.states[node], &solution.controls[node]) {
             Ok(predicted) => {
                 for (a, b) in solution.states[node + 1].iter().zip(&predicted) {
                     max_gap = max_gap.max((a - b).abs());
                 }
+                let node_gap = solution.states[node + 1]
+                    .iter()
+                    .zip(&predicted)
+                    .fold(0.0_f64, |maximum, (a, b)| maximum.max((a - b).abs()));
+                if node_gap > worst_gap {
+                    worst_gap = node_gap;
+                    worst_node = node;
+                }
             }
             Err(_) => failed_nodes += 1,
         }
     }
+    println!(
+        "worst gap {worst_gap:.3e} at node {worst_node} (crouch<{CROUCH_STEPS}, push<{}) ",
+        CROUCH_STEPS + PUSH_STEPS
+    );
     let feasible = max_gap < 1.0e-4 && failed_nodes == 0;
     println!(
         "converged={} feasible={} cost_finite={}",

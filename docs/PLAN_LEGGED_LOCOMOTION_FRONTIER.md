@@ -232,15 +232,23 @@ controller.
   the body twist as Euler rates (`q += qd * dt`); `rne_dynamics::integrate_configuration`
   now maps the twist through `base_velocity_map` first, and both integrators use
   it. This is the prerequisite for any large-rotation plan.
-- **Whole-body FDDP still does not converge.** Example 113 reports
-  `converged=false feasible=false` (dynamics gap ~8) at 29 DoF. A prerequisite
-  bug was found and fixed: standard DDP scored the caller's infeasible state
-  guess instead of rolling the initial controls forward, so a kinematic warm
-  start was returned as a "zero-torque, zero-gap" solution. With that fixed the
-  solve is honest but still far from feasible; the native solver has no analytic
-  derivatives, and there is no flight-phase controller (`rne_wbc` rejects empty
-  contacts). `rne_dynamics::centroidal_momentum` now exists to shape the aerial
-  rotation.
+- **Whole-body FDDP is closer but still does not converge.** The analytic
+  dynamics derivatives are now implemented and verified in `rne_dynamics`:
+  `link_pose_derivatives`, `link_pose_body_twist_derivatives`,
+  `xup_derivatives`, `mass_matrix_gradient` (`dM/dq`),
+  `non_linear_effects_gradient` (`dh/dq`, `dh/dqd`), and
+  `forward_dynamics_gradient` (`d(qdd)/d(q, qd, tau)`). `rne_oc` uses them
+  through the `analytic_derivatives` hook instead of central differences.
+  With the FDDP warm start restored, example 113 now runs its full iteration
+  budget and reaches cost 1494 (was 74096), a 0.138 m jump, a 6.15 rad yaw span,
+  and realistic 45 Nm torques. The dynamics gap is still ~5.8 and concentrates
+  at the last push node (node 13 of 36). That node is the push-to-flight
+  boundary: a rigid double-contact push cannot produce the stored launch
+  velocity, so the phase transition, not the derivatives, is now the blocker.
+  Landing-impact resets at phase boundaries are still not applied
+  (`ContactSequenceDynamics` documents this), and there is no flight-phase
+  controller (`rne_wbc` rejects empty contacts).
+  `rne_dynamics::centroidal_momentum` exists to shape the aerial rotation.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
