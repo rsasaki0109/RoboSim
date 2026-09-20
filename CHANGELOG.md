@@ -28,6 +28,13 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `ContactImplicitArticulatedDynamics::with_substeps` splits each outer step into
+  explicit sub-steps so a physically stiff compliant-contact law stays stable at
+  the 30 ms planning step (a single step diverges above `k ~ 1e5`). Example 115
+  gains a `--substeps` flag. Sub-stepping multiplies the finite-difference
+  derivative cost, so the optimizer needs analytic contact derivatives before it
+  can exploit the higher stiffness (see `docs/PLAN_LEGGED_LOCOMOTION_FRONTIER.md`).
+
 - Scripted-locomotion gates `examples/110_go2_walk` and `examples/111_g1_walk`.
   The Go2 forward trot runs headless (and `--gif` captures
   `docs/media/unitree-go2-walk.gif`) and asserts transport, straightness, and an

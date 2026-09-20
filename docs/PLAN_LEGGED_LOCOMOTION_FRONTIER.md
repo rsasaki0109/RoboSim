@@ -398,6 +398,18 @@ controller.
   looks like a merit decrease); it needs the failed step scored at infinity to
   be usable. Both were reverted, so the forward-only sweep remains the best
   measured solver for this problem.
+- **Sub-stepping makes a stiff penalty stable, but the optimizer cannot afford
+  it yet.** `ContactImplicitArticulatedDynamics::with_substeps` splits the outer
+  step so a `k = 1e6` law settles within a few millimetres of the surface, where
+  a single 10 ms step diverges to `1e38` (unit test
+  `sub_steps_keep_a_stiff_contact_stable`). In the G1 optimizer each sub-step
+  multiplies the finite-difference derivative cost (`4 (nx + nu)` extra roll-outs
+  per node), so the affordable sub-step count is far too small to hold the
+  backflip. Exploiting the stiffness therefore needs analytic derivatives of the
+  compliant contact dynamics (the contact Jacobian derivative, i.e. a
+  third-order kinematic quantity), which is the next research step. A zero-control
+  warm-start roll-out is not a valid stability probe here because the joint
+  free-fall, not the contact, is what diverges.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic

@@ -74,6 +74,12 @@ pub struct ContactImplicitArticulatedDynamics<'a> {
     pub contacts: Vec<ContactSpec>,
     /// Compliant normal/friction law.
     pub contact_model: CompliantContactModel,
+    /// Number of explicit sub-steps per call to [`step_state`](Self::step_state).
+    ///
+    /// The compliant contact law is stiff, so a single explicit step is only
+    /// stable for a soft stiffness. Splitting the step lets a physically stiff
+    /// law stay stable without changing the outer time step.
+    pub substeps: usize,
 }
 
 impl<'a> ContactImplicitArticulatedDynamics<'a> {
@@ -89,7 +95,15 @@ impl<'a> ContactImplicitArticulatedDynamics<'a> {
             step_time_s,
             contacts,
             contact_model,
+            substeps: 1,
         }
+    }
+
+    /// Sets the number of internal explicit sub-steps (at least one).
+    #[must_use]
+    pub fn with_substeps(mut self, substeps: usize) -> Self {
+        self.substeps = substeps.max(1);
+        self
     }
 
     fn generalized_contact_force(
@@ -145,29 +159,36 @@ impl<'a> ContactImplicitArticulatedDynamics<'a> {
                 "contact-implicit articulated state or control",
             ));
         }
-        let (q, qd) = state.split_at(nv);
+        let mut q = state[..nv].to_vec();
+        let mut qd = state[nv..].to_vec();
         let mut generalized = vec![0.0; nv];
         generalized[base..].copy_from_slice(control);
-        let bias = non_linear_effects(self.model, q, qd).map_err(|_| OcError::Dynamics)?;
-        let contact = self
-            .generalized_contact_force(q, qd)
-            .map_err(|_| OcError::Dynamics)?;
-        for index in 0..nv {
-            generalized[index] -= bias[index];
-            generalized[index] += contact[index];
+        let dt = self.step_time_s / self.substeps.max(1) as f64;
+        for _ in 0..self.substeps.max(1) {
+            let bias =
+                non_linear_effects(self.model, &q, &qd).map_err(|_| OcError::Dynamics)?;
+            let contact = self
+                .generalized_contact_force(&q, &qd)
+                .map_err(|_| OcError::Dynamics)?;
+            let mut forces = generalized.clone();
+            for index in 0..nv {
+                forces[index] -= bias[index];
+                forces[index] += contact[index];
+            }
+            let mass = mass_matrix(self.model, &q).map_err(|_| OcError::Dynamics)?;
+            let acceleration = mass.solve(&forces).ok_or(OcError::Dynamics)?;
+            // Integrate the configuration through the floating-base chart, not
+            // with the raw twist, so a rotated base does not drift its world
+            // position.
+            q = integrate_configuration(self.model, &q, &qd, &acceleration, dt)
+                .map_err(|_| OcError::Dynamics)?;
+            for index in 0..nv {
+                qd[index] += acceleration[index] * dt;
+            }
         }
-        let mass = mass_matrix(self.model, q).map_err(|_| OcError::Dynamics)?;
-        let acceleration = mass.solve(&generalized).ok_or(OcError::Dynamics)?;
-        let dt = self.step_time_s;
-        // Integrate the configuration through the floating-base chart, not with
-        // the raw twist, so a rotated base does not drift its world position.
-        let next_q = integrate_configuration(self.model, q, qd, &acceleration, dt)
-            .map_err(|_| OcError::Dynamics)?;
         let mut next = vec![0.0; 2 * nv];
-        next[..nv].copy_from_slice(&next_q);
-        for index in 0..nv {
-            next[nv + index] = qd[index] + acceleration[index] * dt;
-        }
+        next[..nv].copy_from_slice(&q);
+        next[nv..].copy_from_slice(&qd);
         Ok(next)
     }
 }
@@ -329,5 +350,51 @@ mod tests {
             ..model
         };
         assert_eq!(clamped.normal_force_n(10.0, 0.0), 10.0);
+    }
+
+    #[test]
+    fn sub_steps_keep_a_stiff_contact_stable() {
+        let (_world, model, base) = floating_body(3.0);
+        let stiff = CompliantContactModel {
+            stiffness_n_m: 1.0e6,
+            damping_n_s_m: 1.0e3,
+            ..CompliantContactModel::default()
+        };
+        let single = ContactImplicitArticulatedDynamics::new(
+            &model,
+            0.01,
+            corner_contacts(base),
+            stiff,
+        );
+        let sub = ContactImplicitArticulatedDynamics::new(
+            &model,
+            0.01,
+            corner_contacts(base),
+            stiff,
+        )
+        .with_substeps(64);
+        let mut state = vec![0.0; 12];
+        state[1] = 0.1;
+        let mut single_state = state.clone();
+        let mut single_diverged = false;
+        for _ in 0..500 {
+            match single.step(&single_state, &[]) {
+                Ok(next) => single_state = next,
+                Err(_) => {
+                    single_diverged = true;
+                    break;
+                }
+            }
+        }
+        for _ in 0..500 {
+            state = sub.step(&state, &[]).expect("step");
+        }
+        assert!(
+            single_diverged || !single_state[1].is_finite() || single_state[1] < -1.0,
+            "single step unexpectedly stable: {}",
+            single_state[1]
+        );
+        assert!(state[1].is_finite());
+        assert!(state[1] > -0.05, "sub-stepped body fell through: {}", state[1]);
     }
 }

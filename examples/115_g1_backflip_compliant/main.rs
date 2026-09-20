@@ -20,7 +20,7 @@
 //! the base with the raw body twist instead of through the floating-base chart
 //! (now fixed, with a regression test in `rne_oc`).
 //!
-//! Run with `cargo run --release -p g1_backflip_compliant --example 115_g1_backflip_compliant [--stiffness N] [--damping N] [--exponent N] [--ground M] [--solver ddp|ms] [--gaps] [--gap-weight N] [--iterations N]`.
+//! Run with `cargo run --release -p g1_backflip_compliant --example 115_g1_backflip_compliant [--stiffness N] [--damping N] [--exponent N] [--ground M] [--solver ddp|ms] [--gaps] [--gap-weight N] [--substeps N] [--iterations N]`.
 
 use rne_dynamics::{centroidal_momentum, link_motions, ArticulatedModel, ContactSpec};
 use rne_ecs::World;
@@ -271,6 +271,7 @@ fn main() {
     let mut use_multiple_shooting = true;
     let mut keep_gaps_open = false;
     let mut gap_weight = 0.0_f64;
+    let mut substeps = 1_usize;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().and_then(|v| v.parse::<f64>().ok());
@@ -291,11 +292,12 @@ fn main() {
             "--solver" => use_multiple_shooting = args.next().map(|v| v != "ddp").unwrap_or(true),
             "--gaps" => keep_gaps_open = true,
             "--gap-weight" => gap_weight = value().unwrap_or(gap_weight),
+            "--substeps" => substeps = value().map(|v| v as usize).unwrap_or(substeps),
             _ => {}
         }
     }
     println!(
-        "compliant contact: k={} c={} n={} ground={} mu={} horizon={horizon}",
+        "compliant contact: k={} c={} n={} ground={} mu={} horizon={horizon} substeps={substeps}",
         contact_model.stiffness_n_m,
         contact_model.damping_n_s_m,
         contact_model.penetration_exponent,
@@ -307,7 +309,8 @@ fn main() {
         STEP_TIME_S,
         toe_contacts.clone(),
         contact_model,
-    );
+    )
+    .with_substeps(substeps);
 
     let no_flip = std::env::var("G1_NO_FLIP").is_ok();
     let control_weights = vec![2.0e-4; control_dim];
