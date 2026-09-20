@@ -435,6 +435,58 @@ fn vec_neg(a: &[f64]) -> Vec<f64> {
     a.iter().map(|value| -value).collect()
 }
 
+/// Rolls a control sequence forward into a feasible state trajectory.
+///
+/// The FDDP controls are tuned to the (infeasible) warm-start states, so a
+/// straight rollout can blow up. This damps a control until the resulting step
+/// is finite, and if no damping works it falls back to the last finite state
+/// advanced with a zero control. Returns the feasible states and the controls
+/// actually used, or `None` only if even the initial state cannot advance.
+#[allow(clippy::needless_range_loop, clippy::type_complexity)]
+fn project_feasible_rollout(
+    dynamics: &dyn ShootingDynamics,
+    nx: usize,
+    _nu: usize,
+    initial: &[f64],
+    controls: &[Vec<f64>],
+    config: &DdpConfig,
+) -> Option<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
+    let horizon = controls.len();
+    let mut feasible = vec![vec![0.0; nx]; horizon + 1];
+    feasible[0] = initial.to_vec();
+    let mut used = vec![vec![0.0; controls[0].len()]; horizon];
+    for k in 0..horizon {
+        let mut accepted: Option<Vec<f64>> = None;
+        for factor in [1.0, 0.5, 0.25, 0.125, 0.05] {
+            let mut trial: Vec<f64> = controls[k].iter().map(|value| value * factor).collect();
+            trial = clamp_control(&trial, config);
+            if let Ok(next) = dynamics.step_at(k, &feasible[k], &trial) {
+                if next.iter().all(|value| value.is_finite()) {
+                    accepted = Some(next);
+                    used[k] = trial;
+                    break;
+                }
+            }
+        }
+        if accepted.is_none() {
+            if std::env::var("RNE_OC_DEBUG").is_ok() {
+                let finite = feasible[k].iter().all(|value| value.is_finite());
+                let magnitude = feasible[k]
+                    .iter()
+                    .fold(0.0_f64, |maximum, value| maximum.max(value.abs()));
+                eprintln!(
+                    "[rne_oc] projection stuck at node {k}: state finite={finite} max|state|={magnitude:.3e}"
+                );
+            }
+            // Even a zero control failed; stop the projection rather than
+            // returning a non-finite warm start.
+            return None;
+        }
+        feasible[k + 1] = accepted.expect("accepted");
+    }
+    Some((feasible, used))
+}
+
 fn clamp_control(control: &[f64], config: &DdpConfig) -> Vec<f64> {
     match (&config.control_lower, &config.control_upper) {
         (Some(lower), Some(upper)) => control
@@ -667,36 +719,25 @@ pub fn solve(
 
     // FDDP uses opened gaps as a warm start. Project the final controls onto a
     // feasible rollout and polish with standard DDP so the returned trajectory
-    // satisfies the dynamics exactly at a local optimum.
+    // satisfies the dynamics exactly at a local optimum. The raw controls are
+    // tuned to the (infeasible) FDDP states, so a straight rollout can diverge;
+    // the projection damps a control until the step stays finite, which keeps
+    // the warm start feasible instead of discarding it.
     if config.keep_gaps_open {
-        let mut feasible = vec![vec![0.0; nx]; horizon + 1];
-        feasible[0] = states[0].clone();
-        let mut ok = true;
-        for k in 0..horizon {
-            match dynamics.step_at(k, &feasible[k], &controls[k]) {
-                Ok(next) => feasible[k + 1] = next,
-                Err(_) => {
-                    if std::env::var("RNE_OC_DEBUG").is_ok() {
-                        eprintln!("[rne_oc] projection step failed at node {k}");
-                    }
-                    ok = false;
-                    break;
-                }
-            }
-        }
-        let debug = std::env::var("RNE_OC_DEBUG").is_ok();
-        if ok {
+        if let Some((feasible, projected_controls)) =
+            project_feasible_rollout(dynamics, nx, nu, &states[0], &controls, config)
+        {
             let mut polish = config.clone();
             polish.keep_gaps_open = false;
-            match solve(dynamics, cost, &feasible, &controls, &polish) {
+            match solve(dynamics, cost, &feasible, &projected_controls, &polish) {
                 Ok(solution) => return Ok(solution),
                 Err(error) => {
-                    if debug {
+                    if std::env::var("RNE_OC_DEBUG").is_ok() {
                         eprintln!("[rne_oc] feasibility polish failed: {error}");
                     }
                 }
             }
-        } else if debug {
+        } else if std::env::var("RNE_OC_DEBUG").is_ok() {
             eprintln!("[rne_oc] FDDP projection failed; returning the open-gap trajectory");
         }
     }

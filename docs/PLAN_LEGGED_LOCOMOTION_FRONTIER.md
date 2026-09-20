@@ -265,10 +265,17 @@ controller.
   solver never applies the feasible polish and returns the open-gap trajectory.
   A `DdpConfig::gap_weight` was added to penalize open gaps during the line
   search; it lowers the raw gap (2.05 to 1.31 on a 60-iteration run) but does
-  not yet stabilize the projection, which still diverges in flight. The next
-  step is a feasibility QP or a flight-phase controller (`rne_wbc` rejects empty
-  contacts). Landing-impact resets for contact additions work through
-  `ContactSequenceDynamics`'s `impulse_velocity`.
+  not stabilize the projection. The projection is now damped
+  (`project_feasible_rollout` scales a control down until the step stays finite)
+  and instrumentation shows the replayed open-loop controls explode to
+  `max|state| ~ 1e157` by node 14, before the state can recover, because the
+  controls are tuned to the FDDP's infeasible states. The Boston Dynamics-style
+  reading is that the aerial phase has uncontrolled angular momentum, which
+  makes the problem ill-conditioned; the next step is a flight cost on
+  `rne_dynamics::centroidal_momentum` and a feasibility QP or flight-phase
+  controller (`rne_wbc` rejects empty contacts). Landing-impact resets for
+  contact additions work through `ContactSequenceDynamics`'s
+  `impulse_velocity`.
   `rne_dynamics::centroidal_momentum` exists to shape the aerial rotation.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
