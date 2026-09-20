@@ -107,7 +107,12 @@ All notable changes to Robot Native Engine are documented in this file.
   replaying unstable controls, which single-shooting DDP cannot do. Verified on
   a deliberately inconsistent double-integrator warm start, and on the G1
   backflip it reaches a full 6.28 rad flip with a dynamics gap of ~0.12, an
-  order of magnitude below the FDDP single-shooting gap.
+  order of magnitude below the FDDP single-shooting gap. Control bounds are
+  handled by a backtracking line search on the local penalized objective, and
+  the defect penalty is paired with an augmented-Lagrangian multiplier so the
+  cost keeps shaping the trajectory. With torque bounds the G1 backflip returns
+  a natural, torque-limited trajectory: a full 6.33 rad flip with a 0.19 m jump
+  and a peak torque of 31 Nm.
 - `rne_oc::ContactSequenceDynamics::new_with_substeps` integrates each step with
   a configurable number of inner steps, holding the control over the step. This
   stabilizes the stiff contact modes that a single semi-implicit Euler step at
