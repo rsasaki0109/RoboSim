@@ -270,7 +270,6 @@ pub fn mass_matrix_gradient(
 }
 
 /// Recursive Newton-Euler inverse dynamics.
-////// Recursive Newton-Euler inverse dynamics.
 ///
 /// Returns the generalized force that realizes `qdd` at state `(q, qd)`,
 /// including gravity. For a floating base the first six entries are the base
@@ -401,6 +400,268 @@ pub fn non_linear_effects(
     qd: &[f64],
 ) -> Result<Vec<f64>, DynamicsError> {
     rnea(model, q, qd, &vec![0.0; model.nv()])
+}
+
+/// Analytical gradient of the nonlinear effects `h(q, qd) = C(q, qd) qd + g(q)`.
+///
+/// `with_respect_to_q[k]` is `dh/dq_k` and `with_respect_to_qd[k]` is
+/// `dh/dqd_k`. Both are computed by differentiating the recursive Newton-Euler
+/// pass analytically, mirroring [`non_linear_effects`].
+#[allow(clippy::needless_range_loop)]
+pub fn non_linear_effects_gradient(
+    model: &ArticulatedModel,
+    q: &[f64],
+    qd: &[f64],
+) -> Result<NonLinearEffectsGradient, DynamicsError> {
+    validate(model, q, "q")?;
+    validate(model, qd, "qd")?;
+
+    let kinematics = model.kinematic.forward_kinematics(q)?;
+    let transforms = kinematics.transforms();
+    let xup = xup_transforms(model, transforms);
+    let xup_gradient = xup_derivatives(model, q)?;
+    let inertia = inertia_matrices(model);
+    let link_count = model.link_count();
+    let nv = model.nv();
+    let base = model.base_dof();
+
+    let base_rotation = crate::spatial::rotation_matrix(transforms[0].rotation);
+    let gravity_body = crate::spatial::mat3_mul_vec(
+        &crate::spatial::mat3_transpose(&base_rotation),
+        model.gravity_m_s2,
+    );
+
+    // Forward velocity and acceleration, matching `rnea` with `qdd = 0`.
+    let mut velocity: Vec<SpatialVec> = vec![[0.0; 6]; link_count];
+    let mut acceleration: Vec<SpatialVec> = vec![[0.0; 6]; link_count];
+    if base == 6 {
+        velocity[0] = [qd[0], qd[1], qd[2], qd[3], qd[4], qd[5]];
+        acceleration[0] = [0.0; 6];
+        for index in 0..3 {
+            acceleration[0][index] = -gravity_body[index];
+        }
+    } else {
+        for index in 0..3 {
+            acceleration[0][index] = -gravity_body[index];
+        }
+    }
+
+    let mut velocity_dq: Vec<Vec<SpatialVec>> = vec![vec![[0.0; 6]; nv]; link_count];
+    let mut velocity_dqd: Vec<Vec<SpatialVec>> = vec![vec![[0.0; 6]; nv]; link_count];
+    let mut acceleration_dq: Vec<Vec<SpatialVec>> = vec![vec![[0.0; 6]; nv]; link_count];
+    let mut acceleration_dqd: Vec<Vec<SpatialVec>> = vec![vec![[0.0; 6]; nv]; link_count];
+
+    if base == 6 {
+        for k in 0..6 {
+            let mut basis = [0.0; 6];
+            basis[k] = 1.0;
+            velocity_dqd[0][k] = basis;
+        }
+        // Gravity is expressed in the base frame: `acceleration[0] = -R^T g`.
+        // A base orientation step rotates the frame, so
+        // `d(R^T g)/dq_k = -R^T (world_axis_k x g)` with the ZYX world axes.
+        // Body-frame angular velocity columns of the ZYX chart, rotated to the
+        // world frame. Unlike `R * X/Y/Z` these are the actual chart axes.
+        let (roll, pitch) = (q[3], q[4]);
+        let body_columns = [
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, roll.cos(), -roll.sin()),
+            Vec3::new(
+                -pitch.sin(),
+                pitch.cos() * roll.sin(),
+                pitch.cos() * roll.cos(),
+            ),
+        ];
+        let world_axes = body_columns.map(|column| transforms[0].rotation * column);
+        for (offset, world_axis) in world_axes.iter().enumerate() {
+            let k = 3 + offset;
+            let body_correction = crate::spatial::mat3_mul_vec(
+                &crate::spatial::mat3_transpose(&base_rotation),
+                world_axis.cross(model.gravity_m_s2),
+            );
+            for index in 0..3 {
+                acceleration_dq[0][k][index] = body_correction[index];
+            }
+        }
+    }
+
+    for index in 1..link_count {
+        let parent = model.links[index]
+            .parent
+            .expect("non-root link has a parent");
+        let joint_dof = model.links[index]
+            .joint
+            .as_ref()
+            .and_then(|joint| joint.dof);
+        let joint_velocity = joint_dof
+            .map(|dof| scale6(&model.dofs[dof].s, qd[dof]))
+            .unwrap_or([0.0; 6]);
+
+        let mut link_velocity = mat6_mul_vec(&xup[index], &velocity[parent]);
+        let mut link_acceleration = mat6_mul_vec(&xup[index], &acceleration[parent]);
+        if joint_dof.is_some() {
+            link_velocity = add6(&link_velocity, &joint_velocity);
+            let bias = cross_motion(&link_velocity, &joint_velocity);
+            link_acceleration = add6(&link_acceleration, &bias);
+        }
+        velocity[index] = link_velocity;
+        acceleration[index] = link_acceleration;
+
+        for k in 0..nv {
+            let conveyed_v = mat6_mul_vec(&xup[index], &velocity_dq[parent][k]);
+            let d_x_v = mat6_mul_vec(&xup_gradient[index][k], &velocity[parent]);
+            let dv = add6(&conveyed_v, &d_x_v);
+            if joint_dof == Some(k) {
+                // d(joint_velocity)/dq_k = 0 (S is constant, qd fixed).
+            }
+            velocity_dq[index][k] = dv;
+
+            let conveyed_vd = mat6_mul_vec(&xup[index], &velocity_dqd[parent][k]);
+            let mut dvd = conveyed_vd;
+            if joint_dof == Some(k) {
+                dvd = add6(&dvd, &model.dofs[k].s);
+            }
+            velocity_dqd[index][k] = dvd;
+
+            // Bias derivative w.r.t. q: joint velocity is constant in q.
+            let bias_dq = cross_motion(&dv, &joint_velocity);
+            let conveyed_a = mat6_mul_vec(&xup[index], &acceleration_dq[parent][k]);
+            let d_x_a = mat6_mul_vec(&xup_gradient[index][k], &acceleration[parent]);
+            acceleration_dq[index][k] = add6(&add6(&conveyed_a, &d_x_a), &bias_dq);
+
+            // Bias derivative w.r.t. qd: velocity and joint velocity both move.
+            let mut bias_dqd = cross_motion(&dvd, &joint_velocity);
+            if joint_dof == Some(k) {
+                bias_dqd = add6(&bias_dqd, &cross_motion(&link_velocity, &model.dofs[k].s));
+            }
+            let conveyed_ad = mat6_mul_vec(&xup[index], &acceleration_dqd[parent][k]);
+            acceleration_dqd[index][k] = add6(&conveyed_ad, &bias_dqd);
+        }
+    }
+
+    // Backward wrench pass with derivatives.
+    let mut transmitted: Vec<SpatialVec> = vec![[0.0; 6]; link_count];
+    let mut transmitted_dq: Vec<Vec<SpatialVec>> = vec![vec![[0.0; 6]; nv]; link_count];
+    let mut transmitted_dqd: Vec<Vec<SpatialVec>> = vec![vec![[0.0; 6]; nv]; link_count];
+    let mut gradient = NonLinearEffectsGradient {
+        with_respect_to_q: vec![vec![0.0; nv]; nv],
+        with_respect_to_qd: vec![vec![0.0; nv]; nv],
+    };
+
+    for index in (0..link_count).rev() {
+        let momentum = mat6_mul_vec(&inertia[index], &velocity[index]);
+        let force = add6(
+            &add6(
+                &mat6_mul_vec(&inertia[index], &acceleration[index]),
+                &cross_force(&velocity[index], &momentum),
+            ),
+            &transmitted[index],
+        );
+        for &dof in &model.link_dofs[index] {
+            for k in 0..nv {
+                // dh/dq_k = S^T d(force)/dq_k.
+                let d_momentum = mat6_mul_vec(&inertia[index], &velocity_dq[index][k]);
+                let d_cross = dual_cross_derivative(
+                    &velocity[index],
+                    &velocity_dq[index][k],
+                    &momentum,
+                    &d_momentum,
+                );
+                let d_force = add6(
+                    &add6(
+                        &mat6_mul_vec(&inertia[index], &acceleration_dq[index][k]),
+                        &d_cross,
+                    ),
+                    &transmitted_dq[index][k],
+                );
+                gradient.with_respect_to_q[k][dof] = dot6(&model.dofs[dof].s, &d_force);
+
+                let d_momentum_qd = mat6_mul_vec(&inertia[index], &velocity_dqd[index][k]);
+                let d_cross_qd = dual_cross_derivative(
+                    &velocity[index],
+                    &velocity_dqd[index][k],
+                    &momentum,
+                    &d_momentum_qd,
+                );
+                let d_force_qd = add6(
+                    &add6(
+                        &mat6_mul_vec(&inertia[index], &acceleration_dqd[index][k]),
+                        &d_cross_qd,
+                    ),
+                    &transmitted_dqd[index][k],
+                );
+                gradient.with_respect_to_qd[k][dof] = dot6(&model.dofs[dof].s, &d_force_qd);
+            }
+        }
+        if let Some(parent) = model.links[index].parent {
+            for k in 0..nv {
+                let d_momentum = mat6_mul_vec(&inertia[index], &velocity_dq[index][k]);
+                let d_cross = dual_cross_derivative(
+                    &velocity[index],
+                    &velocity_dq[index][k],
+                    &momentum,
+                    &d_momentum,
+                );
+                let d_force = add6(
+                    &add6(
+                        &mat6_mul_vec(&inertia[index], &acceleration_dq[index][k]),
+                        &d_cross,
+                    ),
+                    &transmitted_dq[index][k],
+                );
+                let conveyed = mat6_transpose_mul_vec(&xup[index], &d_force);
+                let conveyed_xup = mat6_transpose_mul_vec(&xup_gradient[index][k], &force);
+                transmitted_dq[parent][k] =
+                    add6(&transmitted_dq[parent][k], &add6(&conveyed, &conveyed_xup));
+
+                let d_momentum_qd = mat6_mul_vec(&inertia[index], &velocity_dqd[index][k]);
+                let d_cross_qd = dual_cross_derivative(
+                    &velocity[index],
+                    &velocity_dqd[index][k],
+                    &momentum,
+                    &d_momentum_qd,
+                );
+                let d_force_qd = add6(
+                    &add6(
+                        &mat6_mul_vec(&inertia[index], &acceleration_dqd[index][k]),
+                        &d_cross_qd,
+                    ),
+                    &transmitted_dqd[index][k],
+                );
+                let conveyed_qd = mat6_transpose_mul_vec(&xup[index], &d_force_qd);
+                transmitted_dqd[parent][k] = add6(&transmitted_dqd[parent][k], &conveyed_qd);
+            }
+            transmitted[parent] = add6(
+                &transmitted[parent],
+                &mat6_transpose_mul_vec(&xup[index], &force),
+            );
+        }
+    }
+
+    Ok(gradient)
+}
+
+/// Gradient of the nonlinear effects, one vector per generalized coordinate.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NonLinearEffectsGradient {
+    /// `dh/dq_k` for each generalized coordinate.
+    pub with_respect_to_q: Vec<Vec<f64>>,
+    /// `dh/dqd_k` for each generalized coordinate.
+    pub with_respect_to_qd: Vec<Vec<f64>>,
+}
+
+/// Derivative of `cross_force(v, I v)` with respect to the state that moves
+/// both `v` and `I v`.
+fn dual_cross_derivative(
+    velocity: &SpatialVec,
+    d_velocity: &SpatialVec,
+    momentum: &SpatialVec,
+    d_momentum: &SpatialVec,
+) -> SpatialVec {
+    add6(
+        &cross_force(d_velocity, momentum),
+        &cross_force(velocity, d_momentum),
+    )
 }
 
 /// Generalized gravity force `g(q)`.
@@ -1623,6 +1884,54 @@ mod tests {
                         finite_difference[component]
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn non_linear_effects_gradient_matches_finite_difference() {
+        let (world, robot) = floating_two_link_world(2.0, 1.5, 0.7, 0.5, 4.0);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let q = vec![0.3, -0.2, 0.1, 0.4, -0.3, 0.25, 0.5, -0.7];
+        let qd = vec![0.2, -0.1, 0.3, 0.15, -0.25, 0.1, 0.4, -0.3];
+        let gradient = non_linear_effects_gradient(&model, &q, &qd).expect("gradient");
+        let nv = model.nv();
+        let h = 1.0e-6;
+
+        for k in 0..nv {
+            let mut q_plus = q.clone();
+            q_plus[k] += h;
+            let mut q_minus = q.clone();
+            q_minus[k] -= h;
+            let plus = non_linear_effects(&model, &q_plus, &qd).expect("bias");
+            let minus = non_linear_effects(&model, &q_minus, &qd).expect("bias");
+            for row in 0..nv {
+                let finite_difference = (plus[row] - minus[row]) / (2.0 * h);
+                let error = (gradient.with_respect_to_q[k][row] - finite_difference).abs();
+                assert!(
+                    error < 1.0e-5,
+                    "dh/dq dof {k} row {row}: {} vs {}",
+                    gradient.with_respect_to_q[k][row],
+                    finite_difference
+                );
+            }
+
+            let mut qd_plus = qd.clone();
+            qd_plus[k] += h;
+            let mut qd_minus = qd.clone();
+            qd_minus[k] -= h;
+            let plus = non_linear_effects(&model, &q, &qd_plus).expect("bias");
+            let minus = non_linear_effects(&model, &q, &qd_minus).expect("bias");
+            for row in 0..nv {
+                let finite_difference = (plus[row] - minus[row]) / (2.0 * h);
+                let error = (gradient.with_respect_to_qd[k][row] - finite_difference).abs();
+                assert!(
+                    error < 1.0e-5,
+                    "dh/dqd dof {k} row {row}: {} vs {}",
+                    gradient.with_respect_to_qd[k][row],
+                    finite_difference
+                );
             }
         }
     }

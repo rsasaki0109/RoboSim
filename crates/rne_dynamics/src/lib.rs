@@ -35,8 +35,8 @@ pub use algorithms::{
     center_of_mass, centroidal_momentum, com_jacobian, constrained_forward_dynamics,
     forward_dynamics, frame_jacobian, gravity_torque, impulse_velocity, integrate_configuration,
     link_motions, link_pose_body_twist_derivatives, link_pose_derivatives, mass_matrix,
-    mass_matrix_gradient, non_linear_effects, rnea, ContactSpec, DenseMatrix, LinkMotion,
-    LinkPoseDerivative, CONTACT_REGULARIZATION,
+    mass_matrix_gradient, non_linear_effects, non_linear_effects_gradient, rnea, ContactSpec,
+    DenseMatrix, LinkMotion, LinkPoseDerivative, NonLinearEffectsGradient, CONTACT_REGULARIZATION,
 };
 pub use model::{ArticulatedModel, DynamicsError};
 pub use spatial::{SpatialInertia, SpatialVec};
