@@ -23,6 +23,10 @@ pub enum WbcError {
     #[error("whole-body control requires a floating-base model")]
     RequiresFloatingBase,
     /// No contact points were provided.
+    ///
+    /// Retained for API compatibility. An empty contact set is now valid and
+    /// means the flight phase: the base is unactuated and only the joints and
+    /// tasks act, so the solver no longer returns this error.
     #[error("whole-body control requires at least one contact point")]
     NoContacts,
     /// A contact referenced a link that is not part of the model.
@@ -245,9 +249,9 @@ impl WholeBodyController {
         if model.base_dof() != 6 {
             return Err(WbcError::RequiresFloatingBase);
         }
-        if contacts.is_empty() {
-            return Err(WbcError::NoContacts);
-        }
+        // Empty contacts are allowed: this is the flight phase, where the base
+        // is unactuated and only the actuated joints and any tasks act. The
+        // contact rows are simply absent.
         if q.iter().chain(qd).any(|value| !value.is_finite()) {
             return Err(WbcError::InvalidInput("configuration is not finite"));
         }
@@ -796,7 +800,7 @@ mod tests {
     use approx::assert_relative_eq;
     use rne_ecs::{spawn_named, World};
     use rne_physics::{RigidBody, RigidBodyInertia};
-    use rne_robot::{FloatingBase, Link, Robot, RobotId};
+    use rne_robot::{FloatingBase, Joint, JointKind, JointLimits, Link, Robot, RobotId};
     use rne_world::Transform3;
 
     #[test]
@@ -870,6 +874,112 @@ mod tests {
         ));
         let model = ArticulatedModel::from_robot(&world, robot).expect("model");
         (world, model, base)
+    }
+
+    fn floating_arm() -> (World, rne_dynamics::ArticulatedModel, Entity) {
+        let mut world = World::new();
+        let robot = spawn_named(&mut world, "arm");
+        let base = spawn_named(&mut world, "base");
+        let link = spawn_named(&mut world, "link");
+        let joint = spawn_named(&mut world, "joint");
+        world.entity_mut(robot).insert(Robot {
+            robot_id: RobotId::new_v4(),
+            model_name: "floating_arm".into(),
+            base_link: base,
+        });
+        world.entity_mut(base).insert((
+            Link {
+                robot,
+                name: "base".into(),
+            },
+            Transform3::IDENTITY,
+            FloatingBase,
+            RigidBody {
+                mass_kg: 3.0,
+                ..RigidBody::default()
+            },
+            RigidBodyInertia {
+                center_of_mass_local_m: Vec3::ZERO,
+                ixx_kg_m2: 0.1,
+                ixy_kg_m2: 0.0,
+                ixz_kg_m2: 0.0,
+                iyy_kg_m2: 0.1,
+                iyz_kg_m2: 0.0,
+                izz_kg_m2: 0.1,
+            },
+        ));
+        world.entity_mut(link).insert((
+            Link {
+                robot,
+                name: "link".into(),
+            },
+            Transform3::from_translation_rotation(
+                Vec3::new(0.3, 0.0, 0.0),
+                rne_math::Quat::IDENTITY,
+            ),
+            RigidBody {
+                mass_kg: 1.0,
+                ..RigidBody::default()
+            },
+            RigidBodyInertia {
+                center_of_mass_local_m: Vec3::new(0.2, 0.0, 0.0),
+                ixx_kg_m2: 0.02,
+                ixy_kg_m2: 0.0,
+                ixz_kg_m2: 0.0,
+                iyy_kg_m2: 0.02,
+                iyz_kg_m2: 0.0,
+                izz_kg_m2: 0.02,
+            },
+        ));
+        world.entity_mut(joint).insert(Joint {
+            robot,
+            parent_link: base,
+            child_link: link,
+            kind: JointKind::Revolute,
+            limits: JointLimits::default(),
+            axis: Vec3::Z,
+            position: 0.0,
+            velocity: 0.0,
+        });
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        (world, model, base)
+    }
+
+    #[test]
+    fn flight_phase_tracks_posture_with_a_free_base() {
+        let (_world, model, _base) = floating_arm();
+        assert_eq!(model.nv(), 7);
+        let controller = WholeBodyController::new(WholeBodyConfig::default());
+        let posture = PostureTask {
+            desired_joint_positions: vec![0.5],
+            desired_joint_velocities: Some(vec![0.0]),
+            desired_joint_accelerations: None,
+            position_gain_s_inv2: 25.0,
+            velocity_gain_s_inv: 10.0,
+        };
+        let solution = controller
+            .solve(
+                &model,
+                &[0.0; 7],
+                &[0.0; 7],
+                &[],
+                None,
+                None,
+                Some(&posture),
+            )
+            .expect("flight solve");
+        // With no contacts the base is unactuated and only gravity acts on it,
+        // but the joint is driven toward the posture target.
+        assert!(solution.contact_forces_world_n.is_empty());
+        assert!(solution
+            .joint_acceleration
+            .iter()
+            .all(|value| value.is_finite()));
+        assert!(
+            solution.joint_acceleration[6] > 0.0,
+            "joint did not accelerate toward the target: {}",
+            solution.joint_acceleration[6]
+        );
     }
 
     #[test]
@@ -1046,13 +1156,19 @@ mod tests {
     }
 
     #[test]
-    fn rejects_fixed_base_and_empty_contacts() {
+    fn handles_empty_contacts_and_rejects_bad_limits() {
         let (_world, model, base) = floating_body();
         let controller = WholeBodyController::new(WholeBodyConfig::default());
-        assert_eq!(
-            controller.solve(&model, &[0.0; 6], &[0.0; 6], &[], None, None, None),
-            Err(WbcError::NoContacts)
-        );
+        // Flight phase: no contacts is valid and yields a finite free-base
+        // solution rather than an error.
+        let solution = controller
+            .solve(&model, &[0.0; 6], &[0.0; 6], &[], None, None, None)
+            .expect("flight-phase solve");
+        assert!(solution.contact_forces_world_n.is_empty());
+        assert!(solution
+            .joint_acceleration
+            .iter()
+            .all(|value| value.is_finite()));
         let contacts = vec![ContactPoint::new(base, Vec3::ZERO, 0.8)];
         let bad_limits = WholeBodyConfig {
             torque_limits_nm: Some(vec![1.0]),

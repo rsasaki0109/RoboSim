@@ -77,6 +77,10 @@ All notable changes to Robot Native Engine are documented in this file.
   infeasible) state guess, and falls back to the caller's trajectory if the
   rollout is non-finite. Previously a cheap but infeasible warm start made the
   line search unable to improve and the solver returned it.
+- `rne_wbc::WholeBodyController` accepts an empty contact set. This is the
+  flight phase: the floating base is unactuated and only the actuated joints and
+  the configured tasks act, so the contact rows are simply absent. The posture
+  and attitude tasks keep working, which unblocks aerial whole-body control.
 - `rne_oc::ContactSequenceDynamics` now provides analytic Jacobians that compose
   the smooth integration with the exact impact reset
   (`rne_dynamics::impulse_velocity_gradient`) instead of differencing across the
