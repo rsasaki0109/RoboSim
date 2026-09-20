@@ -2,8 +2,9 @@
 
 use crate::contact::{ContactPoint, FrictionCone};
 use rne_dynamics::{
-    center_of_mass, com_jacobian, link_motions, mass_matrix, non_linear_effects, ArticulatedModel,
-    DenseMatrix, DynamicsError,
+    center_of_mass, centroidal_momentum, centroidal_momentum_bias, centroidal_momentum_matrix,
+    com_jacobian, link_motions, mass_matrix, non_linear_effects, ArticulatedModel, DenseMatrix,
+    DynamicsError,
 };
 use rne_ecs::Entity;
 use rne_math::Vec3;
@@ -166,6 +167,23 @@ pub struct BaseAttitudeTask {
     pub desired_angular_acceleration_rad_s2: Vec3,
 }
 
+/// Whole-body angular-momentum task at the acceleration level.
+///
+/// The rows command the angular part of the centroidal momentum rate,
+/// `Ldot = A(q) qdd + c(q, qd)`, so a flight-phase controller can build or
+/// arrest a spin with no contacts. The linear part of the momentum is left
+/// free.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CentroidalMomentumTask {
+    /// Desired angular momentum about the whole-body center of mass, in
+    /// kg·m²/s.
+    pub desired_angular_momentum_world_kg_m2_s: Vec3,
+    /// Momentum feedback gain in inverse seconds.
+    pub momentum_gain_s_inv: f64,
+    /// Feed-forward angular momentum rate, in N·m.
+    pub desired_angular_momentum_rate_world_nm: Vec3,
+}
+
 /// Result of one whole-body control solve.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WholeBodySolution {
@@ -234,7 +252,6 @@ impl WholeBodyController {
     /// [`Self::solve`] with an optional per-joint feed-forward torque
     /// reference, such as a trajectory-plan torque.
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::needless_range_loop)]
     pub fn solve_with_torque_reference(
         &self,
         model: &ArticulatedModel,
@@ -245,6 +262,62 @@ impl WholeBodyController {
         base_attitude_task: Option<&BaseAttitudeTask>,
         posture_task: Option<&PostureTask>,
         torque_reference_nm: Option<&[f64]>,
+    ) -> Result<WholeBodySolution, WbcError> {
+        self.solve_inner(
+            model,
+            q,
+            qd,
+            contacts,
+            com_task,
+            base_attitude_task,
+            posture_task,
+            torque_reference_nm,
+            None,
+        )
+    }
+
+    /// [`Self::solve`] with a whole-body angular-momentum task.
+    ///
+    /// The momentum task lets a flight-phase controller shape the spin without
+    /// contacts, using [`rne_dynamics::centroidal_momentum`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn solve_with_centroidal_momentum(
+        &self,
+        model: &ArticulatedModel,
+        q: &[f64],
+        qd: &[f64],
+        contacts: &[ContactPoint],
+        com_task: Option<&ComTask>,
+        base_attitude_task: Option<&BaseAttitudeTask>,
+        posture_task: Option<&PostureTask>,
+        momentum_task: Option<&CentroidalMomentumTask>,
+    ) -> Result<WholeBodySolution, WbcError> {
+        self.solve_inner(
+            model,
+            q,
+            qd,
+            contacts,
+            com_task,
+            base_attitude_task,
+            posture_task,
+            None,
+            momentum_task,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::needless_range_loop)]
+    fn solve_inner(
+        &self,
+        model: &ArticulatedModel,
+        q: &[f64],
+        qd: &[f64],
+        contacts: &[ContactPoint],
+        com_task: Option<&ComTask>,
+        base_attitude_task: Option<&BaseAttitudeTask>,
+        posture_task: Option<&PostureTask>,
+        torque_reference_nm: Option<&[f64]>,
+        momentum_task: Option<&CentroidalMomentumTask>,
     ) -> Result<WholeBodySolution, WbcError> {
         if model.base_dof() != 6 {
             return Err(WbcError::RequiresFloatingBase);
@@ -373,6 +446,32 @@ impl WholeBodyController {
                 let mut coefficients = vec![0.0; cols];
                 coefficients[3 + component] = 1.0;
                 push_row(&mut rows, &mut rhs, coefficients, desired[component], scale);
+            }
+        }
+
+        // Whole-body angular-momentum task: `Ldot = A qdd + c`.
+        if let Some(task) = momentum_task {
+            let momentum_matrix = centroidal_momentum_matrix(model, q)?;
+            let momentum_bias = centroidal_momentum_bias(model, q, qd)?;
+            let momentum = centroidal_momentum(model, q, qd)?;
+            let scale = self.config.angular_weight.sqrt();
+            for component in 0..3 {
+                let row = 3 + component;
+                let desired = task.desired_angular_momentum_rate_world_nm.to_array()[component]
+                    + task.momentum_gain_s_inv
+                        * (task.desired_angular_momentum_world_kg_m2_s.to_array()[component]
+                            - momentum[row]);
+                let mut coefficients = vec![0.0; cols];
+                for column in 0..nv {
+                    coefficients[column] = momentum_matrix.get(row, column);
+                }
+                push_row(
+                    &mut rows,
+                    &mut rhs,
+                    coefficients,
+                    desired - momentum_bias[row],
+                    scale,
+                );
             }
         }
 
@@ -979,6 +1078,54 @@ mod tests {
             solution.joint_acceleration[6] > 0.0,
             "joint did not accelerate toward the target: {}",
             solution.joint_acceleration[6]
+        );
+    }
+
+    #[test]
+    fn momentum_task_tracks_a_commanded_angular_rate() {
+        // Ground reaction is needed to change the angular momentum, so the task
+        // is exercised with contacts, as in a push or a landing.
+        let (_world, model, base) = floating_body();
+        let controller = WholeBodyController::new(WholeBodyConfig::default());
+        let q = [0.0; 6];
+        let qd = [0.0; 6];
+        let contacts = vec![
+            ContactPoint::new(base, Vec3::new(0.1, -0.2, 0.0), 0.8),
+            ContactPoint::new(base, Vec3::new(-0.1, -0.2, 0.0), 0.8),
+        ];
+        let desired = Vec3::new(0.0, 0.0, 1.0);
+        let task = CentroidalMomentumTask {
+            desired_angular_momentum_world_kg_m2_s: Vec3::ZERO,
+            momentum_gain_s_inv: 0.0,
+            desired_angular_momentum_rate_world_nm: desired,
+        };
+        let without = controller
+            .solve_with_centroidal_momentum(&model, &q, &qd, &contacts, None, None, None, None)
+            .expect("solve");
+        let with = controller
+            .solve_with_centroidal_momentum(
+                &model,
+                &q,
+                &qd,
+                &contacts,
+                None,
+                None,
+                None,
+                Some(&task),
+            )
+            .expect("solve");
+
+        let matrix = centroidal_momentum_matrix(&model, &q).expect("matrix");
+        let bias = centroidal_momentum_bias(&model, &q, &qd).expect("bias");
+        let angular_rate = |solution: &WholeBodySolution| {
+            let rate = matrix.mul_vec(&solution.joint_acceleration);
+            Vec3::new(rate[3] + bias[3], rate[4] + bias[4], rate[5] + bias[5])
+        };
+        let without_error = (angular_rate(&without) - desired).length();
+        let with_error = (angular_rate(&with) - desired).length();
+        assert!(
+            with_error < without_error,
+            "momentum task did not approach the target: {with_error} vs {without_error}"
         );
     }
 

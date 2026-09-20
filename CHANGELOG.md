@@ -77,6 +77,11 @@ All notable changes to Robot Native Engine are documented in this file.
   infeasible) state guess, and falls back to the caller's trajectory if the
   rollout is non-finite. Previously a cheap but infeasible warm start made the
   line search unable to improve and the solver returned it.
+- `rne_wbc::CentroidalMomentumTask` and `WholeBodyController::solve_with_centroidal_momentum`
+  add an acceleration-level whole-body angular-momentum task, `Ldot = A qdd + c`,
+  so a push or landing can command a spin rate through the contact reaction. The
+  existing `solve` API is unchanged. Verified with a task that tracks a
+  commanded angular momentum rate.
 - `rne_dynamics::centroidal_momentum_matrix` returns the `6 x nv` matrix
   `A(q)` with `L = A(q) qd`, and `centroidal_momentum_bias` returns
   `(dL/dq) qd` so `Ldot = A(q) qdd + c`. Both are verified against finite
