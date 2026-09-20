@@ -296,7 +296,11 @@ controller.
   map is a non-smooth velocity projection and the solver still does not close
   it. The next step is a landing impulse treated explicitly in the DDP
   (impulse-aware backward pass or a non-smooth transition model), not a
-  kinematic warm start.
+  kinematic warm start. With the landing phase in the horizon the FDDP solve
+  itself diverges (the state reaches ~5e4 by node 11) and the feasibility
+  projection, now bounded by `MAX_PROJECTED_STATE_MAGNITUDE`, correctly refuses
+  to return it. A hard impact on a 46-step 29-DoF horizon needs a dedicated
+  non-smooth or multiple-shooting solver.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic

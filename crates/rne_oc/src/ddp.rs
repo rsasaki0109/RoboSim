@@ -435,6 +435,12 @@ fn vec_neg(a: &[f64]) -> Vec<f64> {
     a.iter().map(|value| -value).collect()
 }
 
+/// Largest state magnitude the feasibility projection accepts before treating a
+/// step as divergent. A real maneuver stays far below this; the bound only
+/// exists so an unstable open-loop replay is damped instead of propagating an
+/// astronomically large state.
+const MAX_PROJECTED_STATE_MAGNITUDE: f64 = 1.0e6;
+
 /// Rolls a control sequence forward into a feasible state trajectory.
 ///
 /// The FDDP controls are tuned to the (infeasible) warm-start states, so a
@@ -461,7 +467,14 @@ fn project_feasible_rollout(
             let mut trial: Vec<f64> = controls[k].iter().map(|value| value * factor).collect();
             trial = clamp_control(&trial, config);
             if let Ok(next) = dynamics.step_at(k, &feasible[k], &trial) {
-                if next.iter().all(|value| value.is_finite()) {
+                // Reject a state that has already exploded: a finite but
+                // enormous state (for example 1e157 from an unstable open-loop
+                // replay) cannot recover, so damping must engage now rather
+                // than after it poisons every later step.
+                if next
+                    .iter()
+                    .all(|value| value.is_finite() && value.abs() < MAX_PROJECTED_STATE_MAGNITUDE)
+                {
                     accepted = Some(next);
                     used[k] = trial;
                     break;
@@ -871,6 +884,43 @@ mod tests {
             }
         }
         assert!(max_gap < 1.0e-3, "unclosed gap {max_gap}");
+    }
+
+    struct ExplodingDynamics;
+
+    impl DiscreteDynamics for ExplodingDynamics {
+        fn state_dim(&self) -> usize {
+            1
+        }
+
+        fn control_dim(&self) -> usize {
+            1
+        }
+
+        fn step(&self, state: &[f64], control: &[f64]) -> Result<Vec<f64>, OcError> {
+            if control[0].abs() > 0.5 {
+                // A large control blows the state up, like an unstable open-loop
+                // replay through a contact transition.
+                Ok(vec![state[0] + 1.0e12])
+            } else {
+                Ok(vec![state[0] + control[0]])
+            }
+        }
+    }
+
+    #[test]
+    fn projection_damps_a_diverging_control() {
+        let dynamics = ExplodingDynamics;
+        let controls = vec![vec![1.0]; 3];
+        let (states, used) =
+            project_feasible_rollout(&dynamics, 1, 1, &[0.0], &controls, &DdpConfig::default())
+                .expect("projection");
+        // The raw control explodes, so the projection damps it to 0.5 and keeps
+        // every state finite and small.
+        for control in &used {
+            assert!(control[0] <= 0.5 + 1.0e-12, "control {control:?}");
+        }
+        assert!(states.iter().flatten().all(|value| value.abs() < 1.0e6));
     }
 
     struct SineDynamics;
