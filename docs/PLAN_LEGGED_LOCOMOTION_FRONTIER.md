@@ -388,6 +388,16 @@ controller.
   is fixed with a regression test. The remaining unlock is a genuine
   complementarity contact formulation at a small enough step (or a variable-step
   integrator), not a softer penalty.
+- **Two multiple-shooting solver tweaks did not break the G1 plateau.** A
+  symmetric Gauss-Seidel sweep (forward then backward, so the terminal condition
+  also propagates) reaches gap 0.257 at 1000 sweeps against 0.18 for the
+  forward-only sweep, though at a lower true cost (313 vs 577); the extra
+  backward pass only moves the residual to the flight yaw position. Replacing
+  the "defect grew by 50%" sweep-acceptance with an augmented-Lagrangian merit
+  test diverged (it under-counts a failed roll-out step, so a blowing-up sweep
+  looks like a merit decrease); it needs the failed step scored at infinity to
+  be usable. Both were reverted, so the forward-only sweep remains the best
+  measured solver for this problem.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
