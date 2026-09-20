@@ -346,9 +346,13 @@ controller.
   penalty now carries an augmented-Lagrangian multiplier so the cost keeps
   shaping the trajectory. With torque bounds the G1 backflip returns a natural
   trajectory: a full 6.33 rad flip, a 0.19 m jump, and a 31 Nm peak torque, at a
-  dynamics gap of ~0.33. The remaining work is closing that gap to the 1e-4
-  level (more multiplier iterations or a full SQP step), after which the
-  trajectory is a physically simulated backflip.
+  dynamics gap of ~0.33. More iterations help (1000 sweeps reach a gap of ~0.18
+  with cost 577, a 6.10 rad flip, a 0.15 m jump, and a 98 Nm peak torque), but
+  a stronger penalty makes the gap worse because the sweeps roll back. The
+  remaining work is closing the gap to the 1e-4 level: the Gauss-Seidel sweep
+  is the bottleneck, so the next step is a banded SQP or a Riccati-based
+  multiple-shooting solve that exploits the block-tridiagonal structure and
+  converges in a handful of Newton steps.
 - **Deliverable:** example 114 renders a clearly labeled forward-kinematics
   backflip reference (`--smoke` gate, `--gif` capture) without claiming physical
   accuracy. A physically simulated backflip requires, in order: (1) analytic
