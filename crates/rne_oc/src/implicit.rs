@@ -10,7 +10,8 @@
 
 use crate::ddp::{DiscreteDynamics, OcError};
 use rne_dynamics::{
-    frame_jacobian, link_motions, mass_matrix, non_linear_effects, ArticulatedModel, ContactSpec,
+    frame_jacobian, integrate_configuration, link_motions, mass_matrix, non_linear_effects,
+    ArticulatedModel, ContactSpec,
 };
 use rne_math::Vec3;
 
@@ -158,9 +159,13 @@ impl<'a> ContactImplicitArticulatedDynamics<'a> {
         let mass = mass_matrix(self.model, q).map_err(|_| OcError::Dynamics)?;
         let acceleration = mass.solve(&generalized).ok_or(OcError::Dynamics)?;
         let dt = self.step_time_s;
+        // Integrate the configuration through the floating-base chart, not with
+        // the raw twist, so a rotated base does not drift its world position.
+        let next_q = integrate_configuration(self.model, q, qd, &acceleration, dt)
+            .map_err(|_| OcError::Dynamics)?;
         let mut next = vec![0.0; 2 * nv];
+        next[..nv].copy_from_slice(&next_q);
         for index in 0..nv {
-            next[index] = q[index] + qd[index] * dt + 0.5 * acceleration[index] * dt * dt;
             next[nv + index] = qd[index] + acceleration[index] * dt;
         }
         Ok(next)
@@ -285,6 +290,32 @@ mod tests {
         // The compliance holds the body up instead of letting it fall through.
         assert!(state[1] > -0.2, "base fell through: {}", state[1]);
         assert!(state[7].abs() < 0.5, "body never settled: {}", state[7]);
+    }
+
+    #[test]
+    fn a_rotated_free_body_does_not_drift_its_world_position() {
+        let (_world, model, base) = floating_body(3.0);
+        let dynamics = ContactImplicitArticulatedDynamics::new(
+            &model,
+            0.005,
+            corner_contacts(base),
+            CompliantContactModel {
+                ground_height_m: -100.0,
+                ..CompliantContactModel::default()
+            },
+        );
+        let mut state = vec![0.0; 12];
+        state[1] = 5.0;
+        // A quarter-turn yaw. Integrating the raw body twist would leak the
+        // gravity acceleration into the world x/z coordinates; the chart
+        // integration keeps them fixed and only the world height drops.
+        state[5] = std::f64::consts::FRAC_PI_2;
+        for _ in 0..20 {
+            state = dynamics.step(&state, &[]).expect("step");
+        }
+        assert!(state[0].abs() < 1.0e-9, "x drifted: {}", state[0]);
+        assert!(state[2].abs() < 1.0e-9, "z drifted: {}", state[2]);
+        assert!(state[1] < 5.0, "did not fall: {}", state[1]);
     }
 
     #[test]
