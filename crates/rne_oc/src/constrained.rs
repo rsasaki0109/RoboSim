@@ -1,6 +1,6 @@
 //! Contact-constrained articulated dynamics and contact sequences.
 
-use crate::ddp::{DiscreteDynamics, DynamicsDerivatives, OcError, ShootingDynamics};
+use crate::ddp::{DiscreteDynamics, DynamicsDerivatives, DynamicsHessian, OcError, ShootingDynamics};
 use rne_dynamics::{
     constrained_forward_dynamics, constrained_forward_dynamics_gradient, impulse_velocity,
     impulse_velocity_gradient, integrate_configuration, ArticulatedModel, ContactSpec,
@@ -377,6 +377,71 @@ impl ShootingDynamics for ContactSequenceDynamics<'_> {
             }
         }
         Some(Ok(DynamicsDerivatives { fx, fu }))
+    }
+
+    /// Second derivatives of the dynamics, by central differences of the
+    /// analytical first derivatives.
+    ///
+    /// The impulse reset is a non-smooth composition, so an impact node falls
+    /// back to Gauss-Newton (`None`), as does sub-stepping.
+    #[allow(clippy::needless_range_loop)]
+    fn analytic_hessian(
+        &self,
+        node: usize,
+        state: &[f64],
+        control: &[f64],
+    ) -> Option<Result<DynamicsHessian, OcError>> {
+        if self.substeps > 1 {
+            return None;
+        }
+        if self.impact_reset
+            && self
+                .reset_per_node
+                .get(node)
+                .and_then(|reset| reset.as_ref())
+                .is_some()
+        {
+            return None;
+        }
+        let nx = 2 * self.model.nv();
+        let nu = self.model.nv() - self.model.base_dof();
+        let e = 1.0e-6;
+        let shift = |base: &[f64], index: usize, delta: f64| {
+            let mut value = base.to_vec();
+            value[index] += delta;
+            value
+        };
+        let mut fxx = vec![vec![vec![0.0; nx]; nx]; nx];
+        let mut fxu = vec![vec![vec![0.0; nu]; nx]; nx];
+        let mut fuu = vec![vec![vec![0.0; nu]; nu]; nx];
+        for j in 0..nx {
+            let plus = self.analytic_derivatives(node, &shift(state, j, e), control)?.ok()?;
+            let minus = self
+                .analytic_derivatives(node, &shift(state, j, -e), control)?
+                .ok()?;
+            for a in 0..nx {
+                for i in 0..nx {
+                    fxx[a][i][j] = (plus.fx[a][i] - minus.fx[a][i]) / (2.0 * e);
+                }
+                for i in 0..nu {
+                    fxu[a][i][j] = (plus.fu[a][i] - minus.fu[a][i]) / (2.0 * e);
+                }
+            }
+        }
+        for j in 0..nu {
+            let plus = self
+                .analytic_derivatives(node, state, &shift(control, j, e))?
+                .ok()?;
+            let minus = self
+                .analytic_derivatives(node, state, &shift(control, j, -e))?
+                .ok()?;
+            for a in 0..nx {
+                for i in 0..nu {
+                    fuu[a][i][j] = (plus.fu[a][i] - minus.fu[a][i]) / (2.0 * e);
+                }
+            }
+        }
+        Some(Ok(DynamicsHessian { fxx, fxu, fuu }))
     }
 }
 
