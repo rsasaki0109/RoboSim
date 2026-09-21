@@ -163,6 +163,8 @@ class ContactPlantTests(unittest.TestCase):
             self.assertFalse(result["passed"])
             self.assertTrue(result["self_contact_pairs"])
             self.assertLess(result["simulation_time_s"], 1.0)
+            repeated, _ = campaign.rollout(seed["parameters"] + [0.2])
+            self.assertEqual(result, repeated)
 
     def test_failed_rollout_cannot_be_rendered_as_success(self):
         with tempfile.TemporaryDirectory() as temporary:

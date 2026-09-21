@@ -1,0 +1,141 @@
+{
+  "loss": 408.52447604712984,
+  "passed": false,
+  "parameters": [
+    2.5347628008568965,
+    -0.2607507710936129,
+    0.06901343387710883,
+    2.4991193761700483,
+    0.4863068607249062,
+    0.5368623819048416,
+    2.55,
+    2.0394162392984865,
+    1.3882548925813847,
+    -0.628948809728203,
+    -0.35,
+    5.3,
+    -0.25705210232812714
+  ],
+  "dt_s": 0.000125,
+  "signed_rotation_rad": -3.2217205121469044,
+  "root_rise_m": 0.0,
+  "takeoff_s": 0.620875,
+  "touchdown_s": null,
+  "longest_flight_s": 0.09037500000000007,
+  "nonfoot_ground_contact": false,
+  "final_root_height_m": 0.772890411488278,
+  "stand_error": 8.870338798672817,
+  "peak_torque_nm": 120.0,
+  "joint_limit_time_constant_s": 0.002,
+  "joint_limit_margin_rad": 0.005,
+  "backend": "mujoco",
+  "backend_version": "3.13.0",
+  "urdf_sha256": "b462e1367ccb50f148db8c82f93421cb3f47497b10b735e891d2c9d000870cfc",
+  "joint_names": [
+    "left_hip_pitch_joint",
+    "left_hip_roll_joint",
+    "left_hip_yaw_joint",
+    "left_knee_joint",
+    "left_ankle_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_hip_pitch_joint",
+    "right_hip_roll_joint",
+    "right_hip_yaw_joint",
+    "right_knee_joint",
+    "right_ankle_pitch_joint",
+    "right_ankle_roll_joint",
+    "waist_yaw_joint",
+    "left_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "left_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "left_wrist_roll_joint",
+    "right_shoulder_pitch_joint",
+    "right_shoulder_roll_joint",
+    "right_shoulder_yaw_joint",
+    "right_elbow_joint",
+    "right_wrist_roll_joint"
+  ],
+  "balance_gains": [
+    1.0,
+    0.0,
+    0.6
+  ],
+  "early_balance_gains": [
+    1,
+    0.3
+  ],
+  "landing_gains": [
+    1000.0,
+    20.0
+  ],
+  "recovery_s": 0.5,
+  "numerical_failure": false,
+  "mass_policy": "declared",
+  "mass_kg": 34.133858000000004,
+  "stage": "flip",
+  "takeoff_angular_momentum_nms": [
+    -0.005243123324696258,
+    -19.78199938606205,
+    -0.0027787176900893992
+  ],
+  "takeoff_com_velocity_m_s": [
+    -1.4705610075600555,
+    0.0009608976680690603,
+    1.9767758097443062
+  ],
+  "standing": false,
+  "peak_joint_position_excess_rad": 0.0,
+  "final_second_min_upright": 1.0,
+  "final_second_max_base_speed": 0.0,
+  "simulation_time_s": 0.7113750000000294,
+  "screening_profile": {
+    "name": "g1_edu-partial-spec-screen",
+    "mass_policy": "declared",
+    "self_collision": true,
+    "knee_limit_nm": 120,
+    "control_period_s": 0.002,
+    "command_delay_s": 0.002
+  },
+  "self_contact_pairs": [
+    [
+      "left_knee_link",
+      "torso_link"
+    ],
+    [
+      "right_knee_link",
+      "torso_link"
+    ]
+  ],
+  "control_period_s": 0.002,
+  "command_delay_s": 0.002,
+  "torque_limits_nm": [
+    88.0,
+    88.0,
+    88.0,
+    120.0,
+    35.0,
+    35.0,
+    88.0,
+    88.0,
+    88.0,
+    120.0,
+    35.0,
+    35.0,
+    88.0,
+    25.0,
+    25.0,
+    25.0,
+    25.0,
+    25.0,
+    25.0,
+    25.0,
+    25.0,
+    25.0,
+    25.0
+  ],
+  "self_collision_enabled": true,
+  "peak_joint_speed_ratio": 1.0258344241929387,
+  "nonfoot_contact_bodies": [],
+  "rollout_sha256": "0c5e276fbb7582fe8c413532dbf851c07cff0147f032c6922203b93bb8988f71"
+}

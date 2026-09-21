@@ -55,6 +55,12 @@ that file; the embedded profile is restored automatically. An explicit
 target/research/backflip-env/bin/python -I scripts/g1_backflip_search.py --generations 0 --parameters docs/evidence/g1-contact-backflip/candidate.json --profile scripts/fixtures/g1_edu_backflip_screen.json --output target/research/g1-edu-screen
 ```
 
+A bounded EDU search improved takeoff upward speed to about 1.98 m/s, but
+the full maneuver still failed on knee–torso contact. A candidate with optimized
+arm spread avoided self-contact but hit the floor with its hands.
+[Search evidence and termination status](evidence/g1-contact-backflip/README.md#bounded-edu-search-results)
+are recorded; no stricter-profile backflip has passed.
+
 Other joint torque/speed ceilings remain URDF assumptions; mass/COM, motor
 power/current/thermal limits, gain limits, elastic transmission, state-estimation
 errors and actual transport latency are not identified. Standard G1 development
@@ -108,7 +114,9 @@ MUJOCO_GL=egl target/research/backflip-env/bin/python -I scripts/g1_backflip_ren
 A headless OpenGL/EGL implementation is required only for GIF generation.
 The simulation and tests require no renderer. Search can be restarted with
 `--generations 15 --stage flip`; `--stage launch` freezes flight parameters and
-`--stage flight` freezes the launch. `--balance-kp` / `--balance-kd` support
+`--stage flight` freezes launch timing and sagittal targets. Arm spread is
+shared across phases and remains variable in both searches.
+`--balance-kp` / `--balance-kd` support
 bounded landing-gain sweeps. Optimization output always records failures too;
 exit 2 means the complete backflip gate failed, including launch-only runs.
 The pinned fine integration rates are offline numerical checks, not demonstrated

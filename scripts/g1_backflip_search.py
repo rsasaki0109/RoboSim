@@ -183,6 +183,8 @@ class Campaign:
                         )
         m, d = self.model, self.data
         mujoco.mj_resetData(m, d)
+        m.actuator_forcerange[:, 0] = -self.torque_limits
+        m.actuator_forcerange[:, 1] = self.torque_limits
         m.actuator_gainprm[:, 0] = 300
         m.actuator_biasprm[:, 1] = -300
         m.actuator_biasprm[:, 2] = -10

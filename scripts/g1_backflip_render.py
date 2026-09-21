@@ -79,7 +79,7 @@ def render(directory, output):
                     renderer.scene.ngeom += 1
             picture = Image.fromarray(renderer.render())
             draw = ImageDraw.Draw(picture)
-            draw.rectangle((0, 0, 480, 44), fill=(15, 20, 28))
+            draw.rectangle((0, 0, 480, 60), fill=(15, 20, 28))
             draw.text(
                 (12, 8), "G1 | Non-RL optimization | MuJoCo physics", fill="white"
             )
@@ -87,6 +87,19 @@ def render(directory, output):
                 (12, 25),
                 f"t = {frame['time_s']:.2f} s   |   {summary['mass_kg']:.2f} kg",
                 fill=(170, 210, 240),
+            )
+            knee_cap = max(
+                limit
+                for name, limit in zip(
+                    manifest["joint_names"], manifest["torque_limits_nm"]
+                )
+                if "knee" in name
+            )
+            collision_label = "on" if manifest["self_collision"] else "off"
+            draw.text(
+                (12, 42),
+                f"Benchmark | Knee {knee_cap:g} Nm | Self-collision {collision_label}",
+                fill=(255, 205, 140),
             )
             frames.append(picture)
     output.parent.mkdir(parents=True, exist_ok=True)
