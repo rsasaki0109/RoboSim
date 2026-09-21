@@ -678,4 +678,53 @@ mod tests {
             state[1]
         );
     }
+
+    #[test]
+    fn exact_hessian_converges_on_a_contact_problem() {
+        use crate::ddp::QuadraticCost;
+        use crate::multiple_shooting::{max_defect, solve_multiple_shooting, MultipleShootingConfig};
+        let (_world, model, base) = floating_body();
+        let contacts = vec![ContactSpec {
+            link: base,
+            point_local_m: Vec3::new(0.1, -0.1, 0.1),
+        }];
+        let phases = [ContactPhase {
+            contacts,
+            steps: 24,
+        }];
+        let dynamics = ContactSequenceDynamics::new(&model, 0.01, &phases);
+        let horizon = 24;
+        let nx = 2 * model.nv();
+        // A warm start that starts just above the surface with a downward
+        // velocity and no contact force in the reference.
+        let mut states = Vec::new();
+        for _ in 0..=horizon {
+            let mut state = vec![0.0; nx];
+            state[1] = 0.1;
+            state[7] = -0.5;
+            states.push(state);
+        }
+        let controls = vec![Vec::new(); horizon];
+        let mut cost = QuadraticCost::new(vec![0.0; nx], Vec::new(), vec![0.0; nx]);
+        cost.state_reference[1] = 0.1;
+        let run = |use_exact_hessian: bool| {
+            let config = MultipleShootingConfig {
+                max_iterations: 120,
+                tolerance: 1.0e-6,
+                use_exact_hessian,
+                ..MultipleShootingConfig::default()
+            };
+            solve_multiple_shooting(&dynamics, &cost, &states, &controls, &config).expect("solve")
+        };
+        let gauss_newton = run(false);
+        let newton = run(true);
+        let gn_defect = max_defect(&dynamics, &gauss_newton.states, &gauss_newton.controls);
+        let newton_defect = max_defect(&dynamics, &newton.states, &newton.controls);
+        assert!(gn_defect < 1.0e-1, "gauss-newton defect {gn_defect}");
+        assert!(newton_defect < 1.0e-1, "newton defect {newton_defect}");
+        assert!(
+            newton_defect <= gn_defect * 1.5,
+            "newton {newton_defect} worse than gauss-newton {gn_defect}"
+        );
+    }
 }

@@ -567,6 +567,15 @@ acceptance rule, or the step size.
    The plain multiple shooting on this warm start reaches gap 4.12, well above
    the historical 0.18, because the committed 113 reference differs from the
    probe that produced 0.18.
+  - **The exact Hessian does not change the contact convergence.** On a small
+    contact problem (a floating body against the ground, no actuation) the
+    multiple shooting reaches defect 0.0604 with Gauss-Newton and 0.0610 with the
+    exact constrained Hessian, both at the 120-iteration cap. The second-order
+    term therefore does not move the contact defect floor, which is consistent
+    with the plateau being structural (a hard-contact fixed point of the
+    augmented-Lagrangian sweep) rather than a Hessian-approximation issue. This
+    removes the main motivation for hand-deriving the fourth-order contact
+    Hessian.
 3. *A contact-consistent trajectory.* Instead of a kinematic reference, obtain
    the warm start by solving a short optimal-control problem over the transition
    with the contact schedule fixed but the torque and timing free, so the
