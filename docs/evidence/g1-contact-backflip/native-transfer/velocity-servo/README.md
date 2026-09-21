@@ -62,3 +62,6 @@ workspace formatting, and malformed-input rejection checks. Full workspace
 build/test/xtask commands were not rerun: approximately 32 GiB remained free
 and the task retains a 30 GiB disk reserve. These diagnostics do not establish
 complete collision qualification or hardware readiness.
+
+[Four explicit friction comparisons](friction/README.md) retain a subsequent
+0.5/0.7 comparison; those candidates also fail landing.

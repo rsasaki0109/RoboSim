@@ -222,3 +222,15 @@ hardware transfer, power/current limits and uncertainty testing remain open.
   rotate through a full revolution, but does not land successfully. Mesh
   collisions/self-collision and a full physical qualification gate remain
   open; next use the stable native motor baseline for landing optimization.
+
+
+### Native backflip actuator screening follow-up
+
+The native probe now measures joint-speed/rating and position-limit excess at
+every physics step, uses whole-robot COM velocity in landing feedback, and can
+apply bounded implicit velocity commands with torque ceilings. A previous
+near-upright position-motor candidate exceeded knee speed by at least 1.928x;
+it is rejected. Twenty recorded velocity-servo candidates and four explicit
+friction comparisons still fail landing. Native success and a native-success
+GIF remain open; the existing RoboSim GIF is labeled MuJoCo state replay.
+See [native velocity diagnostics](evidence/g1-contact-backflip/native-transfer/velocity-servo/README.md).
