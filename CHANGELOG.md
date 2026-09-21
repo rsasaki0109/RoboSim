@@ -28,6 +28,13 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_dynamics::constrained_forward_dynamics_gradient` differentiates the
+  contact-constrained KKT system with respect to `(q, qd, tau)`, using the exact
+  `dM/dq`, `dh/dx` and `dJ/dq` and a central difference of the analytic contact
+  bias acceleration. It is verified against central differences of
+  `constrained_forward_dynamics` and is the input an exact contact Hessian
+  needs.
+
 - `rne_dynamics::frame_jacobian_gradient` computes `dJ/dq` for a link point.
   The joint columns are differentiated analytically from the link body-twist
   derivatives (a column is `[R v + (R w) x (P - t); R w]` for the joint subspace

@@ -2148,6 +2148,184 @@ pub fn constrained_forward_dynamics(
     Ok((joint_acceleration, forces))
 }
 
+/// Analytical gradient of [`constrained_forward_dynamics`] with respect to
+/// `(q, qd, tau)`.
+///
+/// Differentiates the KKT system `A z = b` with `z = [qdd; lambda]`, using the
+/// exact `dM/dq`, `dh/dx` and `dJ/dq`. The contact bias acceleration `Jdot qd`
+/// is differentiated by central differences of the analytic bias, which is the
+/// remaining third-order term. The result is the constrained analogue of
+/// [`forward_dynamics_gradient`] and the input for an exact contact Hessian.
+#[allow(clippy::needless_range_loop)]
+pub fn constrained_forward_dynamics_gradient(
+    model: &ArticulatedModel,
+    q: &[f64],
+    qd: &[f64],
+    tau: &[f64],
+    contacts: &[ContactSpec],
+) -> Result<ForwardDynamicsGradient, DynamicsError> {
+    validate(model, q, "q")?;
+    validate(model, qd, "qd")?;
+    validate(model, tau, "tau")?;
+    let nv = model.nv();
+    let nc = contacts.len();
+    let size = nv + 3 * nc;
+
+    let mass = mass_matrix(model, q)?;
+    let bias = non_linear_effects(model, q, qd)?;
+    let mass_gradient = mass_matrix_gradient(model, q)?;
+    let bias_gradient = non_linear_effects_gradient(model, q, qd)?;
+
+    // Contact Jacobians and bias accelerations at the base point.
+    let mut jacobians: Vec<DenseMatrix> = Vec::with_capacity(nc);
+    let mut jacobian_gradients: Vec<Vec<DenseMatrix>> = Vec::with_capacity(nc);
+    let mut contact_bias = vec![0.0; 3 * nc];
+    let motions = link_motions(model, q, qd)?;
+    for (contact, spec) in contacts.iter().enumerate() {
+        let link_index = model
+            .kinematic
+            .link_index(spec.link)
+            .ok_or(DynamicsError::MissingDofOwner(contact))?;
+        jacobians.push(frame_jacobian(model, q, spec.link, spec.point_local_m)?);
+        jacobian_gradients.push(frame_jacobian_gradient(
+            model,
+            q,
+            spec.link,
+            spec.point_local_m,
+        )?);
+        let point_bias = motions[link_index].point_bias_acceleration_m_s2(spec.point_local_m);
+        contact_bias[3 * contact] = point_bias.x;
+        contact_bias[3 * contact + 1] = point_bias.y;
+        contact_bias[3 * contact + 2] = point_bias.z;
+    }
+
+    // Finite-difference gradients of the contact bias acceleration.
+    let epsilon = 1.0e-6;
+    let contact_bias_at = |q_value: &[f64], qd_value: &[f64]| -> Result<Vec<f64>, DynamicsError> {
+        let motions = link_motions(model, q_value, qd_value)?;
+        let mut out = vec![0.0; 3 * nc];
+        for (contact, spec) in contacts.iter().enumerate() {
+            let link_index = model
+                .kinematic
+                .link_index(spec.link)
+                .ok_or(DynamicsError::MissingDofOwner(contact))?;
+            let value = motions[link_index].point_bias_acceleration_m_s2(spec.point_local_m);
+            out[3 * contact] = value.x;
+            out[3 * contact + 1] = value.y;
+            out[3 * contact + 2] = value.z;
+        }
+        Ok(out)
+    };
+    let mut bias_dq = vec![vec![0.0; 3 * nc]; nv];
+    let mut bias_dqd = vec![vec![0.0; 3 * nc]; nv];
+    for k in 0..nv {
+        let mut plus = q.to_vec();
+        plus[k] += epsilon;
+        let mut minus = q.to_vec();
+        minus[k] -= epsilon;
+        let plus_value = contact_bias_at(&plus, qd)?;
+        let minus_value = contact_bias_at(&minus, qd)?;
+        for row in 0..3 * nc {
+            bias_dq[k][row] = (plus_value[row] - minus_value[row]) / (2.0 * epsilon);
+        }
+        let mut plus = qd.to_vec();
+        plus[k] += epsilon;
+        let mut minus = qd.to_vec();
+        minus[k] -= epsilon;
+        let plus_value = contact_bias_at(q, &plus)?;
+        let minus_value = contact_bias_at(q, &minus)?;
+        for row in 0..3 * nc {
+            bias_dqd[k][row] = (plus_value[row] - minus_value[row]) / (2.0 * epsilon);
+        }
+    }
+
+    // Assemble the KKT matrix and solve for `z = [qdd; lambda]`.
+    let mut matrix = DenseMatrix::zeros(size, size);
+    let mut rhs = vec![0.0; size];
+    for row in 0..nv {
+        for column in 0..nv {
+            matrix.set(row, column, mass.get(row, column));
+        }
+        rhs[row] = tau[row] - bias[row];
+    }
+    for contact in 0..nc {
+        for component in 0..3 {
+            let row = 3 * contact + component;
+            for column in 0..nv {
+                let value = jacobians[contact].get(component, column);
+                matrix.set(column, nv + row, -value);
+                matrix.set(nv + row, column, value);
+            }
+            matrix.set(nv + row, nv + row, -CONTACT_REGULARIZATION);
+            rhs[nv + row] = -contact_bias[row];
+        }
+    }
+    let solution = matrix
+        .solve(&rhs)
+        .ok_or(DynamicsError::SingularMassMatrix)?;
+    let acceleration = &solution[..nv];
+    let lambda = &solution[nv..];
+
+    let solve = |rhs: &[f64]| -> Result<Vec<f64>, DynamicsError> {
+        matrix.solve(rhs).ok_or(DynamicsError::SingularMassMatrix)
+    };
+    let mut with_respect_to_q = vec![vec![0.0; nv]; nv];
+    let mut with_respect_to_qd = vec![vec![0.0; nv]; nv];
+    let mut with_respect_to_control = vec![vec![0.0; nv]; nv];
+    for k in 0..nv {
+        // q: `db/dq_k - dA/dq_k z`.
+        let mut local_rhs = vec![0.0; size];
+        for row in 0..nv {
+            let mut d_a_z = 0.0;
+            for column in 0..nv {
+                d_a_z += mass_gradient[k].get(row, column) * acceleration[column];
+            }
+            for contact in 0..nc {
+                for component in 0..3 {
+                    let index = 3 * contact + component;
+                    d_a_z -= jacobian_gradients[contact][k].get(component, row) * lambda[index];
+                }
+            }
+            local_rhs[row] = -bias_gradient.with_respect_to_q[k][row] - d_a_z;
+        }
+        for row in 0..3 * nc {
+            let mut d_a_z = 0.0;
+            let contact = row / 3;
+            let component = row % 3;
+            for column in 0..nv {
+                d_a_z += jacobian_gradients[contact][k].get(component, column)
+                    * acceleration[column];
+            }
+            local_rhs[nv + row] = -bias_dq[k][row] - d_a_z;
+        }
+        let column = solve(&local_rhs)?;
+        with_respect_to_q[k].copy_from_slice(&column[..nv]);
+
+        // qd: `dA = 0`.
+        let mut local_rhs = vec![0.0; size];
+        for row in 0..nv {
+            local_rhs[row] = -bias_gradient.with_respect_to_qd[k][row];
+        }
+        for row in 0..3 * nc {
+            local_rhs[nv + row] = -bias_dqd[k][row];
+        }
+        let column = solve(&local_rhs)?;
+        with_respect_to_qd[k].copy_from_slice(&column[..nv]);
+    }
+    for j in 0..nv {
+        let mut local_rhs = vec![0.0; size];
+        local_rhs[j] = 1.0;
+        let column = solve(&local_rhs)?;
+        with_respect_to_control[j].copy_from_slice(&column[..nv]);
+    }
+
+    Ok(ForwardDynamicsGradient {
+        with_respect_to_q,
+        with_respect_to_qd,
+        with_respect_to_control,
+    })
+}
+
 /// Impulsive reset of the joint velocities when new contacts are established.
 ///
 /// Solves the impulse KKT system
@@ -3735,5 +3913,82 @@ mod tests {
         let model = ArticulatedModel::from_robot(&world, robot).expect("model");
         let link = model.link_entity(1).expect("link");
         assert_frame_jacobian_gradient(&model, &[0.3, 0.2, -0.1, 0.5, -0.4, 0.9, 0.6], link);
+    }
+
+    fn assert_constrained_gradient(model: &ArticulatedModel, q: &[f64], qd: &[f64], tau: &[f64]) {
+        let link = model.link_entity(1).expect("link");
+        let contacts = vec![ContactSpec {
+            link,
+            point_local_m: Vec3::new(0.2, 0.0, 0.0),
+        }];
+        let gradient =
+            constrained_forward_dynamics_gradient(model, q, qd, tau, &contacts).expect("gradient");
+        let nv = model.nv();
+        let epsilon = 1.0e-6;
+        for k in 0..nv {
+            let mut plus = q.to_vec();
+            plus[k] += epsilon;
+            let mut minus = q.to_vec();
+            minus[k] -= epsilon;
+            let (plus_a, _) =
+                constrained_forward_dynamics(model, &plus, qd, tau, &contacts).expect("plus");
+            let (minus_a, _) =
+                constrained_forward_dynamics(model, &minus, qd, tau, &contacts).expect("minus");
+            for row in 0..nv {
+                let fd = (plus_a[row] - minus_a[row]) / (2.0 * epsilon);
+                assert_relative_eq!(
+                    gradient.with_respect_to_q[k][row],
+                    fd,
+                    epsilon = 5.0e-4,
+                    max_relative = 5.0e-4
+                );
+            }
+
+            let mut plus = qd.to_vec();
+            plus[k] += epsilon;
+            let mut minus = qd.to_vec();
+            minus[k] -= epsilon;
+            let (plus_a, _) =
+                constrained_forward_dynamics(model, q, &plus, tau, &contacts).expect("plus");
+            let (minus_a, _) =
+                constrained_forward_dynamics(model, q, &minus, tau, &contacts).expect("minus");
+            for row in 0..nv {
+                let fd = (plus_a[row] - minus_a[row]) / (2.0 * epsilon);
+                assert_relative_eq!(
+                    gradient.with_respect_to_qd[k][row],
+                    fd,
+                    epsilon = 5.0e-4,
+                    max_relative = 5.0e-4
+                );
+            }
+
+            let mut plus = tau.to_vec();
+            plus[k] += epsilon;
+            let mut minus = tau.to_vec();
+            minus[k] -= epsilon;
+            let (plus_a, _) =
+                constrained_forward_dynamics(model, q, qd, &plus, &contacts).expect("plus");
+            let (minus_a, _) =
+                constrained_forward_dynamics(model, q, qd, &minus, &contacts).expect("minus");
+            for row in 0..nv {
+                let fd = (plus_a[row] - minus_a[row]) / (2.0 * epsilon);
+                assert_relative_eq!(
+                    gradient.with_respect_to_control[k][row],
+                    fd,
+                    epsilon = 5.0e-4,
+                    max_relative = 5.0e-4
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn constrained_forward_dynamics_gradient_matches_finite_difference() {
+        let (world, robot) = floating_chain_world();
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let q = vec![0.3, 0.2, -0.1, 0.5, -0.4, 0.9, 0.6];
+        let qd = vec![0.7, -0.2, 0.4, -0.5, 0.3, -0.6, 0.8];
+        let tau = vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4];
+        assert_constrained_gradient(&model, &q, &qd, &tau);
     }
 }
