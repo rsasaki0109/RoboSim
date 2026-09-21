@@ -10,7 +10,58 @@ The robot is RNE's existing 23-joint G1 URDF. This is an external contact-plant
 benchmark, not yet a demonstration of the RNE/Rapier backend or real hardware.
 It adds no dependency to a Rust crate.
 
-## Measured result
+## Partial specification screen (not hardware validation)
+
+The saved GIF uses a **139 N m knee ceiling and disables self-collision**.
+Unitree lists maximum knee torque of **90 N m for G1 and 120 N m for G1 EDU**
+on its [official specification page](https://www.unitree.com/g1/).
+The saved motion therefore does not demonstrate feasibility on either machine.
+
+Two optional profiles, `scripts/fixtures/g1_backflip_screen.json` and
+`g1_edu_backflip_screen.json`, enable robot self-collision, cap knee effort at
+90/120 N m, select the URDF-declared mass (34.133858 kg), and sample joint target
+and gain commands every 2 ms. The period follows the
+[official low-level Python example](https://github.com/unitreerobotics/unitree_sdk2_python/blob/master/example/g1/low_level/g1_low_level_example.py).
+One additional 2 ms command delay is an explicit test assumption, **not a measured
+hardware latency**. Targets and gains are held between updates; flight/contact
+state transitions are sampled on that clock. The implicit motor PD and idealized
+speed envelope remain part of the continuously integrated plant.
+
+Self-collision uses the URDF collision meshes (MuJoCo convex mesh collision),
+including the foot mesh; the four sole points still handle ground contact.
+MuJoCo's normal same-body/parent filtering remains. Any penetrating self-contact
+fails the rollout immediately. Mesh approximations and this conservative gate
+need comparison with the real geometry before interpreting contacts as measured
+hardware interference.
+
+Replaying the existing candidate at 0.125 ms gives:
+
+| Change from the saved benchmark | Result |
+|---|---|
+| Only knee ceiling 120 N m | Fails; non-foot ground contact at 1.703 s |
+| Only 2 ms command period, no delay | Passes the full five-second gate |
+| Only self-collision enabled | Fails; hand–hand contact at 0.658 s |
+| Combined G1 screen | Fails; hand–hand contact at 0.645 s |
+| Combined G1 EDU screen | Fails; hand–hand contact at 0.652 s |
+
+[Screen summaries](evidence/g1-contact-backflip/screening/) record each exact
+profile and motion parameter set. These are dynamic rollouts, not geometric
+replays of the GIF. Each summary can be reproduced using `--parameters` with
+that file; the embedded profile is restored automatically. An explicit
+`--profile` replaces the embedded profile.
+
+```bash
+# Exit 2 is expected for the current candidate under the stricter screen.
+target/research/backflip-env/bin/python -I scripts/g1_backflip_search.py --generations 0 --parameters docs/evidence/g1-contact-backflip/candidate.json --profile scripts/fixtures/g1_edu_backflip_screen.json --output target/research/g1-edu-screen
+```
+
+Other joint torque/speed ceilings remain URDF assumptions; mass/COM, motor
+power/current/thermal limits, gain limits, elastic transmission, state-estimation
+errors and actual transport latency are not identified. Standard G1 development
+access must not be inferred from this numerical profile. Neither profile is a
+hardware controller or permission to execute the maneuver on a robot.
+
+## Measured benchmark result
 
 ![G1 optimized backflip in the contact plant](media/unitree-g1-optimization-backflip.gif)
 
@@ -84,16 +135,19 @@ hardware control frequencies.
   Both use MuJoCo's soft constraint solver. Position-limit
   excess must remain below 0.02 rad and speed below 1.05 times the rating. The
   numerical tolerances are checked at every integration step, including impact.
-- Only robot-ground collisions are enabled. Self-collision, gear elasticity,
+- In the original benchmark, only robot-ground collisions are enabled. Self-collision, gear elasticity,
   actuator latency, terrain variation, and hardware uncertainty are not covered.
 - A deterministic state machine performs crouch, extension, tuck, opening,
   landing, and recovery. Touchdown and takeoff use measured foot contacts.
   Root pitch and velocity feedback adjust the ankle targets after landing.
   The integrator uses simulation steps, never wall-clock time.
 
-The 13 search parameters are crouch knee, crouch lean, extension duration,
+The original 13 motion parameters are crouch knee, crouch lean, extension duration,
 extension hip, extension ankle, tuck duration, tuck hip, tuck knee, landing knee,
 extension shoulder, landing hip bias, opening angle, and crouch hip bias.
+New searches also optimize a fourteenth parameter, symmetric shoulder roll
+(arm spread), to allow avoiding hand–hand and arm–leg collisions. Saved 13-value
+candidates retain their original arm posture.
 Angles are radians and durations seconds. Landing feedback gains are recorded
 separately. The random seed is fixed to 20260921. A feasible candidate is not
 proof of globally optimal motion.

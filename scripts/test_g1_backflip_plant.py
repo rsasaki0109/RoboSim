@@ -12,7 +12,7 @@ import g1_backflip_plant as plant
 import g1_backflip_render as render
 import mujoco
 import numpy as np
-from g1_backflip_search import Campaign
+from g1_backflip_search import Campaign, CommandClock
 
 
 class ContactPlantTests(unittest.TestCase):
@@ -89,6 +89,80 @@ class ContactPlantTests(unittest.TestCase):
         self.assertTrue(result["passed"], result)
         digest = hashlib.sha256((json.dumps(history) + "\n").encode()).hexdigest()
         self.assertEqual(digest, expected["rollout_sha256"])
+
+    def test_command_hold_and_one_tick_delay(self):
+        clock = CommandClock(0.000125, 0.002, 0.002, (0, 300, 10))
+        received = []
+        for step in range(33):
+            if clock.update_due(step):
+                clock.submit((step + 1, 1000, 20))
+            received.append(clock.current)
+        self.assertEqual(received[:16], [(0, 300, 10)] * 16)
+        self.assertEqual(received[16:32], [(1, 1000, 20)] * 16)
+        self.assertEqual(received[32], (17, 1000, 20))
+        for period, delay in (
+            (0.0001, 0),
+            (0.0021, 0),
+            (0.002, 0.001),
+            (float("nan"), 0),
+        ):
+            with self.assertRaises(ValueError):
+                CommandClock(0.000125, period, delay, None)
+
+    def test_self_collision_standing_pose_has_no_penetration(self):
+        model = plant.build_model(
+            dict(self.manifest, self_collision=True), 0.001, 300, 10
+        )
+        data = mujoco.MjData(model)
+        q = np.asarray(self.manifest["initial_q_xyzw"])
+        data.qpos[:3] = q[:3]
+        data.qpos[3:7] = q[[6, 3, 4, 5]]
+        for index, name in enumerate(self.manifest["joint_names"]):
+            data.qpos[model.jnt_qposadr[model.joint(name).id]] = q[index + 7]
+        data.ctrl[:] = q[7:]
+        ground = model.geom("ground").id
+        for _ in range(200):
+            mujoco.mj_step(model, data)
+            self.assertFalse(
+                any(
+                    c.dist < 0 and ground not in (c.geom1, c.geom2)
+                    for c in data.contact
+                )
+            )
+        self.assertGreater(data.qpos[2], 0.7)
+
+    def test_screening_caps_and_self_collision(self):
+        evidence = plant.ROOT / "docs/evidence/g1-contact-backflip"
+        seed = json.loads((evidence / "candidate.json").read_text())
+        for name, cap in (("g1", 90), ("g1_edu", 120)):
+            profile = json.loads(
+                (
+                    plant.ROOT / f"scripts/fixtures/{name}_backflip_screen.json"
+                ).read_text()
+            )
+            with tempfile.TemporaryDirectory() as temporary:
+                campaign = Campaign(Path(temporary), dt_s=0.000125, profile=profile)
+                for index, joint in enumerate(campaign.names):
+                    if "knee" in joint:
+                        self.assertEqual(campaign.torque_limits[index], cap)
+                        self.assertEqual(
+                            campaign.model.actuator_forcerange[index, 1], cap
+                        )
+                self.assertAlmostEqual(
+                    sum(campaign.model.body_mass), 34.13385728, places=5
+                )
+        with tempfile.TemporaryDirectory() as temporary:
+            campaign = Campaign(
+                Path(temporary),
+                dt_s=seed["dt_s"],
+                joint_limit_time_constant_s=seed["joint_limit_time_constant_s"],
+                joint_limit_margin_rad=seed["joint_limit_margin_rad"],
+                profile={"self_collision": True},
+            )
+            result, _ = campaign.rollout(seed["parameters"] + [0.2])
+            self.assertFalse(result["passed"])
+            self.assertTrue(result["self_contact_pairs"])
+            self.assertLess(result["simulation_time_s"], 1.0)
 
     def test_failed_rollout_cannot_be_rendered_as_success(self):
         with tempfile.TemporaryDirectory() as temporary:

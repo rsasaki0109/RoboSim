@@ -7,6 +7,7 @@ import json
 import shutil
 import sys
 import xml.etree.ElementTree as ET
+from collections import deque
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -14,6 +15,36 @@ import g1_backflip_plant as plant
 import mujoco
 import numpy as np
 from scipy.optimize import differential_evolution
+
+
+class CommandClock:
+    """Sample and hold joint targets and gains, with whole-tick transport delay."""
+
+    def __init__(self, dt_s, period_s, delay_s, initial):
+        values = np.asarray([dt_s, period_s, delay_s])
+        if not np.all(np.isfinite(values)) or dt_s <= 0 or period_s <= 0 or delay_s < 0:
+            raise ValueError("invalid command timing")
+        ratio = period_s / dt_s
+        ticks = delay_s / period_s
+        if ratio < 1 or not np.isclose(ratio, round(ratio), atol=1e-9, rtol=0):
+            raise ValueError(
+                "command period must be an integer number of physics steps"
+            )
+        if not np.isclose(ticks, round(ticks), atol=1e-9, rtol=0):
+            raise ValueError("command delay must be an integer number of command ticks")
+        self.steps = round(ratio)
+        self.queue = deque([initial] * round(ticks))
+        self.current = initial
+
+    def update_due(self, step):
+        """Whether an outer-loop command is sampled at this physics step."""
+        return step % self.steps == 0
+
+    def submit(self, command):
+        """Queue one sampled (target, kp, kd) command and return the arriving one."""
+        self.queue.append(command)
+        self.current = self.queue.popleft()
+        return self.current
 
 
 class Campaign:
@@ -28,6 +59,7 @@ class Campaign:
         mass_policy="rne",
         joint_limit_time_constant_s=0.004,
         joint_limit_margin_rad=0.0,
+        profile=None,
     ):
         if (
             shutil.disk_usage(output if output.exists() else plant.ROOT).free
@@ -40,6 +72,33 @@ class Campaign:
         self.summary["mass_policy"] = mass_policy
         self.summary["joint_limit_time_constant_s"] = joint_limit_time_constant_s
         self.summary["joint_limit_margin_rad"] = joint_limit_margin_rad
+        self.profile = dict(profile or {})
+        allowed = {
+            "name",
+            "mass_policy",
+            "self_collision",
+            "knee_limit_nm",
+            "control_period_s",
+            "command_delay_s",
+        }
+        if set(self.profile) - allowed:
+            raise ValueError("unknown screening profile fields")
+        for key in ("mass_policy", "self_collision"):
+            if key in self.profile:
+                self.summary[key] = self.profile[key]
+        if "knee_limit_nm" in self.profile:
+            cap = self.profile["knee_limit_nm"]
+            if not np.isfinite(cap) or cap <= 0 or cap > 139:
+                raise ValueError("invalid screening knee torque cap")
+            self.summary["torque_limits_nm"] = [
+                min(limit, cap) if "knee" in name else limit
+                for name, limit in zip(
+                    self.summary["joint_names"], self.summary["torque_limits_nm"]
+                )
+            ]
+        self.control_period_s = self.profile.get("control_period_s", dt_s)
+        self.command_delay_s = self.profile.get("command_delay_s", 0.0)
+        CommandClock(dt_s, self.control_period_s, self.command_delay_s, None)
         self.model = plant.build_model(self.summary, dt_s, 300, 10)
         self.data = mujoco.MjData(self.model)
         self.dt_s = dt_s
@@ -89,8 +148,8 @@ class Campaign:
 
     def rollout(self, parameters, record=False):
         """Simulate five seconds, applying only bounded joint motor commands."""
-        if len(parameters) != 13 or not np.all(np.isfinite(parameters)):
-            raise ValueError("expected 13 finite maneuver parameters")
+        if len(parameters) not in (13, 14) or not np.all(np.isfinite(parameters)):
+            raise ValueError("expected 13 or 14 finite maneuver parameters")
         (
             knee,
             lean,
@@ -115,6 +174,13 @@ class Campaign:
         land = self.pose(
             land_hip, landing_knee, np.clip(-land_hip - landing_knee, -0.85, 0.5)
         )
+        if len(parameters) == 14:
+            for pose in (crouch, launch, tuck, land):
+                for index, name in enumerate(self.names):
+                    if "shoulder_roll" in name:
+                        pose[index] = parameters[13] * (
+                            1 if name.startswith("left") else -1
+                        )
         m, d = self.model, self.data
         mujoco.mj_resetData(m, d)
         m.actuator_gainprm[:, 0] = 300
@@ -142,63 +208,75 @@ class Campaign:
         tail_height = np.inf
         tail_contact = True
         numerical_failure = False
+        self_contact_pairs = set()
+        clock = CommandClock(
+            self.dt_s,
+            self.control_period_s,
+            self.command_delay_s,
+            (self.stand.copy(), 300.0, 10.0),
+        )
+        command_kp, command_kd = 300.0, 10.0
         history = []
         last_stand_error = 0.0
         for step in range(round(5.0 / self.dt_s)):
             t = step * self.dt_s
-            if t < 0.5:
-                alpha = min(1.0, t / 0.4)
-                alpha = alpha * alpha * (3 - 2 * alpha)
-                target = (1 - alpha) * self.stand + alpha * crouch
-            elif takeoff is None:
-                alpha = min(1.0, (t - 0.5) / push_s)
-                target = (1 - alpha) * crouch + alpha * launch
-            elif touchdown is None:
-                elapsed = t - takeoff
-                if elapsed < tuck_s and angle > -opening_angle:
-                    alpha = min(1.0, elapsed / 0.08)
-                    target = (1 - alpha) * launch + alpha * tuck
-                else:
-                    alpha = (
-                        min(1.0, max(0.0, elapsed - tuck_s) / 0.1)
-                        if angle > -opening_angle
-                        else 1.0
-                    )
-                    target = (1 - alpha) * tuck + alpha * land
-                    m.actuator_gainprm[:, 0] = 1000
-                    m.actuator_biasprm[:, 1] = -1000
-                    m.actuator_biasprm[:, 2] = -20
+            if clock.update_due(step):
+                if t < 0.5:
+                    alpha = min(1.0, t / 0.4)
+                    alpha = alpha * alpha * (3 - 2 * alpha)
+                    target = (1 - alpha) * self.stand + alpha * crouch
+                elif takeoff is None:
+                    alpha = min(1.0, (t - 0.5) / push_s)
+                    target = (1 - alpha) * crouch + alpha * launch
+                elif touchdown is None:
+                    elapsed = t - takeoff
+                    if elapsed < tuck_s and angle > -opening_angle:
+                        alpha = min(1.0, elapsed / 0.08)
+                        target = (1 - alpha) * launch + alpha * tuck
+                    else:
+                        alpha = (
+                            min(1.0, max(0.0, elapsed - tuck_s) / 0.1)
+                            if angle > -opening_angle
+                            else 1.0
+                        )
+                        target = (1 - alpha) * tuck + alpha * land
+                        command_kp, command_kd = 1000.0, 20.0
 
-            else:
-                m.actuator_gainprm[:, 0] = self.landing_gains[0]
-                m.actuator_biasprm[:, 1] = -self.landing_gains[0]
-                m.actuator_biasprm[:, 2] = -self.landing_gains[1]
-                alpha = min(1.0, (t - touchdown) / self.recovery_s)
-                target = (1 - alpha) * land + alpha * self.stand
-                mujoco.mj_subtreeVel(m, d)
-                root = m.body("pelvis").id
-                center = np.mean([d.xpos[body] for body in self.feet], axis=0)
-                gain, com_gain, velocity_gain = self.balance
-                blend = np.clip((t - touchdown - 0.5) / 0.3, 0, 1)
-                feedback = (
-                    gain * previous
-                    + com_gain * (d.subtree_com[root, 0] - center[0] - 0.015)
-                    + velocity_gain * d.subtree_linvel[root, 0]
-                )
-                correction = np.clip(
-                    (1 - blend)
-                    * (
-                        self.early_balance[0] * previous
-                        + self.early_balance[1] * d.qvel[4]
+                else:
+                    command_kp, command_kd = self.landing_gains
+                    alpha = min(1.0, (t - touchdown) / self.recovery_s)
+                    target = (1 - alpha) * land + alpha * self.stand
+                    mujoco.mj_subtreeVel(m, d)
+                    root = m.body("pelvis").id
+                    center = np.mean([d.xpos[body] for body in self.feet], axis=0)
+                    gain, com_gain, velocity_gain = self.balance
+                    blend = np.clip((t - touchdown - 0.5) / 0.3, 0, 1)
+                    feedback = (
+                        gain * previous
+                        + com_gain * (d.subtree_com[root, 0] - center[0] - 0.015)
+                        + velocity_gain * d.subtree_linvel[root, 0]
                     )
-                    + blend * feedback,
-                    -0.6,
-                    0.6,
-                )
-                for index, name in enumerate(self.names):
-                    if "ankle_pitch" in name:
-                        target[index] = np.clip(target[index] + correction, -0.85, 0.5)
+                    correction = np.clip(
+                        (1 - blend)
+                        * (
+                            self.early_balance[0] * previous
+                            + self.early_balance[1] * d.qvel[4]
+                        )
+                        + blend * feedback,
+                        -0.6,
+                        0.6,
+                    )
+                    for index, name in enumerate(self.names):
+                        if "ankle_pitch" in name:
+                            target[index] = np.clip(
+                                target[index] + correction, -0.85, 0.5
+                            )
+                clock.submit((target.copy(), command_kp, command_kd))
+            target, kp, kd = clock.current
             d.ctrl[:] = target
+            m.actuator_gainprm[:, 0] = kp
+            m.actuator_biasprm[:, 1] = -kp
+            m.actuator_biasprm[:, 2] = -kd
             velocity_ratio = d.qvel[self.vids] / self.speed_limits
             # Full effort below 90% rated speed; motoring effort vanishes at the limit.
             m.actuator_forcerange[:, 0] = -self.torque_limits * np.clip(
@@ -234,16 +312,34 @@ class Campaign:
                     else:
                         nonfoot = True
                         nonfoot_bodies.add(m.body(m.geom_bodyid[other]).name)
+                elif collision.dist < 0:
+                    self_contact_pairs.add(
+                        tuple(
+                            sorted(
+                                (
+                                    m.body(m.geom_bodyid[collision.geom1]).name,
+                                    m.body(m.geom_bodyid[collision.geom2]).name,
+                                )
+                            )
+                        )
+                    )
             air_s = 0.0 if contact else air_s + self.dt_s
             longest_air_s = max(longest_air_s, air_s)
-            if takeoff is None and t > 0.5 and air_s > 0.012 and d.qvel[2] > 0.3:
+            if (
+                clock.update_due(step)
+                and takeoff is None
+                and t > 0.5
+                and air_s > 0.012
+                and d.qvel[2] > 0.3
+            ):
                 takeoff = t - air_s
                 mujoco.mj_subtreeVel(m, d)
                 root = m.body("pelvis").id
                 takeoff_momentum = d.subtree_angmom[root].copy()
                 takeoff_velocity = d.subtree_linvel[root].copy()
             if (
-                takeoff is not None
+                clock.update_due(step)
+                and takeoff is not None
                 and touchdown is None
                 and t - takeoff > 0.1
                 and contact
@@ -282,7 +378,7 @@ class Campaign:
                         "foot_contact": contact,
                     }
                 )
-            if nonfoot or not np.all(np.isfinite(d.qpos)):
+            if nonfoot or self_contact_pairs or not np.all(np.isfinite(d.qpos)):
                 break
             if self.stage == "launch" and takeoff is not None:
                 break
@@ -304,6 +400,7 @@ class Campaign:
                 + 3 * (takeoff_momentum[0] ** 2 + takeoff_momentum[2] ** 2)
             )
             loss += 200 * nonfoot
+        loss += 200 * bool(self_contact_pairs)
         loss += 1e6 * numerical_failure
         loss += (
             30 * max(0, peak_speed_ratio - 1.05) ** 2
@@ -318,6 +415,7 @@ class Campaign:
         )
         passed = (
             not numerical_failure
+            and not self_contact_pairs
             and standing
             and peak_position_excess < 0.02
             and peak_speed_ratio < 1.05
@@ -373,6 +471,12 @@ class Campaign:
             final_second_max_base_speed=float(tail_speed),
             simulation_time_s=float(d.time),
         )
+        result["screening_profile"] = self.profile
+        result["self_contact_pairs"] = sorted(self_contact_pairs)
+        result["control_period_s"] = self.control_period_s
+        result["command_delay_s"] = self.command_delay_s
+        result["torque_limits_nm"] = self.torque_limits.tolist()
+        result["self_collision_enabled"] = self.summary.get("self_collision", False)
         result["peak_joint_speed_ratio"] = peak_speed_ratio
         result["nonfoot_contact_bodies"] = sorted(nonfoot_bodies)
         return result, history
@@ -399,13 +503,15 @@ def main():
     parser.add_argument("--balance-kp", type=float)
     parser.add_argument("--balance-kd", type=float)
     parser.add_argument("--parameters", type=Path)
-    parser.add_argument("--stage", choices=("launch", "flight", "flip"), default="flip")
+    parser.add_argument("--profile", type=Path)
+    parser.add_argument("--stage", choices=("launch", "flight", "flip"))
     parser.add_argument("--mass-policy", choices=("rne", "declared"))
     parser.add_argument("--target-momentum", type=float, default=-20.0)
     args = parser.parse_args()
     if args.generations < 0:
         parser.error("generations must be nonnegative")
     seed = json.loads(args.parameters.read_text()) if args.parameters else {}
+    args.stage = args.stage or seed.get("stage", "flip")
     campaign = Campaign(
         args.output,
         args.dt_s if args.dt_s is not None else seed.get("dt_s", 0.001),
@@ -416,6 +522,9 @@ def main():
         if args.joint_limit_time_constant_s is not None
         else seed.get("joint_limit_time_constant_s", 0.004),
         seed.get("joint_limit_margin_rad", 0.0),
+        json.loads(args.profile.read_text())
+        if args.profile
+        else seed.get("screening_profile"),
     )
     for field, attribute in (
         ("early_balance_gains", "early_balance"),
@@ -444,6 +553,8 @@ def main():
         if len(initial) == 12:
             initial.append(0.0)
     if args.generations:
+        if len(initial) == 13:
+            initial.append(0.2)
         bounds = [
             (0.8, 2.8),
             (-0.4, 0.2),
@@ -458,6 +569,7 @@ def main():
             (-1.0, 0.8),
             (3.3, 6.0),
             (-0.8, 0.8),
+            (0.2, 1.2),
         ]
         if args.stage == "launch":
             for i in (5, 6, 7, 8, 10, 11):

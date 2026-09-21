@@ -20,3 +20,13 @@ sweeps of flight pose, landing feedback, and explicitly recorded constraint
 settings. No policy network, reward training, pretrained action data, or external
 base wrench was used. Simulator settings are part of this benchmark's contract,
 not inferred hardware parameters. Self-collision is disabled.
+
+## Stricter screening
+
+`screening/` contains dynamic replays of the same candidate with independently
+changed constraints and combined G1/G1 EDU partial-specification profiles.
+The full settings are embedded in each summary. Reproduce any summary with
+`--parameters <summary.json> --generations 0 --output <directory>`.
+The stricter combined profiles fail; the original GIF is not hardware evidence.
+Only `control500hz.json` passes, with every other original benchmark assumption
+retained. See the main document for the public specification sources and unknowns.

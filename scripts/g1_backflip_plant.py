@@ -66,6 +66,7 @@ def build_model(manifest, dt_s, kp, kd):
         iterations="100",
         tolerance="1e-10",
     )
+    self_collision = manifest.get("self_collision", False)
     world = xml.find("worldbody")
     ET.SubElement(
         world,
@@ -74,7 +75,7 @@ def build_model(manifest, dt_s, kp, kd):
         type="plane",
         size="5 5 .1",
         contype="2",
-        conaffinity="1",
+        conaffinity="5" if self_collision else "1",
         friction=".7 .005 .0001",
         solref=".004 1",
         rgba=".2 .25 .3 1",
@@ -92,12 +93,13 @@ def build_model(manifest, dt_s, kp, kd):
     for geom in world.findall(".//body/geom"):
         if geom.get("contype", "1") != "0":
             geom.set("contype", "1")
-            geom.set("conaffinity", "2")
+            geom.set("conaffinity", "3" if self_collision else "2")
     for side in ("left", "right"):
         body = world.find(f".//body[@name='{side}_ankle_roll_link']")
         for geom in body.findall("geom"):
-            geom.set("contype", "0")
-            geom.set("conaffinity", "0")
+            collidable = self_collision and geom.get("contype", "1") != "0"
+            geom.set("contype", "1" if collidable else "0")
+            geom.set("conaffinity", "1" if collidable else "0")
         for index, offset in enumerate(manifest["contact_offsets_local_m"]):
             position = np.array(offset) + [0, 0, 0.002]
             ET.SubElement(
@@ -108,7 +110,7 @@ def build_model(manifest, dt_s, kp, kd):
                 pos=" ".join(map(str, position)),
                 size=".002",
                 mass="0",
-                contype="1",
+                contype="4" if self_collision else "1",
                 conaffinity="2",
                 condim="3",
                 friction=".7 .005 .0001",

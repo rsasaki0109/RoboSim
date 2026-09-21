@@ -165,3 +165,15 @@ measurement with `--scan` (torque sweep) and `--trace` (per-step telemetry).
   Consistent with the base contact-schedule/closing wall, this keeps Theme B
   (foot placement) and a whole-body jump trajectory as the prerequisites for
   any parkour capture.
+
+
+### G1 hardware-oriented screening follow-up
+
+The optional contact backflip benchmark now supports self-collision, separate
+physics/command periods, a held target-and-gain command with transport delay,
+and explicit 90/120 N m knee ceilings. Replaying the saved trajectory at 500 Hz
+alone passes, but knee-limited and self-collision-enabled variants fail. Combined
+G1/G1 EDU profiles are partial specification screens, not hardware validation.
+See [measured results and remaining model gaps](G1_CONTACT_BACKFLIP.md).
+The next motion search must solve collision-free launch and landing under these
+conditions before claiming progress toward a real-machine backflip.

@@ -32,6 +32,10 @@ def render(directory, output):
     manifest["mass_policy"] = summary["mass_policy"]
     manifest["joint_limit_time_constant_s"] = summary["joint_limit_time_constant_s"]
     manifest["joint_limit_margin_rad"] = summary["joint_limit_margin_rad"]
+    manifest["self_collision"] = summary.get("self_collision_enabled", False)
+    manifest["torque_limits_nm"] = summary.get(
+        "torque_limits_nm", manifest["torque_limits_nm"]
+    )
     model = plant.build_model(manifest, summary["dt_s"], 300, 10)
     model.vis.headlight.ambient[:] = 0.55
     model.vis.headlight.diffuse[:] = 0.8
