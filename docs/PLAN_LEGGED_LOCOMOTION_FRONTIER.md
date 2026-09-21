@@ -546,12 +546,15 @@ acceptance rule, or the step size.
    gap and a real jump at once, which is the same trade-off seen everywhere
    else and confirms the maneuver is near the platform limit at this reference
    and step size.
-2. *Exact contact derivatives.* Implement
-   `constrained_forward_dynamics_gradient` (the KKT solve differentiated, which
-   needs the contact Jacobian derivative and the bias-acceleration derivative —
-   fourth-order kinematics) and the matching Hessian, then feed a Riccati/SQP
-   step. This is what would make the transition linearization accurate enough
-   for a Newton method.
+2. *Exact contact derivatives.* `frame_jacobian_gradient` and
+   `constrained_forward_dynamics_gradient` are now implemented and
+   finite-difference verified, and `ContactSequenceDynamics::analytic_derivatives`
+   uses them instead of differencing the whole step. Example 113 drops from about
+   two minutes to 47 seconds and reaches a larger jump (0.229 m against 0.118 m)
+   with a different defect (3.37 against 1.76), so the analytic Jacobians change
+   the solved trajectory as well as the cost. The remaining second-order work is
+   the contact Hessian (differentiate the KKT solution a second time) and a
+   Riccati/SQP step on top of it.
 3. *A contact-consistent trajectory.* Instead of a kinematic reference, obtain
    the warm start by solving a short optimal-control problem over the transition
    with the contact schedule fixed but the torque and timing free, so the
