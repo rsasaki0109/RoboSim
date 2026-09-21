@@ -28,6 +28,15 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_oc::ComplementarityContactDynamics` resolves hard point contacts with a
+  velocity-level sequential-impulse (projected Gauss-Seidel) solver: the
+  post-contact normal velocity is non-negative to a solver tolerance and the
+  tangential impulse is clamped to the Coulomb cone, so the points do not
+  penetrate instead of sinking through a stiffness-dependent penalty. It is the
+  first hard-contact formulation in `rne_oc` that is not a penalty, and is the
+  route the frontier plan points to for the push-to-flight transition. Tests
+  cover a falling body caught at the surface and a body falling freely above it.
+
 - `rne_dynamics` gains the second-order derivatives needed for an exact Hessian
   of the dynamics: `xup_hessian` (`d²(xup)/dq_k dq_l`), `mass_matrix_hessian`
   (`d²M/dq_k dq_l`, the exact derivative of `mass_matrix_gradient`),

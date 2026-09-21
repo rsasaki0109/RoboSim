@@ -14,6 +14,7 @@
 #![deny(missing_docs)]
 
 pub mod articulated;
+pub mod complementarity;
 pub mod constrained;
 pub mod ddp;
 pub mod implicit;
@@ -22,6 +23,7 @@ pub mod matrix;
 pub mod multiple_shooting;
 
 pub use articulated::ArticulatedDynamics;
+pub use complementarity::ComplementarityContactDynamics;
 pub use constrained::{ConstrainedArticulatedDynamics, ContactPhase, ContactSequenceDynamics};
 pub use ddp::{
     dynamics_derivatives, solve, CostDerivatives, CostModel, DdpConfig, DdpSolution,
