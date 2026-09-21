@@ -539,6 +539,13 @@ acceptance rule, or the step size.
    Lowering the apex target (1.05 -> 0.90) does not reduce the defect
    (1.43-2.18) and removes the jump, so the residual is a boundary-condition
    feasibility limit, not a contact-schedule or jump-height limit.
+   Example 113 now has a task-aware grid search (`--search`) that scores
+   `gap + w * max(0, jump_target - jump)`. With a weak jump penalty it returns
+   the degenerate `(8,6,18)` (gap 0.92, jump 0.06); with a strong one the
+   baseline `(8,6,22)` wins (gap 1.76, jump 0.12). No schedule reaches a small
+   gap and a real jump at once, which is the same trade-off seen everywhere
+   else and confirms the maneuver is near the platform limit at this reference
+   and step size.
 2. *Exact contact derivatives.* Implement
    `constrained_forward_dynamics_gradient` (the KKT solve differentiated, which
    needs the contact Jacobian derivative and the bias-acceleration derivative —

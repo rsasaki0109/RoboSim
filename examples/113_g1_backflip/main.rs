@@ -196,6 +196,14 @@ impl CostModel for CentroidalMomentumCost<'_> {
     }
 }
 
+/// Outcome of one contact-schedule solve.
+struct PlanOutcome {
+    gap: f64,
+    cost: f64,
+    jump: f64,
+    span: f64,
+}
+
 fn main() {
     let document = rne_urdf_import::parse_urdf_document(G1_URDF).expect("parse G1 URDF");
     let mut world = World::new();
@@ -254,10 +262,11 @@ fn main() {
         })
         .collect();
     assert_eq!(toe_contacts.len(), 2, "expected two toe contacts");
-    let mut target_apex_y_m = TARGET_APEX_Y_M;
     let mut crouch_steps = 8_usize;
     let mut push_steps = 6_usize;
     let mut flight_steps = 22_usize;
+    let mut target_apex_y_m = TARGET_APEX_Y_M;
+    let mut search = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().and_then(|v| v.parse::<usize>().ok());
@@ -271,9 +280,16 @@ fn main() {
                     .and_then(|v| v.parse::<f64>().ok())
                     .unwrap_or(target_apex_y_m)
             }
+            "--search" => search = true,
             _ => {}
         }
     }
+    let no_flip = std::env::var("G1_NO_FLIP").is_ok();
+    let run_plan = |crouch_steps: usize,
+                    push_steps: usize,
+                    flight_steps: usize,
+                    target_apex_y_m: f64|
+     -> PlanOutcome {
     let horizon = crouch_steps + push_steps + flight_steps;
     println!("g1 backflip FDDP probe: nv={nv} control_dim={control_dim} horizon={horizon}");
 
@@ -293,7 +309,6 @@ fn main() {
     ];
     let dynamics = ContactSequenceDynamics::new(&model, STEP_TIME_S, &phases);
 
-    let no_flip = std::env::var("G1_NO_FLIP").is_ok();
     let control_weights = vec![2.0e-4; control_dim];
     let zero = vec![0.0; 2 * nv];
     let mut running = Vec::with_capacity(horizon);
@@ -528,4 +543,53 @@ fn main() {
         max_yaw - min_yaw,
         solution.iterations,
     );
+        PlanOutcome {
+            gap: max_gap,
+            cost: solution.cost,
+            jump: apex_y - BASE_START_Y_M,
+            span: max_yaw - min_yaw,
+        }
+    };
+
+    let score = |outcome: &PlanOutcome| outcome.gap + 5.0 * (0.10 - outcome.jump).max(0.0);
+    if search {
+        let mut best: Option<(PlanOutcome, [usize; 3])> = None;
+        for crouch in [6_usize, 8, 10] {
+            for push in [5_usize, 6, 7] {
+                for flight in [18_usize, 20, 22] {
+                    let outcome = run_plan(crouch, push, flight, TARGET_APEX_Y_M);
+                    let better = best
+                        .as_ref()
+                        .map(|(current, _)| score(&outcome) < score(current))
+                        .unwrap_or(true);
+                    if better {
+                        best = Some((outcome, [crouch, push, flight]));
+                    }
+                }
+            }
+        }
+        if let Some((outcome, schedule)) = best {
+            println!(
+                "BEST schedule crouch={} push={} flight={} gap={:.3e} cost={:.1} jump={:.3} span={:.2} score={:.3}",
+                schedule[0],
+                schedule[1],
+                schedule[2],
+                outcome.gap,
+                outcome.cost,
+                outcome.jump,
+                outcome.span,
+                score(&outcome),
+            );
+        }
+    } else {
+        let outcome = run_plan(crouch_steps, push_steps, flight_steps, target_apex_y_m);
+        println!(
+            "RESULT gap={:.3e} cost={:.1} jump={:.3} span={:.2} score={:.3}",
+            outcome.gap,
+            outcome.cost,
+            outcome.jump,
+            outcome.span,
+            score(&outcome),
+        );
+    }
 }
