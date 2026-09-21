@@ -23,9 +23,6 @@ pub struct UrdfSpawnConfig {
     pub attach_colliders: bool,
     /// When true, mesh collision geometry is approximated by AABB colliders.
     pub attach_mesh_colliders: bool,
-    /// Preserve multiple collision elements as compound primitives (Rapier supports this).
-    /// Mesh elements retain their existing AABB approximation. Defaults to false.
-    pub preserve_collision_parts: bool,
     /// When false, colliders spawned for this robot do not collide with each other.
     pub self_collisions: bool,
     /// Rigid body type applied to the base link.
@@ -51,7 +48,6 @@ impl Default for UrdfSpawnConfig {
             attach_physics: true,
             attach_colliders: true,
             attach_mesh_colliders: true,
-            preserve_collision_parts: false,
             self_collisions: true,
             base_body_type: RigidBodyType::Kinematic,
             visual_color_rgba: [0.7, 0.7, 0.75, 1.0],
@@ -106,6 +102,52 @@ pub fn spawn_urdf_document(
     document: &UrdfDocument,
 ) -> Result<SpawnedUrdfRobot, UrdfSpawnError> {
     spawn_urdf_document_with_config(world, document, UrdfSpawnConfig::default())
+}
+
+/// Preserves multiple collision primitives on already spawned URDF links.
+///
+/// Call before the first physics synchronization. The companion bounding
+/// collider supplies material/sensor settings; Rapier consumes compound parts.
+/// Mesh parts retain their existing AABB approximation. Returns the number of
+/// links receiving compounds. Existing public spawn configuration is unchanged.
+pub fn attach_urdf_collision_parts(
+    world: &mut World,
+    urdf: &UrdfRobot,
+    spawned: &SpawnedUrdfRobot,
+    config: &UrdfSpawnConfig,
+) -> usize {
+    if !config.attach_colliders {
+        return 0;
+    }
+    let mut count = 0;
+    for link in &urdf.links {
+        let Some(&entity) = spawned.links.get(&link.name) else {
+            continue;
+        };
+        if world.get::<rne_physics::Collider>(entity).is_none() {
+            continue;
+        }
+        let parts: Vec<_> = link
+            .collisions
+            .iter()
+            .filter(|element| {
+                config.attach_mesh_colliders
+                    || !matches!(element.geometry, crate::schema::UrdfGeometry::Mesh { .. })
+            })
+            .filter_map(|element| {
+                collider_from_element(element, config.mesh_assets_root.as_deref())
+            })
+            .map(|part| ColliderPart {
+                shape: part.shape,
+                local_offset: part.local_offset,
+            })
+            .collect();
+        if parts.len() > 1 {
+            world.entity_mut(entity).insert(CompoundCollider { parts });
+            count += 1;
+        }
+    }
+    count
 }
 
 /// Attaches URDF visual components to existing link entities keyed by link name.
@@ -298,24 +340,6 @@ fn attach_link_geometry(
             collider_from_link_with_meshes(link, assets_root, config.attach_mesh_colliders)
         {
             world.entity_mut(entity).insert(collider);
-            if config.preserve_collision_parts {
-                let parts: Vec<_> = link
-                    .collisions
-                    .iter()
-                    .filter(|element| {
-                        config.attach_mesh_colliders
-                            || !matches!(element.geometry, crate::schema::UrdfGeometry::Mesh { .. })
-                    })
-                    .filter_map(|element| collider_from_element(element, assets_root))
-                    .map(|part| ColliderPart {
-                        shape: part.shape,
-                        local_offset: part.local_offset,
-                    })
-                    .collect();
-                if parts.len() > 1 {
-                    world.entity_mut(entity).insert(CompoundCollider { parts });
-                }
-            }
             counts.colliders += 1;
         }
         if counts.colliders > 0 && !config.self_collisions {
@@ -532,15 +556,14 @@ mod tests {
         </link></robot>"#).unwrap();
         for preserve in [false, true] {
             let mut world = World::new();
-            let robot = spawn_urdf_robot_with_config(
-                &mut world,
-                &urdf,
-                UrdfSpawnConfig {
-                    preserve_collision_parts: preserve,
-                    ..UrdfSpawnConfig::default()
-                },
-            )
-            .unwrap();
+            let config = UrdfSpawnConfig::default();
+            let robot = spawn_urdf_robot_with_config(&mut world, &urdf, config.clone()).unwrap();
+            if preserve {
+                assert_eq!(
+                    attach_urdf_collision_parts(&mut world, &urdf, &robot, &config),
+                    1
+                );
+            }
             let parts = world.get::<CompoundCollider>(robot.base_link);
             assert_eq!(parts.is_some(), preserve);
             if let Some(compound) = parts {

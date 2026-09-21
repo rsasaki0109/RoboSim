@@ -307,9 +307,7 @@ impl PhysicsBackend for RapierBackend {
                             .any(|v| !(v as f32).is_finite())
                     })
             }) {
-                return Err(PhysicsError::InvalidCompoundCollider {
-                    entity_index: entity.index(),
-                });
+                return Err(PhysicsError::InitializationFailed);
             }
             if collider.is_none() && world.get::<MultibodyLink>(entity).is_none() {
                 continue;
@@ -1582,7 +1580,7 @@ mod tests {
             .insert(CompoundCollider { parts: Vec::new() });
         assert!(matches!(
             backend.sync_from_ecs(&mut world, id),
-            Err(PhysicsError::InvalidCompoundCollider { .. })
+            Err(PhysicsError::InitializationFailed)
         ));
     }
 

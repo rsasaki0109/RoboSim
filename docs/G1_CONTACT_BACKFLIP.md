@@ -287,6 +287,16 @@ creation-time geometry and backend support. Unit tests check a ray passing
 through the gap, rays hitting the individual spheres, declared mass retention,
 invalid geometry rejection, primitive origins/order and explicit opt-in.
 
+The original maneuver still collapses at both 0.5 ms and 0.125 ms. Maximum
+joint speed/rating is 2.31648 and 2.18477 respectively. Standing stays upright
+but fails continuous foot contact at both steps; the finer-step final-second
+maximum base speed improves to 0.04400 m/s. No gate is relaxed. The 0.5 ms
+compound flip repeats byte-for-byte, and the disabled-option box trajectory
+matches every frame of its earlier recording.
+
+[Compound-contact recordings and checks](evidence/g1-contact-backflip/native-transfer/compound-soles/README.md)
+preserve these failures separately from the successful external-model motion.
+
 
 ## Original-candidate screening (not hardware validation)
 

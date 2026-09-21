@@ -200,10 +200,6 @@ pub struct UrdfRobotAsset {
     /// When true, mesh collision geometry is approximated by AABB colliders.
     #[serde(default = "default_true")]
     pub mesh_collisions: bool,
-    /// Preserve multiple collision elements as compound primitives; opt-in.
-    /// Requires a backend with compound support, such as Rapier.
-    #[serde(default)]
-    pub preserve_collision_parts: bool,
     /// When true, links belonging to this robot collide with one another.
     #[serde(default = "default_true")]
     pub self_collisions: bool,
@@ -240,6 +236,8 @@ pub struct UrdfJointPassiveDynamicsAsset {
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 struct UrdfRobotAssetExtensions {
+    #[serde(default)]
+    preserve_collision_parts: bool,
     #[serde(default)]
     joint_passive_dynamics: Vec<UrdfJointPassiveDynamicsAsset>,
 }
@@ -290,7 +288,6 @@ impl UrdfRobotAsset {
             base_body_type: self.base_body_type.into(),
             attach_colliders: self.collisions,
             attach_mesh_colliders: self.mesh_collisions,
-            preserve_collision_parts: self.preserve_collision_parts,
             self_collisions: self.self_collisions,
             use_declared_inertial_masses: self.use_declared_inertial_masses,
             ..UrdfSpawnConfig::default()
@@ -342,6 +339,26 @@ pub fn load_robot_asset(path: &Path) -> Result<RobotAsset, AssetError> {
         message: error.to_string(),
     })?;
     parse_robot_asset(&text, path)
+}
+
+/// Loads the opt-in compound collision extension without changing public asset structs.
+pub fn load_robot_asset_collision_parts(path: &Path) -> Result<bool, AssetError> {
+    let text = std::fs::read_to_string(path).map_err(|error| AssetError::Io {
+        path: path.display().to_string(),
+        message: error.to_string(),
+    })?;
+    parse_robot_asset_collision_parts(&text, path)
+}
+
+/// Parses the optional `urdf.preserve_collision_parts` TOML extension.
+///
+/// The default is false. Existing public asset/spawn struct literals remain compatible.
+pub fn parse_robot_asset_collision_parts(text: &str, path: &Path) -> Result<bool, AssetError> {
+    let extensions: RobotAssetExtensions = toml::from_str(text)
+        .map_err(|error| AssetError::invalid(path.display().to_string(), error.to_string()))?;
+    Ok(extensions
+        .urdf
+        .is_some_and(|urdf| urdf.preserve_collision_parts))
 }
 
 /// Loads validated passive-dynamics extensions retained in a robot asset TOML.
@@ -593,7 +610,7 @@ coulomb_transition_velocity_rad_s = 0.04
         assert!(!urdf.articulation);
         assert!(urdf.collisions);
         assert!(urdf.mesh_collisions);
-        assert!(!urdf.preserve_collision_parts);
+        assert!(!parse_robot_asset_collision_parts(URDF, Path::new("test.toml")).unwrap());
         assert!(urdf.self_collisions);
         assert!(!urdf.multibody);
         assert_eq!(urdf.base_body_type, UrdfBaseBodyType::Kinematic);
@@ -602,14 +619,13 @@ coulomb_transition_velocity_rad_s = 0.04
     #[test]
     fn compound_geometry_option_reaches_urdf_import() {
         let text = format!("{URDF}\npreserve_collision_parts = true\n");
-        let asset = parse_robot_asset(&text, Path::new("test.toml")).unwrap();
-        assert!(
-            asset
-                .urdf
-                .unwrap()
-                .to_spawn_config()
-                .preserve_collision_parts
+        parse_robot_asset(&text, Path::new("test.toml")).unwrap();
+        assert!(parse_robot_asset_collision_parts(&text, Path::new("test.toml")).unwrap());
+        let bad = text.replace(
+            "preserve_collision_parts = true",
+            "preserve_collision_parts = 42",
         );
+        assert!(parse_robot_asset(&bad, Path::new("test.toml")).is_err());
     }
 
     #[test]

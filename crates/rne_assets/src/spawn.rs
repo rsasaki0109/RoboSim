@@ -1,7 +1,10 @@
 //! Spawn ECS entities from parsed assets.
 
 use crate::error::AssetError;
-use crate::robot::{load_robot_asset_passive_dynamics, LidarRobotAsset, RobotAsset, RobotKind};
+use crate::robot::{
+    load_robot_asset_collision_parts, load_robot_asset_passive_dynamics, LidarRobotAsset,
+    RobotAsset, RobotKind,
+};
 use crate::scene::{
     ObstacleBodyType, SceneAsset, SceneCollisionAsset, SceneDeformableAsset,
     SceneDeformableMaterialAsset, SceneObjectAsset, SceneObstacleAsset, SceneTaskMarkerAsset,
@@ -17,9 +20,9 @@ use rne_render::{Visual, VisualShape};
 use rne_robot::{spawn_diff_drive_robot, DiffDriveSpawned, Link};
 use rne_sensor::{Sensor, SensorKind, SensorState};
 use rne_urdf_import::{
-    attach_urdf_document_articulation, attach_urdf_visuals, parse_urdf_document,
-    parse_urdf_document_file, parse_urdf_file, spawn_urdf_document_with_config, SpawnedUrdfRobot,
-    UrdfDocument,
+    attach_urdf_collision_parts, attach_urdf_document_articulation, attach_urdf_visuals,
+    parse_urdf_document, parse_urdf_document_file, parse_urdf_file,
+    spawn_urdf_document_with_config, SpawnedUrdfRobot, UrdfDocument,
 };
 use rne_world::{
     spawn_world, world_transform_of, Gravity, TaskMarker, Transform3, WorldEntity, WorldRandom,
@@ -166,6 +169,8 @@ pub fn spawn_robot_asset_with_sources(
             } else {
                 Vec::new()
             };
+            let preserve_parts =
+                asset_path.is_file() && load_robot_asset_collision_parts(asset_path)?;
             let urdf_path = section.resolve_path(base_dir);
             let document = load_urdf_document(&urdf_path, urdf_sources).map_err(|error| {
                 AssetError::invalid(
@@ -179,15 +184,17 @@ pub fn spawn_robot_asset_with_sources(
                 spawn_config.mesh_assets_root = Some(parent.to_path_buf());
             }
 
-            let spawned = spawn_urdf_document_with_config(world, &document, spawn_config).map_err(
-                |error| {
-                    AssetError::invalid(
-                        asset_path.display().to_string(),
-                        format!("urdf spawn failed: {error}"),
-                    )
-                },
-            )?;
+            let spawned = spawn_urdf_document_with_config(world, &document, spawn_config.clone())
+                .map_err(|error| {
+                AssetError::invalid(
+                    asset_path.display().to_string(),
+                    format!("urdf spawn failed: {error}"),
+                )
+            })?;
 
+            if preserve_parts {
+                attach_urdf_collision_parts(world, &document.robot, &spawned, &spawn_config);
+            }
             if wire_articulation && section.articulation {
                 attach_urdf_document_articulation(
                     world,
