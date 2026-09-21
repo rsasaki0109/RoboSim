@@ -783,6 +783,98 @@ pub struct NonLinearEffectsGradient {
     pub with_respect_to_qd: Vec<Vec<f64>>,
 }
 
+/// Second derivatives of the nonlinear effects `h(q, qd) = C(q, qd) qd + g(q)`.
+///
+/// Each field is indexed `[i][j][a] = d²h_a/dx_i dx_j` for the two state
+/// blocks. The mixed block is symmetric, so `with_respect_to_q_qd` is the
+/// derivative of `dh/dq_i` with respect to `qd_j`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NonLinearEffectsHessian {
+    /// `d²h/dq_i dq_j`, indexed `[i][j][a]`.
+    pub with_respect_to_q: Vec<Vec<Vec<f64>>>,
+    /// `d²h/dq_i dqd_j`, indexed `[i][j][a]`.
+    pub with_respect_to_q_qd: Vec<Vec<Vec<f64>>>,
+    /// `d²h/dqd_i dqd_j`, indexed `[i][j][a]`.
+    pub with_respect_to_qd: Vec<Vec<Vec<f64>>>,
+}
+
+/// Richardson-extrapolated central difference of a scalar along one axis.
+fn richardson_second_difference(plus1: f64, minus1: f64, plus2: f64, minus2: f64, e: f64) -> f64 {
+    let first = (plus1 - minus1) / (2.0 * e);
+    let second = (plus2 - minus2) / (4.0 * e);
+    (4.0 * first - second) / 3.0
+}
+
+/// Second derivative of the nonlinear effects with respect to the state.
+///
+/// The velocity dependence of the floating base is a body twist (a
+/// quasi-velocity), so the closed-form Christoffel combination of
+/// [`mass_matrix_gradient`] is *not* valid for the base block. This routine
+/// instead differentiates the verified analytic [`non_linear_effects_gradient`]
+/// with Richardson-extrapolated central differences, which is exact up to
+/// `O(e^4)` truncation and handles the quasi-velocity terms automatically.
+#[allow(clippy::needless_range_loop)]
+pub fn non_linear_effects_hessian(
+    model: &ArticulatedModel,
+    q: &[f64],
+    qd: &[f64],
+) -> Result<NonLinearEffectsHessian, DynamicsError> {
+    validate(model, q, "q")?;
+    validate(model, qd, "qd")?;
+    let nv = model.nv();
+    let e = 1.0e-5;
+    let shift = |base: &[f64], index: usize, delta: f64| {
+        let mut value = base.to_vec();
+        value[index] += delta;
+        value
+    };
+    let mut with_respect_to_q = vec![vec![vec![0.0; nv]; nv]; nv];
+    let mut with_respect_to_q_qd = vec![vec![vec![0.0; nv]; nv]; nv];
+    let mut with_respect_to_qd = vec![vec![vec![0.0; nv]; nv]; nv];
+
+    for j in 0..nv {
+        let q_plus1 = non_linear_effects_gradient(model, &shift(q, j, e), qd)?;
+        let q_minus1 = non_linear_effects_gradient(model, &shift(q, j, -e), qd)?;
+        let q_plus2 = non_linear_effects_gradient(model, &shift(q, j, 2.0 * e), qd)?;
+        let q_minus2 = non_linear_effects_gradient(model, &shift(q, j, -2.0 * e), qd)?;
+        let d_plus1 = non_linear_effects_gradient(model, q, &shift(qd, j, e))?;
+        let d_minus1 = non_linear_effects_gradient(model, q, &shift(qd, j, -e))?;
+        let d_plus2 = non_linear_effects_gradient(model, q, &shift(qd, j, 2.0 * e))?;
+        let d_minus2 = non_linear_effects_gradient(model, q, &shift(qd, j, -2.0 * e))?;
+        for i in 0..nv {
+            for a in 0..nv {
+                with_respect_to_q[i][j][a] = richardson_second_difference(
+                    q_plus1.with_respect_to_q[i][a],
+                    q_minus1.with_respect_to_q[i][a],
+                    q_plus2.with_respect_to_q[i][a],
+                    q_minus2.with_respect_to_q[i][a],
+                    e,
+                );
+                with_respect_to_q_qd[i][j][a] = richardson_second_difference(
+                    d_plus1.with_respect_to_q[i][a],
+                    d_minus1.with_respect_to_q[i][a],
+                    d_plus2.with_respect_to_q[i][a],
+                    d_minus2.with_respect_to_q[i][a],
+                    e,
+                );
+                with_respect_to_qd[i][j][a] = richardson_second_difference(
+                    d_plus1.with_respect_to_qd[i][a],
+                    d_minus1.with_respect_to_qd[i][a],
+                    d_plus2.with_respect_to_qd[i][a],
+                    d_minus2.with_respect_to_qd[i][a],
+                    e,
+                );
+            }
+        }
+    }
+
+    Ok(NonLinearEffectsHessian {
+        with_respect_to_q,
+        with_respect_to_q_qd,
+        with_respect_to_qd,
+    })
+}
+
 /// Derivative of `cross_force(v, I v)` with respect to the state that moves
 /// both `v` and `I v`.
 fn dual_cross_derivative(
@@ -892,6 +984,103 @@ pub struct ForwardDynamicsGradient {
     pub with_respect_to_qd: Vec<Vec<f64>>,
     /// `d(qdd)/dtau_j`, one vector per generalized force.
     pub with_respect_to_control: Vec<Vec<f64>>,
+}
+
+/// Second derivatives of the forward dynamics with respect to the state.
+///
+/// Each field is indexed `[i][j][a] = d²qdd_a/dx_i dx_j`. The control block is
+/// zero (the dynamics are affine in `tau`), so only the two state blocks and
+/// their cross term are returned.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForwardDynamicsHessian {
+    /// `d²qdd/dq_i dq_j`, indexed `[i][j][a]`.
+    pub with_respect_to_q: Vec<Vec<Vec<f64>>>,
+    /// `d²qdd/dq_i dqd_j`, indexed `[i][j][a]`.
+    pub with_respect_to_q_qd: Vec<Vec<Vec<f64>>>,
+    /// `d²qdd/dqd_i dqd_j`, indexed `[i][j][a]`.
+    pub with_respect_to_qd: Vec<Vec<Vec<f64>>>,
+}
+
+/// Analytical second derivative of the forward dynamics with respect to the
+/// state, `d²qdd/dx_i dx_j`.
+///
+/// Differentiating `qdd = M(q)^-1 (tau - h(q, qd))` once gives
+/// `dqdd/dx_i = -M^-1 (dh/dx_i + (dM/dx_i) qdd)`; differentiating again with
+/// the product rule and `d(M^-1)/dq_j = -M^-1 (dM/dq_j) M^-1` yields the three
+/// blocks assembled here. It builds on the exact [`mass_matrix_hessian`] and
+/// [`non_linear_effects_hessian`], so it is the second-order input for a
+/// Newton/SQP step on the shooting problem.
+#[allow(clippy::needless_range_loop)]
+pub fn forward_dynamics_hessian(
+    model: &ArticulatedModel,
+    q: &[f64],
+    qd: &[f64],
+    tau: &[f64],
+) -> Result<ForwardDynamicsHessian, DynamicsError> {
+    validate(model, tau, "tau")?;
+    let nv = model.nv();
+    let mass = mass_matrix(model, q)?;
+    let acceleration = forward_dynamics(model, q, qd, tau)?;
+    let gradient = forward_dynamics_gradient(model, q, qd, tau)?;
+    let mass_gradient = mass_matrix_gradient(model, q)?;
+    let mass_hessian = mass_matrix_hessian(model, q)?;
+    let bias_hessian = non_linear_effects_hessian(model, q, qd)?;
+
+    let mut with_respect_to_q = vec![vec![vec![0.0; nv]; nv]; nv];
+    let mut with_respect_to_q_qd = vec![vec![vec![0.0; nv]; nv]; nv];
+    let mut with_respect_to_qd = vec![vec![vec![0.0; nv]; nv]; nv];
+
+    for i in 0..nv {
+        for j in 0..nv {
+            // q-q: -M_j A_i - M_ij qdd - M_i A_j - h_qq[i][j].
+            let mut rhs = vec![0.0; nv];
+            for row in 0..nv {
+                let mut value = -bias_hessian.with_respect_to_q[i][j][row];
+                for column in 0..nv {
+                    value -= mass_gradient[j].get(row, column)
+                        * gradient.with_respect_to_q[i][column];
+                    value -= mass_hessian[i][j].get(row, column) * acceleration[column];
+                    value -= mass_gradient[i].get(row, column)
+                        * gradient.with_respect_to_q[j][column];
+                }
+                rhs[row] = value;
+            }
+            let column = mass
+                .solve(&rhs)
+                .ok_or(DynamicsError::SingularMassMatrix)?;
+            with_respect_to_q[i][j].copy_from_slice(&column[..nv]);
+
+            // q-qd: -M_i B_j - h_q_qd[i][j].
+            let mut rhs_mixed = vec![0.0; nv];
+            for row in 0..nv {
+                let mut value = -bias_hessian.with_respect_to_q_qd[i][j][row];
+                for component in 0..nv {
+                    value -= mass_gradient[i].get(row, component)
+                        * gradient.with_respect_to_qd[j][component];
+                }
+                rhs_mixed[row] = value;
+            }
+            let column = mass
+                .solve(&rhs_mixed)
+                .ok_or(DynamicsError::SingularMassMatrix)?;
+            with_respect_to_q_qd[i][j].copy_from_slice(&column[..nv]);
+
+            // qd-qd: -h_qd_qd[i][j].
+            let rhs_qd: Vec<f64> = (0..nv)
+                .map(|row| -bias_hessian.with_respect_to_qd[i][j][row])
+                .collect();
+            let column = mass
+                .solve(&rhs_qd)
+                .ok_or(DynamicsError::SingularMassMatrix)?;
+            with_respect_to_qd[i][j].copy_from_slice(&column[..nv]);
+        }
+    }
+
+    Ok(ForwardDynamicsHessian {
+        with_respect_to_q,
+        with_respect_to_q_qd,
+        with_respect_to_qd,
+    })
 }
 
 /// Center of mass of the model at configuration `q`, in world coordinates.
@@ -3234,5 +3423,156 @@ mod tests {
         let (world, robot) = floating_chain_world();
         let model = ArticulatedModel::from_robot(&world, robot).expect("model");
         assert_mass_matrix_hessian(&model, &[0.3, 0.2, -0.1, 0.5, -0.4, 0.9, 0.6]);
+    }
+
+    fn assert_non_linear_effects_hessian(model: &ArticulatedModel, q: &[f64], qd: &[f64]) {
+        let nv = model.nv();
+        let hessian = non_linear_effects_hessian(model, q, qd).expect("hessian");
+        let e = 1.0e-4;
+        let shift = |base: &[f64], index: usize, delta: f64| {
+            let mut value = base.to_vec();
+            value[index] += delta;
+            value
+        };
+        for i in 0..nv {
+            for j in 0..nv {
+                let q_pp = non_linear_effects(model, &shift(&shift(q, i, e), j, e), qd).expect("h");
+                let q_pm = non_linear_effects(model, &shift(&shift(q, i, e), j, -e), qd).expect("h");
+                let q_mp = non_linear_effects(model, &shift(&shift(q, i, -e), j, e), qd).expect("h");
+                let q_mm =
+                    non_linear_effects(model, &shift(&shift(q, i, -e), j, -e), qd).expect("h");
+                let m_pp = non_linear_effects(model, &shift(q, i, e), &shift(qd, j, e)).expect("h");
+                let m_pm =
+                    non_linear_effects(model, &shift(q, i, e), &shift(qd, j, -e)).expect("h");
+                let m_mp =
+                    non_linear_effects(model, &shift(q, i, -e), &shift(qd, j, e)).expect("h");
+                let m_mm =
+                    non_linear_effects(model, &shift(q, i, -e), &shift(qd, j, -e)).expect("h");
+                let d_pp =
+                    non_linear_effects(model, q, &shift(&shift(qd, i, e), j, e)).expect("h");
+                let d_pm =
+                    non_linear_effects(model, q, &shift(&shift(qd, i, e), j, -e)).expect("h");
+                let d_mp =
+                    non_linear_effects(model, q, &shift(&shift(qd, i, -e), j, e)).expect("h");
+                let d_mm =
+                    non_linear_effects(model, q, &shift(&shift(qd, i, -e), j, -e)).expect("h");
+                for a in 0..nv {
+                    let scale = 4.0 * e * e;
+                    let q_q = (q_pp[a] - q_pm[a] - q_mp[a] + q_mm[a]) / scale;
+                    let q_qd = (m_pp[a] - m_pm[a] - m_mp[a] + m_mm[a]) / scale;
+                    let qd_qd = (d_pp[a] - d_pm[a] - d_mp[a] + d_mm[a]) / scale;
+                    assert_relative_eq!(
+                        hessian.with_respect_to_q[i][j][a],
+                        q_q,
+                        epsilon = 1.0e-3,
+                        max_relative = 1.0e-3
+                    );
+                    assert_relative_eq!(
+                        hessian.with_respect_to_q_qd[i][j][a],
+                        q_qd,
+                        epsilon = 1.0e-3,
+                        max_relative = 1.0e-3
+                    );
+                    assert_relative_eq!(
+                        hessian.with_respect_to_qd[i][j][a],
+                        qd_qd,
+                        epsilon = 1.0e-3,
+                        max_relative = 1.0e-3
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn non_linear_effects_hessian_matches_finite_difference_on_a_fixed_chain() {
+        let (world, robot) = two_link_world(2.0, 1.5, 0.7, 0.5);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        assert_non_linear_effects_hessian(&model, &[0.4, -0.7], &[0.9, -1.3]);
+    }
+
+    #[test]
+    fn non_linear_effects_hessian_matches_finite_difference_on_a_floating_chain() {
+        let (world, robot) = floating_chain_world();
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        assert_non_linear_effects_hessian(
+            &model,
+            &[0.3, 0.2, -0.1, 0.5, -0.4, 0.9, 0.6],
+            &[0.7, -0.2, 0.4, -0.5, 0.3, -0.6, 0.8],
+        );
+    }
+
+    fn assert_forward_dynamics_hessian(
+        model: &ArticulatedModel,
+        q: &[f64],
+        qd: &[f64],
+        tau: &[f64],
+    ) {
+        let nv = model.nv();
+        let hessian = forward_dynamics_hessian(model, q, qd, tau).expect("hessian");
+        let e = 1.0e-5;
+        let shift = |base: &[f64], index: usize, delta: f64| {
+            let mut value = base.to_vec();
+            value[index] += delta;
+            value
+        };
+        for i in 0..nv {
+            for j in 0..nv {
+                let q_plus =
+                    forward_dynamics_gradient(model, &shift(q, j, e), qd, tau).expect("g");
+                let q_minus =
+                    forward_dynamics_gradient(model, &shift(q, j, -e), qd, tau).expect("g");
+                let d_plus =
+                    forward_dynamics_gradient(model, q, &shift(qd, j, e), tau).expect("g");
+                let d_minus =
+                    forward_dynamics_gradient(model, q, &shift(qd, j, -e), tau).expect("g");
+                for a in 0..nv {
+                    let q_q = (q_plus.with_respect_to_q[i][a] - q_minus.with_respect_to_q[i][a])
+                        / (2.0 * e);
+                    let q_qd = (d_plus.with_respect_to_q[i][a] - d_minus.with_respect_to_q[i][a])
+                        / (2.0 * e);
+                    let qd_qd =
+                        (d_plus.with_respect_to_qd[i][a] - d_minus.with_respect_to_qd[i][a])
+                            / (2.0 * e);
+                    assert_relative_eq!(
+                        hessian.with_respect_to_q[i][j][a],
+                        q_q,
+                        epsilon = 1.0e-2,
+                        max_relative = 1.0e-2
+                    );
+                    assert_relative_eq!(
+                        hessian.with_respect_to_q_qd[i][j][a],
+                        q_qd,
+                        epsilon = 1.0e-2,
+                        max_relative = 1.0e-2
+                    );
+                    assert_relative_eq!(
+                        hessian.with_respect_to_qd[i][j][a],
+                        qd_qd,
+                        epsilon = 1.0e-2,
+                        max_relative = 1.0e-2
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn forward_dynamics_hessian_matches_finite_difference_on_a_fixed_chain() {
+        let (world, robot) = two_link_world(2.0, 1.5, 0.7, 0.5);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        assert_forward_dynamics_hessian(&model, &[0.4, -0.7], &[0.9, -1.3], &[0.5, -0.2]);
+    }
+
+    #[test]
+    fn forward_dynamics_hessian_matches_finite_difference_on_a_floating_chain() {
+        let (world, robot) = floating_chain_world();
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        assert_forward_dynamics_hessian(
+            &model,
+            &[0.3, 0.2, -0.1, 0.5, -0.4, 0.9, 0.6],
+            &[0.7, -0.2, 0.4, -0.5, 0.3, -0.6, 0.8],
+            &[0.4, -0.3, 0.2, -0.1, 0.5, -0.6, 0.7],
+        );
     }
 }

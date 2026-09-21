@@ -239,18 +239,20 @@ controller.
   `non_linear_effects_gradient` (`dh/dq`, `dh/dqd`), and
   `forward_dynamics_gradient` (`d(qdd)/d(q, qd, tau)`). `rne_oc` uses them
   through the `analytic_derivatives` hook instead of central differences.
-  - **Second-order extension (in progress).** `xup_hessian` (`d²(xup)/dq²`) and
-    `mass_matrix_hessian` (`d²M/dq²`) are implemented and verified against
-    central differences on a fixed and a floating chain. The velocity Hessian
+  - **Second-order extension.** `xup_hessian` (`d²(xup)/dq²`) and
+    `mass_matrix_hessian` (`d²M/dq²`) are exact and verified against central
+    differences on a fixed and a floating chain. The velocity Hessian
     `d²h/dqd²` is *not* the Christoffel combination
     `dM_aj/dq_i + dM_ai/dq_j - dM_ij/dq_a`: that identity holds for holonomic
     (chart) velocities, but the floating base uses the body twist, a
     quasi-velocity, so the base block needs the SE(3) structure-constant terms.
     A Christoffel-only version matched a fixed chain but returned 0 where the
-    floating chain has `-4`, so it was reverted rather than shipped wrong. The
-    remaining second-order work is the exact `non_linear_effects_hessian`
-    (including the quasi-velocity terms) and `forward_dynamics_hessian`, then
-    wiring them into the Riccati/SQP backward pass.
+    floating chain has `-4`, so it was reverted. `non_linear_effects_hessian`
+    therefore differentiates the verified analytic gradient with Richardson
+    extrapolation, and `forward_dynamics_hessian` assembles `d²qdd/dx²` from it
+    with the `M^-1` product rule. Both are FD-verified. The remaining work is
+    wiring the Hessian into the Riccati/SQP backward pass and measuring whether
+    it closes the G1 gap below the current 0.18.
   With the FDDP warm start restored, example 113 now runs its full iteration
   budget and reaches cost 1494 (was 74096), a 0.138 m jump, a 6.15 rad yaw span,
   and realistic 45 Nm torques. The dynamics gap is still ~3.9 and concentrates

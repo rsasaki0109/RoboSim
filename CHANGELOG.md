@@ -28,12 +28,17 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
-- `rne_dynamics` gains the exact second-order kinematic and inertial
-  derivatives needed for an exact Hessian of the dynamics: `xup_hessian`
-  (`d²(xup)/dq_k dq_l`) and `mass_matrix_hessian` (`d²M/dq_k dq_l`, the exact
-  derivative of `mass_matrix_gradient`). Both are verified against central
-  differences on a fixed two-link chain and a floating base chain. They are the
-  third-order kinematic input for the contact-constraint derivatives.
+- `rne_dynamics` gains the second-order derivatives needed for an exact Hessian
+  of the dynamics: `xup_hessian` (`d²(xup)/dq_k dq_l`), `mass_matrix_hessian`
+  (`d²M/dq_k dq_l`, the exact derivative of `mass_matrix_gradient`),
+  `non_linear_effects_hessian` (`d²h/dx_i dx_j`), and `forward_dynamics_hessian`
+  (`d²qdd/dx_i dx_j`, assembled from the former with the `M^-1` product rule).
+  All are verified against central differences on a fixed two-link chain and a
+  floating base chain. `non_linear_effects_hessian` differentiates the verified
+  analytic `non_linear_effects_gradient` with Richardson extrapolation rather
+  than using the closed-form Christoffel combination, because the floating base
+  velocity is a body twist (a quasi-velocity) for which that combination is
+  invalid.
 
 - `ContactImplicitArticulatedDynamics::with_substeps` splits each outer step into
   explicit sub-steps so a physically stiff compliant-contact law stays stable at
