@@ -247,3 +247,18 @@ baseline flips and all 13 candidates in the first native coordinate-pattern
 search fail landing. See [model alignment evidence](evidence/g1-contact-backflip/native-transfer/model-alignment/README.md).
 Independent sole contacts, body/self-collision and source joint armature/loss
 remain unmatched; mass alignment is not complete plant equivalence.
+
+
+### Independent native sole primitives
+
+An opt-in `urdf.preserve_collision_parts` TOML extension now preserves each
+sole sphere in a `CompoundCollider` supported by Rapier. The existing public
+asset/spawn structs and physics error enum remain unchanged. The generated
+34.13385728 kg model reports two four-part feet; gap raycasts and declared-mass
+tests distinguish it from the legacy box. The option-off recording matches
+prior physical frames, and repeated compound flips are byte-identical.
+Standing still fails positive-contact continuity at 0.5 and 0.125 ms, and both
+flip runs collapse (peak speed/rating 2.31648 and 2.18477). Full-body collision,
+source armature/passive losses and successful native landing remain open.
+See [compound sole evidence](evidence/g1-contact-backflip/native-transfer/compound-soles/README.md)
+and [ADR 029](adr/029-compound-contact-primitives.md).
