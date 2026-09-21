@@ -8,6 +8,17 @@ that could. It is written after a measurement pass, so every "blocked" claim
 below is an observed result, not an assumption. Detailed evidence lives in
 [GO2_LOCOMOTION.md](GO2_LOCOMOTION.md) and [G1_LOCOMOTION.md](G1_LOCOMOTION.md).
 
+## Non-RL G1 backflip contact benchmark
+
+The [optional optimization benchmark](G1_CONTACT_BACKFLIP.md) now demonstrates
+a full G1 backflip in MuJoCo using the repository's URDF, bounded joint motors,
+actual takeoff/landing contacts, and no RL. The pinned controller passes at
+0.125 ms and 0.0625 ms, including a final second of stable standing. A recorded
+physics GIF and replay-hash regression accompany the measurements. This is an
+external contact-plant milestone; native RNE/Rapier and hardware validation
+remain separate work. See the benchmark for mass policy, joint-stop tolerances,
+motor assumptions, and disabled self-collision.
+
 ## What is done
 
 - **Go2 learning boundary.** The learned turn, sprint, and schedule searches,

@@ -1,0 +1,5 @@
+# Optional headless benchmark; no Rust/core dependencies.
+numpy==2.4.2
+scipy==1.17.0
+mujoco==3.13.0
+Pillow==12.3.0
