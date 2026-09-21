@@ -1,6 +1,8 @@
 //! Contact-constrained articulated dynamics and contact sequences.
 
-use crate::ddp::{DiscreteDynamics, DynamicsDerivatives, DynamicsHessian, OcError, ShootingDynamics};
+use crate::ddp::{
+    DiscreteDynamics, DynamicsDerivatives, DynamicsHessian, OcError, ShootingDynamics,
+};
 use rne_dynamics::{
     constrained_forward_dynamics, constrained_forward_dynamics_gradient, impulse_velocity,
     impulse_velocity_gradient, integrate_configuration, ArticulatedModel, ContactSpec,
@@ -415,7 +417,9 @@ impl ShootingDynamics for ContactSequenceDynamics<'_> {
         let mut fxu = vec![vec![vec![0.0; nu]; nx]; nx];
         let mut fuu = vec![vec![vec![0.0; nu]; nu]; nx];
         for j in 0..nx {
-            let plus = self.analytic_derivatives(node, &shift(state, j, e), control)?.ok()?;
+            let plus = self
+                .analytic_derivatives(node, &shift(state, j, e), control)?
+                .ok()?;
             let minus = self
                 .analytic_derivatives(node, &shift(state, j, -e), control)?
                 .ok()?;
@@ -424,9 +428,8 @@ impl ShootingDynamics for ContactSequenceDynamics<'_> {
                     fxx[a][i][j] = (plus.fx[a][i] - minus.fx[a][i]) / (2.0 * e);
                 }
                 for control_index in 0..nu {
-                    fxu[a][j][control_index] = (plus.fu[a][control_index]
-                        - minus.fu[a][control_index])
-                        / (2.0 * e);
+                    fxu[a][j][control_index] =
+                        (plus.fu[a][control_index] - minus.fu[a][control_index]) / (2.0 * e);
                 }
             }
         }
@@ -682,7 +685,9 @@ mod tests {
     #[test]
     fn exact_hessian_converges_on_a_contact_problem() {
         use crate::ddp::QuadraticCost;
-        use crate::multiple_shooting::{max_defect, solve_multiple_shooting, MultipleShootingConfig};
+        use crate::multiple_shooting::{
+            max_defect, solve_multiple_shooting, MultipleShootingConfig,
+        };
         let (_world, model, base) = floating_body();
         let contacts = vec![ContactSpec {
             link: base,

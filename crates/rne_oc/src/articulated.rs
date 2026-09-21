@@ -224,9 +224,8 @@ impl ArticulatedDynamics<'_> {
                     fxx[a][i][j] = (plus.fx[a][i] - minus.fx[a][i]) / (2.0 * epsilon);
                 }
                 for control_index in 0..nu {
-                    fxu[a][j][control_index] = (plus.fu[a][control_index]
-                        - minus.fu[a][control_index])
-                        / (2.0 * epsilon);
+                    fxu[a][j][control_index] =
+                        (plus.fu[a][control_index] - minus.fu[a][control_index]) / (2.0 * epsilon);
                 }
             }
         }
@@ -417,7 +416,9 @@ mod tests {
     #[test]
     fn exact_hessian_converges_on_a_floating_chain() {
         use crate::ddp::QuadraticCost;
-        use crate::multiple_shooting::{max_defect, solve_multiple_shooting, MultipleShootingConfig};
+        use crate::multiple_shooting::{
+            max_defect, solve_multiple_shooting, MultipleShootingConfig,
+        };
         let model = floating_two_link_model();
         let dynamics = ArticulatedDynamics::new(&model, 0.02);
         let nx = 2 * model.nv();
@@ -445,8 +446,7 @@ mod tests {
         };
         let gauss_newton = run(false);
         let newton = run(true);
-        let gn_defect =
-            max_defect(&dynamics, &gauss_newton.states, &gauss_newton.controls);
+        let gn_defect = max_defect(&dynamics, &gauss_newton.states, &gauss_newton.controls);
         let newton_defect = max_defect(&dynamics, &newton.states, &newton.controls);
         assert!(gn_defect < 1.0e-2, "gauss-newton defect {gn_defect}");
         assert!(newton_defect < 1.0e-2, "newton defect {newton_defect}");

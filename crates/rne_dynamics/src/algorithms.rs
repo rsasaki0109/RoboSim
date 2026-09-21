@@ -332,8 +332,7 @@ pub fn mass_matrix_hessian(
                 sum = mat6_add(&sum, &mat6_mul(&xt, &mat6_mul(&c_k, &x_l)));
                 sum = mat6_add(&sum, &mat6_mul(&xt, &mat6_mul(&c_l, &x_k)));
                 sum = mat6_add(&sum, &mat6_mul(&xt, &mat6_mul(&c_kl, &x)));
-                composite_second[parent][k][l] =
-                    mat6_add(&composite_second[parent][k][l], &sum);
+                composite_second[parent][k][l] = mat6_add(&composite_second[parent][k][l], &sum);
             }
         }
     }
@@ -1037,17 +1036,15 @@ pub fn forward_dynamics_hessian(
             for row in 0..nv {
                 let mut value = -bias_hessian.with_respect_to_q[i][j][row];
                 for column in 0..nv {
-                    value -= mass_gradient[j].get(row, column)
-                        * gradient.with_respect_to_q[i][column];
+                    value -=
+                        mass_gradient[j].get(row, column) * gradient.with_respect_to_q[i][column];
                     value -= mass_hessian[i][j].get(row, column) * acceleration[column];
-                    value -= mass_gradient[i].get(row, column)
-                        * gradient.with_respect_to_q[j][column];
+                    value -=
+                        mass_gradient[i].get(row, column) * gradient.with_respect_to_q[j][column];
                 }
                 rhs[row] = value;
             }
-            let column = mass
-                .solve(&rhs)
-                .ok_or(DynamicsError::SingularMassMatrix)?;
+            let column = mass.solve(&rhs).ok_or(DynamicsError::SingularMassMatrix)?;
             with_respect_to_q[i][j].copy_from_slice(&column[..nv]);
 
             // q-qd: -M_i B_j - h_q_qd[i][j].
@@ -1118,8 +1115,7 @@ pub fn frame_jacobian_gradient(
         let twist = twists[target][k];
         let linear = Vec3::new(twist[0], twist[1], twist[2]);
         let angular = Vec3::new(twist[3], twist[4], twist[5]);
-        point_derivative[k] =
-            target_pose.rotation * (linear + angular.cross(point_local_m));
+        point_derivative[k] = target_pose.rotation * (linear + angular.cross(point_local_m));
     }
 
     // Base columns: central difference of the transformed base block.
@@ -1548,8 +1544,7 @@ fn link_pose_body_twist_hessian(
     let base = model.base_dof();
     let nv = model.nv();
     let link_count = model.link_count();
-    let mut result: Vec<Vec<Vec<SpatialVec>>> =
-        vec![vec![vec![[0.0; 6]; nv]; nv]; link_count];
+    let mut result: Vec<Vec<Vec<SpatialVec>>> = vec![vec![vec![[0.0; 6]; nv]; nv]; link_count];
 
     if base == 6 {
         let rotation = transforms[0].rotation;
@@ -1636,10 +1631,7 @@ fn link_pose_body_twist_hessian(
                 let mut value = mat6_mul_vec(&adjoint_inverse_child, &result[parent][k][l]);
                 if Some(l) == joint_dof {
                     if let Some(adjoint_gradient) = &joint_adjoint {
-                        value = add6(
-                            &value,
-                            &mat6_mul_vec(adjoint_gradient, &twists[parent][k]),
-                        );
+                        value = add6(&value, &mat6_mul_vec(adjoint_gradient, &twists[parent][k]));
                     }
                 }
                 result[index][k][l] = value;
@@ -2293,8 +2285,8 @@ pub fn constrained_forward_dynamics_gradient(
             let contact = row / 3;
             let component = row % 3;
             for column in 0..nv {
-                d_a_z += jacobian_gradients[contact][k].get(component, column)
-                    * acceleration[column];
+                d_a_z +=
+                    jacobian_gradients[contact][k].get(component, column) * acceleration[column];
             }
             local_rhs[nv + row] = -bias_dq[k][row] - d_a_z;
         }
@@ -2364,16 +2356,26 @@ pub fn constrained_forward_dynamics_hessian(
             constrained_forward_dynamics_gradient(model, &shift(q, j, -e), qd, tau, contacts)?;
         let q_plus2 =
             constrained_forward_dynamics_gradient(model, &shift(q, j, 2.0 * e), qd, tau, contacts)?;
-        let q_minus2 =
-            constrained_forward_dynamics_gradient(model, &shift(q, j, -2.0 * e), qd, tau, contacts)?;
+        let q_minus2 = constrained_forward_dynamics_gradient(
+            model,
+            &shift(q, j, -2.0 * e),
+            qd,
+            tau,
+            contacts,
+        )?;
         let d_plus1 =
             constrained_forward_dynamics_gradient(model, q, &shift(qd, j, e), tau, contacts)?;
         let d_minus1 =
             constrained_forward_dynamics_gradient(model, q, &shift(qd, j, -e), tau, contacts)?;
         let d_plus2 =
             constrained_forward_dynamics_gradient(model, q, &shift(qd, j, 2.0 * e), tau, contacts)?;
-        let d_minus2 =
-            constrained_forward_dynamics_gradient(model, q, &shift(qd, j, -2.0 * e), tau, contacts)?;
+        let d_minus2 = constrained_forward_dynamics_gradient(
+            model,
+            q,
+            &shift(qd, j, -2.0 * e),
+            tau,
+            contacts,
+        )?;
         for i in 0..nv {
             for a in 0..nv {
                 with_respect_to_q[i][j][a] = richardson_second_difference(
@@ -3774,8 +3776,7 @@ mod tests {
                 let minus_gradient = mass_matrix_gradient(model, &minus).expect("minus");
                 for row in 0..nv {
                     for col in 0..nv {
-                        let fd = (plus_gradient[k].get(row, col)
-                            - minus_gradient[k].get(row, col))
+                        let fd = (plus_gradient[k].get(row, col) - minus_gradient[k].get(row, col))
                             / (2.0 * epsilon);
                         assert_relative_eq!(
                             hessian[k][l].get(row, col),
@@ -3815,8 +3816,10 @@ mod tests {
         for i in 0..nv {
             for j in 0..nv {
                 let q_pp = non_linear_effects(model, &shift(&shift(q, i, e), j, e), qd).expect("h");
-                let q_pm = non_linear_effects(model, &shift(&shift(q, i, e), j, -e), qd).expect("h");
-                let q_mp = non_linear_effects(model, &shift(&shift(q, i, -e), j, e), qd).expect("h");
+                let q_pm =
+                    non_linear_effects(model, &shift(&shift(q, i, e), j, -e), qd).expect("h");
+                let q_mp =
+                    non_linear_effects(model, &shift(&shift(q, i, -e), j, e), qd).expect("h");
                 let q_mm =
                     non_linear_effects(model, &shift(&shift(q, i, -e), j, -e), qd).expect("h");
                 let m_pp = non_linear_effects(model, &shift(q, i, e), &shift(qd, j, e)).expect("h");
@@ -3826,8 +3829,7 @@ mod tests {
                     non_linear_effects(model, &shift(q, i, -e), &shift(qd, j, e)).expect("h");
                 let m_mm =
                     non_linear_effects(model, &shift(q, i, -e), &shift(qd, j, -e)).expect("h");
-                let d_pp =
-                    non_linear_effects(model, q, &shift(&shift(qd, i, e), j, e)).expect("h");
+                let d_pp = non_linear_effects(model, q, &shift(&shift(qd, i, e), j, e)).expect("h");
                 let d_pm =
                     non_linear_effects(model, q, &shift(&shift(qd, i, e), j, -e)).expect("h");
                 let d_mp =
@@ -3896,12 +3898,10 @@ mod tests {
         };
         for i in 0..nv {
             for j in 0..nv {
-                let q_plus =
-                    forward_dynamics_gradient(model, &shift(q, j, e), qd, tau).expect("g");
+                let q_plus = forward_dynamics_gradient(model, &shift(q, j, e), qd, tau).expect("g");
                 let q_minus =
                     forward_dynamics_gradient(model, &shift(q, j, -e), qd, tau).expect("g");
-                let d_plus =
-                    forward_dynamics_gradient(model, q, &shift(qd, j, e), tau).expect("g");
+                let d_plus = forward_dynamics_gradient(model, q, &shift(qd, j, e), tau).expect("g");
                 let d_minus =
                     forward_dynamics_gradient(model, q, &shift(qd, j, -e), tau).expect("g");
                 for a in 0..nv {
@@ -3909,9 +3909,9 @@ mod tests {
                         / (2.0 * e);
                     let q_qd = (d_plus.with_respect_to_q[i][a] - d_minus.with_respect_to_q[i][a])
                         / (2.0 * e);
-                    let qd_qd =
-                        (d_plus.with_respect_to_qd[i][a] - d_minus.with_respect_to_qd[i][a])
-                            / (2.0 * e);
+                    let qd_qd = (d_plus.with_respect_to_qd[i][a]
+                        - d_minus.with_respect_to_qd[i][a])
+                        / (2.0 * e);
                     assert_relative_eq!(
                         hessian.with_respect_to_q[i][j][a],
                         q_q,
@@ -4110,10 +4110,10 @@ mod tests {
                 let dm = constrained_forward_dynamics_gradient(&model, &q, &minus, &tau, &contacts)
                     .expect("minus");
                 for a in 0..nv {
-                    let q_q = (gp.with_respect_to_q[i][a] - gm.with_respect_to_q[i][a])
-                        / (2.0 * epsilon);
-                    let q_qd = (dp.with_respect_to_q[i][a] - dm.with_respect_to_q[i][a])
-                        / (2.0 * epsilon);
+                    let q_q =
+                        (gp.with_respect_to_q[i][a] - gm.with_respect_to_q[i][a]) / (2.0 * epsilon);
+                    let q_qd =
+                        (dp.with_respect_to_q[i][a] - dm.with_respect_to_q[i][a]) / (2.0 * epsilon);
                     let qd_qd = (dp.with_respect_to_qd[i][a] - dm.with_respect_to_qd[i][a])
                         / (2.0 * epsilon);
                     assert_relative_eq!(

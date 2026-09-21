@@ -295,266 +295,272 @@ fn main() {
                     flight_steps: usize,
                     target_apex_y_m: f64|
      -> PlanOutcome {
-    let horizon = crouch_steps + push_steps + flight_steps;
-    println!("g1 backflip FDDP probe: nv={nv} control_dim={control_dim} horizon={horizon}");
+        let horizon = crouch_steps + push_steps + flight_steps;
+        println!("g1 backflip FDDP probe: nv={nv} control_dim={control_dim} horizon={horizon}");
 
-    let phases = [
-        ContactPhase {
-            contacts: toe_contacts.clone(),
-            steps: crouch_steps,
-        },
-        ContactPhase {
-            contacts: toe_contacts.clone(),
-            steps: push_steps,
-        },
-        ContactPhase {
-            contacts: Vec::new(),
-            steps: flight_steps,
-        },
-    ];
-    let dynamics = ContactSequenceDynamics::new(&model, STEP_TIME_S, &phases);
+        let phases = [
+            ContactPhase {
+                contacts: toe_contacts.clone(),
+                steps: crouch_steps,
+            },
+            ContactPhase {
+                contacts: toe_contacts.clone(),
+                steps: push_steps,
+            },
+            ContactPhase {
+                contacts: Vec::new(),
+                steps: flight_steps,
+            },
+        ];
+        let dynamics = ContactSequenceDynamics::new(&model, STEP_TIME_S, &phases);
 
-    let control_weights = vec![2.0e-4; control_dim];
-    let zero = vec![0.0; 2 * nv];
-    let mut running = Vec::with_capacity(horizon);
-    for node in 0..horizon {
-        let mut weights = vec![0.0; 2 * nv];
-        let mut reference = vec![0.0; 2 * nv];
-        if node < crouch_steps {
-            weights[1] = 300.0;
-            reference[1] = CROUCH_Y_M;
+        let control_weights = vec![2.0e-4; control_dim];
+        let zero = vec![0.0; 2 * nv];
+        let mut running = Vec::with_capacity(horizon);
+        for node in 0..horizon {
+            let mut weights = vec![0.0; 2 * nv];
+            let mut reference = vec![0.0; 2 * nv];
+            if node < crouch_steps {
+                weights[1] = 300.0;
+                reference[1] = CROUCH_Y_M;
+            }
+            for (dof, name) in joint_names.iter().enumerate() {
+                if node < crouch_steps {
+                    weights[6 + dof] = 8.0;
+                    reference[6 + dof] = crouch_angle(name);
+                } else if node < crouch_steps + push_steps {
+                    weights[6 + dof] = 3.0;
+                    reference[6 + dof] = stand_angle(name);
+                } else {
+                    weights[6 + dof] = 2.0;
+                    reference[6 + dof] = tuck_angle(name);
+                }
+            }
+            if node >= crouch_steps + push_steps {
+                let flight = (node - crouch_steps - push_steps) as f64;
+                let t = flight / flight_steps as f64;
+                // Ballistic height arc and a full backward rotation of the base yaw.
+                let arc = (std::f64::consts::PI * t).sin();
+                weights[1] = 400.0;
+                reference[1] = BASE_START_Y_M + (target_apex_y_m - BASE_START_Y_M) * arc;
+                if !no_flip {
+                    weights[5] = 400.0;
+                    reference[5] = -2.0 * std::f64::consts::PI * t;
+                }
+            }
+            let mut cost = QuadraticCost::new(weights, control_weights.clone(), zero.clone());
+            cost.state_reference = reference;
+            cost.running_scale = 1.0;
+            running.push(cost);
+        }
+
+        let mut terminal_weights = vec![0.0; 2 * nv];
+        terminal_weights[1] = 4.0e3;
+        if !no_flip {
+            terminal_weights[5] = 1.0e3;
+        }
+        for index in 0..6 {
+            terminal_weights[nv + index] = 40.0;
         }
         for (dof, name) in joint_names.iter().enumerate() {
-            if node < crouch_steps {
-                weights[6 + dof] = 8.0;
-                reference[6 + dof] = crouch_angle(name);
+            // The wrist joints have low torque authority, so a hard zero terminal
+            // velocity is not achievable in the last step and leaves a residual
+            // gap. Ask for a soft stop there and a firm stop on the body.
+            terminal_weights[nv + 6 + dof] = if name.contains("wrist") { 5.0 } else { 40.0 };
+        }
+        let mut terminal =
+            QuadraticCost::new(zero.clone(), vec![0.0; control_dim], terminal_weights);
+        let mut terminal_reference = vec![0.0; 2 * nv];
+        terminal_reference[1] = BASE_START_Y_M;
+        terminal_reference[5] = -2.0 * std::f64::consts::PI;
+        for (dof, name) in joint_names.iter().enumerate() {
+            terminal_reference[6 + dof] = stand_angle(name);
+        }
+        terminal.state_reference = terminal_reference;
+        let schedule = PhaseCostSchedule { running, terminal };
+
+        // Warm start: a crouch pose held, then a tucked spin through flight.
+        let mut crouch = initial.clone();
+        crouch[1] = CROUCH_Y_M;
+        for (dof, name) in joint_names.iter().enumerate() {
+            crouch[6 + dof] = crouch_angle(name);
+        }
+        // Launch velocity implied by the ballistic arc: the vertical speed needed
+        // at takeoff to reach the apex over the flight time.
+        let flight_time_s = flight_steps as f64 * STEP_TIME_S;
+        let launch_velocity_m_s = 2.0 * (target_apex_y_m - BASE_START_Y_M) / flight_time_s;
+        let mut states = Vec::with_capacity(horizon + 1);
+        for node in 0..=horizon {
+            let mut state = if node < crouch_steps {
+                crouch.clone()
             } else if node < crouch_steps + push_steps {
-                weights[6 + dof] = 3.0;
-                reference[6 + dof] = stand_angle(name);
+                let push = (node - crouch_steps) as f64;
+                let linear = (push + 1.0) / push_steps as f64;
+                // Ease-out so the joint velocity reaches zero at the push-to-flight
+                // boundary, matching the flight ease-in and keeping the transition
+                // continuous.
+                let t = linear * linear * (3.0 - 2.0 * linear);
+                let mut extended = initial.clone();
+                extended[1] = BASE_START_Y_M + 0.05 * linear.sin();
+                extended[nv + 1] = launch_velocity_m_s;
+                for (dof, name) in joint_names.iter().enumerate() {
+                    extended[6 + dof] =
+                        stand_angle(name) + (crouch_angle(name) - stand_angle(name)) * (1.0 - t);
+                }
+                extended
             } else {
-                weights[6 + dof] = 2.0;
-                reference[6 + dof] = tuck_angle(name);
-            }
+                let flight = (node - crouch_steps - push_steps) as f64;
+                let t = flight / flight_steps as f64;
+                let mut tucked = initial.clone();
+                tucked[1] = BASE_START_Y_M
+                    + (target_apex_y_m - BASE_START_Y_M) * (std::f64::consts::PI * t).sin();
+                tucked[5] = -2.0 * std::f64::consts::PI * t;
+                // The spin is built during flight; do not impose the full rate at
+                // the push boundary, where the planted feet cannot supply it.
+                tucked[nv + 5] =
+                    -2.0 * std::f64::consts::PI * t / (flight_steps as f64 * STEP_TIME_S);
+                // Blend the legs from the push extension into the tuck over the
+                // first third of flight so the push-to-flight joint velocity is
+                // continuous instead of a step.
+                let ramp = (t / 0.33).min(1.0);
+                // Ease-in so the joint velocity starts at zero and matches the push
+                // ease-out at the boundary.
+                let blend = ramp * ramp * (3.0 - 2.0 * ramp);
+                for (dof, name) in joint_names.iter().enumerate() {
+                    let start = stand_angle(name);
+                    tucked[6 + dof] = start + (tuck_angle(name) - start) * blend;
+                }
+                tucked
+            };
+            state[nv + 1] = 0.0;
+            states.push(state);
         }
-        if node >= crouch_steps + push_steps {
-            let flight = (node - crouch_steps - push_steps) as f64;
-            let t = flight / flight_steps as f64;
-            // Ballistic height arc and a full backward rotation of the base yaw.
-            let arc = (std::f64::consts::PI * t).sin();
-            weights[1] = 400.0;
-            reference[1] = BASE_START_Y_M + (target_apex_y_m - BASE_START_Y_M) * arc;
-            if !no_flip {
-                weights[5] = 400.0;
-                reference[5] = -2.0 * std::f64::consts::PI * t;
-            }
-        }
-        let mut cost = QuadraticCost::new(weights, control_weights.clone(), zero.clone());
-        cost.state_reference = reference;
-        cost.running_scale = 1.0;
-        running.push(cost);
-    }
+        states[0] = initial.clone();
 
-    let mut terminal_weights = vec![0.0; 2 * nv];
-    terminal_weights[1] = 4.0e3;
-    if !no_flip {
-        terminal_weights[5] = 1.0e3;
-    }
-    for index in 0..6 {
-        terminal_weights[nv + index] = 40.0;
-    }
-    for (dof, name) in joint_names.iter().enumerate() {
-        // The wrist joints have low torque authority, so a hard zero terminal
-        // velocity is not achievable in the last step and leaves a residual
-        // gap. Ask for a soft stop there and a firm stop on the body.
-        terminal_weights[nv + 6 + dof] = if name.contains("wrist") { 5.0 } else { 40.0 };
-    }
-    let mut terminal = QuadraticCost::new(zero.clone(), vec![0.0; control_dim], terminal_weights);
-    let mut terminal_reference = vec![0.0; 2 * nv];
-    terminal_reference[1] = BASE_START_Y_M;
-    terminal_reference[5] = -2.0 * std::f64::consts::PI;
-    for (dof, name) in joint_names.iter().enumerate() {
-        terminal_reference[6 + dof] = stand_angle(name);
-    }
-    terminal.state_reference = terminal_reference;
-    let schedule = PhaseCostSchedule { running, terminal };
-
-    // Warm start: a crouch pose held, then a tucked spin through flight.
-    let mut crouch = initial.clone();
-    crouch[1] = CROUCH_Y_M;
-    for (dof, name) in joint_names.iter().enumerate() {
-        crouch[6 + dof] = crouch_angle(name);
-    }
-    // Launch velocity implied by the ballistic arc: the vertical speed needed
-    // at takeoff to reach the apex over the flight time.
-    let flight_time_s = flight_steps as f64 * STEP_TIME_S;
-    let launch_velocity_m_s = 2.0 * (target_apex_y_m - BASE_START_Y_M) / flight_time_s;
-    let mut states = Vec::with_capacity(horizon + 1);
-    for node in 0..=horizon {
-        let mut state = if node < crouch_steps {
-            crouch.clone()
-        } else if node < crouch_steps + push_steps {
-            let push = (node - crouch_steps) as f64;
-            let linear = (push + 1.0) / push_steps as f64;
-            // Ease-out so the joint velocity reaches zero at the push-to-flight
-            // boundary, matching the flight ease-in and keeping the transition
-            // continuous.
-            let t = linear * linear * (3.0 - 2.0 * linear);
-            let mut extended = initial.clone();
-            extended[1] = BASE_START_Y_M + 0.05 * linear.sin();
-            extended[nv + 1] = launch_velocity_m_s;
-            for (dof, name) in joint_names.iter().enumerate() {
-                extended[6 + dof] =
-                    stand_angle(name) + (crouch_angle(name) - stand_angle(name)) * (1.0 - t);
-            }
-            extended
-        } else {
-            let flight = (node - crouch_steps - push_steps) as f64;
-            let t = flight / flight_steps as f64;
-            let mut tucked = initial.clone();
-            tucked[1] = BASE_START_Y_M
-                + (target_apex_y_m - BASE_START_Y_M) * (std::f64::consts::PI * t).sin();
-            tucked[5] = -2.0 * std::f64::consts::PI * t;
-            // The spin is built during flight; do not impose the full rate at
-            // the push boundary, where the planted feet cannot supply it.
-            tucked[nv + 5] = -2.0 * std::f64::consts::PI * t / (flight_steps as f64 * STEP_TIME_S);
-            // Blend the legs from the push extension into the tuck over the
-            // first third of flight so the push-to-flight joint velocity is
-            // continuous instead of a step.
-            let ramp = (t / 0.33).min(1.0);
-            // Ease-in so the joint velocity starts at zero and matches the push
-            // ease-out at the boundary.
-            let blend = ramp * ramp * (3.0 - 2.0 * ramp);
-            for (dof, name) in joint_names.iter().enumerate() {
-                let start = stand_angle(name);
-                tucked[6 + dof] = start + (tuck_angle(name) - start) * blend;
-            }
-            tucked
-        };
-        state[nv + 1] = 0.0;
-        states.push(state);
-    }
-    states[0] = initial.clone();
-
-    let controls = vec![vec![0.0; control_dim]; horizon];
-    let limits: Vec<f64> = joint_names.iter().map(|name| torque_limit(name)).collect();
-    // FDDP keeps the warm-start gaps open on the first pass, so the kinematic
-    // reference can seed a solve that the analytic Jacobians then close.
-    let config = DdpConfig {
-        max_iterations: 300,
-        tolerance: 1.0e-7,
-        keep_gaps_open: true,
-        control_lower: Some(limits.iter().map(|limit| -limit).collect()),
-        control_upper: Some(limits.clone()),
-        ..DdpConfig::default()
-    };
-    println!("solving FDDP...");
-    // Target the centroidal angular momentum the warm-start spin already
-    // produces at mid-flight, so the aerial phase is shaped toward that flip.
-    let flight_axis_momentum = {
-        let mid = &states[crouch_steps + push_steps + flight_steps / 2];
-        let nv = mid.len() / 2;
-        centroidal_momentum(&model, &mid[..nv], &mid[nv..])
-            .map(|momentum| momentum[5])
-            .unwrap_or(0.0)
-    };
-    let momentum_weight = std::env::var("G1_MOMENTUM_WEIGHT")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(0.0);
-    let cost = CentroidalMomentumCost {
-        model: &model,
-        schedule,
-        flight_start: crouch_steps + push_steps,
-        weight: momentum_weight,
-        desired_angular_momentum_z: flight_axis_momentum,
-    };
-    println!("momentum: desired L_z={flight_axis_momentum:.3} kg m^2/s weight={momentum_weight}");
-    let solution = if use_multiple_shooting {
-        let ms_config = MultipleShootingConfig {
-            max_iterations: 1000,
-            tolerance: 1.0e-4,
-            use_exact_hessian,
+        let controls = vec![vec![0.0; control_dim]; horizon];
+        let limits: Vec<f64> = joint_names.iter().map(|name| torque_limit(name)).collect();
+        // FDDP keeps the warm-start gaps open on the first pass, so the kinematic
+        // reference can seed a solve that the analytic Jacobians then close.
+        let config = DdpConfig {
+            max_iterations: 300,
+            tolerance: 1.0e-7,
+            keep_gaps_open: true,
             control_lower: Some(limits.iter().map(|limit| -limit).collect()),
             control_upper: Some(limits.clone()),
-            ..MultipleShootingConfig::default()
+            ..DdpConfig::default()
         };
-        println!("solving multiple shooting (exact_hessian={use_exact_hessian})...");
-        solve_multiple_shooting(&dynamics, &cost, &states, &controls, &ms_config).expect("solve")
-    } else {
-        solve(&dynamics, &cost, &states, &controls, &config).expect("solve")
-    };
+        println!("solving FDDP...");
+        // Target the centroidal angular momentum the warm-start spin already
+        // produces at mid-flight, so the aerial phase is shaped toward that flip.
+        let flight_axis_momentum = {
+            let mid = &states[crouch_steps + push_steps + flight_steps / 2];
+            let nv = mid.len() / 2;
+            centroidal_momentum(&model, &mid[..nv], &mid[nv..])
+                .map(|momentum| momentum[5])
+                .unwrap_or(0.0)
+        };
+        let momentum_weight = std::env::var("G1_MOMENTUM_WEIGHT")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0.0);
+        let cost = CentroidalMomentumCost {
+            model: &model,
+            schedule,
+            flight_start: crouch_steps + push_steps,
+            weight: momentum_weight,
+            desired_angular_momentum_z: flight_axis_momentum,
+        };
+        println!(
+            "momentum: desired L_z={flight_axis_momentum:.3} kg m^2/s weight={momentum_weight}"
+        );
+        let solution = if use_multiple_shooting {
+            let ms_config = MultipleShootingConfig {
+                max_iterations: 1000,
+                tolerance: 1.0e-4,
+                use_exact_hessian,
+                control_lower: Some(limits.iter().map(|limit| -limit).collect()),
+                control_upper: Some(limits.clone()),
+                ..MultipleShootingConfig::default()
+            };
+            println!("solving multiple shooting (exact_hessian={use_exact_hessian})...");
+            solve_multiple_shooting(&dynamics, &cost, &states, &controls, &ms_config)
+                .expect("solve")
+        } else {
+            solve(&dynamics, &cost, &states, &controls, &config).expect("solve")
+        };
 
-    let apex_y = solution
-        .states
-        .iter()
-        .fold(f64::MIN, |maximum, state| maximum.max(state[1]));
-    let final_y = solution.states.last().expect("states")[1];
-    let min_yaw = solution
-        .states
-        .iter()
-        .fold(f64::MAX, |minimum, state| minimum.min(state[5]));
-    let max_yaw = solution
-        .states
-        .iter()
-        .fold(f64::MIN, |maximum, state| maximum.max(state[5]));
-    let mut max_gap = 0.0_f64;
-    let mut failed_nodes = 0_usize;
-    let mut worst_node = 0_usize;
-    let mut worst_gap = 0.0_f64;
-    let mut worst_component = 0_usize;
-    for node in 0..horizon {
-        match dynamics.step_at(node, &solution.states[node], &solution.controls[node]) {
-            Ok(predicted) => {
-                for (a, b) in solution.states[node + 1].iter().zip(&predicted) {
-                    max_gap = max_gap.max((a - b).abs());
-                }
-                let mut node_gap = 0.0_f64;
-                let mut node_gap_index = 0_usize;
-                for (index, (a, b)) in solution.states[node + 1].iter().zip(&predicted).enumerate()
-                {
-                    if (a - b).abs() > node_gap {
-                        node_gap = (a - b).abs();
-                        node_gap_index = index;
+        let apex_y = solution
+            .states
+            .iter()
+            .fold(f64::MIN, |maximum, state| maximum.max(state[1]));
+        let final_y = solution.states.last().expect("states")[1];
+        let min_yaw = solution
+            .states
+            .iter()
+            .fold(f64::MAX, |minimum, state| minimum.min(state[5]));
+        let max_yaw = solution
+            .states
+            .iter()
+            .fold(f64::MIN, |maximum, state| maximum.max(state[5]));
+        let mut max_gap = 0.0_f64;
+        let mut failed_nodes = 0_usize;
+        let mut worst_node = 0_usize;
+        let mut worst_gap = 0.0_f64;
+        let mut worst_component = 0_usize;
+        for node in 0..horizon {
+            match dynamics.step_at(node, &solution.states[node], &solution.controls[node]) {
+                Ok(predicted) => {
+                    for (a, b) in solution.states[node + 1].iter().zip(&predicted) {
+                        max_gap = max_gap.max((a - b).abs());
+                    }
+                    let mut node_gap = 0.0_f64;
+                    let mut node_gap_index = 0_usize;
+                    for (index, (a, b)) in
+                        solution.states[node + 1].iter().zip(&predicted).enumerate()
+                    {
+                        if (a - b).abs() > node_gap {
+                            node_gap = (a - b).abs();
+                            node_gap_index = index;
+                        }
+                    }
+                    if node_gap > worst_gap {
+                        worst_gap = node_gap;
+                        worst_node = node;
+                        worst_component = node_gap_index;
                     }
                 }
-                if node_gap > worst_gap {
-                    worst_gap = node_gap;
-                    worst_node = node;
-                    worst_component = node_gap_index;
-                }
+                Err(_) => failed_nodes += 1,
             }
-            Err(_) => failed_nodes += 1,
         }
-    }
-    let worst_label = if worst_component < nv {
-        format!("q[{}]", worst_component)
-    } else if worst_component < nv + 6 {
-        format!("base_qd[{}]", worst_component - nv)
-    } else {
-        let joint = worst_component - nv - 6;
-        format!(
-            "qd[{}] ({})",
-            joint,
-            joint_names.get(joint).map(String::as_str).unwrap_or("?")
-        )
-    };
-    println!(
+        let worst_label = if worst_component < nv {
+            format!("q[{}]", worst_component)
+        } else if worst_component < nv + 6 {
+            format!("base_qd[{}]", worst_component - nv)
+        } else {
+            let joint = worst_component - nv - 6;
+            format!(
+                "qd[{}] ({})",
+                joint,
+                joint_names.get(joint).map(String::as_str).unwrap_or("?")
+            )
+        };
+        println!(
         "worst gap {worst_gap:.3e} at node {worst_node} component {worst_component} {worst_label} (crouch<{crouch_steps}, push<{})",
         crouch_steps + push_steps
     );
-    let feasible = max_gap < 1.0e-4 && failed_nodes == 0;
-    println!(
-        "converged={} feasible={} cost_finite={}",
-        solution.converged,
-        feasible,
-        solution.cost.is_finite(),
-    );
-    let max_torque = solution
-        .controls
-        .iter()
-        .flatten()
-        .fold(0.0_f64, |maximum, value| maximum.max(value.abs()));
-    println!(
+        let feasible = max_gap < 1.0e-4 && failed_nodes == 0;
+        println!(
+            "converged={} feasible={} cost_finite={}",
+            solution.converged,
+            feasible,
+            solution.cost.is_finite(),
+        );
+        let max_torque = solution
+            .controls
+            .iter()
+            .flatten()
+            .fold(0.0_f64, |maximum, value| maximum.max(value.abs()));
+        println!(
         "cost={:.4} apex_y={apex_y:.3} final_y={final_y:.3} jump={:.3} yaw=[{min_yaw:.2},{max_yaw:.2}] span={:.2} rad max_gap={max_gap:.2e} max_torque={max_torque:.1} iterations={}",
         solution.cost,
         apex_y - BASE_START_Y_M,

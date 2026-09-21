@@ -165,8 +165,7 @@ impl<'a> ContactImplicitArticulatedDynamics<'a> {
         generalized[base..].copy_from_slice(control);
         let dt = self.step_time_s / self.substeps.max(1) as f64;
         for _ in 0..self.substeps.max(1) {
-            let bias =
-                non_linear_effects(self.model, &q, &qd).map_err(|_| OcError::Dynamics)?;
+            let bias = non_linear_effects(self.model, &q, &qd).map_err(|_| OcError::Dynamics)?;
             let contact = self
                 .generalized_contact_force(&q, &qd)
                 .map_err(|_| OcError::Dynamics)?;
@@ -359,8 +358,7 @@ impl<'a> ContactImplicitArticulatedDynamics<'a> {
         for k in 0..nv {
             for row in 0..nv {
                 fx[nv + row][k] = dqdd_dq[k][row] * dt;
-                fx[nv + row][nv + k] =
-                    if row == k { 1.0 } else { 0.0 } + dqdd_dqd[k][row] * dt;
+                fx[nv + row][nv + k] = if row == k { 1.0 } else { 0.0 } + dqdd_dqd[k][row] * dt;
             }
         }
         for j in 0..nu {
@@ -577,8 +575,8 @@ mod tests {
                     .abs()
                     .max(finite.fx[row][column].abs())
                     .max(1.0);
-                max_relative =
-                    max_relative.max((analytic.fx[row][column] - finite.fx[row][column]).abs() / scale);
+                max_relative = max_relative
+                    .max((analytic.fx[row][column] - finite.fx[row][column]).abs() / scale);
             }
         }
         assert!(max_relative < 1.0e-4, "fx relative error {max_relative}");
@@ -594,19 +592,11 @@ mod tests {
             damping_n_s_m: 1.0e3,
             ..CompliantContactModel::default()
         };
-        let single = ContactImplicitArticulatedDynamics::new(
-            &model,
-            0.01,
-            corner_contacts(base),
-            stiff,
-        );
-        let sub = ContactImplicitArticulatedDynamics::new(
-            &model,
-            0.01,
-            corner_contacts(base),
-            stiff,
-        )
-        .with_substeps(64);
+        let single =
+            ContactImplicitArticulatedDynamics::new(&model, 0.01, corner_contacts(base), stiff);
+        let sub =
+            ContactImplicitArticulatedDynamics::new(&model, 0.01, corner_contacts(base), stiff)
+                .with_substeps(64);
         let mut state = vec![0.0; 12];
         state[1] = 0.1;
         let mut single_state = state.clone();
@@ -629,6 +619,10 @@ mod tests {
             single_state[1]
         );
         assert!(state[1].is_finite());
-        assert!(state[1] > -0.05, "sub-stepped body fell through: {}", state[1]);
+        assert!(
+            state[1] > -0.05,
+            "sub-stepped body fell through: {}",
+            state[1]
+        );
     }
 }
