@@ -56,6 +56,15 @@ pub(super) fn run() {
         landing_stance_rad.is_finite() && (0.0..=0.2).contains(&landing_stance_rad),
         "landing stance must be in 0..=0.2 rad"
     );
+    let contact_friction = candidate
+        .as_ref()
+        .and_then(|value| value.get("contact_friction"))
+        .map(|value| value.as_f64().expect("numeric contact_friction"))
+        .unwrap_or(0.5);
+    assert!(
+        contact_friction.is_finite() && (0.0..=1.5).contains(&contact_friction),
+        "contact friction must be in 0..=1.5"
+    );
     let stop_on_fall = args.iter().any(|arg| arg == "--native-stop-on-fall");
     let dt_us: u64 = args
         .iter()
@@ -95,6 +104,9 @@ pub(super) fn run() {
         SimDuration::from_ticks(dt_us * 1000),
     )
     .expect("native G1 scene");
+    for name in ["ground", "left_ankle_roll_link", "right_ankle_roll_link"] {
+        assert!(sim.set_named_collider_friction(name, contact_friction));
+    }
     let (model, names) = build_chain(&mut sim);
     let mass_kg: f64 = (0..model.link_count())
         .map(|i| model.link_inertia(i).unwrap().mass_kg)
@@ -442,7 +454,7 @@ pub(super) fn run() {
     let output = json!({"backend":"RoboSim/Rapier","qualified_backflip":false,
         "velocity_servo":velocity_servo,"peak_joint_speed_ratio":peak_speed_ratio,"peak_speed_joint":peak_speed_joint,"peak_speed_time_s":peak_speed_time_s,"max_joint_position_excess_rad":max_position_excess_rad,
         "failure":failure,"completed_maneuver_time_s":completed_s,"implicit_position_motors":implicit,"declared_inertial_scene":declared,"standing_only":standing_only,"note":"Transfer probe: native primitive collisions, self-collision disabled; qualification pending",
-        "dt_s":dt_s,"balance_velocity_source":if declared {"whole_robot_com"} else {"base_origin"},"parameters":p,"recovery_s":recovery_s,"roll_balance":roll_balance,"landing_stance_rad":landing_stance_rad,"stop_on_fall":stop_on_fall,"mass_kg":mass_kg,"knee_limit_nm":120.0,
+        "dt_s":dt_s,"contact_friction":contact_friction,"balance_velocity_source":if declared {"whole_robot_com"} else {"base_origin"},"parameters":p,"recovery_s":recovery_s,"roll_balance":roll_balance,"landing_stance_rad":landing_stance_rad,"stop_on_fall":stop_on_fall,"mass_kg":mass_kg,"knee_limit_nm":120.0,
         "standing_passed":standing_only && failure.is_none() && completed_s>=4.999
             && min_tail_upright>0.99 && max_tail_speed<0.1 && tail_contact
             && last_position.y>0.65,"signed_rotation_rad":angle,

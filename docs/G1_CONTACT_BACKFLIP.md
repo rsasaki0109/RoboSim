@@ -153,7 +153,10 @@ retain these outcomes separately from the successful external-model backflip.
 
 The native diagnostic accepts `--native-candidate candidate.json`, containing
 16 `parameters` and optional `recovery_s`, `roll_balance`, and
-`landing_stance_rad` (0–0.2 rad). Unsupported nonzero hip-extension delay,
+`landing_stance_rad` (0–0.2 rad), and `contact_friction` (0–1.5; default 0.5).
+The friction value is applied explicitly to the ground and both feet; 0.7
+matches the source screening model's sliding coefficient, but does not make
+the two contact solvers equivalent. Unsupported nonzero hip-extension delay,
 malformed optional fields, and nonpositive phase/recovery durations are rejected.
 `--native-output path.json` refuses to overwrite an existing recording;
 `--native-stop-on-fall` ends a collapsed landing early. A completed probe alone
@@ -182,6 +185,8 @@ joints. Every completed physics step now contributes to measured maximum
 speed/rating and joint-position excess; the peak speed's joint and time are
 recorded too. Neither mode changes `qualified_backflip: false`. Native landing
 and complete collision/actuator qualification remain unresolved.
+[Twenty rejected velocity-servo candidates and source hashes](evidence/g1-contact-backflip/native-transfer/velocity-servo/README.md)
+retain the measured failures.
 
 ```bash
 cargo run --release -p g1_backflip_gif --example 114_g1_backflip_gif -- \
