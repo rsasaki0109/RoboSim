@@ -39,6 +39,14 @@ All notable changes to Robot Native Engine are documented in this file.
   than using the closed-form Christoffel combination, because the floating base
   velocity is a body twist (a quasi-velocity) for which that combination is
   invalid.
+- `ContactImplicitArticulatedDynamics` now provides analytic derivatives: the
+  smooth forward dynamics use the analytic gradient and the compliant contact
+  force is differentiated by central differences of the force alone (one
+  `frame_jacobian` per candidate point) instead of differencing the whole step.
+  Sub-stepping falls back to finite differences. This removes the
+  `4 (nx + nu)` whole-step evaluations per node that the compliant solver
+  previously paid, and is verified against the whole-step finite difference.
+
 - `rne_oc` can use an exact dynamics Hessian in the multiple-shooting local step
   (`MultipleShootingConfig::use_exact_hessian`), through new
   `DiscreteDynamics::analytic_hessian` / `ShootingDynamics::analytic_hessian`
