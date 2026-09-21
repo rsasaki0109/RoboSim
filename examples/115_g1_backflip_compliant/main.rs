@@ -364,6 +364,12 @@ fn main() {
         if node < CROUCH_STEPS {
             weights[1] = 300.0;
             reference[1] = CROUCH_Y_M;
+        } else if node < CROUCH_STEPS + PUSH_STEPS {
+            // Extend from the crouch height back to the standing height so the
+            // base height is continuous into the flight arc instead of free.
+            let push = (node - CROUCH_STEPS + 1) as f64 / PUSH_STEPS as f64;
+            weights[1] = 300.0;
+            reference[1] = CROUCH_Y_M + (BASE_START_Y_M - CROUCH_Y_M) * push;
         }
         for (dof, name) in joint_names.iter().enumerate() {
             if node < CROUCH_STEPS {
