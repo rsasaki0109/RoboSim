@@ -257,6 +257,37 @@ model without advancing simulation time.
 keep this intermediate result separate from physical backflip qualification.
 
 
+### Independent native sole contacts
+
+URDF assets can now opt into `preserve_collision_parts = true`. Instead of
+filling the space between multiple collision elements with one box, the
+importer retains each primitive in a backend-neutral `CompoundCollider`.
+Rapier creates a compound shape on the same link body, retaining the link's
+material, collision groups and sensor behavior. Declared mass and inertia are
+not augmented by the additional shapes. The default remains the legacy AABB.
+Mesh elements still use their existing box approximation.
+
+```bash
+python3 scripts/g1_native_model.py --source-soles --independent-soles \
+  --output target/research/native-compound-model
+cargo run --release -p g1_backflip_gif --example 114_g1_backflip_gif -- \
+  --native-probe --native-declared \
+  --native-scene target/research/native-compound-model/scene.rne.scene.toml \
+  --native-model-check
+```
+
+The constructed model reports `compound_part_counts: [4, 4]`, mass
+34.13385728 kg, and 23 movable joints. The four sphere positions/radii match
+the source sole profile. This resolves the filled-space sole approximation;
+body mesh/self-contact, source armature/losses and controller/contact-solver
+differences remain unqualified. `qualified_backflip` stays false.
+
+[Compound primitive contract](adr/029-compound-contact-primitives.md) documents
+creation-time geometry and backend support. Unit tests check a ray passing
+through the gap, rays hitting the individual spheres, declared mass retention,
+invalid geometry rejection, primitive origins/order and explicit opt-in.
+
+
 ## Original-candidate screening (not hardware validation)
 
 The original benchmark GIF uses a **139 N m knee ceiling and disables self-collision**.

@@ -1,10 +1,12 @@
 //! Spawn RNE entities from parsed URDF.
 
-use crate::geometry::{collider_from_link_with_meshes, visual_from_element};
+use crate::geometry::{collider_from_element, collider_from_link_with_meshes, visual_from_element};
 use crate::parse::rpy_to_quat;
 use crate::schema::{UrdfDocument, UrdfInertial, UrdfJoint, UrdfJointType, UrdfLink, UrdfRobot};
 use rne_ecs::{spawn_named, Entity, World};
-use rne_physics::{CollisionGroups, RigidBody, RigidBodyInertia, RigidBodyType};
+use rne_physics::{
+    ColliderPart, CollisionGroups, CompoundCollider, RigidBody, RigidBodyInertia, RigidBodyType,
+};
 use rne_render::{LinkVisuals, Visual};
 use rne_robot::{Joint, JointKind, JointLimits, Link, MimicJoint, Robot, RobotId};
 use rne_world::Transform3;
@@ -21,6 +23,9 @@ pub struct UrdfSpawnConfig {
     pub attach_colliders: bool,
     /// When true, mesh collision geometry is approximated by AABB colliders.
     pub attach_mesh_colliders: bool,
+    /// Preserve multiple collision elements as compound primitives (Rapier supports this).
+    /// Mesh elements retain their existing AABB approximation. Defaults to false.
+    pub preserve_collision_parts: bool,
     /// When false, colliders spawned for this robot do not collide with each other.
     pub self_collisions: bool,
     /// Rigid body type applied to the base link.
@@ -46,6 +51,7 @@ impl Default for UrdfSpawnConfig {
             attach_physics: true,
             attach_colliders: true,
             attach_mesh_colliders: true,
+            preserve_collision_parts: false,
             self_collisions: true,
             base_body_type: RigidBodyType::Kinematic,
             visual_color_rgba: [0.7, 0.7, 0.75, 1.0],
@@ -292,6 +298,24 @@ fn attach_link_geometry(
             collider_from_link_with_meshes(link, assets_root, config.attach_mesh_colliders)
         {
             world.entity_mut(entity).insert(collider);
+            if config.preserve_collision_parts {
+                let parts: Vec<_> = link
+                    .collisions
+                    .iter()
+                    .filter(|element| {
+                        config.attach_mesh_colliders
+                            || !matches!(element.geometry, crate::schema::UrdfGeometry::Mesh { .. })
+                    })
+                    .filter_map(|element| collider_from_element(element, assets_root))
+                    .map(|part| ColliderPart {
+                        shape: part.shape,
+                        local_offset: part.local_offset,
+                    })
+                    .collect();
+                if parts.len() > 1 {
+                    world.entity_mut(entity).insert(CompoundCollider { parts });
+                }
+            }
             counts.colliders += 1;
         }
         if counts.colliders > 0 && !config.self_collisions {
@@ -498,6 +522,37 @@ mod tests {
         assert_eq!(mimic.multiplier, -1.0);
         assert_eq!(mimic.offset, 0.05);
         assert!(world.get::<MimicJoint>(leader).is_none());
+    }
+
+    #[test]
+    fn compound_import_is_opt_in_and_preserves_primitive_origins() {
+        let urdf = parse_urdf(r#"<robot name="sole"><link name="foot">
+          <collision><origin xyz="-.05 0 -.03"/><geometry><sphere radius=".002"/></geometry></collision>
+          <collision><origin xyz=".09 0 -.03"/><geometry><sphere radius=".002"/></geometry></collision>
+        </link></robot>"#).unwrap();
+        for preserve in [false, true] {
+            let mut world = World::new();
+            let robot = spawn_urdf_robot_with_config(
+                &mut world,
+                &urdf,
+                UrdfSpawnConfig {
+                    preserve_collision_parts: preserve,
+                    ..UrdfSpawnConfig::default()
+                },
+            )
+            .unwrap();
+            let parts = world.get::<CompoundCollider>(robot.base_link);
+            assert_eq!(parts.is_some(), preserve);
+            if let Some(compound) = parts {
+                assert_eq!(compound.parts.len(), 2);
+                assert_eq!(
+                    compound.parts[0].local_offset.translation,
+                    rne_math::Vec3::new(-0.05, 0.0, -0.03)
+                );
+                assert_eq!(compound.parts[1].local_offset.translation.x, 0.09);
+                assert!(compound.is_valid());
+            }
+        }
     }
 
     #[test]

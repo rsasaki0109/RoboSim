@@ -200,6 +200,10 @@ pub struct UrdfRobotAsset {
     /// When true, mesh collision geometry is approximated by AABB colliders.
     #[serde(default = "default_true")]
     pub mesh_collisions: bool,
+    /// Preserve multiple collision elements as compound primitives; opt-in.
+    /// Requires a backend with compound support, such as Rapier.
+    #[serde(default)]
+    pub preserve_collision_parts: bool,
     /// When true, links belonging to this robot collide with one another.
     #[serde(default = "default_true")]
     pub self_collisions: bool,
@@ -286,6 +290,7 @@ impl UrdfRobotAsset {
             base_body_type: self.base_body_type.into(),
             attach_colliders: self.collisions,
             attach_mesh_colliders: self.mesh_collisions,
+            preserve_collision_parts: self.preserve_collision_parts,
             self_collisions: self.self_collisions,
             use_declared_inertial_masses: self.use_declared_inertial_masses,
             ..UrdfSpawnConfig::default()
@@ -588,9 +593,23 @@ coulomb_transition_velocity_rad_s = 0.04
         assert!(!urdf.articulation);
         assert!(urdf.collisions);
         assert!(urdf.mesh_collisions);
+        assert!(!urdf.preserve_collision_parts);
         assert!(urdf.self_collisions);
         assert!(!urdf.multibody);
         assert_eq!(urdf.base_body_type, UrdfBaseBodyType::Kinematic);
+    }
+
+    #[test]
+    fn compound_geometry_option_reaches_urdf_import() {
+        let text = format!("{URDF}\npreserve_collision_parts = true\n");
+        let asset = parse_robot_asset(&text, Path::new("test.toml")).unwrap();
+        assert!(
+            asset
+                .urdf
+                .unwrap()
+                .to_spawn_config()
+                .preserve_collision_parts
+        );
     }
 
     #[test]

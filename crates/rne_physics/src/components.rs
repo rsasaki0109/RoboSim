@@ -174,6 +174,60 @@ impl Default for ColliderShape {
     }
 }
 
+/// One finite primitive in a compound collision shape.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ColliderPart {
+    /// Primitive geometry; infinite planes are not supported in compounds.
+    pub shape: ColliderShape,
+    /// Pose relative to the entity, not to the companion collider's offset.
+    pub local_offset: Transform3,
+}
+
+/// Optional compound geometry replacing the companion [`Collider`]'s shape.
+///
+/// The companion retains material, sensor and collision-group behavior. Parts
+/// share one rigid body and do not add mass when declared inertia is present.
+/// Rapier supports this component at collider creation; author it before the
+/// first physics synchronization. Backends without compound support must not
+/// be used to validate compound-contact behavior. Legacy `Collider` geometry
+/// remains available as a broad bounding approximation for other consumers.
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompoundCollider {
+    /// Nonempty, deterministically ordered finite primitives.
+    pub parts: Vec<ColliderPart>,
+}
+
+impl CompoundCollider {
+    /// Returns whether all parts have finite poses and positive finite extents.
+    pub fn is_valid(&self) -> bool {
+        let positive =
+            |x: f64| x.is_finite() && x > 0.0 && (x as f32).is_finite() && (x as f32) > 0.0;
+        !self.parts.is_empty()
+            && self.parts.iter().all(|part| {
+                let pose = part.local_offset;
+                pose.translation.is_finite()
+                    && pose.rotation.is_finite()
+                    && (pose.rotation.length_squared() - 1.0).abs() < 1e-6
+                    && match part.shape {
+                        ColliderShape::Sphere { radius_m } => positive(radius_m),
+                        ColliderShape::Cuboid { half_extents_m } => {
+                            half_extents_m.to_array().into_iter().all(positive)
+                        }
+                        ColliderShape::Capsule {
+                            half_height_m,
+                            radius_m,
+                        } => {
+                            half_height_m.is_finite()
+                                && (half_height_m as f32).is_finite()
+                                && half_height_m >= 0.0
+                                && positive(radius_m)
+                        }
+                        ColliderShape::Plane { .. } => false,
+                    }
+            })
+    }
+}
+
 /// Collider attached to an entity.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Collider {

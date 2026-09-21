@@ -79,6 +79,30 @@ class ModelPreparationTest(unittest.TestCase):
             )
             self.assertFalse(audit["qualification_ready"])
 
+    def test_independent_sole_profile_requests_compound_geometry(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch(
+                "g1_native_model.shutil.disk_usage",
+                return_value=Usage(100, 0, 32 * 1024**3),
+            ),
+        ):
+            output = Path(directory) / "model"
+            audit = prepare(SOURCE, output, source_soles=True, independent_soles=True)
+            self.assertEqual(audit["multi_collision_links_merged_to_aabb"], {})
+            self.assertEqual(
+                audit["compound_link_part_counts"],
+                {
+                    "left_ankle_roll_link": 4,
+                    "right_ankle_roll_link": 4,
+                },
+            )
+            self.assertIn(
+                "preserve_collision_parts = true",
+                (output / "robot.rne.robot.toml").read_text(),
+            )
+            self.assertFalse(audit["qualification_ready"])
+
     def test_physical_or_branch_massless_link_rejected(self):
         for content in ["<visual/>", ""]:
             with tempfile.TemporaryDirectory() as directory:

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "assets/robots/g1_description/g1_23dof.urdf"
 
 
-def prepare(source, output, source_soles=False):
+def prepare(source, output, source_soles=False, independent_soles=False):
     """Remove only empty fixed leaf frames; preserve every physical link and joint."""
     source, output = Path(source).resolve(), Path(output).resolve()
     robot = ET.parse(source).getroot()
@@ -93,6 +93,9 @@ use_declared_inertial_masses = true
 use_joint_origin_rpy = true
 weld_fixed_children = true
 """)
+    if independent_soles:
+        config = output / "robot.rne.robot.toml"
+        config.write_text(config.read_text() + "preserve_collision_parts = true\n")
     (output / "scene.rne.scene.toml").write_text("""[world]
 gravity_m_s2 = [0.0, -9.81, 0.0]
 seed = 2002
@@ -111,11 +114,18 @@ path = "robot.rne.robot.toml"
             j.get("type") != "fixed" for j in robot.findall("joint")
         ),
         "mesh_collision_elements_disabled": mesh_count,
-        "multi_collision_links_merged_to_aabb": merged,
+        "multi_collision_links_merged_to_aabb": {} if independent_soles else merged,
+        "compound_link_part_counts": merged if independent_soles else {},
         "self_collision": False,
         "qualification_ready": False,
-        "remaining_differences": [
-            "Native multiple sole spheres are merged into an AABB; source uses four independent sole spheres.",
+        "remaining_differences": (
+            []
+            if independent_soles
+            else [
+                "Native multiple sole spheres are merged into an AABB; source uses four independent sole spheres."
+            ]
+        )
+        + [
             "Native mesh collisions are disabled; enabling them currently produces AABBs, not source convex meshes.",
             "Source adds joint armature 0.01, damping 0.05 and Coulomb friction 0.2; native probe does not match these.",
             "Different contact solvers and motor models; equal mass does not establish equivalent dynamics.",
@@ -131,10 +141,20 @@ def main():
     parser.add_argument(
         "--source-soles",
         action="store_true",
-        help="match source sole points/radius; native still merges them into a box",
+        help="match source sole points/radius; use --independent-soles to avoid box merging",
+    )
+    parser.add_argument(
+        "--independent-soles",
+        action="store_true",
+        help="preserve each sole sphere as a compound part",
     )
     args = parser.parse_args()
-    print(json.dumps(prepare(SOURCE, args.output, args.source_soles), indent=2))
+    print(
+        json.dumps(
+            prepare(SOURCE, args.output, args.source_soles, args.independent_soles),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

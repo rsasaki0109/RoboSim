@@ -331,6 +331,12 @@ pub enum PhysicsError {
         /// Static validation reason shared by backend implementations.
         reason: &'static str,
     },
+    /// Compound collision geometry is empty, nonfinite, invalid, or lacks a companion collider.
+    #[error("invalid compound collider on entity {entity_index}")]
+    InvalidCompoundCollider {
+        /// Stable ECS entity index carrying the invalid geometry.
+        entity_index: u32,
+    },
     /// An external rigid-body wrench command is invalid.
     #[error("invalid external body wrench on entity {entity_index}: {reason}")]
     InvalidExternalBodyWrench {

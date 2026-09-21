@@ -13,12 +13,12 @@ use rne_ecs::{Entity, World};
 use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
 use rne_physics::{
-    Collider, ContactEvent, ContactPointSample, ExternalBodyWrench, FixedJointDesc, GravityScale,
-    JointActuation, JointEffortMeasurement, JointMotor, JointMotorGainModel, JointPassiveDynamics,
-    JointState, MultibodyLink, PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability,
-    PhysicsCapability, PhysicsError, PhysicsOwnedPose, PhysicsWorldDesc, PhysicsWorldId,
-    PrismaticJointDesc, RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyInertia,
-    RigidBodyType,
+    Collider, CompoundCollider, ContactEvent, ContactPointSample, ExternalBodyWrench,
+    FixedJointDesc, GravityScale, JointActuation, JointEffortMeasurement, JointMotor,
+    JointMotorGainModel, JointPassiveDynamics, JointState, MultibodyLink, PhysicsBackend,
+    PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCapability, PhysicsError,
+    PhysicsOwnedPose, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc, RaycastHit,
+    RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::HashMap;
@@ -296,6 +296,21 @@ impl PhysicsBackend for RapierBackend {
                 continue;
             };
             let collider = world.get::<Collider>(entity);
+            if world.get::<CompoundCollider>(entity).is_some_and(|parts| {
+                collider.is_none()
+                    || !parts.is_valid()
+                    || parts.parts.iter().any(|part| {
+                        part.local_offset
+                            .translation
+                            .to_array()
+                            .into_iter()
+                            .any(|v| !(v as f32).is_finite())
+                    })
+            }) {
+                return Err(PhysicsError::InvalidCompoundCollider {
+                    entity_index: entity.index(),
+                });
+            }
             if collider.is_none() && world.get::<MultibodyLink>(entity).is_none() {
                 continue;
             }
@@ -783,8 +798,27 @@ fn sync_entity_collider(
 }
 
 fn collider_builder(world: &World, entity: Entity, collider: &Collider) -> ColliderBuilder {
-    let mut builder = ColliderBuilder::new(shape_to_shared(collider.shape))
-        .position(transform_to_isometry(&collider.local_offset))
+    let (shape, offset) = if let Some(compound) = world.get::<CompoundCollider>(entity) {
+        (
+            SharedShape::compound(
+                compound
+                    .parts
+                    .iter()
+                    .map(|part| {
+                        (
+                            transform_to_isometry(&part.local_offset),
+                            shape_to_shared(part.shape),
+                        )
+                    })
+                    .collect(),
+            ),
+            Transform3::IDENTITY,
+        )
+    } else {
+        (shape_to_shared(collider.shape), collider.local_offset)
+    };
+    let mut builder = ColliderBuilder::new(shape)
+        .position(transform_to_isometry(&offset))
         .friction(collider.material.friction)
         .restitution(collider.material.restitution)
         .sensor(collider.sensor)
@@ -1490,6 +1524,66 @@ mod tests {
         ));
 
         (backend, physics_world, world, ground, cube)
+    }
+
+    #[test]
+    fn compound_spheres_leave_a_gap_and_preserve_declared_mass() {
+        let mut backend = RapierBackend::new();
+        let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+        let mut world = World::new();
+        let foot = spawn_named(&mut world, "foot");
+        let parts = [-0.2, 0.2].map(|x| rne_physics::ColliderPart {
+            shape: ColliderShape::Sphere { radius_m: 0.04 },
+            local_offset: Transform3::from_translation_rotation(
+                Vec3::new(x, 0.0, 0.0),
+                Quat::IDENTITY,
+            ),
+        });
+        world.entity_mut(foot).insert((
+            RigidBody {
+                mass_kg: 3.0,
+                ..RigidBody::default()
+            },
+            RigidBodyInertia {
+                center_of_mass_local_m: Vec3::ZERO,
+                ixx_kg_m2: 0.01,
+                ixy_kg_m2: 0.0,
+                ixz_kg_m2: 0.0,
+                iyy_kg_m2: 0.01,
+                iyz_kg_m2: 0.0,
+                izz_kg_m2: 0.01,
+            },
+            Collider::cuboid(Vec3::new(0.24, 0.04, 0.04)),
+            CompoundCollider {
+                parts: parts.to_vec(),
+            },
+            Transform3::IDENTITY,
+        ));
+        backend.sync_from_ecs(&mut world, id).unwrap();
+        assert!(backend
+            .raycast(id, RaycastQuery::downward(Vec3::Y, 2.0))
+            .unwrap()
+            .is_empty());
+        for x in [-0.2, 0.2] {
+            let hits = backend
+                .raycast(id, RaycastQuery::downward(Vec3::new(x, 1.0, 0.0), 2.0))
+                .unwrap();
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0].entity, foot);
+            assert_relative_eq!(hits[0].point_m.y, 0.04, epsilon = 1e-5);
+        }
+        // Rapier finalizes newly attached collider mass properties on its first step.
+        backend.step(id, fixed_step()).unwrap();
+        let state = backend.world(id).unwrap();
+        let body = &state.bodies[state.entity_to_body[&foot]];
+        assert_relative_eq!(body.mass() as f64, 3.0, epsilon = 1e-6);
+        world
+            .entity_mut(foot)
+            .insert(CompoundCollider { parts: Vec::new() });
+        assert!(matches!(
+            backend.sync_from_ecs(&mut world, id),
+            Err(PhysicsError::InvalidCompoundCollider { .. })
+        ));
     }
 
     #[test]
