@@ -525,7 +525,14 @@ acceptance rule, or the step size.
    decision variable (the phase lengths and the active set) and optimize the
    schedule in an outer loop over the inner shooting solve. This is the most
    likely fix because the defect concentrates exactly where the active set
-   changes, and it is the one direction not yet tried.
+   changes. Example 113's phase lengths are now CLI-tunable (`--crouch`,
+   `--push`, `--flight`) and a first sweep shows the schedule matters: the FDDP
+   gap is 1.76 at flight 22 but 0.92 at flight 18, with push and crouch
+   variations worse (1.8-4.5). But the space is strongly non-convex — flight 16
+   and 20 are both far worse than 18 — and the low-gap schedules are degenerate
+   (jump 0.06 m against 0.12 m), so a naive local search finds low-defect
+   no-jump motions. A schedule optimizer must therefore score both the defect
+   and the task (jump/rotation), not the defect alone.
 2. *Exact contact derivatives.* Implement
    `constrained_forward_dynamics_gradient` (the KKT solve differentiated, which
    needs the contact Jacobian derivative and the bias-acceleration derivative —

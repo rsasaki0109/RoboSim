@@ -35,9 +35,6 @@ const TOE_OFFSET_LOCAL_M: Vec3 = Vec3::new(0.09, 0.0, -0.035);
 const FOOT_LINKS: [&str; 2] = ["left_ankle_roll_link", "right_ankle_roll_link"];
 
 const STEP_TIME_S: f64 = 0.03;
-const CROUCH_STEPS: usize = 8;
-const PUSH_STEPS: usize = 6;
-const FLIGHT_STEPS: usize = 22;
 const BASE_START_Y_M: f64 = 0.82;
 const CROUCH_Y_M: f64 = 0.66;
 const TARGET_APEX_Y_M: f64 = 1.05;
@@ -257,21 +254,34 @@ fn main() {
         })
         .collect();
     assert_eq!(toe_contacts.len(), 2, "expected two toe contacts");
-    let horizon = CROUCH_STEPS + PUSH_STEPS + FLIGHT_STEPS;
+    let mut crouch_steps = 8_usize;
+    let mut push_steps = 6_usize;
+    let mut flight_steps = 22_usize;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        let mut value = || args.next().and_then(|v| v.parse::<usize>().ok());
+        match arg.as_str() {
+            "--crouch" => crouch_steps = value().unwrap_or(crouch_steps),
+            "--push" => push_steps = value().unwrap_or(push_steps),
+            "--flight" => flight_steps = value().unwrap_or(flight_steps),
+            _ => {}
+        }
+    }
+    let horizon = crouch_steps + push_steps + flight_steps;
     println!("g1 backflip FDDP probe: nv={nv} control_dim={control_dim} horizon={horizon}");
 
     let phases = [
         ContactPhase {
             contacts: toe_contacts.clone(),
-            steps: CROUCH_STEPS,
+            steps: crouch_steps,
         },
         ContactPhase {
             contacts: toe_contacts.clone(),
-            steps: PUSH_STEPS,
+            steps: push_steps,
         },
         ContactPhase {
             contacts: Vec::new(),
-            steps: FLIGHT_STEPS,
+            steps: flight_steps,
         },
     ];
     let dynamics = ContactSequenceDynamics::new(&model, STEP_TIME_S, &phases);
@@ -283,15 +293,15 @@ fn main() {
     for node in 0..horizon {
         let mut weights = vec![0.0; 2 * nv];
         let mut reference = vec![0.0; 2 * nv];
-        if node < CROUCH_STEPS {
+        if node < crouch_steps {
             weights[1] = 300.0;
             reference[1] = CROUCH_Y_M;
         }
         for (dof, name) in joint_names.iter().enumerate() {
-            if node < CROUCH_STEPS {
+            if node < crouch_steps {
                 weights[6 + dof] = 8.0;
                 reference[6 + dof] = crouch_angle(name);
-            } else if node < CROUCH_STEPS + PUSH_STEPS {
+            } else if node < crouch_steps + push_steps {
                 weights[6 + dof] = 3.0;
                 reference[6 + dof] = stand_angle(name);
             } else {
@@ -299,9 +309,9 @@ fn main() {
                 reference[6 + dof] = tuck_angle(name);
             }
         }
-        if node >= CROUCH_STEPS + PUSH_STEPS {
-            let flight = (node - CROUCH_STEPS - PUSH_STEPS) as f64;
-            let t = flight / FLIGHT_STEPS as f64;
+        if node >= crouch_steps + push_steps {
+            let flight = (node - crouch_steps - push_steps) as f64;
+            let t = flight / flight_steps as f64;
             // Ballistic height arc and a full backward rotation of the base yaw.
             let arc = (std::f64::consts::PI * t).sin();
             weights[1] = 400.0;
@@ -349,15 +359,15 @@ fn main() {
     }
     // Launch velocity implied by the ballistic arc: the vertical speed needed
     // at takeoff to reach the apex over the flight time.
-    let flight_time_s = FLIGHT_STEPS as f64 * STEP_TIME_S;
+    let flight_time_s = flight_steps as f64 * STEP_TIME_S;
     let launch_velocity_m_s = 2.0 * (TARGET_APEX_Y_M - BASE_START_Y_M) / flight_time_s;
     let mut states = Vec::with_capacity(horizon + 1);
     for node in 0..=horizon {
-        let mut state = if node < CROUCH_STEPS {
+        let mut state = if node < crouch_steps {
             crouch.clone()
-        } else if node < CROUCH_STEPS + PUSH_STEPS {
-            let push = (node - CROUCH_STEPS) as f64;
-            let linear = (push + 1.0) / PUSH_STEPS as f64;
+        } else if node < crouch_steps + push_steps {
+            let push = (node - crouch_steps) as f64;
+            let linear = (push + 1.0) / push_steps as f64;
             // Ease-out so the joint velocity reaches zero at the push-to-flight
             // boundary, matching the flight ease-in and keeping the transition
             // continuous.
@@ -371,15 +381,15 @@ fn main() {
             }
             extended
         } else {
-            let flight = (node - CROUCH_STEPS - PUSH_STEPS) as f64;
-            let t = flight / FLIGHT_STEPS as f64;
+            let flight = (node - crouch_steps - push_steps) as f64;
+            let t = flight / flight_steps as f64;
             let mut tucked = initial.clone();
             tucked[1] = BASE_START_Y_M
                 + (TARGET_APEX_Y_M - BASE_START_Y_M) * (std::f64::consts::PI * t).sin();
             tucked[5] = -2.0 * std::f64::consts::PI * t;
             // The spin is built during flight; do not impose the full rate at
             // the push boundary, where the planted feet cannot supply it.
-            tucked[nv + 5] = -2.0 * std::f64::consts::PI * t / (FLIGHT_STEPS as f64 * STEP_TIME_S);
+            tucked[nv + 5] = -2.0 * std::f64::consts::PI * t / (flight_steps as f64 * STEP_TIME_S);
             // Blend the legs from the push extension into the tuck over the
             // first third of flight so the push-to-flight joint velocity is
             // continuous instead of a step.
@@ -414,7 +424,7 @@ fn main() {
     // Target the centroidal angular momentum the warm-start spin already
     // produces at mid-flight, so the aerial phase is shaped toward that flip.
     let flight_axis_momentum = {
-        let mid = &states[CROUCH_STEPS + PUSH_STEPS + FLIGHT_STEPS / 2];
+        let mid = &states[crouch_steps + push_steps + flight_steps / 2];
         let nv = mid.len() / 2;
         centroidal_momentum(&model, &mid[..nv], &mid[nv..])
             .map(|momentum| momentum[5])
@@ -427,7 +437,7 @@ fn main() {
     let cost = CentroidalMomentumCost {
         model: &model,
         schedule,
-        flight_start: CROUCH_STEPS + PUSH_STEPS,
+        flight_start: crouch_steps + push_steps,
         weight: momentum_weight,
         desired_angular_momentum_z: flight_axis_momentum,
     };
@@ -489,8 +499,8 @@ fn main() {
         )
     };
     println!(
-        "worst gap {worst_gap:.3e} at node {worst_node} component {worst_component} {worst_label} (crouch<{CROUCH_STEPS}, push<{})",
-        CROUCH_STEPS + PUSH_STEPS
+        "worst gap {worst_gap:.3e} at node {worst_node} component {worst_component} {worst_label} (crouch<{crouch_steps}, push<{})",
+        crouch_steps + push_steps
     );
     let feasible = max_gap < 1.0e-4 && failed_nodes == 0;
     println!(
