@@ -2,8 +2,8 @@
 
 use crate::ddp::{DiscreteDynamics, DynamicsDerivatives, OcError, ShootingDynamics};
 use rne_dynamics::{
-    constrained_forward_dynamics, impulse_velocity, impulse_velocity_gradient,
-    integrate_configuration, ArticulatedModel, ContactSpec,
+    constrained_forward_dynamics, constrained_forward_dynamics_gradient, impulse_velocity,
+    impulse_velocity_gradient, integrate_configuration, ArticulatedModel, ContactSpec,
 };
 
 fn integrate(
@@ -34,6 +34,108 @@ fn integrate(
         next[nv + index] = qd[index] + acceleration[index] * dt;
     }
     Ok(next)
+}
+
+/// Analytical `(df/dx, df/du)` of one [`integrate`] step.
+///
+/// The constrained forward dynamics are differentiated analytically through
+/// [`constrained_forward_dynamics_gradient`]; the floating-base chart Jacobian
+/// of the configuration update is a small central difference of that map, as in
+/// `ArticulatedDynamics`.
+#[allow(clippy::needless_range_loop)]
+fn integrate_derivatives(
+    model: &ArticulatedModel,
+    step_time_s: f64,
+    state: &[f64],
+    control: &[f64],
+    contacts: &[ContactSpec],
+) -> Result<DynamicsDerivatives, OcError> {
+    let nv = model.nv();
+    let base = model.base_dof();
+    let nx = 2 * nv;
+    let nu = nv - base;
+    let (q, qd) = state.split_at(nv);
+    let mut torque = vec![0.0; nv];
+    torque[base..].copy_from_slice(control);
+
+    let (acceleration, _) = constrained_forward_dynamics(model, q, qd, &torque, contacts)
+        .map_err(|_| OcError::Dynamics)?;
+    let gradient = constrained_forward_dynamics_gradient(model, q, qd, &torque, contacts)
+        .map_err(|_| OcError::Dynamics)?;
+
+    let epsilon = 1.0e-7;
+    let dt = step_time_s;
+    let integrate_at = |q_value: &[f64], qd_value: &[f64], qdd_value: &[f64]| {
+        integrate_configuration(model, q_value, qd_value, qdd_value, dt)
+    };
+    let mut fx = vec![vec![0.0; nx]; nx];
+    let mut fu = vec![vec![0.0; nu]; nx];
+    for k in 0..nv {
+        let mut q_shift = q.to_vec();
+        q_shift[k] += epsilon;
+        let mut qdd_shift = acceleration.clone();
+        for row in 0..nv {
+            qdd_shift[row] += gradient.with_respect_to_q[k][row] * epsilon;
+        }
+        let plus = integrate_at(&q_shift, qd, &qdd_shift).map_err(|_| OcError::Dynamics)?;
+        let mut q_shift = q.to_vec();
+        q_shift[k] -= epsilon;
+        let mut qdd_shift = acceleration.clone();
+        for row in 0..nv {
+            qdd_shift[row] -= gradient.with_respect_to_q[k][row] * epsilon;
+        }
+        let minus = integrate_at(&q_shift, qd, &qdd_shift).map_err(|_| OcError::Dynamics)?;
+        for row in 0..nv {
+            fx[row][k] = (plus[row] - minus[row]) / (2.0 * epsilon);
+        }
+    }
+    for k in 0..nv {
+        let mut qd_shift = qd.to_vec();
+        qd_shift[k] += epsilon;
+        let mut qdd_shift = acceleration.clone();
+        for row in 0..nv {
+            qdd_shift[row] += gradient.with_respect_to_qd[k][row] * epsilon;
+        }
+        let plus = integrate_at(q, &qd_shift, &qdd_shift).map_err(|_| OcError::Dynamics)?;
+        let mut qd_shift = qd.to_vec();
+        qd_shift[k] -= epsilon;
+        let mut qdd_shift = acceleration.clone();
+        for row in 0..nv {
+            qdd_shift[row] -= gradient.with_respect_to_qd[k][row] * epsilon;
+        }
+        let minus = integrate_at(q, &qd_shift, &qdd_shift).map_err(|_| OcError::Dynamics)?;
+        for row in 0..nv {
+            fx[row][nv + k] = (plus[row] - minus[row]) / (2.0 * epsilon);
+        }
+    }
+    for j in 0..nu {
+        let mut qdd_shift = acceleration.clone();
+        for row in 0..nv {
+            qdd_shift[row] += gradient.with_respect_to_control[base + j][row] * epsilon;
+        }
+        let plus = integrate_at(q, qd, &qdd_shift).map_err(|_| OcError::Dynamics)?;
+        let mut qdd_shift = acceleration.clone();
+        for row in 0..nv {
+            qdd_shift[row] -= gradient.with_respect_to_control[base + j][row] * epsilon;
+        }
+        let minus = integrate_at(q, qd, &qdd_shift).map_err(|_| OcError::Dynamics)?;
+        for row in 0..nu {
+            fu[row][j] = (plus[row] - minus[row]) / (2.0 * epsilon);
+        }
+    }
+    for k in 0..nv {
+        for row in 0..nv {
+            fx[nv + row][k] = gradient.with_respect_to_q[k][row] * dt;
+            fx[nv + row][nv + k] =
+                if row == k { 1.0 } else { 0.0 } + gradient.with_respect_to_qd[k][row] * dt;
+        }
+    }
+    for j in 0..nu {
+        for row in 0..nv {
+            fu[nv + row][j] = gradient.with_respect_to_control[base + j][row] * dt;
+        }
+    }
+    Ok(DynamicsDerivatives { fx, fu })
 }
 
 /// Semi-implicit Euler over the contact-constrained articulated dynamics.
@@ -231,45 +333,20 @@ impl ShootingDynamics for ContactSequenceDynamics<'_> {
         if state.len() != nx || control.len() != nu {
             return Some(Err(OcError::Dimension("contact sequence state or control")));
         }
-        let epsilon = 1.0e-6;
-        let evaluate = |state: &[f64], control: &[f64]| {
-            integrate(self.model, self.step_time_s, state, control, contacts)
-        };
-        let mut fx = vec![vec![0.0; nx]; nx];
-        let mut fu = vec![vec![0.0; nu]; nx];
-        for column in 0..nx {
-            let mut plus = state.to_vec();
-            plus[column] += epsilon;
-            let mut minus = state.to_vec();
-            minus[column] -= epsilon;
-            let (plus_value, minus_value) =
-                match (evaluate(&plus, control), evaluate(&minus, control)) {
-                    (Ok(plus_value), Ok(minus_value)) => (plus_value, minus_value),
-                    _ => return Some(Err(OcError::Dynamics)),
-                };
-            for row in 0..nx {
-                fx[row][column] = (plus_value[row] - minus_value[row]) / (2.0 * epsilon);
-            }
+        if self.substeps > 1 {
+            // The composed sub-stepped Jacobian is not assembled here.
+            return None;
         }
-        for column in 0..nu {
-            let mut plus = control.to_vec();
-            plus[column] += epsilon;
-            let mut minus = control.to_vec();
-            minus[column] -= epsilon;
-            let (plus_value, minus_value) = match (evaluate(state, &plus), evaluate(state, &minus))
-            {
-                (Ok(plus_value), Ok(minus_value)) => (plus_value, minus_value),
-                _ => return Some(Err(OcError::Dynamics)),
+        let DynamicsDerivatives { mut fx, mut fu } =
+            match integrate_derivatives(self.model, self.step_time_s, state, control, contacts) {
+                Ok(value) => value,
+                Err(_) => return Some(Err(OcError::Dynamics)),
             };
-            for row in 0..nx {
-                fu[row][column] = (plus_value[row] - minus_value[row]) / (2.0 * epsilon);
-            }
-        }
         if !self.impact_reset {
             return Some(Ok(DynamicsDerivatives { fx, fu }));
         }
         if let Some(reset) = &self.reset_per_node[node] {
-            let next = evaluate(state, control).ok()?;
+            let next = integrate(self.model, self.step_time_s, state, control, contacts).ok()?;
             let (q, _) = next.split_at(nv);
             let reset_jacobian = impulse_velocity_gradient(self.model, q, reset).ok()?;
             // The reset leaves positions and applies `P` to the velocity rows.

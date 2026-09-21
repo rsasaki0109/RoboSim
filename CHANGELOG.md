@@ -28,6 +28,12 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `ContactSequenceDynamics::analytic_derivatives` now uses the analytic
+  constrained gradient instead of differencing the whole step, so the hard
+  contact sequence no longer pays `4 (nx + nu)` step evaluations per node. The
+  impact reset is still composed exactly. Sub-stepping falls back to finite
+  differences.
+
 - `rne_dynamics::constrained_forward_dynamics_gradient` differentiates the
   contact-constrained KKT system with respect to `(q, qd, tau)`, using the exact
   `dM/dq`, `dh/dx` and `dJ/dq` and a central difference of the analytic contact
