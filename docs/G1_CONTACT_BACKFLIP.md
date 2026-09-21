@@ -8,7 +8,8 @@ receive joint targets and bounded effort.
 
 The robot is RNE's existing 23-joint G1 URDF. This is an external contact-plant
 benchmark, not yet a demonstration of the RNE/Rapier backend or real hardware.
-It adds no dependency to a Rust crate.
+The Python benchmark remains independent of the Rust engine. Example 114
+provides the RoboSim playback and a separate native transfer probe.
 
 ## EDU partial-specification result
 
@@ -44,6 +45,64 @@ include a golden replay hash. Applying the same controller to the standard
 **90 N m G1 screen fails** on knee–ground contact; this is not a claim that no
 other 90 N m trajectory is feasible. Public knee ceilings alone do not identify
 the other motors, power limits, mass/COM, contact geometry or hardware latency.
+
+## View the successful motion in RoboSim
+
+![Verified state replay in RoboSim's world and wgpu renderer](media/unitree-g1-robosim-replay.gif)
+
+Example 114 now projects the **recorded physical states** into RoboSim's G1
+world and renders them with its wgpu backend. It verifies both the recording
+and URDF SHA-256 hashes, maps all 23 joints by name, and converts the complete
+base quaternion from source Z-up to RoboSim Y-up. It does not synthesize a
+ballistic arc or interpolate an invented flip. The native simulation clock
+must remain at zero throughout playback. The GIF explicitly labels this as
+**MuJoCo state replay, not a Rapier physics result**.
+
+```bash
+# Headless: validate all 500 frames, joint mapping, and base projection.
+cargo run --release -p g1_backflip_gif --example 114_g1_backflip_gif -- \
+  --recording docs/evidence/g1-contact-backflip/edu/step-125us --smoke
+
+# RoboSim/wgpu rendering; ffmpeg with drawtext is needed for the visible label.
+cargo run --release -p g1_backflip_gif --example 114_g1_backflip_gif -- \
+  --recording docs/evidence/g1-contact-backflip/edu/step-125us --gif
+```
+
+Frames are encoded incrementally, avoiding a directory of uncompressed frame
+images. Only the final GIF and one temporary GIF used for labeling are written.
+The original `--smoke` and `--gif` without `--recording` still select the older
+synthetic reference animation; those modes are not physical evidence.
+
+### Native physics transfer probe
+
+```bash
+cargo run --release -p g1_backflip_gif --example 114_g1_backflip_gif -- \
+  --native-probe --native-dt-us 125
+cargo run --release -p g1_backflip_gif --example 114_g1_backflip_gif -- \
+  --native-probe --native-dt-us 500 --native-implicit
+```
+
+This separate experiment uses the live `UrdfSceneSim`/Rapier world, one second
+of motor-driven standing preparation, then the optimized maneuver parameters.
+It never writes base positions or velocities after scene loading. Commands
+use a 2 ms sample/hold and one-period delay; the direct-effort variant applies
+the source motor-speed taper. The implicit diagnostic variant uses native
+force-based position motors with torque ceilings but no speed taper.
+
+**Native backflip is not achieved.** Direct PD effort becomes unstable during
+standing preparation. Implicit position motors keep the initial standing pose,
+but the maneuver becomes unstable after takeoff. The probe stops on excessive
+joint speed, nonfinite state, a base outside scene bounds, or a backend panic,
+and writes a failure recording under `target/research/g1-native-probe-*.json`.
+Incomplete final-second metrics are null, and `qualified_backflip` is always
+false: this diagnostic has no full contact/self-collision qualification gate.
+
+The native scene uses primitive collisions, disables self-collision, and has
+different imported mass/inertia and contact settings. The diagnostic landing
+feedback uses base velocity instead of the source subtree COM velocity.
+These differences need reconciliation before transferring or reoptimizing the
+motion. The current evidence does not justify a native-physics or hardware
+success claim.
 
 ## Original-candidate screening (not hardware validation)
 

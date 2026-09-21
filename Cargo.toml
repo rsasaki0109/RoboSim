@@ -67,6 +67,7 @@ members = [
   "examples/111_diff_drive_euroc_export",
   "examples/112_house_3dgs_euroc_export",
   "examples/113_drjohnson_euroc_export",
+  "examples/114_g1_backflip_gif",
   "examples/20_mobile_manipulator_arm",
   "examples/21_mobile_manipulator_reach",
   "examples/22_mobile_manipulator_grasp",

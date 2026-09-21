@@ -191,3 +191,17 @@ cover parallel determinism and both legacy/EDU recorded-state hashes.
 [Evidence and GIF](G1_CONTACT_BACKFLIP.md#edu-partial-specification-result) remain
 model-specific. The same candidate fails at 90 N m; native RNE/Rapier and real
 hardware transfer, power/current limits and uncertainty testing remain open.
+
+### RoboSim-space playback and native transfer (2026-09-22)
+
+- Example 114 accepts `--recording DIR` to validate and project all 500 physical
+  states into the RoboSim G1 world; `--gif` renders them using wgpu. Full base
+  quaternion, joint-name mapping, recording/model hashes, and a zero native
+  simulation clock are checked. This is explicitly labeled MuJoCo replay.
+- `--native-probe` exercises bounded joint effort in the live Rapier scene,
+  without writing the base pose or velocity. Standing preparation is unstable
+  under direct PD effort; an implicit-position-motor diagnostic stands, but
+  becomes unstable after takeoff. Native success remains open.
+- Next: reconcile collision/mass/inertia and actuator integration differences,
+  establish stable native motor-only standing, then reoptimize and apply the
+  full landing/contact qualification gate. See `G1_CONTACT_BACKFLIP.md`.

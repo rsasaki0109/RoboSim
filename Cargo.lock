@@ -1342,6 +1342,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "g1_backflip_gif"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "png",
+ "rne_ai",
+ "rne_core",
+ "rne_dynamics",
+ "rne_math",
+ "rne_render",
+ "rne_render_wgpu",
+ "rne_robot",
+ "rne_world",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "g1_commanded_locomotion"
 version = "0.3.0"
 dependencies = [
