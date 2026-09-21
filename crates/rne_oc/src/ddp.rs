@@ -43,6 +43,19 @@ pub trait DiscreteDynamics {
     ) -> Option<Result<DynamicsDerivatives, OcError>> {
         None
     }
+
+    /// Optional second derivatives of the dynamics.
+    ///
+    /// The default returns `None`, so a Newton/SQP step falls back to the
+    /// Gauss-Newton Hessian. Models that provide them let the solver include the
+    /// curvature term of the defect residual.
+    fn analytic_hessian(
+        &self,
+        _state: &[f64],
+        _control: &[f64],
+    ) -> Option<Result<DynamicsHessian, OcError>> {
+        None
+    }
 }
 
 /// A node-dependent dynamics model for a shooting problem.
@@ -71,6 +84,19 @@ pub trait ShootingDynamics {
     ) -> Option<Result<DynamicsDerivatives, OcError>> {
         None
     }
+
+    /// Optional second derivatives of the dynamics at a node.
+    ///
+    /// The default returns `None`, keeping the Gauss-Newton Hessian. Returning
+    /// them enables the exact curvature correction in the local step.
+    fn analytic_hessian(
+        &self,
+        _node: usize,
+        _state: &[f64],
+        _control: &[f64],
+    ) -> Option<Result<DynamicsHessian, OcError>> {
+        None
+    }
 }
 
 impl<T: DiscreteDynamics + ?Sized> ShootingDynamics for T {
@@ -93,6 +119,15 @@ impl<T: DiscreteDynamics + ?Sized> ShootingDynamics for T {
         control: &[f64],
     ) -> Option<Result<DynamicsDerivatives, OcError>> {
         DiscreteDynamics::analytic_derivatives(self, state, control)
+    }
+
+    fn analytic_hessian(
+        &self,
+        _node: usize,
+        state: &[f64],
+        control: &[f64],
+    ) -> Option<Result<DynamicsHessian, OcError>> {
+        DiscreteDynamics::analytic_hessian(self, state, control)
     }
 }
 
@@ -292,6 +327,21 @@ pub struct DynamicsDerivatives {
     pub fx: Vec<Vec<f64>>,
     /// Control Jacobian (state rows, control columns).
     pub fu: Vec<Vec<f64>>,
+}
+
+/// Second derivatives of the discrete dynamics `f(x, u)`.
+///
+/// Each field is indexed `[a][i][j] = d²f_a/d(_)_i d(_)_j`, where `a` is the
+/// output row. They let a Newton/SQP local step add the curvature of the defect
+/// residual instead of using the Gauss-Newton approximation.
+#[derive(Clone, Debug)]
+pub struct DynamicsHessian {
+    /// `d²f/dx_i dx_j`, indexed `[a][i][j]`.
+    pub fxx: Vec<Vec<Vec<f64>>>,
+    /// `d²f/dx_i du_j`, indexed `[a][i][j]`.
+    pub fxu: Vec<Vec<Vec<f64>>>,
+    /// `d²f/du_i du_j`, indexed `[a][i][j]`.
+    pub fuu: Vec<Vec<Vec<f64>>>,
 }
 
 /// Central-difference derivatives of the dynamics, Richardson-extrapolated.

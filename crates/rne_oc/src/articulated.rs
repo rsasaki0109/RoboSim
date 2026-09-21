@@ -1,6 +1,6 @@
 //! Discrete dynamics for a floating- or fixed-base articulated model.
 
-use crate::ddp::{DiscreteDynamics, DynamicsDerivatives, OcError};
+use crate::ddp::{DiscreteDynamics, DynamicsDerivatives, DynamicsHessian, OcError};
 use rne_dynamics::{
     forward_dynamics, forward_dynamics_gradient, integrate_configuration, ArticulatedModel,
 };
@@ -63,6 +63,14 @@ impl DiscreteDynamics for ArticulatedDynamics<'_> {
         control: &[f64],
     ) -> Option<Result<DynamicsDerivatives, OcError>> {
         Some(self.analytic_derivatives_inner(state, control))
+    }
+
+    fn analytic_hessian(
+        &self,
+        state: &[f64],
+        control: &[f64],
+    ) -> Option<Result<DynamicsHessian, OcError>> {
+        Some(self.analytic_hessian_inner(state, control))
     }
 }
 
@@ -181,6 +189,58 @@ impl ArticulatedDynamics<'_> {
         }
 
         Ok(DynamicsDerivatives { fx, fu })
+    }
+
+    /// Builds `(d²f/dx², d²f/dxdu, d²f/du²)` by differentiating the analytical
+    /// first derivatives at the same point.
+    ///
+    /// The first-derivative map is the one the solver uses, so differentiating
+    /// it keeps the second derivatives consistent with the Jacobians even where
+    /// the floating-base chart Jacobian is itself a small central difference.
+    #[allow(clippy::needless_range_loop)]
+    fn analytic_hessian_inner(
+        &self,
+        state: &[f64],
+        control: &[f64],
+    ) -> Result<DynamicsHessian, OcError> {
+        let nv = self.model.nv();
+        let nx = 2 * nv;
+        let nu = self.model.nv() - self.model.base_dof();
+        let epsilon = 1.0e-6;
+        let shift = |base: &[f64], index: usize, delta: f64| {
+            let mut value = base.to_vec();
+            value[index] += delta;
+            value
+        };
+        let mut fxx = vec![vec![vec![0.0; nx]; nx]; nx];
+        let mut fxu = vec![vec![vec![0.0; nu]; nx]; nx];
+        let mut fuu = vec![vec![vec![0.0; nu]; nu]; nx];
+
+        for j in 0..nx {
+            let plus = self.analytic_derivatives_inner(&shift(state, j, epsilon), control)?;
+            let minus = self.analytic_derivatives_inner(&shift(state, j, -epsilon), control)?;
+            for a in 0..nx {
+                for i in 0..nx {
+                    fxx[a][i][j] = (plus.fx[a][i] - minus.fx[a][i]) / (2.0 * epsilon);
+                }
+                for control_index in 0..nu {
+                    fxu[a][j][control_index] = (plus.fu[a][control_index]
+                        - minus.fu[a][control_index])
+                        / (2.0 * epsilon);
+                }
+            }
+        }
+        for j in 0..nu {
+            let plus = self.analytic_derivatives_inner(state, &shift(control, j, epsilon))?;
+            let minus = self.analytic_derivatives_inner(state, &shift(control, j, -epsilon))?;
+            for a in 0..nx {
+                for i in 0..nu {
+                    fuu[a][i][j] = (plus.fu[a][i] - minus.fu[a][i]) / (2.0 * epsilon);
+                }
+            }
+        }
+
+        Ok(DynamicsHessian { fxx, fxu, fuu })
     }
 }
 

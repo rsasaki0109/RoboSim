@@ -35,6 +35,9 @@ pub struct MultipleShootingConfig {
     pub control_lower: Option<Vec<f64>>,
     /// Optional per-control upper bounds.
     pub control_upper: Option<Vec<f64>>,
+    /// Use the exact dynamics Hessian in the local step when the model provides
+    /// it, instead of the Gauss-Newton approximation.
+    pub use_exact_hessian: bool,
 }
 
 impl Default for MultipleShootingConfig {
@@ -49,6 +52,7 @@ impl Default for MultipleShootingConfig {
             epsilon: 1.0e-6,
             control_lower: None,
             control_upper: None,
+            use_exact_hessian: false,
         }
     }
 }
@@ -181,6 +185,37 @@ fn local_step(
             hessian[i][nx + j] = value;
         }
     }
+    // Exact curvature of the defect residual: `-sum_a (penalty r_a + lambda_a)
+    // H_f,a`. This turns the Gauss-Newton step into a Newton step when the model
+    // provides the second derivatives.
+    if config.use_exact_hessian {
+        if let Some(Ok(dynamics_hessian)) = dynamics.analytic_hessian(node, x, u) {
+            for a in 0..nx {
+                let weight = penalty * r_cur[a] + lambda_cur[a];
+                if weight == 0.0 {
+                    continue;
+                }
+                for i in 0..nx {
+                    for j in 0..nx {
+                        hessian[i][j] -= weight * dynamics_hessian.fxx[a][i][j];
+                    }
+                }
+                for i in 0..nx {
+                    for j in 0..nu {
+                        let value = weight * dynamics_hessian.fxu[a][i][j];
+                        hessian[i][nx + j] -= value;
+                        hessian[nx + j][i] -= value;
+                    }
+                }
+                for i in 0..nu {
+                    for j in 0..nu {
+                        hessian[nx + i][nx + j] -= weight * dynamics_hessian.fuu[a][i][j];
+                    }
+                }
+            }
+        }
+    }
+
     for (index, row) in hessian.iter_mut().enumerate() {
         row[index] += regularization;
     }
@@ -504,6 +539,36 @@ mod tests {
         let config = MultipleShootingConfig {
             max_iterations: 200,
             tolerance: 1.0e-5,
+            ..MultipleShootingConfig::default()
+        };
+        let solution = solve_multiple_shooting(
+            &dynamics,
+            &crate::ddp::QuadraticCost::new(vec![0.0, 0.0], vec![0.001], vec![0.0, 0.0]),
+            &states,
+            &controls,
+            &config,
+        )
+        .expect("solve");
+        let defect = max_defect(&dynamics, &solution.states, &solution.controls);
+        assert!(defect < 1.0e-3, "defect {defect}");
+    }
+
+    #[test]
+    fn repairs_an_articulated_warm_start_with_exact_hessian() {
+        use crate::articulated::ArticulatedDynamics;
+        let model = pendulum_model();
+        let dynamics = ArticulatedDynamics::new(&model, 0.02);
+        let horizon = 60;
+        let mut states = Vec::new();
+        for k in 0..=horizon {
+            let t = k as f64 / horizon as f64;
+            states.push(vec![0.5 * t, 0.2]);
+        }
+        let controls = vec![vec![0.0]; horizon];
+        let config = MultipleShootingConfig {
+            max_iterations: 200,
+            tolerance: 1.0e-5,
+            use_exact_hessian: true,
             ..MultipleShootingConfig::default()
         };
         let solution = solve_multiple_shooting(

@@ -39,6 +39,15 @@ All notable changes to Robot Native Engine are documented in this file.
   than using the closed-form Christoffel combination, because the floating base
   velocity is a body twist (a quasi-velocity) for which that combination is
   invalid.
+- `rne_oc` can use an exact dynamics Hessian in the multiple-shooting local step
+  (`MultipleShootingConfig::use_exact_hessian`), through new
+  `DiscreteDynamics::analytic_hessian` / `ShootingDynamics::analytic_hessian`
+  hooks and `ArticulatedDynamics`' second derivatives. The exact curvature turns
+  the Gauss-Newton step into a Newton step; a pendulum warm-start test covers
+  the path. The articulated Hessian differentiates the analytic first
+  derivatives, so it costs `O(nx + nu)` gradient evaluations per node; a fully
+  analytic single-pass Hessian is needed before it is affordable on the 29-DoF
+  G1.
 
 - `ContactImplicitArticulatedDynamics::with_substeps` splits each outer step into
   explicit sub-steps so a physically stiff compliant-contact law stays stable at
