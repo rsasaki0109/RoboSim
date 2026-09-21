@@ -532,7 +532,13 @@ acceptance rule, or the step size.
    and 20 are both far worse than 18 — and the low-gap schedules are degenerate
    (jump 0.06 m against 0.12 m), so a naive local search finds low-defect
    no-jump motions. A schedule optimizer must therefore score both the defect
-   and the task (jump/rotation), not the defect alone.
+   and the task (jump/rotation), not the defect alone. The FDDP probe also shows
+   the dominant 113 defect is not the push-to-flight transition but the terminal
+   node: at `(8,6,22)` the worst component is the right wrist-roll velocity at
+   the last node, where the terminal stop fights the low wrist torque limit.
+   Lowering the apex target (1.05 -> 0.90) does not reduce the defect
+   (1.43-2.18) and removes the jump, so the residual is a boundary-condition
+   feasibility limit, not a contact-schedule or jump-height limit.
 2. *Exact contact derivatives.* Implement
    `constrained_forward_dynamics_gradient` (the KKT solve differentiated, which
    needs the contact Jacobian derivative and the bias-acceleration derivative —

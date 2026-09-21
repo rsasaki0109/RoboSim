@@ -254,6 +254,7 @@ fn main() {
         })
         .collect();
     assert_eq!(toe_contacts.len(), 2, "expected two toe contacts");
+    let mut target_apex_y_m = TARGET_APEX_Y_M;
     let mut crouch_steps = 8_usize;
     let mut push_steps = 6_usize;
     let mut flight_steps = 22_usize;
@@ -264,6 +265,12 @@ fn main() {
             "--crouch" => crouch_steps = value().unwrap_or(crouch_steps),
             "--push" => push_steps = value().unwrap_or(push_steps),
             "--flight" => flight_steps = value().unwrap_or(flight_steps),
+            "--apex" => {
+                target_apex_y_m = args
+                    .next()
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .unwrap_or(target_apex_y_m)
+            }
             _ => {}
         }
     }
@@ -315,7 +322,7 @@ fn main() {
             // Ballistic height arc and a full backward rotation of the base yaw.
             let arc = (std::f64::consts::PI * t).sin();
             weights[1] = 400.0;
-            reference[1] = BASE_START_Y_M + (TARGET_APEX_Y_M - BASE_START_Y_M) * arc;
+            reference[1] = BASE_START_Y_M + (target_apex_y_m - BASE_START_Y_M) * arc;
             if !no_flip {
                 weights[5] = 400.0;
                 reference[5] = -2.0 * std::f64::consts::PI * t;
@@ -360,7 +367,7 @@ fn main() {
     // Launch velocity implied by the ballistic arc: the vertical speed needed
     // at takeoff to reach the apex over the flight time.
     let flight_time_s = flight_steps as f64 * STEP_TIME_S;
-    let launch_velocity_m_s = 2.0 * (TARGET_APEX_Y_M - BASE_START_Y_M) / flight_time_s;
+    let launch_velocity_m_s = 2.0 * (target_apex_y_m - BASE_START_Y_M) / flight_time_s;
     let mut states = Vec::with_capacity(horizon + 1);
     for node in 0..=horizon {
         let mut state = if node < crouch_steps {
@@ -385,7 +392,7 @@ fn main() {
             let t = flight / flight_steps as f64;
             let mut tucked = initial.clone();
             tucked[1] = BASE_START_Y_M
-                + (TARGET_APEX_Y_M - BASE_START_Y_M) * (std::f64::consts::PI * t).sin();
+                + (target_apex_y_m - BASE_START_Y_M) * (std::f64::consts::PI * t).sin();
             tucked[5] = -2.0 * std::f64::consts::PI * t;
             // The spin is built during flight; do not impose the full rate at
             // the push boundary, where the planted feet cannot supply it.
