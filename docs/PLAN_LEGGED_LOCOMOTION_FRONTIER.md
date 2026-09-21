@@ -276,9 +276,21 @@ controller.
     degenerate push. It was reverted. Coupling it to a whole-trajectory
     augmented-Lagrangian merit acceptance (with failed roll-outs scored at
     infinity, fixing the earlier under-count) also diverged — gap 9e10, cost
-    6e13 — so both were reverted again. The defect-based acceptance and the
+    6e13 — so both were reverted again. The     defect-based acceptance and the
     frozen first control stay as they are; a robust first-control update remains
     open.
+  - **The solver plateau is not a local-step deficiency.** Every variant tried
+    against the compliant G1 warm start (at `k=1000, c=0, n=2`, baseline gap
+    0.293, cost 467, 0.22 m jump at 150 sweeps) was worse: a whole-trajectory
+    augmented-Lagrangian merit acceptance (gap 0.257 but cost 17790 and no
+    jump), a trust region of 1.0/0.3/0.1 (gap 0.35-0.57), a symmetric sweep
+    (gap 0.257 at a lower cost), and a freed first control (cost 10988, no
+    jump). The baseline Gauss-Newton local step with the max-defect acceptance
+    and the frozen first control is the best across all of them. This points at
+    genuine infeasibility of the rigid/compliant contact model at the
+    push-to-flight transition rather than a step-size problem, so the next
+    credible route is a different contact formulation (complementarity at a
+    small or variable step), not more acceptance tuning.
   With the FDDP warm start restored, example 113 now runs its full iteration
   budget and reaches cost 1494 (was 74096), a 0.138 m jump, a 6.15 rad yaw span,
   and realistic 45 Nm torques. The dynamics gap is still ~3.9 and concentrates
