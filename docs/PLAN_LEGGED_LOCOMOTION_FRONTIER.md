@@ -291,6 +291,15 @@ controller.
     push-to-flight transition rather than a step-size problem, so the next
     credible route is a different contact formulation (complementarity at a
     small or variable step), not more acceptance tuning.
+  - **Hard complementarity contact does not move the plateau either.**
+    `ComplementarityContactDynamics` (velocity-level sequential impulse, no
+    penetration) run on the same G1 warm start reaches gap 0.295 at 100 sweeps
+    against 0.293 for the compliant penalty at 150, but halves the deepest
+    penetration (0.066 m vs 0.123 m). Two very different contact laws landing on
+    the same defect says the plateau is the planning/solver structure at the
+    push-to-flight transition, not the contact stiffness. The next lever is the
+    transition treatment itself (e.g. a contact-consistent reference or a
+    dedicated transition phase), not the contact model.
   With the FDDP warm start restored, example 113 now runs its full iteration
   budget and reaches cost 1494 (was 74096), a 0.138 m jump, a 6.15 rad yaw span,
   and realistic 45 Nm torques. The dynamics gap is still ~3.9 and concentrates

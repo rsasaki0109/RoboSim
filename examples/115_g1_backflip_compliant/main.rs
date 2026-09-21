@@ -26,9 +26,9 @@ use rne_dynamics::{centroidal_momentum, link_motions, ArticulatedModel, ContactS
 use rne_ecs::World;
 use rne_math::{Quat, Vec3};
 use rne_oc::{
-    solve, solve_multiple_shooting, CompliantContactModel, ContactImplicitArticulatedDynamics,
-    CostDerivatives, CostModel, DdpConfig, MultipleShootingConfig, PhaseCostSchedule,
-    QuadraticCost, ShootingDynamics, TerminalDerivatives,
+    solve, solve_multiple_shooting, ComplementarityContactDynamics, CompliantContactModel,
+    ContactImplicitArticulatedDynamics, CostDerivatives, CostModel, DdpConfig, DiscreteDynamics,
+    MultipleShootingConfig, PhaseCostSchedule, QuadraticCost, TerminalDerivatives,
 };
 use rne_robot::{FloatingBase, Transform3};
 
@@ -272,6 +272,7 @@ fn main() {
     let mut keep_gaps_open = false;
     let mut gap_weight = 0.0_f64;
     let mut substeps = 1_usize;
+    let mut use_complementarity = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().and_then(|v| v.parse::<f64>().ok());
@@ -293,6 +294,9 @@ fn main() {
             "--gaps" => keep_gaps_open = true,
             "--gap-weight" => gap_weight = value().unwrap_or(gap_weight),
             "--substeps" => substeps = value().map(|v| v as usize).unwrap_or(substeps),
+            "--model" => {
+                use_complementarity = args.next().map(|v| v == "complementarity").unwrap_or(false)
+            }
             _ => {}
         }
     }
@@ -304,13 +308,51 @@ fn main() {
         contact_model.ground_height_m,
         contact_model.friction,
     );
-    let dynamics = ContactImplicitArticulatedDynamics::new(
-        &model,
-        STEP_TIME_S,
-        toe_contacts.clone(),
-        contact_model,
-    )
-    .with_substeps(substeps);
+    enum Model<'a> {
+        Compliant(ContactImplicitArticulatedDynamics<'a>),
+        Complementarity(ComplementarityContactDynamics<'a>),
+    }
+
+    impl DiscreteDynamics for Model<'_> {
+        fn state_dim(&self) -> usize {
+            match self {
+                Model::Compliant(model) => DiscreteDynamics::state_dim(model),
+                Model::Complementarity(model) => DiscreteDynamics::state_dim(model),
+            }
+        }
+        fn control_dim(&self) -> usize {
+            match self {
+                Model::Compliant(model) => DiscreteDynamics::control_dim(model),
+                Model::Complementarity(model) => DiscreteDynamics::control_dim(model),
+            }
+        }
+        fn step(&self, state: &[f64], control: &[f64]) -> Result<Vec<f64>, rne_oc::OcError> {
+            match self {
+                Model::Compliant(model) => DiscreteDynamics::step(model, state, control),
+                Model::Complementarity(model) => DiscreteDynamics::step(model, state, control),
+            }
+        }
+    }
+
+    let dynamics = if use_complementarity {
+        println!("using hard complementarity contact");
+        Model::Complementarity(ComplementarityContactDynamics::new(
+            &model,
+            STEP_TIME_S,
+            toe_contacts.clone(),
+            contact_model.friction,
+        ))
+    } else {
+        Model::Compliant(
+            ContactImplicitArticulatedDynamics::new(
+                &model,
+                STEP_TIME_S,
+                toe_contacts.clone(),
+                contact_model,
+            )
+            .with_substeps(substeps),
+        )
+    };
 
     let no_flip = std::env::var("G1_NO_FLIP").is_ok();
     let control_weights = vec![2.0e-4; control_dim];
@@ -447,7 +489,7 @@ fn main() {
     if std::env::var("G1_DEBUG_TOE").is_ok() {
         let mut probe = states[0].clone();
         for k in 0..horizon {
-            match dynamics.step_at(k, &probe, &vec![0.0; control_dim]) {
+            match dynamics.step(&probe, &vec![0.0; control_dim]) {
                 Ok(next) => probe = next,
                 Err(error) => {
                     println!("DEBUG rollout step {k} error {error}");
@@ -569,7 +611,7 @@ fn main() {
     let mut worst_gap = 0.0_f64;
     let mut worst_component = 0_usize;
     for node in 0..horizon {
-        match dynamics.step_at(node, &solution.states[node], &solution.controls[node]) {
+        match dynamics.step(&solution.states[node], &solution.controls[node]) {
             Ok(predicted) => {
                 for (a, b) in solution.states[node + 1].iter().zip(&predicted) {
                     max_gap = max_gap.max((a - b).abs());
