@@ -273,8 +273,12 @@ controller.
     control optimized against the first defect) moved the worst defect to node 6
     but regressed the trajectory badly — cost 10988 and no jump, against 467 and
     a 0.22 m jump — because the node-0 equation alone can drive `u[0]` into a
-    degenerate push. It was reverted; a useful first-control update needs the
-    merit/acceptance to couple it to the whole trajectory.
+    degenerate push. It was reverted. Coupling it to a whole-trajectory
+    augmented-Lagrangian merit acceptance (with failed roll-outs scored at
+    infinity, fixing the earlier under-count) also diverged — gap 9e10, cost
+    6e13 — so both were reverted again. The defect-based acceptance and the
+    frozen first control stay as they are; a robust first-control update remains
+    open.
   With the FDDP warm start restored, example 113 now runs its full iteration
   budget and reaches cost 1494 (was 74096), a 0.138 m jump, a 6.15 rad yaw span,
   and realistic 45 Nm torques. The dynamics gap is still ~3.9 and concentrates
