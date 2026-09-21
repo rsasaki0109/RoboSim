@@ -34,6 +34,11 @@ pub struct ComplementarityContactDynamics<'a> {
     pub baumgarte: f64,
     /// Ground plane height along the world up axis, in meters.
     pub ground_height_m: f64,
+    /// Number of impulse sub-steps per call to [`DiscreteDynamics::step`].
+    ///
+    /// A smaller internal step resolves the contact transition more sharply, at
+    /// the cost of more dynamics and Jacobian evaluations per step.
+    pub substeps: usize,
 }
 
 impl<'a> ComplementarityContactDynamics<'a> {
@@ -52,7 +57,15 @@ impl<'a> ComplementarityContactDynamics<'a> {
             iterations: 40,
             baumgarte: 0.2,
             ground_height_m: 0.0,
+            substeps: 1,
         }
+    }
+
+    /// Sets the number of impulse sub-steps per step and returns `self`.
+    #[must_use]
+    pub fn with_substeps(mut self, substeps: usize) -> Self {
+        self.substeps = substeps.max(1);
+        self
     }
 
     /// Solves the contact impulses and returns the post-contact velocity.
@@ -68,10 +81,10 @@ impl<'a> ComplementarityContactDynamics<'a> {
         qd_free: &[f64],
         penetration: &[f64],
         mass: &rne_dynamics::DenseMatrix,
+        dt: f64,
     ) -> Result<Vec<f64>, OcError> {
         let nv = self.model.nv();
         let nc = self.contacts.len();
-        let dt = self.step_time_s;
         let mut minv_jt: Vec<Vec<Vec<f64>>> = Vec::with_capacity(nc);
         let mut jacobians: Vec<Vec<[f64; 3]>> = Vec::with_capacity(nc);
         for spec in &self.contacts {
@@ -171,33 +184,22 @@ impl<'a> ComplementarityContactDynamics<'a> {
         }
         Ok(qd)
     }
-}
 
-impl DiscreteDynamics for ComplementarityContactDynamics<'_> {
-    fn state_dim(&self) -> usize {
-        2 * self.model.nv()
-    }
-
-    fn control_dim(&self) -> usize {
-        self.model.nv() - self.model.base_dof()
-    }
-
+    /// One impulse sub-step: free acceleration, contact solve, then a
+    /// semi-implicit configuration update with the post-contact velocity.
     #[allow(clippy::needless_range_loop)]
-    fn step(&self, state: &[f64], control: &[f64]) -> Result<Vec<f64>, OcError> {
+    fn substep(
+        &self,
+        q: &[f64],
+        qd: &[f64],
+        torque: &[f64],
+        dt: f64,
+    ) -> Result<(Vec<f64>, Vec<f64>), OcError> {
         let nv = self.model.nv();
-        let base = self.model.base_dof();
-        if state.len() != 2 * nv || control.len() != nv - base {
-            return Err(OcError::Dimension("complementarity state or control"));
-        }
-        let (q, qd) = state.split_at(nv);
-        let mut torque = vec![0.0; nv];
-        torque[base..].copy_from_slice(control);
         let mass = mass_matrix(self.model, q).map_err(|_| OcError::Dynamics)?;
         let bias = non_linear_effects(self.model, q, qd).map_err(|_| OcError::Dynamics)?;
         let rhs: Vec<f64> = (0..nv).map(|i| torque[i] - bias[i]).collect();
         let free_acceleration = mass.solve(&rhs).ok_or(OcError::Dynamics)?;
-
-        let dt = self.step_time_s;
         let qd_free: Vec<f64> = (0..nv).map(|i| qd[i] + free_acceleration[i] * dt).collect();
 
         let motions = link_motions(self.model, q, qd).map_err(|_| OcError::Dynamics)?;
@@ -211,13 +213,41 @@ impl DiscreteDynamics for ComplementarityContactDynamics<'_> {
             }
         }
 
-        let qd_next = self.solve_impulses(q, &qd_free, &penetration, &mass)?;
+        let qd_next = self.solve_impulses(q, &qd_free, &penetration, &mass, dt)?;
+        let q_next = integrate_configuration(self.model, q, &qd_next, &vec![0.0; nv], dt)
+            .map_err(|_| OcError::Dynamics)?;
+        Ok((q_next, qd_next))
+    }
+}
+
+impl DiscreteDynamics for ComplementarityContactDynamics<'_> {
+    fn state_dim(&self) -> usize {
+        2 * self.model.nv()
+    }
+
+    fn control_dim(&self) -> usize {
+        self.model.nv() - self.model.base_dof()
+    }
+
+    fn step(&self, state: &[f64], control: &[f64]) -> Result<Vec<f64>, OcError> {
+        let nv = self.model.nv();
+        let base = self.model.base_dof();
+        if state.len() != 2 * nv || control.len() != nv - base {
+            return Err(OcError::Dimension("complementarity state or control"));
+        }
+        let mut torque = vec![0.0; nv];
+        torque[base..].copy_from_slice(control);
+        let mut q = state[..nv].to_vec();
+        let mut qd = state[nv..].to_vec();
+        let dt = self.step_time_s / self.substeps.max(1) as f64;
+        for _ in 0..self.substeps.max(1) {
+            let (q_next, qd_next) = self.substep(&q, &qd, &torque, dt)?;
+            q = q_next;
+            qd = qd_next;
+        }
         let mut next = vec![0.0; 2 * nv];
-        next[..nv].copy_from_slice(
-            &integrate_configuration(self.model, q, &qd_next, &vec![0.0; nv], dt)
-                .map_err(|_| OcError::Dynamics)?,
-        );
-        next[nv..].copy_from_slice(&qd_next);
+        next[..nv].copy_from_slice(&q);
+        next[nv..].copy_from_slice(&qd);
         Ok(next)
     }
 }

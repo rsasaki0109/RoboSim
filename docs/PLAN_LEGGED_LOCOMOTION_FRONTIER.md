@@ -314,6 +314,15 @@ controller.
     contact at 30 ms, and needs either a variable/smaller step or a
     contact-consistent trajectory (e.g. optimize the contact schedule), not more
     reference tuning.
+  - **Sub-stepping the hard contact does not help the plateau.** The
+    complementarity model gained sub-stepping (smaller internal impulse steps).
+    At 60 sweeps, one sub-step reaches gap 0.525 while three sub-steps reach
+    1.196, so the stiffer sub-stepped model is harder for the
+    finite-difference-derivative shooting solver, not easier. The small-step
+    hypothesis needs the derivative quality to improve with it; as it stands,
+    sub-stepping the contact and trusting finite differences makes the
+    optimization worse. This closes out the "smaller step" route for the current
+    solver and leaves contact-schedule optimization as the open direction.
   With the FDDP warm start restored, example 113 now runs its full iteration
   budget and reaches cost 1494 (was 74096), a 0.138 m jump, a 6.15 rad yaw span,
   and realistic 45 Nm torques. The dynamics gap is still ~3.9 and concentrates

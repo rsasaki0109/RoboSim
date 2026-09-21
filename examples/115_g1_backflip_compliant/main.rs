@@ -336,12 +336,15 @@ fn main() {
 
     let dynamics = if use_complementarity {
         println!("using hard complementarity contact");
-        Model::Complementarity(ComplementarityContactDynamics::new(
-            &model,
-            STEP_TIME_S,
-            toe_contacts.clone(),
-            contact_model.friction,
-        ))
+        Model::Complementarity(
+            ComplementarityContactDynamics::new(
+                &model,
+                STEP_TIME_S,
+                toe_contacts.clone(),
+                contact_model.friction,
+            )
+            .with_substeps(substeps),
+        )
     } else {
         Model::Compliant(
             ContactImplicitArticulatedDynamics::new(
