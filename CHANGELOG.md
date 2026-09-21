@@ -28,6 +28,14 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_dynamics::constrained_forward_dynamics_hessian` gives the second
+  derivative of the contact-constrained dynamics with respect to the state by
+  differentiating the verified analytic
+  `constrained_forward_dynamics_gradient` with Richardson extrapolation. It is
+  finite-difference verified and completes the derivative chain an exact contact
+  SQP step needs (mass matrix, bias, Jacobian, constrained gradient and
+  constrained Hessian).
+
 - `ContactSequenceDynamics::analytic_derivatives` now uses the analytic
   constrained gradient instead of differencing the whole step, so the hard
   contact sequence no longer pays `4 (nx + nu)` step evaluations per node. The

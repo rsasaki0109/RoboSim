@@ -34,7 +34,7 @@ pub mod spatial;
 pub use algorithms::{
     center_of_mass, centroidal_momentum, centroidal_momentum_bias, centroidal_momentum_matrix,
     com_jacobian, constrained_forward_dynamics, constrained_forward_dynamics_gradient,
-    forward_dynamics, forward_dynamics_gradient,
+    constrained_forward_dynamics_hessian, forward_dynamics, forward_dynamics_gradient,
     forward_dynamics_hessian, frame_jacobian, frame_jacobian_gradient, gravity_torque,
     impulse_velocity,
     impulse_velocity_gradient, integrate_configuration, link_motions,

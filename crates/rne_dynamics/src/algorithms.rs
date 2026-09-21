@@ -2326,6 +2326,88 @@ pub fn constrained_forward_dynamics_gradient(
     })
 }
 
+/// Second derivative of [`constrained_forward_dynamics`] with respect to the
+/// state.
+///
+/// Differentiates the verified analytic [`constrained_forward_dynamics_gradient`]
+/// with Richardson-extrapolated central differences. This is the exact
+/// constrained Hessian up to `O(e^4)` truncation without hand-deriving the
+/// fourth-order contact terms (the Jacobian and contact-bias second
+/// derivatives). Only the state blocks are returned, matching
+/// [`ForwardDynamicsHessian`].
+#[allow(clippy::needless_range_loop)]
+pub fn constrained_forward_dynamics_hessian(
+    model: &ArticulatedModel,
+    q: &[f64],
+    qd: &[f64],
+    tau: &[f64],
+    contacts: &[ContactSpec],
+) -> Result<ForwardDynamicsHessian, DynamicsError> {
+    validate(model, q, "q")?;
+    validate(model, qd, "qd")?;
+    validate(model, tau, "tau")?;
+    let nv = model.nv();
+    let e = 1.0e-5;
+    let shift = |base: &[f64], index: usize, delta: f64| {
+        let mut value = base.to_vec();
+        value[index] += delta;
+        value
+    };
+    let mut with_respect_to_q = vec![vec![vec![0.0; nv]; nv]; nv];
+    let mut with_respect_to_q_qd = vec![vec![vec![0.0; nv]; nv]; nv];
+    let mut with_respect_to_qd = vec![vec![vec![0.0; nv]; nv]; nv];
+
+    for j in 0..nv {
+        let q_plus1 =
+            constrained_forward_dynamics_gradient(model, &shift(q, j, e), qd, tau, contacts)?;
+        let q_minus1 =
+            constrained_forward_dynamics_gradient(model, &shift(q, j, -e), qd, tau, contacts)?;
+        let q_plus2 =
+            constrained_forward_dynamics_gradient(model, &shift(q, j, 2.0 * e), qd, tau, contacts)?;
+        let q_minus2 =
+            constrained_forward_dynamics_gradient(model, &shift(q, j, -2.0 * e), qd, tau, contacts)?;
+        let d_plus1 =
+            constrained_forward_dynamics_gradient(model, q, &shift(qd, j, e), tau, contacts)?;
+        let d_minus1 =
+            constrained_forward_dynamics_gradient(model, q, &shift(qd, j, -e), tau, contacts)?;
+        let d_plus2 =
+            constrained_forward_dynamics_gradient(model, q, &shift(qd, j, 2.0 * e), tau, contacts)?;
+        let d_minus2 =
+            constrained_forward_dynamics_gradient(model, q, &shift(qd, j, -2.0 * e), tau, contacts)?;
+        for i in 0..nv {
+            for a in 0..nv {
+                with_respect_to_q[i][j][a] = richardson_second_difference(
+                    q_plus1.with_respect_to_q[i][a],
+                    q_minus1.with_respect_to_q[i][a],
+                    q_plus2.with_respect_to_q[i][a],
+                    q_minus2.with_respect_to_q[i][a],
+                    e,
+                );
+                with_respect_to_q_qd[i][j][a] = richardson_second_difference(
+                    d_plus1.with_respect_to_q[i][a],
+                    d_minus1.with_respect_to_q[i][a],
+                    d_plus2.with_respect_to_q[i][a],
+                    d_minus2.with_respect_to_q[i][a],
+                    e,
+                );
+                with_respect_to_qd[i][j][a] = richardson_second_difference(
+                    d_plus1.with_respect_to_qd[i][a],
+                    d_minus1.with_respect_to_qd[i][a],
+                    d_plus2.with_respect_to_qd[i][a],
+                    d_minus2.with_respect_to_qd[i][a],
+                    e,
+                );
+            }
+        }
+    }
+
+    Ok(ForwardDynamicsHessian {
+        with_respect_to_q,
+        with_respect_to_q_qd,
+        with_respect_to_qd,
+    })
+}
+
 /// Impulsive reset of the joint velocities when new contacts are established.
 ///
 /// Solves the impulse KKT system
@@ -3990,5 +4072,70 @@ mod tests {
         let qd = vec![0.7, -0.2, 0.4, -0.5, 0.3, -0.6, 0.8];
         let tau = vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4];
         assert_constrained_gradient(&model, &q, &qd, &tau);
+    }
+
+    #[test]
+    fn constrained_forward_dynamics_hessian_matches_finite_difference() {
+        let (world, robot) = floating_chain_world();
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let link = model.link_entity(1).expect("link");
+        let contacts = vec![ContactSpec {
+            link,
+            point_local_m: Vec3::new(0.2, 0.0, 0.0),
+        }];
+        let q = vec![0.3, 0.2, -0.1, 0.5, -0.4, 0.9, 0.6];
+        let qd = vec![0.7, -0.2, 0.4, -0.5, 0.3, -0.6, 0.8];
+        let tau = vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4];
+        let hessian =
+            constrained_forward_dynamics_hessian(&model, &q, &qd, &tau, &contacts).expect("h");
+        let nv = model.nv();
+        let epsilon = 1.0e-5;
+        for i in 0..nv {
+            for j in 0..nv {
+                let mut plus = q.to_vec();
+                plus[j] += epsilon;
+                let mut minus = q.to_vec();
+                minus[j] -= epsilon;
+                let gp = constrained_forward_dynamics_gradient(&model, &plus, &qd, &tau, &contacts)
+                    .expect("plus");
+                let gm =
+                    constrained_forward_dynamics_gradient(&model, &minus, &qd, &tau, &contacts)
+                        .expect("minus");
+                let mut plus = qd.to_vec();
+                plus[j] += epsilon;
+                let mut minus = qd.to_vec();
+                minus[j] -= epsilon;
+                let dp = constrained_forward_dynamics_gradient(&model, &q, &plus, &tau, &contacts)
+                    .expect("plus");
+                let dm = constrained_forward_dynamics_gradient(&model, &q, &minus, &tau, &contacts)
+                    .expect("minus");
+                for a in 0..nv {
+                    let q_q = (gp.with_respect_to_q[i][a] - gm.with_respect_to_q[i][a])
+                        / (2.0 * epsilon);
+                    let q_qd = (dp.with_respect_to_q[i][a] - dm.with_respect_to_q[i][a])
+                        / (2.0 * epsilon);
+                    let qd_qd = (dp.with_respect_to_qd[i][a] - dm.with_respect_to_qd[i][a])
+                        / (2.0 * epsilon);
+                    assert_relative_eq!(
+                        hessian.with_respect_to_q[i][j][a],
+                        q_q,
+                        epsilon = 1.0e-2,
+                        max_relative = 1.0e-2
+                    );
+                    assert_relative_eq!(
+                        hessian.with_respect_to_q_qd[i][j][a],
+                        q_qd,
+                        epsilon = 1.0e-2,
+                        max_relative = 1.0e-2
+                    );
+                    assert_relative_eq!(
+                        hessian.with_respect_to_qd[i][j][a],
+                        qd_qd,
+                        epsilon = 1.0e-2,
+                        max_relative = 1.0e-2
+                    );
+                }
+            }
+        }
     }
 }
