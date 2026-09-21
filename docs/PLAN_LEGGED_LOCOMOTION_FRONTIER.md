@@ -300,6 +300,15 @@ controller.
     push-to-flight transition, not the contact stiffness. The next lever is the
     transition treatment itself (e.g. a contact-consistent reference or a
     dedicated transition phase), not the contact model.
+  - **A ballistic-consistent warm start lowers the plateau a little.** The
+    compliant G1 warm start zeroed the base vertical velocity at every node,
+    which discarded the push launch velocity and put a rising flight arc on a
+    body starting from rest. Deriving the flight vertical velocity from the
+    height profile (and keeping the push launch velocity) lowers the plateau
+    from gap 0.293 to 0.269 (cost 467 -> 915, jump 0.222 -> 0.151), and it is
+    again bit-identical at 150 and 400 sweeps, so the plateau is still hard. The
+    reference consistency is a real fix; closing the remaining 0.27 still needs
+    a different transition treatment.
   With the FDDP warm start restored, example 113 now runs its full iteration
   budget and reaches cost 1494 (was 74096), a 0.138 m jump, a 6.15 rad yaw span,
   and realistic 45 Nm torques. The dynamics gap is still ~3.9 and concentrates

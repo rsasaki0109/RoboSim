@@ -465,6 +465,12 @@ fn main() {
             tucked[1] = BASE_START_Y_M
                 + (TARGET_APEX_Y_M - BASE_START_Y_M) * (std::f64::consts::PI * t).sin();
             tucked[5] = -2.0 * std::f64::consts::PI * t;
+            // Match the ballistic arc: the vertical velocity is the derivative
+            // of the height profile, so the flight reference is dynamically
+            // consistent instead of starting from rest under a rising arc.
+            tucked[nv + 1] = (TARGET_APEX_Y_M - BASE_START_Y_M) * std::f64::consts::PI
+                / (FLIGHT_STEPS as f64 * STEP_TIME_S)
+                * (std::f64::consts::PI * t).cos();
             // The spin is built during flight; do not impose the full rate at
             // the push boundary, where the planted feet cannot supply it.
             tucked[nv + 5] = -2.0 * std::f64::consts::PI * t / (FLIGHT_STEPS as f64 * STEP_TIME_S);
@@ -481,7 +487,9 @@ fn main() {
             }
             tucked
         };
-        state[nv + 1] = 0.0;
+        if node < CROUCH_STEPS {
+            state[nv + 1] = 0.0;
+        }
         states.push(state);
     }
     states[0] = initial.clone();
