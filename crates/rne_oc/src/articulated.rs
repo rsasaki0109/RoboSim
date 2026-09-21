@@ -310,10 +310,7 @@ mod tests {
         ArticulatedModel::from_robot(&world, robot).expect("model")
     }
 
-    #[test]
-    #[allow(clippy::needless_range_loop)]
-    fn analytic_derivatives_match_finite_difference() {
-        use crate::ddp::dynamics_derivatives;
+    fn floating_two_link_model() -> ArticulatedModel {
         let mut world = World::new();
         let robot = spawn_named(&mut world, "robot");
         let base = spawn_named(&mut world, "base");
@@ -381,7 +378,14 @@ mod tests {
                 velocity: 0.0,
             });
         }
-        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        ArticulatedModel::from_robot(&world, robot).expect("model")
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn analytic_derivatives_match_finite_difference() {
+        use crate::ddp::dynamics_derivatives;
+        let model = floating_two_link_model();
         let dynamics = ArticulatedDynamics::new(&model, 0.02);
         let nv = model.nv();
         let state: Vec<f64> = vec![
@@ -408,6 +412,48 @@ mod tests {
         }
         assert!(max_fx < 1.0e-4, "fx error {max_fx}");
         assert!(max_fu < 1.0e-4, "fu error {max_fu}");
+    }
+
+    #[test]
+    fn exact_hessian_converges_on_a_floating_chain() {
+        use crate::ddp::QuadraticCost;
+        use crate::multiple_shooting::{max_defect, solve_multiple_shooting, MultipleShootingConfig};
+        let model = floating_two_link_model();
+        let dynamics = ArticulatedDynamics::new(&model, 0.02);
+        let nx = 2 * model.nv();
+        let nu = model.nv() - model.base_dof();
+        let horizon = 20;
+        let mut states = Vec::new();
+        for k in 0..=horizon {
+            let t = k as f64 / horizon as f64;
+            let mut state = vec![0.0; nx];
+            state[1] = 0.5;
+            state[6] = 0.4 * t;
+            state[7] = -0.3 * t;
+            states.push(state);
+        }
+        let controls = vec![vec![0.0; nu]; horizon];
+        let cost = QuadraticCost::new(vec![0.0; nx], vec![0.001; nu], vec![0.0; nx]);
+        let run = |use_exact_hessian: bool| {
+            let config = MultipleShootingConfig {
+                max_iterations: 120,
+                tolerance: 1.0e-6,
+                use_exact_hessian,
+                ..MultipleShootingConfig::default()
+            };
+            solve_multiple_shooting(&dynamics, &cost, &states, &controls, &config).expect("solve")
+        };
+        let gauss_newton = run(false);
+        let newton = run(true);
+        let gn_defect =
+            max_defect(&dynamics, &gauss_newton.states, &gauss_newton.controls);
+        let newton_defect = max_defect(&dynamics, &newton.states, &newton.controls);
+        assert!(gn_defect < 1.0e-2, "gauss-newton defect {gn_defect}");
+        assert!(newton_defect < 1.0e-2, "newton defect {newton_defect}");
+        assert!(
+            newton_defect <= gn_defect * 1.5,
+            "newton {newton_defect} worse than gauss-newton {gn_defect}"
+        );
     }
 
     #[test]
