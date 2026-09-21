@@ -98,10 +98,10 @@ Incomplete final-second metrics are null, and `qualified_backflip` is always
 false: this diagnostic has no full contact/self-collision qualification gate.
 
 The native scene uses primitive collisions, disables self-collision, and has
-different imported mass/inertia and contact settings. The diagnostic landing
-feedback uses base velocity instead of the source subtree COM velocity.
-These differences need reconciliation before transferring or reoptimizing the
-motion. The current evidence does not justify a native-physics or hardware
+different imported mass/inertia and contact settings. The declared-inertia probe now uses mass-weighted link COM velocity for
+landing feedback; the legacy diagnostic retains base-origin velocity.
+The remaining model differences need reconciliation before transferring or
+reoptimizing the motion. The current evidence does not justify a native-physics or hardware
 success claim.
 
 ### Joint-frame and inertial-model correction
@@ -147,6 +147,48 @@ backflip still fails to land, even when it reaches a full backward revolution.
 
 [Native model correction and diagnostic recordings](evidence/g1-contact-backflip/native-transfer/declared-inertia/README.md)
 retain these outcomes separately from the successful external-model backflip.
+
+
+### Native landing feedback and velocity-limited commands
+
+The native diagnostic accepts `--native-candidate candidate.json`, containing
+16 `parameters` and optional `recovery_s`, `roll_balance`, and
+`landing_stance_rad` (0–0.2 rad). Unsupported nonzero hip-extension delay,
+malformed optional fields, and nonpositive phase/recovery durations are rejected.
+`--native-output path.json` refuses to overwrite an existing recording;
+`--native-stop-on-fall` ends a collapsed landing early. A completed probe alone
+is not a successful backflip.
+
+Landing feedback now retains pitch-rate damping during recovery and blends to
+whole-robot COM velocity afterward. COM velocity is calculated from each link's
+physical COM velocity and mass; internal limb motion therefore does not appear
+as whole-body translation. Optional lateral ankle feedback uses body-frame
+gravity and angular velocity rather than an Euler roll angle near vertical
+pitch. Landing stance width is configurable and targets stay within URDF limits.
+
+An implicit-position candidate approached upright recovery but fell sideways.
+Its 10 ms recording already establishes knee speed at least **1.928 times the
+URDF rating**, so it cannot qualify even if landing is improved.
+`--native-velocity-servo` instead uses a force-based implicit velocity motor:
+its desired velocity is `clamp(kp / kd * position_error, ±0.9 * rated_speed)`
+and its effort ceiling remains the selected joint torque limit. The outer
+position target and gains retain their 2 ms sample/hold and 2 ms delay; the
+inner velocity command is calculated every physics step. This is a diagnostic
+servo model, not an identified hardware controller or the source torque-speed
+curve. It cannot be combined with `--native-implicit`.
+
+Bounding the **command** does not bound velocity caused by impact or other
+joints. Every completed physics step now contributes to measured maximum
+speed/rating and joint-position excess; the peak speed's joint and time are
+recorded too. Neither mode changes `qualified_backflip: false`. Native landing
+and complete collision/actuator qualification remain unresolved.
+
+```bash
+cargo run --release -p g1_backflip_gif --example 114_g1_backflip_gif -- \
+  --native-probe --native-declared --native-velocity-servo \
+  --native-dt-us 500 --native-stop-on-fall \
+  --native-candidate candidate.json --native-output rollout.json
+```
 
 
 ## Original-candidate screening (not hardware validation)

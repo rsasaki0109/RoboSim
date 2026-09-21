@@ -1351,6 +1351,7 @@ dependencies = [
  "rne_core",
  "rne_dynamics",
  "rne_math",
+ "rne_physics",
  "rne_render",
  "rne_render_wgpu",
  "rne_robot",
