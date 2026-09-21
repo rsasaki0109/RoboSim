@@ -250,9 +250,17 @@ controller.
     floating chain has `-4`, so it was reverted. `non_linear_effects_hessian`
     therefore differentiates the verified analytic gradient with Richardson
     extrapolation, and `forward_dynamics_hessian` assembles `d²qdd/dx²` from it
-    with the `M^-1` product rule. Both are FD-verified. The remaining work is
-    wiring the Hessian into the Riccati/SQP backward pass and measuring whether
-    it closes the G1 gap below the current 0.18.
+    with the `M^-1` product rule. Both are FD-verified. The Hessian is now wired
+    into the multiple-shooting local step through
+    `MultipleShootingConfig::use_exact_hessian` and the
+    `analytic_hessian` hook, and `ArticulatedDynamics` implements it; a pendulum
+    warm start converges on the exact-Hessian path. Two gaps remain before it
+    can be measured on the backflip: (1) the articulated Hessian differentiates
+    the analytic first derivatives, so it costs `O(nx + nu)` gradient
+    evaluations per node — a single-pass analytic Hessian is needed for the
+    29-DoF G1; and (2) `ContactSequenceDynamics` and
+    `ContactImplicitArticulatedDynamics` do not implement `analytic_hessian`
+    yet, so the contact problems still fall back to Gauss-Newton.
   With the FDDP warm start restored, example 113 now runs its full iteration
   budget and reaches cost 1494 (was 74096), a 0.138 m jump, a 6.15 rad yaw span,
   and realistic 45 Nm torques. The dynamics gap is still ~3.9 and concentrates
