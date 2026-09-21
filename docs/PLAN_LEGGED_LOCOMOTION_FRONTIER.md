@@ -501,3 +501,42 @@ controller.
   flight-phase controller and a landing catch (`rne_wbc` now supports the empty-contact flight phase),
   and (3) an articulated centroidal-momentum term to shape the aerial rotation
   (`centroidal_momentum` is now available).
+
+### Open research task: the G1 backflip defect floor
+
+**Problem.** Every planner in `rne_oc` leaves a dynamics defect of about 0.18
+(hard contact) to 0.29 (compliant or complementarity contact) at the
+push-to-flight transition of the 29-DoF G1 backflip, at a 30 ms planning step.
+The defect is bit-identical across 150 and 400+ Gauss-Seidel sweeps, so it is a
+fixed point of the solver, not a budget issue.
+
+**Evidence that it is not a tuning problem.** These were all measured on the
+same warm start and none lowered the floor: merit-based acceptance, a trust
+region, a symmetric sweep, freeing the frozen first control, reference shaping
+(ballistic flight velocity and a push base-height ramp), and sub-stepping the
+contact. Changing the contact law from a compliant penalty to a hard
+velocity-level complementarity solve left the defect unchanged while halving the
+penetration. So the residual is a structural property of the single-shooting
+reference plus rigid contact at 30 ms, not of the contact stiffness, the
+acceptance rule, or the step size.
+
+**Concrete next steps, in increasing cost.**
+1. *Contact-schedule optimization.* Make the contact activation per node a
+   decision variable (the phase lengths and the active set) and optimize the
+   schedule in an outer loop over the inner shooting solve. This is the most
+   likely fix because the defect concentrates exactly where the active set
+   changes, and it is the one direction not yet tried.
+2. *Exact contact derivatives.* Implement
+   `constrained_forward_dynamics_gradient` (the KKT solve differentiated, which
+   needs the contact Jacobian derivative and the bias-acceleration derivative —
+   fourth-order kinematics) and the matching Hessian, then feed a Riccati/SQP
+   step. This is what would make the transition linearization accurate enough
+   for a Newton method.
+3. *A contact-consistent trajectory.* Instead of a kinematic reference, obtain
+   the warm start by solving a short optimal-control problem over the transition
+   with the contact schedule fixed but the torque and timing free, so the
+   reference itself satisfies the dynamics.
+
+Example 113 (hard contact, FDDP) and example 115 (compliant/complementarity
+contact, multiple shooting) are the probes. The forward-kinematics reference in
+example 114 is the visual baseline.
