@@ -93,7 +93,17 @@ pub(super) fn run() {
     );
     let declared = args.iter().any(|arg| arg == "--native-declared");
     let standing_only = args.iter().any(|arg| arg == "--native-stand");
-    let scene_path = if declared {
+    let custom_scene = args
+        .iter()
+        .position(|arg| arg == "--native-scene")
+        .map(|i| PathBuf::from(args.get(i + 1).expect("native scene path")));
+    assert!(
+        custom_scene.is_none() || declared,
+        "custom comparison scene requires --native-declared"
+    );
+    let scene_path = if let Some(path) = custom_scene {
+        path
+    } else if declared {
         root.join("assets/scenes/unitree_g1_backflip_probe.rne.scene.toml")
     } else {
         unitree_g1_dynamic_scene_path()
@@ -111,6 +121,14 @@ pub(super) fn run() {
     let mass_kg: f64 = (0..model.link_count())
         .map(|i| model.link_inertia(i).unwrap().mass_kg)
         .sum();
+    if args.iter().any(|arg| arg == "--native-model-check") {
+        assert_eq!(sim.sim_time().ticks(), 0);
+        println!(
+            "{}",
+            json!({"mass_kg":mass_kg,"movable_joint_count":names.len(),"scene":scene_path,"simulation_ticks":0,"qualified_backflip":false})
+        );
+        return;
+    }
     let limits: Vec<_> = model
         .kinematic()
         .movable_joint_entities()
@@ -451,7 +469,7 @@ pub(super) fn run() {
                 "foot_contact":contact,"com_velocity_m_s":com_velocity.to_array()}));
         }
     }
-    let output = json!({"backend":"RoboSim/Rapier","qualified_backflip":false,
+    let output = json!({"backend":"RoboSim/Rapier","scene":scene_path,"qualified_backflip":false,
         "velocity_servo":velocity_servo,"peak_joint_speed_ratio":peak_speed_ratio,"peak_speed_joint":peak_speed_joint,"peak_speed_time_s":peak_speed_time_s,"max_joint_position_excess_rad":max_position_excess_rad,
         "failure":failure,"completed_maneuver_time_s":completed_s,"implicit_position_motors":implicit,"declared_inertial_scene":declared,"standing_only":standing_only,"note":"Transfer probe: native primitive collisions, self-collision disabled; qualification pending",
         "dt_s":dt_s,"contact_friction":contact_friction,"balance_velocity_source":if declared {"whole_robot_com"} else {"base_origin"},"parameters":p,"recovery_s":recovery_s,"roll_balance":roll_balance,"landing_stance_rad":landing_stance_rad,"stop_on_fall":stop_on_fall,"mass_kg":mass_kg,"knee_limit_nm":120.0,

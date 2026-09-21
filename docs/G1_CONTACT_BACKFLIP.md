@@ -196,6 +196,67 @@ cargo run --release -p g1_backflip_gif --example 114_g1_backflip_gif -- \
 ```
 
 
+### Declared-mass comparison and native automatic search
+
+`scripts/g1_native_model.py` prepares a separate, generated comparison scene.
+It removes only four empty fixed leaf frames (`imu_in_torso`, `imu_in_pelvis`,
+`d435_link`, `mid360_link`); their parent bodies already carry physical inertia.
+All physical link inertia and 23 movable joints are preserved. Both the URDF
+audit and the live native model report **34.13385728 kg**. The canonical robot
+asset and importer defaults are unchanged. A non-inertial physical link or
+branch is rejected rather than silently removed.
+
+```bash
+# Each output directory must be new; generated files are small and ignored by git.
+python3 scripts/g1_native_model.py --output target/research/native-mass-model
+cargo run --release -p g1_backflip_gif --example 114_g1_backflip_gif -- \
+  --native-probe --native-declared \
+  --native-scene target/research/native-mass-model/scene.rne.scene.toml \
+  --native-model-check
+
+# Optional second profile: match source sole positions and 2 mm radii.
+python3 scripts/g1_native_model.py --source-soles \
+  --output target/research/native-sole-model
+```
+
+**Equal mass is not an equivalent contact plant.** The current native importer
+merges the four URDF foot spheres into one AABB. The original footprint is
+0.18 m by 0.07 m; the source sole profile's bounding footprint is 0.144 m by
+0.054 m. `--source-soles` matches the input points and radii, but the native
+importer still creates a box. Twenty-one mesh collision elements remain
+inactive; enabling mesh collision currently creates AABBs, not source convex
+mesh collision. Source joint armature (0.01), damping (0.05) and Coulomb loss
+(0.2) are additional unmatched dynamics. The generated audit explicitly sets
+`qualification_ready: false` and lists these differences.
+
+The mass-only comparison passes six seconds of velocity-servo standing at
+0.5 ms (final-second maximum base speed 0.06914 m/s), but the source maneuver
+still collapses. A bounded native coordinate-pattern search then evaluates
+launch, tuck, opening and landing parameters directly in live Rapier physics.
+The first campaign has 13 evaluations; all fail landing. Its minimum-loss
+candidate still reaches 1.59451 times rated joint speed. A lower objective
+value is never promoted to a qualified backflip.
+
+```bash
+python3 scripts/g1_native_search.py \
+  --binary target/release/examples/114_g1_backflip_gif \
+  --scene target/research/native-mass-model/scene.rne.scene.toml \
+  --candidate docs/evidence/g1-contact-backflip/native-transfer/model-alignment/candidate.json \
+  --output target/research/native-search --rounds 1 --workers 4
+```
+
+The optimizer uses no RL or extra Python dependencies. It evaluates ordered
+coordinate batches, breaks ties by candidate index, retains every candidate
+and rollout, and publishes a checkpoint after each completed batch. Both
+preparation and search require a 30 GiB disk reserve and refuse existing
+output directories. Generated URDF mesh paths are absolute; regenerate the
+scene after moving the checkout. `--native-model-check` inspects the constructed
+model without advancing simulation time.
+
+[Model audits, standing/failed-flip recordings, and search evidence](evidence/g1-contact-backflip/native-transfer/model-alignment/README.md)
+keep this intermediate result separate from physical backflip qualification.
+
+
 ## Original-candidate screening (not hardware validation)
 
 The original benchmark GIF uses a **139 N m knee ceiling and disables self-collision**.
