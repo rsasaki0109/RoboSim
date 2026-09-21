@@ -423,8 +423,10 @@ impl ShootingDynamics for ContactSequenceDynamics<'_> {
                 for i in 0..nx {
                     fxx[a][i][j] = (plus.fx[a][i] - minus.fx[a][i]) / (2.0 * e);
                 }
-                for i in 0..nu {
-                    fxu[a][i][j] = (plus.fu[a][i] - minus.fu[a][i]) / (2.0 * e);
+                for control_index in 0..nu {
+                    fxu[a][j][control_index] = (plus.fu[a][control_index]
+                        - minus.fu[a][control_index])
+                        / (2.0 * e);
                 }
             }
         }

@@ -554,7 +554,19 @@ acceptance rule, or the step size.
    with a different defect (3.37 against 1.76), so the analytic Jacobians change
    the solved trajectory as well as the cost. The remaining second-order work is
    the contact Hessian (differentiate the KKT solution a second time) and a
-   Riccati/SQP step on top of it.
+   Riccati/SQP step on top of it. The chain is now complete and
+   finite-difference verified: `frame_jacobian_gradient`,
+   `constrained_forward_dynamics_gradient`,
+   `constrained_forward_dynamics_hessian`, and
+   `ContactSequenceDynamics::{analytic_derivatives, analytic_hessian}`. Example
+   113 gained a `G1_SOLVER=ms` / `G1_EXACT_HESSIAN=1` mode. The exact-Hessian
+   hard-contact multiple shooting did not finish in 60 minutes because the
+   contact Hessian is itself a finite difference of the analytic gradient
+   (`(nx + nu)` gradient evaluations per node per sweep), so a hand-derived
+   contact Hessian is required before the exact step is affordable at 29 DoF.
+   The plain multiple shooting on this warm start reaches gap 4.12, well above
+   the historical 0.18, because the committed 113 reference differs from the
+   probe that produced 0.18.
 3. *A contact-consistent trajectory.* Instead of a kinematic reference, obtain
    the warm start by solving a short optimal-control problem over the transition
    with the contact schedule fixed but the torque and timing free, so the

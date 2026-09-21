@@ -21,8 +21,9 @@ use rne_dynamics::{centroidal_momentum, ArticulatedModel, ContactSpec};
 use rne_ecs::World;
 use rne_math::{Quat, Vec3};
 use rne_oc::{
-    solve, ContactPhase, ContactSequenceDynamics, CostDerivatives, CostModel, DdpConfig,
-    PhaseCostSchedule, QuadraticCost, ShootingDynamics, TerminalDerivatives,
+    solve, solve_multiple_shooting, ContactPhase, ContactSequenceDynamics, CostDerivatives,
+    CostModel, DdpConfig, MultipleShootingConfig, PhaseCostSchedule, QuadraticCost,
+    ShootingDynamics, TerminalDerivatives,
 };
 use rne_robot::{FloatingBase, Transform3};
 
@@ -285,6 +286,10 @@ fn main() {
         }
     }
     let no_flip = std::env::var("G1_NO_FLIP").is_ok();
+    let use_multiple_shooting = std::env::var("G1_SOLVER")
+        .map(|value| value == "ms")
+        .unwrap_or(false);
+    let use_exact_hessian = std::env::var("G1_EXACT_HESSIAN").is_ok();
     let run_plan = |crouch_steps: usize,
                     push_steps: usize,
                     flight_steps: usize,
@@ -464,7 +469,20 @@ fn main() {
         desired_angular_momentum_z: flight_axis_momentum,
     };
     println!("momentum: desired L_z={flight_axis_momentum:.3} kg m^2/s weight={momentum_weight}");
-    let solution = solve(&dynamics, &cost, &states, &controls, &config).expect("solve");
+    let solution = if use_multiple_shooting {
+        let ms_config = MultipleShootingConfig {
+            max_iterations: 1000,
+            tolerance: 1.0e-4,
+            use_exact_hessian,
+            control_lower: Some(limits.iter().map(|limit| -limit).collect()),
+            control_upper: Some(limits.clone()),
+            ..MultipleShootingConfig::default()
+        };
+        println!("solving multiple shooting (exact_hessian={use_exact_hessian})...");
+        solve_multiple_shooting(&dynamics, &cost, &states, &controls, &ms_config).expect("solve")
+    } else {
+        solve(&dynamics, &cost, &states, &controls, &config).expect("solve")
+    };
 
     let apex_y = solution
         .states
