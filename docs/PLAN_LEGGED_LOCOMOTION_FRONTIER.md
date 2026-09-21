@@ -234,3 +234,16 @@ it is rejected. Twenty recorded velocity-servo candidates and four explicit
 friction comparisons still fail landing. Native success and a native-success
 GIF remain open; the existing RoboSim GIF is labeled MuJoCo state replay.
 See [native velocity diagnostics](evidence/g1-contact-backflip/native-transfer/velocity-servo/README.md).
+
+
+### Native model alignment and first automatic search
+
+A separate generated G1 model now removes four empty fixed sensor frames,
+matching the declared 34.13385728 kg while preserving all physical inertia and
+23 movable joints. Native standing passes with original sole dimensions.
+An optional source-sole profile matches the source contact points/radii but
+still imports as a box; its standing contact-continuity gate fails. Both
+baseline flips and all 13 candidates in the first native coordinate-pattern
+search fail landing. See [model alignment evidence](evidence/g1-contact-backflip/native-transfer/model-alignment/README.md).
+Independent sole contacts, body/self-collision and source joint armature/loss
+remain unmatched; mass alignment is not complete plant equivalence.
