@@ -5,13 +5,16 @@ import json
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import g1_backflip_plant as plant
 import g1_backflip_render as render
 import mujoco
 import numpy as np
+from g1_backflip_joint_search import BatchObjective, evaluate_batch
 from g1_backflip_search import Campaign, CommandClock
 
 
@@ -90,6 +93,30 @@ class ContactPlantTests(unittest.TestCase):
         digest = hashlib.sha256((json.dumps(history) + "\n").encode()).hexdigest()
         self.assertEqual(digest, expected["rollout_sha256"])
 
+    def test_saved_edu_backflip_passes_and_matches_recording(self):
+        evidence = plant.ROOT / "docs/evidence/g1-contact-backflip/edu"
+        seed = json.loads((evidence / "candidate.json").read_text())
+        expected = json.loads((evidence / "step-125us/summary.json").read_text())
+        with tempfile.TemporaryDirectory() as temporary:
+            campaign = Campaign(
+                Path(temporary),
+                dt_s=seed["dt_s"],
+                mass_policy=seed["mass_policy"],
+                joint_limit_time_constant_s=seed["joint_limit_time_constant_s"],
+                joint_limit_margin_rad=seed["joint_limit_margin_rad"],
+                profile=seed["screening_profile"],
+            )
+            campaign.early_balance = seed["early_balance_gains"]
+            campaign.balance = seed["balance_gains"]
+            campaign.landing_gains = seed["landing_gains"]
+            campaign.recovery_s = seed["recovery_s"]
+            result, history = campaign.rollout(seed["parameters"], record=True)
+        self.assertTrue(result["passed"], result)
+        self.assertTrue(result["self_collision_enabled"])
+        self.assertLessEqual(result["peak_torque_nm"], 120)
+        digest = hashlib.sha256((json.dumps(history) + "\n").encode()).hexdigest()
+        self.assertEqual(digest, expected["rollout_sha256"])
+
     def test_command_hold_and_one_tick_delay(self):
         clock = CommandClock(0.000125, 0.002, 0.002, (0, 300, 10))
         received = []
@@ -165,6 +192,57 @@ class ContactPlantTests(unittest.TestCase):
             self.assertLess(result["simulation_time_s"], 1.0)
             repeated, _ = campaign.rollout(seed["parameters"] + [0.2])
             self.assertEqual(result, repeated)
+            zero_delay, _ = campaign.rollout(seed["parameters"] + [0.2, 0.0, 0.0])
+            self.assertEqual(
+                zero_delay.pop("parameters"), seed["parameters"] + [0.2, 0.0, 0.0]
+            )
+            self.assertEqual(
+                zero_delay,
+                {key: value for key, value in result.items() if key != "parameters"},
+            )
+
+    def test_passing_candidate_is_kept_even_with_higher_loss(self):
+        failed = {
+            "loss": 1.0,
+            "passed": False,
+            "signed_rotation_rad": -6.28,
+            "longest_flight_s": 0.4,
+        }
+        passed = dict(failed, loss=2.0, passed=True)
+        with tempfile.TemporaryDirectory() as temporary:
+            objective = BatchObjective({"output": temporary}, None, 1)
+            with patch(
+                "g1_backflip_joint_search.evaluate_batch", return_value=[failed, passed]
+            ):
+                losses = objective(np.zeros((14, 2)))
+            np.testing.assert_array_equal(losses, [1.0, 2.0])
+            self.assertFalse(objective.best["passed"])
+            self.assertTrue(objective.passing["passed"])
+            self.assertTrue(
+                json.loads((Path(temporary) / "passing.json").read_text())["passed"]
+            )
+            self.assertFalse(list(Path(temporary).glob("*.tmp")))
+
+    def test_parallel_search_preserves_candidate_results(self):
+        seed = json.loads(
+            (
+                plant.ROOT
+                / "docs/evidence/g1-contact-backflip/screening/optimized-launch.json"
+            ).read_text()
+        )
+        candidates = [seed["parameters"], seed["parameters"] + [0.8, 0.04, 1.0]]
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = {"candidate": seed, "output": temporary, "dt_s": 0.0005}
+            serial = evaluate_batch((settings, candidates))
+            with ProcessPoolExecutor(max_workers=2) as executor:
+                parallel = list(
+                    executor.map(
+                        evaluate_batch,
+                        [(settings, [candidate]) for candidate in candidates],
+                    )
+                )
+            self.assertEqual(serial, [batch[0] for batch in parallel])
+            self.assertEqual(list(Path(temporary).iterdir()), [])
 
     def test_failed_rollout_cannot_be_rendered_as_success(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -10,9 +10,44 @@ The robot is RNE's existing 23-joint G1 URDF. This is an external contact-plant
 benchmark, not yet a demonstration of the RNE/Rapier backend or real hardware.
 It adds no dependency to a Rust crate.
 
-## Partial specification screen (not hardware validation)
+## EDU partial-specification result
 
-The saved GIF uses a **139 N m knee ceiling and disables self-collision**.
+The optimized **34.13 kg EDU screening model now passes at both 0.125 ms and
+0.0625 ms** with a 120 N m knee ceiling, self-collision enabled, 2 ms target/gain
+updates and an assumed 2 ms transport delay. Both five-second rollouts complete
+a backward revolution, contact the ground only with the feet, and remain
+standing throughout the final second. This is success in the declared model;
+it does not establish hardware readiness.
+
+![G1 EDU screening-model optimized backflip](media/unitree-g1-edu-optimization-backflip.gif)
+
+| Measurement | 0.125 ms | 0.0625 ms |
+|---|---:|---:|
+| Final backward rotation | 360.022° | 360.022° |
+| Continuous flight | 0.41325 s | 0.41325 s |
+| Root rise above initial standing height | 0.16432 m | 0.16114 m |
+| Maximum motor torque | 120 N m | 120 N m |
+| Maximum joint-position excess | 0 rad | 0 rad |
+| Maximum joint-speed / URDF rating | 1.03323 | 1.03322 |
+| Minimum upright cosine in final second | 0.99999992 | 0.99999992 |
+| Self-contact / non-foot ground contact | none / none | none / none |
+
+The success gate still permits less than 0.02 rad joint-position excess and
+speed below 1.05 times the URDF rating; neither threshold was relaxed. Coordinated
+opening/landing arm motion and joint optimization of the flight/landing pose
+were needed. The final candidate uses zero additional hip-extension delay.
+A prior candidate stood successfully but exceeded knee speed; another passed
+at 0.5 ms and fell when refined. Both rejected results are retained.
+
+[EDU candidate, recordings, rejected candidates and reproduction](evidence/g1-contact-backflip/edu/README.md)
+include a golden replay hash. Applying the same controller to the standard
+**90 N m G1 screen fails** on knee–ground contact; this is not a claim that no
+other 90 N m trajectory is feasible. Public knee ceilings alone do not identify
+the other motors, power limits, mass/COM, contact geometry or hardware latency.
+
+## Original-candidate screening (not hardware validation)
+
+The original benchmark GIF uses a **139 N m knee ceiling and disables self-collision**.
 Unitree lists maximum knee torque of **90 N m for G1 and 120 N m for G1 EDU**
 on its [official specification page](https://www.unitree.com/g1/).
 The saved motion therefore does not demonstrate feasibility on either machine.
@@ -59,7 +94,7 @@ A bounded EDU search improved takeoff upward speed to about 1.98 m/s, but
 the full maneuver still failed on knee–torso contact. A candidate with optimized
 arm spread avoided self-contact but hit the floor with its hands.
 [Search evidence and termination status](evidence/g1-contact-backflip/README.md#bounded-edu-search-results)
-are recorded; no stricter-profile backflip has passed.
+are recorded. The later joint/arm search above produced the passing EDU candidate.
 
 Other joint torque/speed ceilings remain URDF assumptions; mass/COM, motor
 power/current/thermal limits, gain limits, elastic transmission, state-estimation
@@ -121,6 +156,46 @@ bounded landing-gain sweeps. Optimization output always records failures too;
 exit 2 means the complete backflip gate failed, including launch-only runs.
 The pinned fine integration rates are offline numerical checks, not demonstrated
 hardware control frequencies.
+
+## Joint launch/flight search
+
+`scripts/g1_backflip_joint_search.py` optimizes all 16 motion variables together,
+using seeded SciPy differential evolution with deferred population updates.
+Each worker evaluates an ordered batch in its own MuJoCo plant. The parent
+collects results in candidate order, writes the best result, and checkpoints
+each completed generation. A regression compares parallel and serial results.
+No additional package is required. The fifteenth variable delays hip extension
+relative to knee/ankle extension during takeoff (0–0.16 s). It does not change
+transport latency or relax any motor/contact gate. The sixteenth variable sets the shoulder pitch target during opening/landing
+(−1.5–2.5 rad), so arm motion can help compensate torso rotation caused by
+unfolding the legs. Historical candidates retain zero for these additions.
+Loading a 14/15-column population pads zero columns; supply varied values in
+the added columns to search them. Opening angle may reach 7 rad, allowing
+extra torso rotation before unfolding. Success still requires one completed
+rotation and stable standing; these are trajectory variables, not relaxed gates.
+
+```bash
+OPENBLAS_NUM_THREADS=1 target/research/backflip-env/bin/python -I scripts/g1_backflip_joint_search.py --parameters docs/evidence/g1-contact-backflip/screening/optimized-launch.json --generations 5 --workers 4 --output target/research/g1-joint-search
+# Warm-start a new, explicitly seeded search from the saved population.
+OPENBLAS_NUM_THREADS=1 target/research/backflip-env/bin/python -I scripts/g1_backflip_joint_search.py --parameters docs/evidence/g1-contact-backflip/screening/optimized-launch.json --population target/research/g1-joint-search/population.json --generations 5 --seed 20260923 --output target/research/g1-joint-continued
+```
+
+`search.json` records the initial population, random seed, requested/completed
+generations and evaluation count. `population.json` contains the last completed
+generation. A warm start begins a new RNG sequence; it is not bit-for-bit
+continuation of an interrupted optimizer. The completed flag means the search
+returned normally, not that the maneuver passed. Exit 2 means no passing
+candidate was found. `passing.json` preserves any passing candidate even when a
+failed candidate has a lower scalar loss; success always uses the independent
+physical gates. Evidence is written atomically by the parent only.
+
+The default 0.5 ms search integration step reduces evaluation cost. Candidates
+must subsequently be replayed at 0.125 ms and 0.0625 ms using the original
+`g1_backflip_search.py --generations 0 --dt-s ...` command before being treated
+as fine-step successes. `maximum_backward_rotation_rad` measures the largest
+backward torso excursion separately from terminal `signed_rotation_rad`; a
+near-complete airborne rotation followed by a fall is still a failure. Search itself does not generate a GIF. The disk reserve
+is checked before each batch, and only small JSON checkpoints are written.
 
 ## Model and controller contract
 

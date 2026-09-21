@@ -148,8 +148,12 @@ class Campaign:
 
     def rollout(self, parameters, record=False):
         """Simulate five seconds, applying only bounded joint motor commands."""
-        if len(parameters) not in (13, 14) or not np.all(np.isfinite(parameters)):
-            raise ValueError("expected 13 or 14 finite maneuver parameters")
+        if len(parameters) not in (13, 14, 15, 16) or not np.all(
+            np.isfinite(parameters)
+        ):
+            raise ValueError("expected 13 to 16 finite maneuver parameters")
+        if len(parameters) >= 15 and parameters[14] < 0:
+            raise ValueError("hip extension delay must be nonnegative")
         (
             knee,
             lean,
@@ -172,9 +176,12 @@ class Campaign:
         tuck = self.pose(tuck_hip, tuck_knee, -0.4, 0.0)
         land_hip = -landing_knee / 2 + landing_bias
         land = self.pose(
-            land_hip, landing_knee, np.clip(-land_hip - landing_knee, -0.85, 0.5)
+            land_hip,
+            landing_knee,
+            np.clip(-land_hip - landing_knee, -0.85, 0.5),
+            parameters[15] if len(parameters) == 16 else 0.0,
         )
-        if len(parameters) == 14:
+        if len(parameters) >= 14:
             for pose in (crouch, launch, tuck, land):
                 for index, name in enumerate(self.names):
                     if "shoulder_roll" in name:
@@ -194,6 +201,7 @@ class Campaign:
         d.qpos[self.qids] = self.stand
         mujoco.mj_forward(m, d)
         angle = previous = 0.0
+        maximum_backward_rotation = 0.0
         max_height = initial[2]
         takeoff = None
         takeoff_momentum = None
@@ -204,6 +212,8 @@ class Campaign:
         nonfoot_bodies = set()
         peak_torque = 0.0
         peak_speed_ratio = 0.0
+        peak_speed_joint = None
+        peak_speed_time_s = None
         peak_position_excess = 0.0
         tail_upright = 1.0
         tail_speed = 0.0
@@ -230,6 +240,13 @@ class Campaign:
                 elif takeoff is None:
                     alpha = min(1.0, (t - 0.5) / push_s)
                     target = (1 - alpha) * crouch + alpha * launch
+                    if len(parameters) >= 15:
+                        hip_alpha = np.clip((t - 0.5 - parameters[14]) / push_s, 0, 1)
+                        for index, name in enumerate(self.names):
+                            if "hip_pitch" in name:
+                                target[index] = (1 - hip_alpha) * crouch[
+                                    index
+                                ] + hip_alpha * launch[index]
                 elif touchdown is None:
                     elapsed = t - takeoff
                     if elapsed < tuck_s and angle > -opening_angle:
@@ -300,6 +317,7 @@ class Campaign:
             pitch = np.arctan2(2 * (x * z + w * y), 1 - 2 * (y * y + z * z))
             angle += (pitch - previous + np.pi) % (2 * np.pi) - np.pi
             previous = pitch
+            maximum_backward_rotation = max(maximum_backward_rotation, -angle)
             upright = 1 - 2 * (x * x + y * y)
             contact = False
             for collision in d.contact:
@@ -359,10 +377,12 @@ class Campaign:
                 tail_speed = max(tail_speed, float(np.linalg.norm(d.qvel[:6])))
                 tail_height = min(tail_height, float(d.qpos[2]))
                 tail_contact = tail_contact and contact
-            peak_speed_ratio = max(
-                peak_speed_ratio,
-                float(np.max(np.abs(d.qvel[self.vids]) / self.speed_limits)),
-            )
+            speed_ratios = np.abs(d.qvel[self.vids]) / self.speed_limits
+            fastest = int(np.argmax(speed_ratios))
+            if speed_ratios[fastest] > peak_speed_ratio:
+                peak_speed_ratio = float(speed_ratios[fastest])
+                peak_speed_joint = self.names[fastest]
+                peak_speed_time_s = float(d.time)
             peak_torque = max(peak_torque, float(np.max(np.abs(d.actuator_force))))
             last_stand_error = (
                 (1 - upright) ** 2
@@ -433,6 +453,7 @@ class Campaign:
             "parameters": list(map(float, parameters)),
             "dt_s": self.dt_s,
             "signed_rotation_rad": float(angle),
+            "maximum_backward_rotation_rad": float(maximum_backward_rotation),
             "root_rise_m": float(max_height - initial[2]),
             "takeoff_s": takeoff,
             "touchdown_s": touchdown,
@@ -480,6 +501,8 @@ class Campaign:
         result["torque_limits_nm"] = self.torque_limits.tolist()
         result["self_collision_enabled"] = self.summary.get("self_collision", False)
         result["peak_joint_speed_ratio"] = peak_speed_ratio
+        result["peak_joint_speed_joint"] = peak_speed_joint
+        result["peak_joint_speed_time_s"] = peak_speed_time_s
         result["nonfoot_contact_bodies"] = sorted(nonfoot_bodies)
         return result, history
 
@@ -569,15 +592,19 @@ def main():
             (0.1, 1.6),
             (-2.5, 2.0),
             (-1.0, 0.8),
-            (3.3, 6.0),
+            (3.3, 7.0),
             (-0.8, 0.8),
             (0.2, 1.2),
         ]
+        if len(initial) >= 15:
+            bounds.append((0.0, 0.16))
+        if len(initial) == 16:
+            bounds.append((-1.5, 2.5))
         if args.stage == "launch":
             for i in (5, 6, 7, 8, 10, 11):
                 bounds[i] = (initial[i], initial[i])
         if args.stage == "flight":
-            for i in (0, 1, 2, 3, 4, 9, 12):
+            for i in (0, 1, 2, 3, 4, 9, 12) + ((14,) if len(initial) >= 15 else ()):
                 bounds[i] = (initial[i], initial[i])
         solution = differential_evolution(
             campaign,

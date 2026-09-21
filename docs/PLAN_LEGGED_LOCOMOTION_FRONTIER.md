@@ -177,3 +177,17 @@ G1/G1 EDU profiles are partial specification screens, not hardware validation.
 See [measured results and remaining model gaps](G1_CONTACT_BACKFLIP.md).
 The next motion search must solve collision-free launch and landing under these
 conditions before claiming progress toward a real-machine backflip.
+
+
+### 2026-09-22: EDU contact backflip under stricter screening
+
+A 16-parameter non-RL controller now passes five-second MuJoCo rollouts at both
+0.125 ms and 0.0625 ms using the URDF-declared 34.13 kg mass, self-collision,
+120 N m knee caps, 500 Hz held commands and one assumed command-tick delay.
+It completes about 360.022 degrees, lands feet-only, and remains standing for
+the final second, with peak speed ratio about 1.033 and no joint-position excess.
+The optional optimizer checkpoints ordered parallel batches; regression tests
+cover parallel determinism and both legacy/EDU recorded-state hashes.
+[Evidence and GIF](G1_CONTACT_BACKFLIP.md#edu-partial-specification-result) remain
+model-specific. The same candidate fails at 90 N m; native RNE/Rapier and real
+hardware transfer, power/current limits and uncertainty testing remain open.

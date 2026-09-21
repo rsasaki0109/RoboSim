@@ -22,6 +22,12 @@ settings. No policy network, reward training, pretrained action data, or externa
 base wrench was used. Simulator settings are part of this benchmark's contract,
 not inferred hardware parameters. Self-collision is disabled.
 
+## EDU follow-up
+
+[The EDU candidate](edu/README.md) passes at both fine timesteps with self-collision
+enabled and a 120 N m knee ceiling. Its new GIF is separate from the original
+139 N m benchmark. The historical ablations below replay the original candidate.
+
 ## Stricter screening
 
 `screening/` contains dynamic replays of the same candidate with independently
