@@ -261,6 +261,20 @@ controller.
     29-DoF G1; and (2) `ContactSequenceDynamics` and
     `ContactImplicitArticulatedDynamics` do not implement `analytic_hessian`
     yet, so the contact problems still fall back to Gauss-Newton.
+  - **Compliant contact derivatives are now cheap.** The compliant model
+    differentiates its smooth dynamics analytically and its contact force by
+    central differences of the force alone, which removes the whole-step finite
+    differences and makes a 600-sweep compliant G1 solve take about five minutes
+    (was far slower). The remaining compliant plateau is unchanged: at
+    `k=1000, c=0, n=2` the worst defect is 0.29.
+  - **Freeing the first control does not help.** The forward-only sweep leaves
+    `u[0]` frozen, so the node-0 defect is fixed by the warm start and was the
+    worst defect at 0.29. Adding a dedicated initial-control step (state fixed,
+    control optimized against the first defect) moved the worst defect to node 6
+    but regressed the trajectory badly — cost 10988 and no jump, against 467 and
+    a 0.22 m jump — because the node-0 equation alone can drive `u[0]` into a
+    degenerate push. It was reverted; a useful first-control update needs the
+    merit/acceptance to couple it to the whole trajectory.
   With the FDDP warm start restored, example 113 now runs its full iteration
   budget and reaches cost 1494 (was 74096), a 0.138 m jump, a 6.15 rad yaw span,
   and realistic 45 Nm torques. The dynamics gap is still ~3.9 and concentrates
