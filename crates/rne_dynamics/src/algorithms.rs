@@ -1083,6 +1083,124 @@ pub fn forward_dynamics_hessian(
     })
 }
 
+/// Derivative of [`frame_jacobian`] with respect to the configuration.
+///
+/// Entry `[k]` is the `6 x nv` matrix `dJ/dq_k`. The joint columns are
+/// differentiated analytically from the link body-twist derivatives: a column is
+/// `[R v + (R w) x (P - t); R w]` for the joint subspace `[v; w]` in the child
+/// frame, so its derivative follows from the child and target point-twist
+/// derivatives. The floating-base block is a transformed copy of the robot
+/// Jacobian's base block, whose chart map depends on the base orientation, so it
+/// is differentiated by a small central difference of that `6 x 6` block alone.
+#[allow(clippy::needless_range_loop)]
+pub fn frame_jacobian_gradient(
+    model: &ArticulatedModel,
+    q: &[f64],
+    link: rne_ecs::Entity,
+    point_local_m: Vec3,
+) -> Result<Vec<DenseMatrix>, DynamicsError> {
+    validate(model, q, "q")?;
+    let nv = model.nv();
+    let base = model.base_dof();
+    let kinematics = model.kinematic.forward_kinematics(q)?;
+    let transforms = kinematics.transforms();
+    let target = model
+        .kinematic()
+        .link_index(link)
+        .ok_or(DynamicsError::MissingDofOwner(0))?;
+    let twists = link_pose_body_twist_derivatives(model, q)?;
+
+    // World position of the target point and its derivative for every `q_k`.
+    let target_pose = transforms[target];
+    let point_world = target_pose.translation + target_pose.rotation * point_local_m;
+    let mut point_derivative = vec![Vec3::ZERO; nv];
+    for k in 0..nv {
+        let twist = twists[target][k];
+        let linear = Vec3::new(twist[0], twist[1], twist[2]);
+        let angular = Vec3::new(twist[3], twist[4], twist[5]);
+        point_derivative[k] =
+            target_pose.rotation * (linear + angular.cross(point_local_m));
+    }
+
+    // Base columns: central difference of the transformed base block.
+    let epsilon = 1.0e-6;
+    let mut base_gradient: Vec<[[f64; 6]; 6]> = vec![[[0.0; 6]; 6]; nv];
+    if base == 6 {
+        for k in 0..nv {
+            let mut plus = q.to_vec();
+            plus[k] += epsilon;
+            let mut minus = q.to_vec();
+            minus[k] -= epsilon;
+            let plus_block = base_block(model, &plus, link, point_local_m)?;
+            let minus_block = base_block(model, &minus, link, point_local_m)?;
+            for row in 0..6 {
+                for column in 0..6 {
+                    base_gradient[k][row][column] =
+                        (plus_block[row][column] - minus_block[row][column]) / (2.0 * epsilon);
+                }
+            }
+        }
+    }
+
+    // Joint columns and their derivatives.
+    let mut gradient: Vec<DenseMatrix> = (0..nv).map(|_| DenseMatrix::zeros(6, nv)).collect();
+    for dof in base..nv {
+        let child = model.dofs[dof].link;
+        let subspace = model.dofs[dof].s;
+        let child_pose = transforms[child];
+        let rotation = child_pose.rotation;
+        let origin = child_pose.translation;
+        let v_child = Vec3::new(subspace[0], subspace[1], subspace[2]);
+        let w_child = Vec3::new(subspace[3], subspace[4], subspace[5]);
+        let linear = rotation * v_child;
+        let angular = rotation * w_child;
+        for k in 0..nv {
+            let twist = twists[child][k];
+            let v_k = Vec3::new(twist[0], twist[1], twist[2]);
+            let w_k = Vec3::new(twist[3], twist[4], twist[5]);
+            let angular_k = rotation * w_k;
+            let linear_k = rotation * v_k;
+            let d_angular = angular_k.cross(angular);
+            let d_linear = angular_k.cross(linear)
+                + d_angular.cross(point_world - origin)
+                + angular.cross(point_derivative[k] - linear_k);
+            gradient[k].set(0, dof, d_linear.x);
+            gradient[k].set(1, dof, d_linear.y);
+            gradient[k].set(2, dof, d_linear.z);
+            gradient[k].set(3, dof, d_angular.x);
+            gradient[k].set(4, dof, d_angular.y);
+            gradient[k].set(5, dof, d_angular.z);
+        }
+        let _ = origin;
+    }
+    for k in 0..nv {
+        for row in 0..6 {
+            for column in 0..base {
+                gradient[k].set(row, column, base_gradient[k][row][column]);
+            }
+        }
+    }
+    Ok(gradient)
+}
+
+/// The `6 x 6` base block of [`frame_jacobian`] at `q`.
+#[allow(clippy::needless_range_loop)]
+fn base_block(
+    model: &ArticulatedModel,
+    q: &[f64],
+    link: rne_ecs::Entity,
+    point_local_m: Vec3,
+) -> Result<[[f64; 6]; 6], DynamicsError> {
+    let jacobian = frame_jacobian(model, q, link, point_local_m)?;
+    let mut block = [[0.0; 6]; 6];
+    for row in 0..6 {
+        for column in 0..6 {
+            block[row][column] = jacobian.get(row, column);
+        }
+    }
+    Ok(block)
+}
+
 /// Center of mass of the model at configuration `q`, in world coordinates.
 pub fn center_of_mass(model: &ArticulatedModel, q: &[f64]) -> Result<Vec3, DynamicsError> {
     validate(model, q, "q")?;
@@ -3574,5 +3692,48 @@ mod tests {
             &[0.7, -0.2, 0.4, -0.5, 0.3, -0.6, 0.8],
             &[0.4, -0.3, 0.2, -0.1, 0.5, -0.6, 0.7],
         );
+    }
+
+    fn assert_frame_jacobian_gradient(model: &ArticulatedModel, q: &[f64], link: rne_ecs::Entity) {
+        let point = Vec3::new(0.1, -0.05, 0.02);
+        let gradient = frame_jacobian_gradient(model, q, link, point).expect("gradient");
+        let nv = model.nv();
+        let epsilon = 1.0e-6;
+        for k in 0..nv {
+            let mut plus = q.to_vec();
+            plus[k] += epsilon;
+            let mut minus = q.to_vec();
+            minus[k] -= epsilon;
+            let plus_jacobian = frame_jacobian(model, &plus, link, point).expect("plus");
+            let minus_jacobian = frame_jacobian(model, &minus, link, point).expect("minus");
+            for row in 0..6 {
+                for column in 0..nv {
+                    let fd = (plus_jacobian.get(row, column) - minus_jacobian.get(row, column))
+                        / (2.0 * epsilon);
+                    assert_relative_eq!(
+                        gradient[k].get(row, column),
+                        fd,
+                        epsilon = 2.0e-4,
+                        max_relative = 2.0e-4
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn frame_jacobian_gradient_matches_finite_difference_on_a_fixed_chain() {
+        let (world, robot) = two_link_world(2.0, 1.5, 0.7, 0.5);
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let link = model.link_entity(2).expect("link");
+        assert_frame_jacobian_gradient(&model, &[0.4, -0.7], link);
+    }
+
+    #[test]
+    fn frame_jacobian_gradient_matches_finite_difference_on_a_floating_chain() {
+        let (world, robot) = floating_chain_world();
+        let model = ArticulatedModel::from_robot(&world, robot).expect("model");
+        let link = model.link_entity(1).expect("link");
+        assert_frame_jacobian_gradient(&model, &[0.3, 0.2, -0.1, 0.5, -0.4, 0.9, 0.6], link);
     }
 }

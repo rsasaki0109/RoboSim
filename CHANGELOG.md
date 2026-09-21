@@ -28,6 +28,15 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_dynamics::frame_jacobian_gradient` computes `dJ/dq` for a link point.
+  The joint columns are differentiated analytically from the link body-twist
+  derivatives (a column is `[R v + (R w) x (P - t); R w]` for the joint subspace
+  `[v; w]`), and the floating-base block is differentiated by a small central
+  difference of its `6 x 6` transform. It is verified against central
+  differences of `frame_jacobian` on a fixed and a floating chain, and is the
+  first building block for the constrained-dynamics gradient needed by an exact
+  contact Hessian.
+
 - `rne_oc::ComplementarityContactDynamics` resolves hard point contacts with a
   velocity-level sequential-impulse (projected Gauss-Seidel) solver: the
   post-contact normal velocity is non-negative to a solver tolerance and the
