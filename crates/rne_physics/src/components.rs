@@ -277,7 +277,8 @@ impl Default for PhysicsMaterial {
 pub struct RevoluteJointDesc {
     /// Parent rigid body entity.
     pub parent: Entity,
-    /// Joint axis in parent-local coordinates.
+    /// Joint axis before applying [`Self::relative_rotation`] and the parent
+    /// body rotation; the identity relative rotation preserves parent-local axes.
     pub axis: Vec3,
     /// Anchor point in the parent body's local frame.
     pub anchor_parent_m: Vec3,
@@ -303,7 +304,8 @@ pub struct RevoluteJointDesc {
 pub struct PrismaticJointDesc {
     /// Parent rigid body entity.
     pub parent: Entity,
-    /// Sliding axis in parent-local coordinates.
+    /// Sliding axis before applying [`Self::relative_rotation`] and the parent
+    /// body rotation; the identity relative rotation preserves parent-local axes.
     pub axis: Vec3,
     /// Anchor point in the parent body's local frame.
     pub anchor_parent_m: Vec3,

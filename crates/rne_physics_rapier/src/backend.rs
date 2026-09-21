@@ -1293,7 +1293,21 @@ fn apply_generalized_effort(
     effort: f64,
     revolute: bool,
 ) -> Result<f64, PhysicsError> {
-    let axis_world = world_transform_of(world, parent).rotation * axis_local.normalize();
+    // Match the parent joint frame built in sync_joints: the authored origin
+    // rotation precedes the local axis. Omitting it applies effort to a locked
+    // direction on rotated URDF joints instead of their free coordinate.
+    let origin_rotation = if revolute {
+        world
+            .get::<RevoluteJointDesc>(entity)
+            .map(|desc| desc.relative_rotation)
+    } else {
+        world
+            .get::<PrismaticJointDesc>(entity)
+            .map(|desc| desc.relative_rotation)
+    }
+    .ok_or_else(|| invalid_actuation(entity, "joint effort has no joint descriptor"))?;
+    let axis_world =
+        world_transform_of(world, parent).rotation * origin_rotation * axis_local.normalize();
     if !axis_world.is_finite() || axis_world.length_squared() <= f64::EPSILON {
         return Err(invalid_actuation(
             entity,
@@ -2198,6 +2212,84 @@ mod tests {
             step_physics(&mut backend, &mut world, physics_world, fixed_step()).unwrap();
         }
         *world.get::<JointState>(child).expect("joint state")
+    }
+
+    #[test]
+    fn direct_effort_follows_rotated_joint_origin() {
+        for revolute in [true, false] {
+            let run = |origin: Quat| {
+                let mut backend = RapierBackend::new();
+                let physics_world = backend
+                    .create_world(PhysicsWorldDesc {
+                        gravity_m_s2: Vec3::ZERO,
+                        solver_iterations: 16,
+                    })
+                    .unwrap();
+                let mut world = World::new();
+                let parent_rotation = Quat::from_rotation_y(0.37);
+                let parent = spawn_named(&mut world, "rotated_parent");
+                world.entity_mut(parent).insert((
+                    RigidBody {
+                        body_type: RigidBodyType::Fixed,
+                        ..RigidBody::default()
+                    },
+                    MultibodyLink,
+                    Transform3::from_translation_rotation(Vec3::ZERO, parent_rotation),
+                ));
+                let child = spawn_named(&mut world, "rotated_child");
+                let rotation = parent_rotation * origin;
+                world.entity_mut(child).insert((
+                    RigidBody::default(),
+                    Collider::sphere(0.1),
+                    MultibodyLink,
+                    Transform3::from_translation_rotation(rotation * -Vec3::Y, rotation),
+                ));
+                if revolute {
+                    world.entity_mut(child).insert((
+                        RevoluteJointDesc {
+                            parent,
+                            axis: Vec3::Z,
+                            anchor_parent_m: Vec3::ZERO,
+                            anchor_child_m: Vec3::Y,
+                            relative_rotation: origin,
+                            lower_rad: None,
+                            upper_rad: None,
+                        },
+                        JointActuation::RevoluteEffort {
+                            effort_nm: 0.5,
+                            max_effort_nm: 0.5,
+                        },
+                    ));
+                } else {
+                    world.entity_mut(child).insert((
+                        PrismaticJointDesc {
+                            parent,
+                            axis: Vec3::Z,
+                            anchor_parent_m: Vec3::ZERO,
+                            anchor_child_m: Vec3::Y,
+                            relative_rotation: origin,
+                            lower_m: None,
+                            upper_m: None,
+                        },
+                        JointActuation::PrismaticEffort {
+                            force_n: 0.5,
+                            max_force_n: 0.5,
+                        },
+                    ));
+                }
+                for _ in 0..30 {
+                    step_physics(&mut backend, &mut world, physics_world, fixed_step()).unwrap();
+                }
+                backend
+                    .multibody_joint_position(physics_world, child)
+                    .unwrap()
+            };
+            let aligned = run(Quat::IDENTITY);
+            let rotated = run(Quat::from_rotation_y(std::f64::consts::FRAC_PI_2));
+            assert!(aligned > 0.01, "fixture must move: {aligned}");
+            assert!((rotated-aligned).abs() < 1e-4,
+                "joint-origin rotation must preserve generalized effort: revolute={revolute}, aligned={aligned}, rotated={rotated}");
+        }
     }
 
     fn coast_velocity_with_passive_loss(

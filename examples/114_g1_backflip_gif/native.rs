@@ -27,13 +27,23 @@ pub(super) fn run() {
     let dt_s = dt_us as f64 * 1e-6;
     let control_steps = 2000 / dt_us;
     let implicit = args.iter().any(|arg| arg == "--native-implicit");
+    let declared = args.iter().any(|arg| arg == "--native-declared");
+    let standing_only = args.iter().any(|arg| arg == "--native-stand");
+    let scene_path = if declared {
+        root.join("assets/scenes/unitree_g1_backflip_probe.rne.scene.toml")
+    } else {
+        unitree_g1_dynamic_scene_path()
+    };
     let mut sim = UrdfSceneSim::from_scene_path_with_solver_iterations_and_fixed_delta(
-        &unitree_g1_dynamic_scene_path(),
+        &scene_path,
         16,
         SimDuration::from_ticks(dt_us * 1000),
     )
     .expect("native G1 scene");
     let (model, names) = build_chain(&mut sim);
+    let mass_kg: f64 = (0..model.link_count())
+        .map(|i| model.link_inertia(i).unwrap().mass_kg)
+        .sum();
     let limits: Vec<_> = model
         .kinematic()
         .movable_joint_entities()
@@ -121,6 +131,8 @@ pub(super) fn run() {
     let mut last_position = sim.named_transform("pelvis").unwrap().translation;
     let mut velocity = Vec3::ZERO;
     let mut contact = true;
+    let mut pitch_rate_rad_s = 0.0;
+    let mut tail_contact = true;
     let mut min_tail_upright = 1.0_f64;
     let mut max_tail_speed = 0.0_f64;
     let mut longest_air_s = 0.0_f64;
@@ -144,8 +156,17 @@ pub(super) fn run() {
             );
         }
         if step % control_steps == 0 {
-            let (next, next_kp, next_kd) = if t < 0.0 {
-                (stand.clone(), 300.0, 10.0)
+            let (next, next_kp, next_kd) = if t < 0.0 || standing_only {
+                let mut q = stand.clone();
+                if declared {
+                    let correction = (previous + 0.3 * pitch_rate_rad_s).clamp(-0.4, 0.4);
+                    for (name, value) in names.iter().zip(&mut q) {
+                        if name.contains("ankle_pitch") {
+                            *value += correction;
+                        }
+                    }
+                }
+                (q, 300.0, 10.0)
             } else if t < 0.5 {
                 (mix(&stand, &crouch, smoothstep(t / 0.4)), 300.0, 10.0)
             } else if let Some(landing) = touchdown {
@@ -238,8 +259,11 @@ pub(super) fn run() {
         last_position = base.translation;
         let forward = base.rotation * Vec3::X;
         let pitch = (-forward.y).atan2(forward.x);
-        angle += (pitch - previous + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+        let pitch_delta = (pitch - previous + std::f64::consts::PI)
+            .rem_euclid(std::f64::consts::TAU)
             - std::f64::consts::PI;
+        angle += pitch_delta;
+        pitch_rate_rad_s = pitch_delta / dt_s;
         previous = pitch;
         contact = ["left_ankle_roll_link", "right_ankle_roll_link"]
             .iter()
@@ -250,6 +274,7 @@ pub(super) fn run() {
         }
         let upright = (base.rotation * Vec3::Z).y;
         if t >= 4.0 {
+            tail_contact &= contact;
             min_tail_upright = min_tail_upright.min(upright);
             max_tail_speed = max_tail_speed.max(velocity.length());
         }
@@ -261,13 +286,18 @@ pub(super) fn run() {
         }
     }
     let output = json!({"backend":"RoboSim/Rapier","qualified_backflip":false,
-        "failure":failure,"completed_maneuver_time_s":completed_s,"implicit_position_motors":implicit,"note":"Transfer probe: native primitive collisions, self-collision disabled; qualification pending",
-        "dt_s":dt_s,"knee_limit_nm":120.0,"signed_rotation_rad":angle,
+        "failure":failure,"completed_maneuver_time_s":completed_s,"implicit_position_motors":implicit,"declared_inertial_scene":declared,"standing_only":standing_only,"note":"Transfer probe: native primitive collisions, self-collision disabled; qualification pending",
+        "dt_s":dt_s,"mass_kg":mass_kg,"knee_limit_nm":120.0,
+        "standing_passed":standing_only && failure.is_none() && completed_s>=4.999
+            && min_tail_upright>0.99 && max_tail_speed<0.1 && tail_contact
+            && last_position.y>0.65,"signed_rotation_rad":angle,
         "takeoff_s":takeoff,"touchdown_s":touchdown,"longest_air_s":longest_air_s,
         "final_second_min_upright":(completed_s>=4.999).then_some(min_tail_upright),"final_second_max_base_speed_m_s":(completed_s>=4.999).then_some(max_tail_speed),
         "joint_link_names":names,"frames":history});
     let path = root.join(format!(
-        "target/research/g1-native-probe-{dt_us}us-{}.json",
+        "target/research/g1-native-probe-{dt_us}us-{}-{}-{}.json",
+        if declared { "declared" } else { "legacy" },
+        if standing_only { "stand" } else { "flip" },
         if implicit { "implicit" } else { "effort" }
     ));
     fs::create_dir_all(path.parent().unwrap()).unwrap();

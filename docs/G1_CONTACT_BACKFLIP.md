@@ -89,9 +89,9 @@ use a 2 ms sample/hold and one-period delay; the direct-effort variant applies
 the source motor-speed taper. The implicit diagnostic variant uses native
 force-based position motors with torque ceilings but no speed taper.
 
-**Native backflip is not achieved.** Direct PD effort becomes unstable during
-standing preparation. Implicit position motors keep the initial standing pose,
-but the maneuver becomes unstable after takeoff. The probe stops on excessive
+**Native backflip is not achieved.** In the legacy G1 scene, direct PD effort
+becomes unstable during standing preparation. Implicit position motors keep the
+initial standing pose, but the maneuver becomes unstable after takeoff. The probe stops on excessive
 joint speed, nonfinite state, a base outside scene bounds, or a backend panic,
 and writes a failure recording under `target/research/g1-native-probe-*.json`.
 Incomplete final-second metrics are null, and `qualified_backflip` is always
@@ -103,6 +103,51 @@ feedback uses base velocity instead of the source subtree COM velocity.
 These differences need reconciliation before transferring or reoptimizing the
 motion. The current evidence does not justify a native-physics or hardware
 success claim.
+
+### Joint-frame and inertial-model correction
+
+The native transfer exposed a backend defect: generalized effort used the
+parent body rotation but omitted the authored joint-origin rotation. The joint
+constraint already included that rotation. A 90-degree-origin regression
+produced no motion with direct effort before the fix; revolute and prismatic
+coordinates now match the corresponding identity-origin experiment. The same
+axis conversion also applies to regularized Coulomb friction.
+
+A separate `unitree_g1_backflip_probe` scene opts into declared URDF inertial
+properties, joint-origin rotations, and fixed-child welding. The legacy walking
+scene is preserved. This probe has **38.13385728 kg**, including the importer's
+1 kg defaults for four links without declared mass; it is not the 34.13 kg
+external screening model. Only primitive collision shapes are active and
+self-collision remains disabled. It is a numerical/controller diagnostic,
+not yet a complete physical backflip qualification model.
+
+```bash
+# Direct joint effort with sampled ankle pitch/rate feedback during preparation.
+cargo run --release -p g1_backflip_gif --example 114_g1_backflip_gif -- \
+  --native-probe --native-declared --native-stand --native-dt-us 125
+
+# Apply the candidate in the same native physical model.
+cargo run --release -p g1_backflip_gif --example 114_g1_backflip_gif -- \
+  --native-probe --native-declared --native-dt-us 125
+```
+
+`--native-stand` keeps the standing target for six simulated seconds (one
+preparation second plus five evaluation seconds). `standing_passed` requires
+completion, final-second upright cosine above 0.99, speed below 0.1 m/s,
+continuous foot contact in that interval, and final base height above 0.65 m.
+The threshold is not relaxed when the coarser integration oscillates.
+The `--native-implicit` diagnostic uses force-based native position motors
+instead of explicitly sampled PD effort; it still has no motor-speed taper.
+
+The 0.5 ms implicit-position-motor **standing test passes**: minimum final-second
+upright cosine 0.99999515 and maximum base speed 0.05280 m/s, with continuous
+foot contact. The 0.5 ms explicit-effort standing test remains upright but
+fails the speed gate (0.45443 m/s); it is not relabeled a pass. The transferred
+backflip still fails to land, even when it reaches a full backward revolution.
+
+[Native model correction and diagnostic recordings](evidence/g1-contact-backflip/native-transfer/declared-inertia/README.md)
+retain these outcomes separately from the successful external-model backflip.
+
 
 ## Original-candidate screening (not hardware validation)
 

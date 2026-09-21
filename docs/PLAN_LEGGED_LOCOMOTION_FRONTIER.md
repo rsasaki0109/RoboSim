@@ -205,3 +205,20 @@ hardware transfer, power/current limits and uncertainty testing remain open.
 - Next: reconcile collision/mass/inertia and actuator integration differences,
   establish stable native motor-only standing, then reoptimize and apply the
   full landing/contact qualification gate. See `G1_CONTACT_BACKFLIP.md`.
+
+### Native joint-effort and inertial-model correction (2026-09-22)
+
+- Generalized joint effort and Coulomb friction now use the authored
+  joint-origin rotation, matching the constraint frame. The new revolute and
+  prismatic regression fails before the correction and passes afterward;
+  all 25 Rapier backend tests pass.
+- A separate G1 probe scene enables declared inertia, authored joint frames,
+  and fixed-child welding; the legacy walking asset is unchanged. It weighs
+  38.13385728 kg because four links still use the importer's 1 kg mass default.
+- Sampled ankle pitch/rate feedback plus native force-based position motors
+  passes a six-second standing test at 0.5 ms: final-second upright cosine
+  >= 0.99999515, base speed <= 0.05280 m/s, with continuous foot contact.
+- Direct explicit PD effort remains oscillatory. The native maneuver can
+  rotate through a full revolution, but does not land successfully. Mesh
+  collisions/self-collision and a full physical qualification gate remain
+  open; next use the stable native motor baseline for landing optimization.
