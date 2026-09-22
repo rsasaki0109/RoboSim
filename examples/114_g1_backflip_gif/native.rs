@@ -45,6 +45,8 @@ pub(super) fn run() {
         recovery_s.is_finite() && recovery_s > 0.0,
         "recovery duration must be positive"
     );
+    let (landing_kp_nm_per_rad, landing_kd_nm_s_per_rad) =
+        landing_gains(candidate.as_ref()).expect("valid landing gains");
     let roll_balance = candidate
         .as_ref()
         .and_then(|value| value.get("roll_balance"))
@@ -359,7 +361,7 @@ pub(super) fn run() {
                         *q = (*q + correction.clamp(-0.6, 0.6)).clamp(-0.85, 0.5);
                     }
                 }
-                (q, 1000.0, 20.0)
+                (q, landing_kp_nm_per_rad, landing_kd_nm_s_per_rad)
             } else if let Some(start) = takeoff {
                 let elapsed = t - start;
                 if elapsed < p[5] && angle > -p[11] {
@@ -555,7 +557,7 @@ pub(super) fn run() {
         "velocity_servo":velocity_servo,"peak_joint_speed_ratio":peak_speed_ratio,"peak_speed_joint":peak_speed_joint,"peak_speed_time_s":peak_speed_time_s,"max_joint_position_excess_rad":max_position_excess_rad,
         "failure":failure,"completed_maneuver_time_s":completed_s,"implicit_position_motors":implicit,"declared_inertial_scene":declared,"standing_only":standing_only,"note":"Transfer probe: native primitive collisions, self-collision disabled; qualification pending",
         "joint_armature_kg_m2":joint_armature_kg_m2,"solver_iterations":solver_iterations,"final_second_contact_diagnostics":tail_diagnostics.report(dt_s),
-        "dt_s":dt_s,"contact_friction":contact_friction,"balance_velocity_source":if declared {"whole_robot_com"} else {"base_origin"},"parameters":p,"recovery_s":recovery_s,"roll_balance":roll_balance,"landing_stance_rad":landing_stance_rad,"stop_on_fall":stop_on_fall,"mass_kg":mass_kg,"knee_limit_nm":120.0,
+        "dt_s":dt_s,"contact_friction":contact_friction,"balance_velocity_source":if declared {"whole_robot_com"} else {"base_origin"},"parameters":p,"recovery_s":recovery_s,"landing_kp_nm_per_rad":landing_kp_nm_per_rad,"landing_kd_nm_s_per_rad":landing_kd_nm_s_per_rad,"roll_balance":roll_balance,"landing_stance_rad":landing_stance_rad,"stop_on_fall":stop_on_fall,"mass_kg":mass_kg,"knee_limit_nm":120.0,
         "standing_passed":standing_only && failure.is_none() && completed_s>=4.999
             && min_tail_upright>0.99 && max_tail_speed<0.1 && tail_contact
             && last_position.y>0.65,"signed_rotation_rad":angle,
@@ -690,9 +692,50 @@ impl ContactDiagnostics {
     }
 }
 
+// Contact-phase gains are independent of the flight opening servo.
+fn landing_gains(candidate: Option<&serde_json::Value>) -> Result<(f64, f64), &'static str> {
+    let read = |key, default| -> Result<f64, &'static str> {
+        candidate.and_then(|v| v.get(key)).map_or(Ok(default), |v| {
+            v.as_f64().ok_or("landing gain must be numeric")
+        })
+    };
+    let kp = read("landing_kp_nm_per_rad", 1000.0)?;
+    let kd = read("landing_kd_nm_s_per_rad", 20.0)?;
+    if !kp.is_finite()
+        || kp <= 0.0
+        || kp > 2000.0
+        || !kd.is_finite()
+        || !(0.0..=100.0).contains(&kd)
+    {
+        return Err("landing gains outside supported range");
+    }
+    Ok((kp, kd))
+}
+
 #[cfg(test)]
 mod diagnostic_tests {
     use super::*;
+    #[test]
+    fn contact_gains_retain_defaults_and_reject_invalid_candidates() {
+        assert_eq!(landing_gains(None), Ok((1000.0, 20.0)));
+        assert_eq!(
+            landing_gains(Some(
+                &json!({"landing_kp_nm_per_rad":500.0,"landing_kd_nm_s_per_rad":40.0})
+            )),
+            Ok((500.0, 40.0))
+        );
+        for candidate in [
+            json!({"landing_kp_nm_per_rad":0.0}),
+            json!({"landing_kp_nm_per_rad":2001.0}),
+            json!({"landing_kd_nm_s_per_rad":-1.0}),
+            json!({"landing_kd_nm_s_per_rad":101.0}),
+            json!({"landing_kd_nm_s_per_rad":"40"}),
+            json!({"landing_kp_nm_per_rad":null}),
+        ] {
+            assert!(landing_gains(Some(&candidate)).is_err());
+        }
+    }
+
     #[test]
     fn native_link_poses_close_the_authored_joint_frames() {
         use rne_physics::{FixedJointDesc, RevoluteJointDesc, RigidBodyInertia};

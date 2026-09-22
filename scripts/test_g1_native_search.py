@@ -90,7 +90,12 @@ class NativeSearchTest(unittest.TestCase):
             self.assertEqual(candidate["joint_armature_kg_m2"], 0.01)
             result = sample()
             result.update(
-                dt_s=0.000125, velocity_servo=False, joint_armature_kg_m2=0.01
+                dt_s=0.000125,
+                velocity_servo=False,
+                joint_armature_kg_m2=0.01,
+                recovery_s=1.2,
+                landing_kp_nm_per_rad=500.0,
+                landing_kd_nm_s_per_rad=40.0,
             )
             Path(command[command.index("--native-output") + 1]).write_text(
                 json.dumps(result)
@@ -107,7 +112,13 @@ class NativeSearchTest(unittest.TestCase):
             base = Path(directory)
             binary = base / "binary"
             binary.write_text("fixture")
-            seed = {"parameters": [2.0] * 16, "joint_armature_kg_m2": 0.01}
+            seed = {
+                "parameters": [2.0] * 16,
+                "joint_armature_kg_m2": 0.01,
+                "recovery_s": 1.2,
+                "landing_kp_nm_per_rad": 500.0,
+                "landing_kd_nm_s_per_rad": 40.0,
+            }
             search(
                 binary,
                 binary,
@@ -137,6 +148,17 @@ class NativeSearchTest(unittest.TestCase):
                     0,
                     1,
                     dt_us=500,
+                    motor_mode="effort",
+                )
+            with self.assertRaisesRegex(ValueError, "landing_kd_nm_s_per_rad differs"):
+                search(
+                    binary,
+                    binary,
+                    dict(seed, landing_kd_nm_s_per_rad=50.0),
+                    base / "ignored-gain",
+                    0,
+                    1,
+                    dt_us=125,
                     motor_mode="effort",
                 )
             for dt, mode in [(126, "effort"), (125, "implicit")]:

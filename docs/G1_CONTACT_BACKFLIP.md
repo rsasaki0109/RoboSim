@@ -594,3 +594,11 @@ COM rotated around the body origin despite zero reported COM linear velocity.
 [ADR 031](adr/031-multibody-free-root-com.md) explains the correction and the
 zero-gravity regression. Native transfer must be re-evaluated with this fix;
 prior failures do not characterize the corrected plant.
+
+Contact-phase candidate fields `landing_kp_nm_per_rad` (0 < kp ≤ 2000) and
+`landing_kd_nm_s_per_rad` (0 ≤ kd ≤ 100) tune post-touchdown recovery independently
+of the flight-opening servo. Defaults remain 1000 and 20. Non-numeric or
+out-of-range values are rejected, and outputs record the applied gains. The
+search driver rejects ignored gain/recovery requests, including an older
+binary that does not report the requested fields. This enables native landing
+absorption experiments without changing launch or flight gains.

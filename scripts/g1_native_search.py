@@ -150,6 +150,9 @@ def search(
             raise ValueError(
                 "rollout step, motor mode or armature differs from campaign"
             )
+        for field in ("recovery_s", "landing_kp_nm_per_rad", "landing_kd_nm_s_per_rad"):
+            if field in parameters and result.get(field) != parameters[field]:
+                raise ValueError(f"rollout {field} differs from campaign")
         return {
             "index": index,
             "loss": loss(result),
