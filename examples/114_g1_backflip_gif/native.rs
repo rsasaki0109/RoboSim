@@ -47,16 +47,27 @@ pub(super) fn run() {
     );
     let (landing_kp_nm_per_rad, landing_kd_nm_s_per_rad) =
         landing_gains(candidate.as_ref()).expect("valid landing gains");
-    let landing_capture_gain_rad_per_m = candidate
-        .as_ref()
-        .and_then(|v| v.get("landing_capture_gain_rad_per_m"))
-        .map(|v| v.as_f64().expect("numeric capture gain"))
-        .unwrap_or(0.0);
-    assert!(
-        landing_capture_gain_rad_per_m.is_finite()
-            && (-4.0..=4.0).contains(&landing_capture_gain_rad_per_m),
-        "capture gain must be in -4..=4 rad/m"
-    );
+    let landing_capture_gain_rad_per_m = bounded_candidate_parameter(
+        candidate.as_ref(),
+        "landing_capture_gain_rad_per_m",
+        0.0,
+        (-4.0, 4.0),
+    )
+    .expect("valid capture gain");
+    let landing_pitch_rate_gain_s = bounded_candidate_parameter(
+        candidate.as_ref(),
+        "landing_pitch_rate_gain_s",
+        0.3,
+        (0.0, 1.0),
+    )
+    .expect("valid landing pitch-rate gain");
+    let landing_early_com_velocity_gain_s_per_m = bounded_candidate_parameter(
+        candidate.as_ref(),
+        "landing_early_com_velocity_gain_s_per_m",
+        0.0,
+        (0.0, 2.0),
+    )
+    .expect("valid early COM velocity gain");
     let roll_balance = candidate
         .as_ref()
         .and_then(|value| value.get("roll_balance"))
@@ -378,7 +389,11 @@ pub(super) fn run() {
                 for (name, q) in names.iter().zip(&mut q) {
                     if name.contains("ankle_pitch") {
                         let blend = ((t - landing - recovery_s) / 0.3).clamp(0.0, 1.0);
-                        let correction = (1.0 - blend) * (previous + 0.3 * pitch_rate_rad_s)
+                        let mut early = previous + landing_pitch_rate_gain_s * pitch_rate_rad_s;
+                        if landing_early_com_velocity_gain_s_per_m != 0.0 {
+                            early += landing_early_com_velocity_gain_s_per_m * com_velocity.x;
+                        }
+                        let correction = (1.0 - blend) * early
                             + blend
                                 * (previous
                                     + 0.6 * if declared { com_velocity.x } else { velocity.x });
@@ -603,11 +618,11 @@ pub(super) fn run() {
                 "foot_contact":contact,"com_velocity_m_s":com_velocity.to_array(),"com_position_m":com_position.to_array(),"foot_center_m":foot_center.to_array()}));
         }
     }
-    let output = json!({"backend":"RoboSim/Rapier","scene":scene_path,"compound_part_counts":compound_part_counts,"qualified_backflip":false,
+    let mut output = json!({"backend":"RoboSim/Rapier","scene":scene_path,"compound_part_counts":compound_part_counts,"qualified_backflip":false,
         "velocity_servo":velocity_servo,"peak_joint_speed_ratio":peak_speed_ratio,"peak_speed_joint":peak_speed_joint,"peak_speed_time_s":peak_speed_time_s,"max_joint_position_excess_rad":max_position_excess_rad,
         "failure":failure,"completed_maneuver_time_s":completed_s,"implicit_position_motors":implicit,"declared_inertial_scene":declared,"standing_only":standing_only,"note":"Transfer probe: native primitive collisions, self-collision disabled; qualification pending",
         "joint_armature_kg_m2":joint_armature_kg_m2,"solver_iterations":solver_iterations,"final_second_contact_diagnostics":tail_diagnostics.report(dt_s),
-        "dt_s":dt_s,"contact_friction":contact_friction,"balance_velocity_source":if declared {"whole_robot_com"} else {"base_origin"},"parameters":p,"recovery_s":recovery_s,"landing_capture_gain_rad_per_m":landing_capture_gain_rad_per_m,"landing_kp_nm_per_rad":landing_kp_nm_per_rad,"landing_kd_nm_s_per_rad":landing_kd_nm_s_per_rad,"roll_balance":roll_balance,"landing_stance_rad":landing_stance_rad,"stop_on_fall":stop_on_fall,"mass_kg":mass_kg,"knee_limit_nm":120.0,
+        "dt_s":dt_s,"contact_friction":contact_friction,"balance_velocity_source":if declared {"whole_robot_com"} else {"base_origin"},"parameters":p,"recovery_s":recovery_s,"landing_kp_nm_per_rad":landing_kp_nm_per_rad,"landing_kd_nm_s_per_rad":landing_kd_nm_s_per_rad,"roll_balance":roll_balance,"landing_stance_rad":landing_stance_rad,"stop_on_fall":stop_on_fall,"mass_kg":mass_kg,"knee_limit_nm":120.0,
         "standing_passed":standing_only && failure.is_none() && completed_s>=4.999
             && min_tail_upright>0.99 && max_tail_speed<0.1 && tail_contact
             && last_position.y>0.65,"signed_rotation_rad":angle,
@@ -615,6 +630,10 @@ pub(super) fn run() {
         "final_second_continuous_foot_contact":(completed_s>=4.999).then_some(tail_contact),
         "final_second_min_upright":(completed_s>=4.999).then_some(min_tail_upright),"final_second_max_base_speed_m_s":(completed_s>=4.999).then_some(max_tail_speed),
         "joint_link_names":names,"frames":history});
+    output["landing_pitch_rate_gain_s"] = json!(landing_pitch_rate_gain_s);
+    output["landing_early_com_velocity_gain_s_per_m"] =
+        json!(landing_early_com_velocity_gain_s_per_m);
+    output["landing_capture_gain_rad_per_m"] = json!(landing_capture_gain_rad_per_m);
     let default_path = root.join(format!(
         "target/research/g1-native-probe-{dt_us}us-{}-{}-{}.json",
         if declared { "declared" } else { "legacy" },
@@ -742,6 +761,23 @@ impl ContactDiagnostics {
     }
 }
 
+fn bounded_candidate_parameter(
+    candidate: Option<&serde_json::Value>,
+    name: &str,
+    default: f64,
+    bounds: (f64, f64),
+) -> Result<f64, &'static str> {
+    let value = candidate
+        .and_then(|v| v.get(name))
+        .map_or(Ok(default), |v| {
+            v.as_f64().ok_or("numeric candidate parameter required")
+        })?;
+    if !value.is_finite() || value < bounds.0 || value > bounds.1 {
+        return Err("candidate parameter outside supported range");
+    }
+    Ok(value)
+}
+
 // Physical spatial COM, in the native y-up world; no kinematic pose writes.
 fn support_com(sim: &UrdfSceneSim, model: &ArticulatedModel) -> (Vec3, Vec3) {
     let mut mass = 0.0;
@@ -809,6 +845,27 @@ fn landing_gains(candidate: Option<&serde_json::Value>) -> Result<(f64, f64), &'
 #[cfg(test)]
 mod diagnostic_tests {
     use super::*;
+    #[test]
+    fn bounded_feedback_parameters_reject_invalid_types_and_ranges() {
+        assert_eq!(
+            bounded_candidate_parameter(None, "gain", 0.3, (0.0, 1.0)),
+            Ok(0.3)
+        );
+        for value in [json!(-0.1), json!(1.1), json!(null), json!("0.3")] {
+            assert!(bounded_candidate_parameter(
+                Some(&json!({"gain":value})),
+                "gain",
+                0.3,
+                (0.0, 1.0)
+            )
+            .is_err());
+        }
+        assert_eq!(
+            bounded_candidate_parameter(Some(&json!({"gain":-4.0})), "gain", 0.0, (-4.0, 4.0)),
+            Ok(-4.0)
+        );
+    }
+
     #[test]
     fn paired_capture_saturation_preserves_both_limits_and_pitch_sum() {
         for (hip, ankle, request) in [(0.0, 0.49, -0.35), (0.9, -0.8, 0.35), (-0.9, 0.0, -0.35)] {

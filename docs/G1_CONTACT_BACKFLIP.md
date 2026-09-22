@@ -636,3 +636,12 @@ Frames now record `com_position_m` and `foot_center_m` for inspecting landing
 geometry. The zero-gain path does not change motor targets. The search rejects
 older binaries that ignore a requested capture gain. Physical landing and
 measured-limit gates remain separate from this option and search scores.
+
+The early ankle balance gains are also selectable independently:
+`landing_pitch_rate_gain_s` defaults to 0.3 (range 0..=1), and
+`landing_early_com_velocity_gain_s_per_m` defaults to 0 (range 0..=2).
+The early correction is pitch + rate_gain × pitch_rate + velocity_gain ×
+COM_velocity_x, before the existing ±0.6 rad correction clamp. It blends to
+the existing late pitch/COM-velocity feedback after recovery. Preparation,
+launch and flight gains are unchanged. These fields are echoed and checked
+by the search driver; absent fields preserve the previous feedback.

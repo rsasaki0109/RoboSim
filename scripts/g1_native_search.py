@@ -155,6 +155,8 @@ def search(
             "landing_kp_nm_per_rad",
             "landing_kd_nm_s_per_rad",
             "landing_capture_gain_rad_per_m",
+            "landing_pitch_rate_gain_s",
+            "landing_early_com_velocity_gain_s_per_m",
         ):
             if field in parameters and result.get(field) != parameters[field]:
                 raise ValueError(f"rollout {field} differs from campaign")

@@ -174,6 +174,21 @@ class NativeSearchTest(unittest.TestCase):
                     dt_us=125,
                     motor_mode="effort",
                 )
+            for field in [
+                "landing_pitch_rate_gain_s",
+                "landing_early_com_velocity_gain_s_per_m",
+            ]:
+                with self.assertRaisesRegex(ValueError, field + " differs"):
+                    search(
+                        binary,
+                        binary,
+                        dict(seed, **{field: 0.1}),
+                        base / field,
+                        0,
+                        1,
+                        dt_us=125,
+                        motor_mode="effort",
+                    )
             for dt, mode in [(126, "effort"), (125, "implicit")]:
                 with self.assertRaisesRegex(ValueError, "supported step"):
                     search(
