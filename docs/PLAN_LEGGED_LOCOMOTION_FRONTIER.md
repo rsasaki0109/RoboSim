@@ -391,3 +391,11 @@ in progress; no fine-step or full-body success has been established. The
 signed-distance query distinguishes overlap from predictive gaps even when
 normal impulse is zero. Exact 62.5 µs timing is available for later refinement.
 See [full-contact optimization evidence](evidence/g1-contact-backflip/native-transfer/full-launch-open-search/README.md).
+
+The selected candidate now completes 15 s at 500 µs with peak speed/rating
+1.049782, continuous final-second foot impulse, upright cosine above 0.999989
+and root speed below 0.000757 m/s. Signed solver-manifold evidence has no
+negative nonadjacent self-contact separation. The 125 µs and 62.5 µs runs are
+still in progress, so full qualification remains open. A +0.02 rad landing-
+knee variant lowers coarse peak speed to 1.031872 but has only been checked
+for 5 s. See [long validation evidence](evidence/g1-contact-backflip/native-transfer/full-long-validation/README.md).
