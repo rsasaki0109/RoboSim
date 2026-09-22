@@ -694,6 +694,120 @@ impl ContactDiagnostics {
 mod diagnostic_tests {
     use super::*;
     #[test]
+    fn native_link_poses_close_the_authored_joint_frames() {
+        use rne_physics::{FixedJointDesc, RevoluteJointDesc, RigidBodyInertia};
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let scene = std::env::var_os("RNE_BACKFLIP_KINEMATIC_SCENE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| root.join("assets/scenes/unitree_g1_backflip_probe.rne.scene.toml"));
+        let mut sim = UrdfSceneSim::from_scene_path_with_solver_iterations_and_fixed_delta(
+            &scene,
+            16,
+            SimDuration::from_ticks(500_000),
+        )
+        .unwrap();
+        for name in ["left_knee_link", "right_knee_link"] {
+            assert!(sim.configure_named_revolute_effort_actuation(name, 10.0));
+        }
+        let mut maximum_position_error_m = 0.0_f64;
+        let mut maximum_rotation_error = 0.0_f64;
+        let mut maximum_rotation_norm_error = 0.0_f64;
+        let mut maximum_joint_motion_rad = 0.0_f64;
+        for _ in 0..100 {
+            sim.step_joint_effort_actuation_targets_substeps(
+                &[
+                    UrdfJointEffortTarget {
+                        link_name: "left_knee_link",
+                        effort_nm: 5.0,
+                    },
+                    UrdfJointEffortTarget {
+                        link_name: "right_knee_link",
+                        effort_nm: 4.0,
+                    },
+                ],
+                1,
+            )
+            .unwrap();
+            for entity in sim.world().iter_entities() {
+                let Some(link) = entity.get::<Link>() else {
+                    continue;
+                };
+                let (parent, anchor_parent, anchor_child, relative_rotation) = if let Some(desc) =
+                    entity.get::<RevoluteJointDesc>()
+                {
+                    let q = sim.named_joint_position(&link.name).unwrap();
+                    maximum_joint_motion_rad = maximum_joint_motion_rad.max(q.abs());
+                    (
+                        desc.parent,
+                        desc.anchor_parent_m,
+                        desc.anchor_child_m,
+                        desc.relative_rotation * Quat::from_axis_angle(desc.axis.normalize(), q),
+                    )
+                } else if let Some(desc) = entity.get::<FixedJointDesc>() {
+                    (
+                        desc.parent,
+                        desc.anchor_parent_m,
+                        desc.anchor_child_m,
+                        desc.relative_rotation,
+                    )
+                } else {
+                    continue;
+                };
+                let parent_name = &sim.world().get::<Link>(parent).unwrap().name;
+                let parent_pose = sim.named_transform(parent_name).unwrap();
+                let actual = sim.named_transform(&link.name).unwrap();
+                let rotation = parent_pose.rotation * relative_rotation;
+                let translation = parent_pose.translation + parent_pose.rotation * anchor_parent
+                    - rotation * anchor_child;
+                maximum_position_error_m =
+                    maximum_position_error_m.max((translation - actual.translation).length());
+                maximum_rotation_norm_error =
+                    maximum_rotation_norm_error.max((actual.rotation.length_squared() - 1.0).abs());
+                maximum_rotation_error = maximum_rotation_error
+                    .max(1.0 - rotation.normalize().dot(actual.rotation.normalize()).abs());
+            }
+        }
+        if let Some(path) = std::env::var_os("RNE_BACKFLIP_KINEMATIC_AUDIT") {
+            use std::io::Write;
+            let mut links: Vec<_> = sim.world().iter_entities().filter_map(|entity| {
+                let link = entity.get::<Link>()?;
+                let body = entity.get::<RigidBody>()?;
+                let pose = sim.named_transform(&link.name)?;
+                Some(json!({"name":link.name,"mass_kg":body.mass_kg,
+                    "translation_m":pose.translation.to_array(),"rotation_xyzw":pose.rotation.to_array(),
+                    "com_local_m":entity.get::<RigidBodyInertia>().map(|i|i.center_of_mass_local_m.to_array()),
+                    "joint_position_rad":sim.named_joint_position(&link.name)}))
+            }).collect();
+            links.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+            let report = json!({"scene":scene,"maximum_position_error_m":maximum_position_error_m,
+                "maximum_rotation_error":maximum_rotation_error,"maximum_rotation_norm_error":maximum_rotation_norm_error,"maximum_joint_motion_rad":maximum_joint_motion_rad,"links":links});
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .unwrap()
+                .write_all(&serde_json::to_vec_pretty(&report).unwrap())
+                .unwrap();
+        }
+        assert!(
+            maximum_joint_motion_rad > 0.01,
+            "fixture must excite joints"
+        );
+        assert!(
+            maximum_position_error_m < 1e-4,
+            "joint-frame translation mismatch: {maximum_position_error_m}"
+        );
+        assert!(
+            maximum_rotation_norm_error < 1e-10,
+            "non-unit world rotation: {maximum_rotation_norm_error}"
+        );
+        assert!(
+            maximum_rotation_error < 1e-6,
+            "joint-frame rotation mismatch: {maximum_rotation_error}"
+        );
+    }
+
+    #[test]
     fn separates_unloaded_pairs_from_missing_contacts_and_counts_runs() {
         let mut stats = ContactDiagnostics::default();
         for (loaded, pair, bottom) in [

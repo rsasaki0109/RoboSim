@@ -36,6 +36,10 @@ pub fn quat_from_rapier(q: UnitQuaternion<f32>) -> Quat {
         coords[2] as f64,
         coords[3] as f64,
     )
+    // Promoting an f32 UnitQuaternion does not make it unit length in f64.
+    // RNE's conjugate-based inverse assumes a unit rotation; normalize at
+    // this boundary to prevent hierarchical world/local error amplification.
+    .normalize()
 }
 
 pub fn transform_to_isometry(transform: &Transform3) -> Isometry<f32> {
@@ -82,5 +86,21 @@ pub fn body_type_to_rapier(body_type: RigidBodyType) -> rapier3d::prelude::Rigid
         RigidBodyType::Dynamic => rapier3d::prelude::RigidBodyType::Dynamic,
         RigidBodyType::Fixed => rapier3d::prelude::RigidBodyType::Fixed,
         RigidBodyType::Kinematic => rapier3d::prelude::RigidBodyType::KinematicPositionBased,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn promoted_rotation_has_unit_length_for_f64_transform_inverse() {
+        let native = UnitQuaternion::from_axis_angle(&Vector3::z_axis(), 1.0);
+        let rotation = quat_from_rapier(native);
+        assert!((rotation.length_squared() - 1.0).abs() < 1e-14);
+        let point = Vec3::new(0.7, -0.3, 0.2);
+        assert!((rotation.conjugate() * (rotation * point) - point).length() < 1e-14);
+        let expected = Quat::from_rotation_z(1.0);
+        assert!(rotation.dot(expected).abs() > 1.0 - 1e-14);
     }
 }

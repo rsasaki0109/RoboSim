@@ -567,3 +567,19 @@ The driver verifies the returned step, motor mode and armature coefficient,
 and rejects binary replacement during a campaign. Fine-step trials have a
 1200-second execution timeout; coarse trials retain 600 seconds. The 30 GiB
 free-space check runs before the campaign and before each evaluation.
+
+### Native rotation conversion regression
+
+Rapier stores rotations in f32. Casting their components to f64 without
+normalization leaves a non-unit quaternion, while RNE hierarchical transforms
+use a conjugate-based inverse that assumes unit length. The Rapier conversion
+now normalizes the promoted rotation. This intentionally changes numerical
+state hashes; recordings made before this fix retain their original provenance.
+
+A headless, torque-excited G1 test checks authored joint-frame closure and unit
+world rotations for 100 steps. It also supports optional
+`RNE_BACKFLIP_KINEMATIC_SCENE` and a fresh `RNE_BACKFLIP_KINEMATIC_AUDIT` JSON
+path for inspecting the passive-loss scene. The latter scene's maximum
+translation residual fell from 21.6 µm to 0.67 µm. Quaternion norm error and
+normalized orientation agreement are checked separately. This regression does
+not establish a successful backflip or prove why landing fails.
