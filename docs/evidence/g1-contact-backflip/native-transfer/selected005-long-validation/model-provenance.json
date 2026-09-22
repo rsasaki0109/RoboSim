@@ -1,0 +1,163 @@
+{
+  "producer_source_commit": "0c84bfdec8bdbdd3a4d9724e5bf13469fc895243",
+  "checked_after_coarse_and_during_fine_runs": true,
+  "note": "This snapshot verifies the current generated URDF against the preparation audit, and source URDF/meshes against the producer commit. It is not a pre-run file attestation. Scene/robot files are preserved verbatim, including original absolute mesh paths; regenerate with g1_native_model.py on another checkout. Candidate supplies armature0.01, friction0.7 and command headroom0.001; the model preparation audit alone does not qualify the final plant.",
+  "source_assets": [
+    {
+      "path": "assets/robots/g1_description/g1_23dof.urdf",
+      "sha256": "b462e1367ccb50f148db8c82f93421cb3f47497b10b735e891d2c9d000870cfc",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/head_link.STL",
+      "sha256": "005fb67fbd3eff94aa8bf4a6e83238174e9f91b6721f7111594322f223724411",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/left_ankle_pitch_link.STL",
+      "sha256": "d49e3abc6f5b12e532062cd575b87b5ef40cd2a3fc18f54a1ca5bba4f773d51d",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/left_ankle_roll_link.STL",
+      "sha256": "c4092af943141d4d9f74232f3cfa345afc6565f46a077793b8ae0e68b39dc33f",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/left_elbow_link.STL",
+      "sha256": "fa752198accd104d5c4c3a01382e45165b944fbbc5acce085059223324e5bed3",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/left_hip_pitch_link.STL",
+      "sha256": "4725168105ee768ee31638ef22b53f6be2d7641bfd7cfefe803488d884776fa4",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/left_hip_roll_link.STL",
+      "sha256": "91f25922ee8a7c3152790051bebad17b4d9cd243569c38fe340285ff93a97acf",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/left_hip_yaw_link.STL",
+      "sha256": "a16d88aa6ddac8083aa7ad55ed317bea44b1fa003d314fba88965b7ed0f3b55b",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/left_knee_link.STL",
+      "sha256": "8d92b9e3d3a636761150bb8025e32514c4602b91c7028d523ee42b3e632de477",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/left_shoulder_pitch_link.STL",
+      "sha256": "f0d1cfd02fcf0d42f95e678eeca33da3afbcc366ffba5c052847773ec4f31d52",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/left_shoulder_roll_link.STL",
+      "sha256": "fb9df21687773522598dc384f1a2945c7519f11cbc8bd372a49170316d6eee88",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/left_shoulder_yaw_link.STL",
+      "sha256": "1aa97e9748e924336567992181f78c7cd0652fd52a4afcca3df6b2ef6f9e712e",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/left_wrist_roll_rubber_hand.STL",
+      "sha256": "e81030abd023bd9e4a308ef376d814a2c12d684d8a7670c335bbd5cd7809c909",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/logo_link.STL",
+      "sha256": "8571a0a19bc4916fa55f91449f51d5fdefd751000054865a842449429d5f155b",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/pelvis.STL",
+      "sha256": "5ba6bbc888e630550140d3c26763f10206da8c8bd30ed886b8ede41c61f57a31",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/pelvis_contour_link.STL",
+      "sha256": "5cc5c2c7a312329e3feeb2b03d3fc09fc29705bd01864f6767e51be959662420",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/right_ankle_pitch_link.STL",
+      "sha256": "15be426539ec1be70246d4d82a168806db64a41301af8b35c197a33348c787a9",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/right_ankle_roll_link.STL",
+      "sha256": "4b66222ea56653e627711b56d0a8949b4920da5df091da0ceb343f54e884e3a5",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/right_elbow_link.STL",
+      "sha256": "1be925d7aa268bb8fddf5362b9173066890c7d32092c05638608126e59d1e2ab",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/right_hip_pitch_link.STL",
+      "sha256": "e4f3c99d7f4a7d34eadbef9461fc66e3486cb5442db1ec50c86317d459f1a9c6",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/right_hip_roll_link.STL",
+      "sha256": "4c254ef66a356f492947f360dd931965477b631e3fcc841f91ccc46d945d54f6",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/right_hip_yaw_link.STL",
+      "sha256": "e479c2936ca2057e9eb2f7dff6c189b7419d7b8484dea0b298cbb36a2a6aa668",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/right_knee_link.STL",
+      "sha256": "63c4008449c9bbe701a6e2b557b7a252e90cf3a5abcf54cee46862b9a69f8ec8",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/right_shoulder_pitch_link.STL",
+      "sha256": "24cdb387e0128dfe602770a81c56cdce3a0181d34d039a11d1aaf8819b7b8c02",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/right_shoulder_roll_link.STL",
+      "sha256": "962b97c48f9ce9e8399f45dd9522e0865d19aa9fd299406b2d475a8fc4a53e81",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/right_shoulder_yaw_link.STL",
+      "sha256": "a0b76489271da0c72461a344c9ffb0f0c6e64f019ea5014c1624886c442a2fe5",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/right_wrist_roll_rubber_hand.STL",
+      "sha256": "0729aff1ac4356f9314de13a46906267642e58bc47f0d8a7f17f6590a6242ccf",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/torso_link.STL",
+      "sha256": "e96d023f0368a4e3450b86ca5d4f10227d8141156a373e7da8cb3c93266523e0",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/waist_support_link.STL",
+      "sha256": "1fae9e1bb609848a1667d32eed8d6083ae443538a306843056a2a660f1b2926a",
+      "matches_producer_commit": true
+    },
+    {
+      "path": "assets/robots/g1_description/meshes/waist_yaw_link.STL",
+      "sha256": "2883f20e03f09b669b5b4ce10677ee6b5191c0934b584d7cbaef2d0662856ffb",
+      "matches_producer_commit": true
+    }
+  ],
+  "generated_files": {
+    "scene.rne.scene.toml": "a0165e5bdb0bb9de83fd0187e87747edaecddc355c7b1260ddc82ff2e03b9fc5",
+    "robot.rne.robot.toml": "115cd53ad67041726f723f17a06209bc330e3ab4400d70d93d1dc8334fb6c6a4",
+    "robot.urdf": "6c17434ee6c2b15aa28127a4a15fb45772917462dbf73293c08b4f2ccb35c213",
+    "audit.json": "ddecf513dd2a8dd2a43c4e2533ee9abfba1db4694f1d34a4b4c62545b898bb0a"
+  }
+}

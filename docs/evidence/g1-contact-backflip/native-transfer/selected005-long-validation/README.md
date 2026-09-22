@@ -9,3 +9,11 @@ No final success GIF has been generated.
 
 Producer source: `0c84bfdec8bdbdd3a4d9724e5bf13469fc895243`.
 Model: `target/research/native-convex-full-model/scene.rne.scene.toml`.
+
+The `model-*` files preserve the declared input scene, robot configuration,
+URDF and preparation audit. `model-provenance.json` verifies all 30 source
+URDF/mesh files against the immutable producer commit and the generated URDF
+against its preparation hash. This snapshot was taken after the coarse run
+and during the finer runs, not as a pre-run attestation. The model preparation
+audit predates the candidate armature override; see the rollout for the applied
+0.01 kg m² armature. Absolute mesh paths require regeneration on another checkout.
