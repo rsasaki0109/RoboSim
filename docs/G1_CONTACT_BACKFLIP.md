@@ -6,8 +6,9 @@ learned policy, external base wrench, or imposed floating-base trajectory.
 MuJoCo integrates the complete free-base robot and ground contacts; the motors
 receive joint targets and bounded effort.
 
-The robot is RNE's existing 23-joint G1 URDF. This is an external contact-plant
-benchmark, not yet a demonstration of the RNE/Rapier backend or real hardware.
+The robot is RNE's existing 23-joint G1 URDF. The original benchmark uses an external contact plant.
+The native Rapier probe now also demonstrates a held backflip in its foot-contact
+model, with measured speed violations and full-body qualification still open.
 The Python benchmark remains independent of the Rust engine. Example 114
 provides the RoboSim playback and a separate native transfer probe.
 
@@ -607,7 +608,7 @@ absorption experiments without changing launch or flight gains.
 retains the independent airborne audit and seven native collapse recordings.
 The original source candidate now rotates once and reaches ground contact,
 but rebounds and falls at 1.991125 s. Earlier opening and slower recovery
-also fail. Successful native standing recovery and its GIF remain open.
+also fail. That baseline fails; the later slow-recovery result below holds landing.
 
 Post-touchdown gain/landing-hip probes (nine trials) and a corrected-plant
 launch/opening search (17 trials plus three crouch follow-ups) also fail.
@@ -615,8 +616,8 @@ The coarse-step best extends time to collapse from 1.8595 to 2.743 s but reaches
 1.190973x rated joint speed; it is not a qualified candidate. See
 [landing probes](evidence/g1-contact-backflip/native-transfer/landing-search/README.md)
 and [corrected launch search](evidence/g1-contact-backflip/native-transfer/corrected-launch-search/README.md).
-Remaining work is sustained landing balance and actuator/contact qualification;
-no native-success GIF has been generated.
+These earlier trials precede the held recovery result below. Actuator/contact
+qualification remains open.
 
 ### Support-relative landing feedback
 

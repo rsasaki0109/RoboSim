@@ -9,6 +9,7 @@
 //! physics backflip. See `docs/G1_CONTACT_BACKFLIP.md`.
 
 mod native;
+mod native_recording;
 mod recording;
 
 use std::fs;
@@ -149,6 +150,10 @@ fn pose_at(joint_names: &[String], tau: f64) -> (f64, f64, Vec<f64>) {
 fn main() {
     if std::env::args().any(|arg| arg == "--native-probe") {
         native::run();
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--native-recording") {
+        native_recording::run();
         return;
     }
     if std::env::args().any(|arg| arg == "--recording") {
