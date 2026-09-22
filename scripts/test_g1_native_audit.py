@@ -44,6 +44,12 @@ class NativeAuditTests(unittest.TestCase):
         row.update(min_solver_separation_m=-1e-9, negative_separation_steps=1)
         self.assertIn("no_nonadjacent_self_overlap", audit(result)["failed_gates"])
 
+    def test_missing_self_pair_geometry_cannot_pass(self):
+        result = self.complete_fixture()
+        result["contact_separation_audit"] = [row for row in result["contact_separation_audit"]
+            if "environment" in (row["link_a"], row["link_b"])]
+        self.assertIn("contact_evidence", audit(result)["failed_gates"])
+
     def test_speed_boundary_and_nonfinite_values_fail(self):
         for speed in (1.05, float("nan"), float("inf"), None, True):
             result = self.complete_fixture()

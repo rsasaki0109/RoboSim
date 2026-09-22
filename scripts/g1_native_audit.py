@@ -99,6 +99,11 @@ def audit(result):
         for row in pairs:
             if not isinstance(row, dict) or not finite(row.get("max_normal_impulse_ns")) or row["max_normal_impulse_ns"] < 0:
                 contact_valid = False
+        if contact_valid:
+            pair_names = lambda row: tuple(sorted((row["link_a"], row["link_b"])))
+            # Every retained impulse pair needs geometric evidence too; a
+            # truncated self-gap table must not look collision-free.
+            contact_valid = {pair_names(row) for row in pairs} <= {pair_names(row) for row in gaps}
     gates["contact_evidence"] = contact_valid
     gates["no_nonfoot_ground_contact"] = contact_valid and not nonfoot_ground
     gates["no_nonadjacent_self_overlap"] = contact_valid and not overlapping_self
