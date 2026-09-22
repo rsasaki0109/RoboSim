@@ -4,7 +4,8 @@ The candidate selected by the unchanged five-second diagnostic loss in
 `../fine-knee-refinement/` is evaluated for 15 seconds with the same immutable
 producer and full-contact model. The 500 µs rollout passes every recorded
 audit gate, including measured physical effort and joint-speed limits.
-The 125 and 62.5 µs trials are still running; this is not qualification.
+The identical 125 µs trial also completes 15 seconds and passes all recorded
+gates. The 62.5 µs trial is still running; this is not qualification.
 No final success GIF has been generated.
 
 Producer source: `0c84bfdec8bdbdd3a4d9724e5bf13469fc895243`.

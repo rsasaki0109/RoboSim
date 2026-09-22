@@ -769,11 +769,31 @@ gate or rounding away the measured excess.
 ### Regression checks for the shared rotation correction
 
 The normalized f64 rotation boundary also changed the trajectories of two
-existing demos. The lift claw's velocity motors now have a 0.3 Nm torque bound
+existing demos. The lift claw's velocity motors now have a 0.1 Nm torque bound
 instead of an unbounded/default-force command, allowing both fingers to establish
 the existing grasp gate before the first finger pushes the cube away. Example 31
-again carries and releases the cube (1.13 m); lift and pick/place regressions pass.
+again carries and releases the cube (1.06 m); lift and pick/place regressions pass. The 0.1 Nm cap also
+passes the simultaneous lower-and-close observation regression (the earlier
+0.3 Nm cap failed that case).
 The Go2 robust overlay is retuned by a 0.85 coefficient scale, preserving its
 existing two-window, perturbation and repeatability tests and example 60's
 heading/transport/height gates. These checks are separate from G1 qualification;
 the native G1 validation continues using its immutable producer.
+
+### Shared simulation regressions after normalized rotations
+
+A controlled comparison that temporarily removed only the f64 quaternion
+normalization restored the ten old `rne_ai` failures, but failed the seven
+checks covered by the earlier 0.3 Nm lift/0.85 robust-turn calibration. The raw
+comparison had 369 passes, 7 failures and 12 ignored tests. Normalization is
+retained; reverting it would reintroduce hierarchical transform drift.
+
+The procedural differential-drive model declared +X forward but placed wheels
+on X with vertical Y spindles. Corrected wheels lie on ±Z and spin about -Z.
+Thin 32-segment convex cylinders avoid the chassis overlap of an axial capsule.
+Two low-friction fixed spherical supports prevent chassis-floor drag. Velocity
+motors use force-based gain and a 1 N·m actuator ceiling, so motion comes from
+wheel contact, without prescribing base velocity. Existing forward-goal,
+agent, sensor, replay and vectorized checks pass (37 filtered `rne_ai` tests),
+alongside four robot geometry/kinematics tests. This procedural model change
+does not alter the G1 model or immutable backflip producer.

@@ -782,7 +782,7 @@ const LIFT_FINGER_MOTOR_GAIN: f64 = 30.0;
 /// finger does not eject the object before the opposite finger can establish
 /// the existing two-sided grasp gate. Friction-mode holds configure their own
 /// force limits separately.
-const LIFT_FINGER_MAX_FORCE_NM: f64 = 0.3;
+const LIFT_FINGER_MAX_FORCE_NM: f64 = 0.1;
 /// Position-hold stiffness for the planar (`mm_minimal`/`mm_mobile`) gripper
 /// finger joints. At the old pure velocity motor (gain 1.0, no restoring force) a
 /// zero command did not HOLD the fingers: the arm's own swing flung them about
