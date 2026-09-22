@@ -1,0 +1,44 @@
+{
+  "source_commit": "428ef7b922b79e27ae0c084c607d7a864d28d730",
+  "source_sha256": {
+    "Cargo.toml": "91eee121b6bf446595d43e8f2ba451d6149049f7bfbed4c6acd88e9667d3fadd",
+    "Cargo.lock": "6b9f923df7bac54a1ac42bcfd3431106936fb61f1c1b7370dbb9d08e78e54447",
+    "crates/rne_physics/src/components.rs": "8a4ce7a4bbb480bece3d9a9d086d7381d383589b8520fbe6b09c398ead0b5936",
+    "crates/rne_physics/src/lib.rs": "6479c81fa8a64bdf91eb81d6fb97234a033dd1393f7b0c7cda51f320bdd00385",
+    "crates/rne_physics_rapier/Cargo.toml": "0db0a54a2888523a8ccb79059386039ba9ffa46cc968465a9b64254ff19db8fc",
+    "crates/rne_physics_rapier/src/backend.rs": "77c12efcb5563cfa982b87d251e4ef162e954de8404362ae415c2fb29984ee32",
+    "examples/114_g1_backflip_gif/Cargo.toml": "9cb4fb4f421319128a600db609d9eb911a593686ac669b618b719b1be3cbbdeb",
+    "examples/114_g1_backflip_gif/native.rs": "5821bd1facd34ee78bb79a288fb4a7a0cb2550b59bb93959e130b5c5f62796f2",
+    "third_party/rapier3d/Cargo.toml": "01d5f1b47c6002e2390a81e15d9ada9dfd92e53dde390f19eb0a5940b112f563",
+    "third_party/rapier3d/src/dynamics/joint/multibody_joint/multibody.rs": "e27350f998bfb6416a27f411a06c02a595143c65ee38179530daa7628e5ed6ce",
+    "third_party/rapier3d/RNE_UPSTREAM_SHA256.json": "77ec485ce27993c69f7f044543ce34079b9f38f9071a1c221a4a41e0167df31f"
+  },
+  "binary_sha256": "7dd30d06330c5712c1c9b7a1f85612163ec733a34be640a35d88de92c0bf666f",
+  "scene_audit": "../contact-diagnostics/passive-model-audit.json",
+  "scene_audit_sha256": "f9fb0341a8ce005321e00f4b290ba106385455aefeafb105c7b41f713ac249c5",
+  "runtime_armature_scope": "All 23 movable joint child links; zero for compatibility comparison, 0.01 kg m\u00b2 for other candidates. Scene audit describes the URDF before this runtime override.",
+  "zero_armature_regression": {
+    "reference": "../contact-diagnostics/flip-loss-16.json",
+    "all_previous_fields_and_frames_exactly_equal": true
+  },
+  "validation": {
+    "physics_core_and_backend_tests": 44,
+    "vendor_unit_tests": 17,
+    "example_tests": 5,
+    "targeted_clippy": "passed with -D warnings; unchanged upstream dependency emits 19 warnings",
+    "unmodified_rapier_default_feature_build": "passed (cargo check with original registry source path override)",
+    "workspace_format": "passed",
+    "full_workspace_ci": "not rerun to preserve 30 GiB disk reserve"
+  },
+  "artifact_sha256": {
+    "armature-effort-125us.json": "bab031e549efe006bfe8f1f4663e6ba7e58ef3accda4be661e145224e7f7e670",
+    "armature-flip.json": "77fc62ce4561ba6bcaccd72b1ace17d1194f882d48218882dba074e33945ac87",
+    "armature-stand.json": "a15f9eef35e8674d14f4cfa07646de3d00ae90172d397b0fd4f89a404ddc526b",
+    "candidate.json": "1a12f8275b3016ccc3a32e55227c7b33a8f1bdc546459342adf1ceff558c5972",
+    "open-5-candidate.json": "fd5f89d3ef5634d664db8f10465c3efc7c5b299f2f5731a75f6d606994f0d60e",
+    "open-5.json": "4543e5eeddb4347ea313a8c1bb7837563f8d19745b3030623bcd869005544b8f",
+    "open-5p5-candidate.json": "3508229ad8e52219f48b9c01be8ed3359aaab678dedf25558027aed42c9cd3ff",
+    "open-5p5.json": "220a6ea1930ec66fc2baa07adef15a2743152095e7f70d062e2c3b21fae33f7d",
+    "zero-armature-flip.json": "a433d5ffec18f3397dce17cef6cc72640e8a68a7b0782eb8d50f42f1aeba9fe2"
+  }
+}

@@ -546,3 +546,9 @@ checks scene structure and does not exercise these candidate overrides.
 
 [ADR 030](adr/030-revolute-joint-armature.md) describes the local Rapier patch,
 analytic tests, invalid-input behavior and repository-build limitation.
+
+[Native armature comparison](evidence/g1-contact-backflip/native-transfer/armature/README.md)
+records exact zero-armature regression, improved standing motion, failed
+velocity/direct-torque flips, and two earlier-opening probes. Opening at
+5.0 rad reduces peak measured speed to 1.02955x, but still under-rotates and
+falls. No native landing or hardware qualification is claimed.

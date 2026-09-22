@@ -276,3 +276,23 @@ and 1.73428. Joint armature 0.01 remains unmatched; Rapier 0.22 exposes no
 public generalized-inertia setter. Adding link spatial inertia would not be
 an equivalent implementation. Native landing and its success GIF remain open.
 See [contact and passive-loss evidence](evidence/g1-contact-backflip/native-transfer/contact-diagnostics/README.md).
+
+### Native generalized motor armature
+
+A repository-local Rapier 0.22 patch now supports constant revolute generalized
+armature without changing spatial link mass/inertia. Example 114 enables the
+experimental backend feature and accepts `joint_armature_kg_m2`; default
+backend builds still compile against unmodified upstream Rapier. Analytic
+fixed/floating-base acceleration, torque-limited motor, remapping and invalid
+input tests pass; zero-armature native output exactly reproduces prior fields
+and frames. See [ADR 030](adr/030-revolute-joint-armature.md).
+
+At 0.01 kg·m² per movable joint, standing tail speed improves from 0.10257 to
+0.02658 m/s, but the unchanged positive-impulse continuity gate remains false.
+Velocity-motor backflip overspeed decreases to 1.54006x. Direct torque at
+0.125 ms becomes runnable and reaches one rotation in flight, yet landing
+collapses. Earlier opening at 5.0 rad lowers overspeed to 1.02955x but
+under-rotates and falls. Native success/GIF remain open; launch, tuck and
+opening need optimization on the native plant. Full-body/self-contact,
+constraint friction, contact/limit solvers and free-root numerical damping
+remain different. See [armature comparison evidence](evidence/g1-contact-backflip/native-transfer/armature/README.md).
