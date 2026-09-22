@@ -369,3 +369,14 @@ connected link contacts. Address topology-derived structural exclusions
 before optimizing this plant, retaining nonadjacent body/self and ground
 contacts. The foot-only observer regression matches all 600 prior frames
 exactly. See [full-contact evidence](evidence/g1-contact-backflip/native-transfer/convex-full-contact/README.md).
+
+### Structural filters and self-contact-free tuck
+
+The native probe can now exclude fixed-cluster/internal and directly connected
+cluster contacts using the authored joint graph. Ground and nonadjacent self
+contacts remain active. Fixed logo/torso interference disappears, but standing
+still fails speed/positive-impulse continuity. The baseline flip hits knee/torso
+in flight and falls at 2.5165 s. Tuck hip targets 2.10, 2.20 and 2.25 rad remove
+positive self-contact impulses but still fall and exceed rated speed. Optimize
+launch and opening jointly around these clear tuck poses; no qualification
+gate has been relaxed. See [structural contact evidence](evidence/g1-contact-backflip/native-transfer/structural-contact/README.md).

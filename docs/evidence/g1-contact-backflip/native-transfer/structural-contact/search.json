@@ -1,0 +1,42 @@
+{
+  "source_commit": "dd072d22cf03bd9c6acf75c612c8fa7b36c9d815",
+  "binary_sha256": "a93719add4f62a4be66e418f08e704b2a33cd69bcae4f83e398452c980fd2d62",
+  "parameter_index": 6,
+  "values_rad": [
+    2.1,
+    2.2,
+    2.25
+  ],
+  "results": [
+    {
+      "failure": "Landing collapsed at maneuver time 2.000500 s",
+      "completed_maneuver_time_s": 2.0010000000000003,
+      "signed_rotation_rad": -4.69978304034586,
+      "peak_joint_speed_ratio": 1.3437258720397949,
+      "final_second_min_upright": null,
+      "final_second_max_base_speed_m_s": null,
+      "hip_rad": 2.1,
+      "rollout_sha256": "c90c0bd693c062f78b1f86870a1bf85951046559636b29b215f6a5c63d97fc75"
+    },
+    {
+      "failure": "Landing collapsed at maneuver time 1.966000 s",
+      "completed_maneuver_time_s": 1.9665000000000001,
+      "signed_rotation_rad": -4.700899903862007,
+      "peak_joint_speed_ratio": 1.208562469482422,
+      "final_second_min_upright": null,
+      "final_second_max_base_speed_m_s": null,
+      "hip_rad": 2.2,
+      "rollout_sha256": "a6ebaf6e60d87af7ce769cd5eaa092d892cddadac24fb91eb8d8dd128912ed60"
+    },
+    {
+      "failure": "Landing collapsed at maneuver time 2.282500 s",
+      "completed_maneuver_time_s": 2.2830000000000004,
+      "signed_rotation_rad": -4.708747707019451,
+      "peak_joint_speed_ratio": 1.1894927024841309,
+      "final_second_min_upright": null,
+      "final_second_max_base_speed_m_s": null,
+      "hip_rad": 2.25,
+      "rollout_sha256": "fdc73b93d67cfd880bf4a3b3ee0a76c594cae288d1cad30c1814e3a0fd55e323"
+    }
+  ]
+}

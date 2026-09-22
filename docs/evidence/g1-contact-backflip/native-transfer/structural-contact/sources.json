@@ -1,0 +1,19 @@
+{
+  "source_commit": "dd072d22cf03bd9c6acf75c612c8fa7b36c9d815",
+  "binary_sha256": "a93719add4f62a4be66e418f08e704b2a33cd69bcae4f83e398452c980fd2d62",
+  "scene_model_audit": "../convex-full-contact/model-audit.json",
+  "dt_us": 500,
+  "qualification": "All trials fail; no gates relaxed.",
+  "artifact_sha256": {
+    "README.md": "029c1f532b732fac864d0983698e23a1e10df6407e3ebaa457c8fc2cd014f64c",
+    "flip.json.gz": "f9c88b5d53530f6e1b0b44839a35eb4a047fac4381751751f198ca79191c1d5c",
+    "hip-2p1.json": "e8695023c9e5a0c6aef61b39ba256130485668e932ff90b9a6ec959816e297a2",
+    "hip-2p1.rollout.json.gz": "d08f76c6a840bcab252fd86370463017bafc3e30163994e0905095cbf027ddd2",
+    "hip-2p2.json": "fd47f0d30408699f51140f16e908017a0c9dfd17e320bf86bfff6c5c1284aa13",
+    "hip-2p2.rollout.json.gz": "edc6e72ad1779305a8125eb28c3c71a6d3e1fd21e564e543259e13aa28172532",
+    "hip-2p25.json": "8648bc526a3fe3f76e853a2a6a273356226d7029a42c3a28101f56bd22cb18a6",
+    "hip-2p25.rollout.json.gz": "62b913cee41803c49c410fd172a94fba4a678e5170b0c07f81d648b76f80b8fa",
+    "search.json": "abbcd653c4822e80b293ecf73a964277771d6deb1e055f791b6ce9e4e605f968",
+    "stand.json.gz": "f80379bb0ab4024b2bac513d002c09c2621fc9b999debbcefc2b0230ee08f595"
+  }
+}
