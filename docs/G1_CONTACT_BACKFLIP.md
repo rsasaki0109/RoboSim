@@ -552,3 +552,18 @@ records exact zero-armature regression, improved standing motion, failed
 velocity/direct-torque flips, and two earlier-opening probes. Opening at
 5.0 rad reduces peak measured speed to 1.02955x, but still under-rotates and
 falls. No native landing or hardware qualification is claimed.
+
+### Native optimization with direct torque
+
+The native search accepts `--motor-mode effort --dt-us 125` to evaluate the
+same armature-enabled direct-torque probe as the fine-step transfer tests.
+Defaults remain velocity motors at 500 µs. `--axes launch-tuck-open` searches
+launch hip target, tucked knee target and opening angle; `--axes all` retains
+the original six coordinates. Every round evaluates its fixed batch, then
+updates the best candidate and checkpoint in deterministic candidate order.
+Search scores never constitute backflip qualification.
+
+The driver verifies the returned step, motor mode and armature coefficient,
+and rejects binary replacement during a campaign. Fine-step trials have a
+1200-second execution timeout; coarse trials retain 600 seconds. The 30 GiB
+free-space check runs before the campaign and before each evaluation.

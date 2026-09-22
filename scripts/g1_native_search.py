@@ -25,6 +25,13 @@ AXES = [
     (10, -0.7, 0.3, 0.15),
 ]
 
+# A focused first stage after armature alignment: launch hip, tuck knee, opening.
+LAUNCH_TUCK_OPEN_AXES = [
+    (3, 0.5, 2.0, 0.2),
+    (7, 1.2, 2.7, 0.4),
+    (11, 4.5, 6.1, 0.25),
+]
+
 
 def loss(result):
     """Score motion and measured limits; this is not a qualification predicate."""
@@ -62,7 +69,18 @@ def write_json(path, value):
     temporary.replace(path)
 
 
-def search(binary, scene, candidate, output, rounds, workers, axes=AXES):
+def search(
+    binary,
+    scene,
+    candidate,
+    output,
+    rounds,
+    workers,
+    axes=AXES,
+    *,
+    dt_us=500,
+    motor_mode="velocity",
+):
     """Evaluate each coordinate batch concurrently, then select in fixed order."""
     binary, scene, output = (
         Path(binary).resolve(),
@@ -73,6 +91,9 @@ def search(binary, scene, candidate, output, rounds, workers, axes=AXES):
         raise ValueError("built native binary and prepared scene required")
     if rounds < 0 or workers not in range(1, 5):
         raise ValueError("nonnegative rounds and 1..4 workers required")
+    if dt_us not in (125, 250, 500, 1000) or motor_mode not in ("velocity", "effort"):
+        raise ValueError("supported step and velocity/effort motor mode required")
+    timeout_s = 1200 if dt_us < 500 else 600
     if shutil.disk_usage(output.parent).free < 30 * 1024**3:
         raise RuntimeError("30 GiB disk reserve required")
     output.mkdir(exist_ok=False)
@@ -84,6 +105,8 @@ def search(binary, scene, candidate, output, rounds, workers, axes=AXES):
         index, parameters = item
         if shutil.disk_usage(output).free < 30 * 1024**3:
             raise RuntimeError("30 GiB disk reserve required")
+        if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_hash:
+            raise ValueError("native binary changed during campaign")
         prefix = output / f"candidate-{index:04d}"
         input_path = prefix.with_suffix(".json")
         rollout_path = prefix.with_suffix(".rollout.json")
@@ -92,24 +115,41 @@ def search(binary, scene, candidate, output, rounds, workers, axes=AXES):
             str(binary),
             "--native-probe",
             "--native-declared",
-            "--native-velocity-servo",
             "--native-scene",
             str(scene),
             "--native-dt-us",
-            "500",
+            str(dt_us),
             "--native-stop-on-fall",
             "--native-candidate",
             str(input_path),
             "--native-output",
             str(rollout_path),
         ]
+        if motor_mode == "velocity":
+            command.append("--native-velocity-servo")
         with prefix.with_suffix(".log").open("w") as log:
             subprocess.run(
-                command, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=600
+                command,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                check=True,
+                timeout=timeout_s,
             )
         result = json.loads(rollout_path.read_text())
+        if hashlib.sha256(binary.read_bytes()).hexdigest() != binary_hash:
+            raise ValueError("native binary changed during campaign")
         if result["backend"] != "RoboSim/Rapier":
             raise ValueError("unexpected physics backend")
+        if (
+            result["dt_s"] != dt_us * 1e-6
+            or result["velocity_servo"] != (motor_mode == "velocity")
+            or result["implicit_position_motors"]
+            or result["joint_armature_kg_m2"]
+            != parameters.get("joint_armature_kg_m2", 0.0)
+        ):
+            raise ValueError(
+                "rollout step, motor mode or armature differs from campaign"
+            )
         return {
             "index": index,
             "loss": loss(result),
@@ -128,7 +168,9 @@ def search(binary, scene, candidate, output, rounds, workers, axes=AXES):
                 "binary_sha256": binary_hash,
                 "scene": str(scene),
                 "workers": workers,
-                "dt_s": 0.0005,
+                "dt_s": dt_us * 1e-6,
+                "motor_mode": motor_mode,
+                "timeout_s": timeout_s,
                 "axes": axes,
                 "qualified_backflip": False,
                 "note": "Diagnostic model only; complete contact qualification remains open.",
@@ -157,10 +199,18 @@ def search(binary, scene, candidate, output, rounds, workers, axes=AXES):
                     )
                     batch.append((next_index, variant))
                     next_index += 1
-            results = list(pool.map(evaluate, batch))
-            rows.extend(results)
-            best = min([best] + results, key=lambda row: (row["loss"], row["index"]))
-            save(best)
+            # Candidates were all generated from the round's starting point.
+            # Consume in index order so checkpoints and ties stay deterministic.
+            for result in pool.map(evaluate, batch):
+                rows.append(result)
+                best = min([best, result], key=lambda row: (row["loss"], row["index"]))
+                save(best)
+                print(
+                    f"candidate {result['index']}: loss {result['loss']:.6f}, "
+                    f"completed {result['completed_maneuver_time_s']:.6f} s, "
+                    f"speed/rating {result['peak_joint_speed_ratio']:.6f}",
+                    flush=True,
+                )
             print(
                 f"round {iteration + 1}: {len(rows)} evaluations, best loss {best['loss']:.6f}; qualification false",
                 flush=True,
@@ -174,6 +224,11 @@ def main():
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--rounds", type=int, default=1)
     parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--dt-us", type=int, choices=[125, 250, 500, 1000], default=500)
+    parser.add_argument(
+        "--motor-mode", choices=["velocity", "effort"], default="velocity"
+    )
+    parser.add_argument("--axes", choices=["all", "launch-tuck-open"], default="all")
     args = parser.parse_args()
     search(
         args.binary,
@@ -182,6 +237,9 @@ def main():
         args.output,
         args.rounds,
         args.workers,
+        AXES if args.axes == "all" else LAUNCH_TUCK_OPEN_AXES,
+        dt_us=args.dt_us,
+        motor_mode=args.motor_mode,
     )
 
 
