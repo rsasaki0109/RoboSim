@@ -80,6 +80,7 @@ def search(
     *,
     dt_us=500,
     motor_mode="velocity",
+    duration_s=5,
 ):
     """Evaluate each coordinate batch concurrently, then select in fixed order."""
     binary, scene, output = (
@@ -93,6 +94,8 @@ def search(
         raise ValueError("nonnegative rounds and 1..4 workers required")
     if dt_us not in (125, 250, 500, 1000) or motor_mode not in ("velocity", "effort"):
         raise ValueError("supported step and velocity/effort motor mode required")
+    if not isinstance(duration_s, int) or duration_s not in range(5, 16):
+        raise ValueError("integer maneuver duration in 5..15 required")
     timeout_s = 1200 if dt_us < 500 else 600
     if shutil.disk_usage(output.parent).free < 30 * 1024**3:
         raise RuntimeError("30 GiB disk reserve required")
@@ -119,6 +122,8 @@ def search(
             str(scene),
             "--native-dt-us",
             str(dt_us),
+            "--native-duration-s",
+            str(duration_s),
             "--native-stop-on-fall",
             "--native-candidate",
             str(input_path),
@@ -142,6 +147,7 @@ def search(
             raise ValueError("unexpected physics backend")
         if (
             result["dt_s"] != dt_us * 1e-6
+            or result.get("maneuver_duration_s") != duration_s
             or result["velocity_servo"] != (motor_mode == "velocity")
             or result["implicit_position_motors"]
             or result["joint_armature_kg_m2"]
@@ -181,6 +187,7 @@ def search(
                 "dt_s": dt_us * 1e-6,
                 "motor_mode": motor_mode,
                 "timeout_s": timeout_s,
+                "maneuver_duration_s": duration_s,
                 "axes": axes,
                 "qualified_backflip": False,
                 "note": "Diagnostic model only; complete contact qualification remains open.",

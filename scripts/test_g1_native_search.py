@@ -17,6 +17,7 @@ def sample():
     return {
         "backend": "RoboSim/Rapier",
         "dt_s": 0.0005,
+        "maneuver_duration_s": 5,
         "velocity_servo": True,
         "implicit_position_motors": False,
         "joint_armature_kg_m2": 0.0,
@@ -189,6 +190,18 @@ class NativeSearchTest(unittest.TestCase):
                         dt_us=125,
                         motor_mode="effort",
                     )
+            with self.assertRaisesRegex(ValueError, "differs from campaign"):
+                search(
+                    binary,
+                    binary,
+                    seed,
+                    base / "ignored-duration",
+                    0,
+                    1,
+                    dt_us=125,
+                    motor_mode="effort",
+                    duration_s=15,
+                )
             for dt, mode in [(126, "effort"), (125, "implicit")]:
                 with self.assertRaisesRegex(ValueError, "supported step"):
                     search(

@@ -110,6 +110,22 @@ pub(super) fn run() {
         [125, 250, 500, 1000].contains(&dt_us),
         "supported steps: 125, 250, 500, 1000 us"
     );
+    let maneuver_duration_s: u64 = args
+        .iter()
+        .position(|arg| arg == "--native-duration-s")
+        .map(|i| {
+            args.get(i + 1)
+                .expect("maneuver duration")
+                .parse()
+                .expect("integer maneuver duration")
+        })
+        .unwrap_or(5);
+    assert!(
+        (5..=15).contains(&maneuver_duration_s),
+        "maneuver duration must be 5..=15 s"
+    );
+    let final_second_start_s = maneuver_duration_s as f64 - 1.0;
+    let complete_threshold_s = maneuver_duration_s as f64 - 0.001;
     let solver_iterations: usize = args
         .iter()
         .position(|arg| arg == "--native-solver-iterations")
@@ -350,7 +366,7 @@ pub(super) fn run() {
     let mut peak_speed_joint = None;
     let mut peak_speed_time_s = 0.0;
     let mut max_position_excess_rad = 0.0_f64;
-    for step in 0..6_000_000 / dt_us {
+    for step in 0..(maneuver_duration_s + 1) * 1_000_000 / dt_us {
         let t = step as f64 * dt_s - 1.0;
         if names.iter().zip(&limits).any(|(name, limit)| {
             let q = sim.named_joint_position(name).unwrap();
@@ -588,7 +604,7 @@ pub(super) fn run() {
             longest_air_s = longest_air_s.max(air_s);
         }
         let upright = (base.rotation * Vec3::Z).y;
-        if t >= 4.0 {
+        if t >= final_second_start_s {
             let pair = ["left_ankle_roll_link", "right_ankle_roll_link"]
                 .iter()
                 .any(|name| sim.named_entities_in_contact(name, "ground"));
@@ -623,13 +639,14 @@ pub(super) fn run() {
         "failure":failure,"completed_maneuver_time_s":completed_s,"implicit_position_motors":implicit,"declared_inertial_scene":declared,"standing_only":standing_only,"note":"Transfer probe: native primitive collisions, self-collision disabled; qualification pending",
         "joint_armature_kg_m2":joint_armature_kg_m2,"solver_iterations":solver_iterations,"final_second_contact_diagnostics":tail_diagnostics.report(dt_s),
         "dt_s":dt_s,"contact_friction":contact_friction,"balance_velocity_source":if declared {"whole_robot_com"} else {"base_origin"},"parameters":p,"recovery_s":recovery_s,"landing_kp_nm_per_rad":landing_kp_nm_per_rad,"landing_kd_nm_s_per_rad":landing_kd_nm_s_per_rad,"roll_balance":roll_balance,"landing_stance_rad":landing_stance_rad,"stop_on_fall":stop_on_fall,"mass_kg":mass_kg,"knee_limit_nm":120.0,
-        "standing_passed":standing_only && failure.is_none() && completed_s>=4.999
+        "standing_passed":standing_only && failure.is_none() && completed_s>=complete_threshold_s
             && min_tail_upright>0.99 && max_tail_speed<0.1 && tail_contact
             && last_position.y>0.65,"signed_rotation_rad":angle,
         "takeoff_s":takeoff,"touchdown_s":touchdown,"longest_air_s":longest_air_s,
-        "final_second_continuous_foot_contact":(completed_s>=4.999).then_some(tail_contact),
-        "final_second_min_upright":(completed_s>=4.999).then_some(min_tail_upright),"final_second_max_base_speed_m_s":(completed_s>=4.999).then_some(max_tail_speed),
+        "final_second_continuous_foot_contact":(completed_s>=complete_threshold_s).then_some(tail_contact),
+        "final_second_min_upright":(completed_s>=complete_threshold_s).then_some(min_tail_upright),"final_second_max_base_speed_m_s":(completed_s>=complete_threshold_s).then_some(max_tail_speed),
         "joint_link_names":names,"frames":history});
+    output["maneuver_duration_s"] = json!(maneuver_duration_s);
     output["landing_pitch_rate_gain_s"] = json!(landing_pitch_rate_gain_s);
     output["landing_early_com_velocity_gain_s_per_m"] =
         json!(landing_early_com_velocity_gain_s_per_m);

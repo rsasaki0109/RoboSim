@@ -645,3 +645,11 @@ COM_velocity_x, before the existing ±0.6 rad correction clamp. It blends to
 the existing late pitch/COM-velocity feedback after recovery. Preparation,
 launch and flight gains are unchanged. These fields are echoed and checked
 by the search driver; absent fields preserve the previous feedback.
+
+`--native-duration-s 5..15` extends the native maneuver after the unchanged
+one-second preparation (default 5). The final-second metrics follow the
+requested endpoint, rather than always sampling from 4 s. This permits slow
+recovery candidates to be checked after their standing transition has completed.
+The native search Python helper accepts `duration_s` and rejects a binary that
+ignores the requested duration. Its score remains a diagnostic, capped at
+five seconds of survival credit; extended rollouts do not bypass qualification.
