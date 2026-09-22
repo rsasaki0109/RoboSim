@@ -529,3 +529,8 @@ It sets all 23 revolute joints to viscous damping 0.05 Nm·s/rad and regularized
 Coulomb loss `0.2 * tanh(velocity / 0.1)` Nm. This replaces Rapier's default
 angular damping 0.1. Source MuJoCo constraint friction and joint armature 0.01
 remain unmatched; the option does not establish model equivalence.
+
+[Contact and passive-loss comparison recordings](evidence/g1-contact-backflip/native-transfer/contact-diagnostics/README.md)
+show that all three standing cases retain active ground pairs but fail the
+strict positive-impulse gate. Passive-loss flips reduce measured overspeed to
+1.70405/1.73428 at 0.5/0.125 ms, yet both collapse at 1.2 s.

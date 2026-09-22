@@ -262,3 +262,17 @@ flip runs collapse (peak speed/rating 2.31648 and 2.18477). Full-body collision,
 source armature/passive losses and successful native landing remain open.
 See [compound sole evidence](evidence/g1-contact-backflip/native-transfer/compound-soles/README.md)
 and [ADR 029](adr/029-compound-contact-primitives.md).
+
+### Native unloading and passive-loss comparison
+
+Every-step diagnostics distinguish positive foot impulse from an active ground
+contact pair. Baseline standing has 24 unloaded steps per final second (maximum
+2 ms) with no missing ground pair; sole geometry remains below the ground plane.
+Increasing solver iterations 16→64 reduces this to 8 steps (maximum 0.5 ms),
+but the unchanged standing gate still fails. A separate generated model applies
+damping 0.05 and regularized Coulomb loss 0.2 Nm to all 23 movable joints.
+Both its 0.5 ms and 0.125 ms backflips collapse, with peak speed/rating 1.70405
+and 1.73428. Joint armature 0.01 remains unmatched; Rapier 0.22 exposes no
+public generalized-inertia setter. Adding link spatial inertia would not be
+an equivalent implementation. Native landing and its success GIF remain open.
+See [contact and passive-loss evidence](evidence/g1-contact-backflip/native-transfer/contact-diagnostics/README.md).
