@@ -797,3 +797,11 @@ wheel contact, without prescribing base velocity. Existing forward-goal,
 agent, sensor, replay and vectorized checks pass (37 filtered `rne_ai` tests),
 alongside four robot geometry/kinematics tests. This procedural model change
 does not alter the G1 model or immutable backflip producer.
+
+The remaining earlier Go2 overlay/policy and G1 short-heading candidates are
+recalibrated without changing their positive behavior gates: overlay coefficients
+×0.95, feedback body-lean columns ×0.8, and G1 negative-yaw gain 0.45. The
+hand-designed gain-25 negative steering experiment may now fall; its test
+classifies an unstable candidate as rejected instead of requiring every failed
+steering idea to remain upright. Baseline stability and all G1 backflip audit
+gates remain unchanged. Full workspace validation is still required.
