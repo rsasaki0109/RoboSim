@@ -380,3 +380,14 @@ in flight and falls at 2.5165 s. Tuck hip targets 2.10, 2.20 and 2.25 rad remove
 positive self-contact impulses but still fall and exceed rated speed. Optimize
 launch and opening jointly around these clear tuck poses; no qualification
 gate has been relaxed. See [structural contact evidence](evidence/g1-contact-backflip/native-transfer/structural-contact/README.md).
+
+### Full-contact optimization candidate within measured speed threshold
+
+A 17-evaluation coordinate search finds a full-contact 500 µs candidate that
+survives through 5 s with peak speed/rating 1.049782 and continuous foot impulse.
+It is still recovering (maximum tail root speed 0.161819 m/s), so standing is
+not qualified. Long 500/125 µs validation and signed-separation auditing are
+in progress; no fine-step or full-body success has been established. The
+signed-distance query distinguishes overlap from predictive gaps even when
+normal impulse is zero. Exact 62.5 µs timing is available for later refinement.
+See [full-contact optimization evidence](evidence/g1-contact-backflip/native-transfer/full-launch-open-search/README.md).

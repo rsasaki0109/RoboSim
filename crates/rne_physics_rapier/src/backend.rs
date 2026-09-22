@@ -1681,6 +1681,14 @@ mod tests {
                     .iter()
                     .all(|c| c.impulse == 0.0));
             }
+            for entity in [a, b] {
+                world
+                    .entity_mut(entity)
+                    .insert(rne_physics::CollisionGroups::without_self_collision(1));
+            }
+            backend.sync_from_ecs(&mut world, id).unwrap();
+            backend.step(id, fixed_step()).unwrap();
+            assert!(backend.contact_separations(id).unwrap().is_empty());
         }
     }
 
