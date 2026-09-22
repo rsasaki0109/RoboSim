@@ -13,6 +13,10 @@ dependency.
 
 ## Real simulation showcase
 
+For hands-on joint sliders, saved poses, floor/obstacle editing, RGB/depth/LiDAR
+views and URDF/MJCF loading, start the [Robot workbench](docs/ROBOT_WORKBENCH.md):
+`cargo run --release --locked -p robot_workbench`.
+
 Every frame below is rendered by wgpu from deterministic simulation or pinned
 dataset/camera state. Reduced-motion clients receive the matching poster PNG.
 The quantitative gates and exact regeneration commands are in

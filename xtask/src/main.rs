@@ -2852,6 +2852,8 @@ fn parse_smoke_partition(partition: Option<&str>) -> anyhow::Result<SmokePartiti
 /// Runs the explicit CPU-only headless renderer and sensor test gates.
 fn ci_headless() -> anyhow::Result<()> {
     accelerator::validate_contract(&workspace_root()?)?;
+    run_step("cargo test --locked -p robot_workbench --no-default-features")?;
+    run_step("cargo run --locked -p robot_workbench --no-default-features -- --smoke")?;
     run_step("cargo test --locked -p rne_render --lib")?;
     run_step("cargo test --locked -p rne_sensor --lib")?;
     run_step("cargo test --locked -p rne_hardware_gateway")?;

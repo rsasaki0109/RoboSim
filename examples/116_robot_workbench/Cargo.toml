@@ -1,0 +1,33 @@
+[package]
+name = "robot_workbench"
+version = "0.3.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = ["gpu"]
+gpu = ["dep:rne_render_wgpu", "dep:base64", "dep:image"]
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+rne_mjcf.workspace = true
+rne_urdf_import.workspace = true
+rne_core.workspace = true
+rne_ecs.workspace = true
+rne_math.workspace = true
+rne_physics.workspace = true
+rne_physics_rapier.workspace = true
+rne_render.workspace = true
+rne_world.workspace = true
+rne_render_wgpu = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+image = { workspace = true, optional = true }
+
+[[bin]]
+name = "rne-workbench"
+path = "main.rs"
