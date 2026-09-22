@@ -16,6 +16,8 @@ rne_ai = { workspace = true }
 rne_dynamics = { workspace = true }
 rne_math = { workspace = true }
 rne_physics = { workspace = true }
+# Activate the repository-only generalized-inertia extension.
+rne_physics_rapier = { workspace = true, features = ["experimental-armature"] }
 rne_render = { workspace = true }
 rne_render_wgpu = { workspace = true, features = ["viewer"] }
 rne_robot = { workspace = true }

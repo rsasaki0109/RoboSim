@@ -326,6 +326,20 @@ impl Default for PhysicsMaterial {
     }
 }
 
+/// Constant diagonal inertia added to one revolute generalized coordinate.
+///
+/// Attach to the child link alongside `RevoluteJointDesc` and `MultibodyLink`.
+/// The Rapier backend with `experimental-armature` and the repository patch
+/// applies this to force and constraint dynamics without
+/// changing link spatial mass/inertia. Zero or absence preserves the original
+/// plant. Non-finite, negative, unrepresentable or unsupported configurations
+/// are rejected. Other backends do not yet implement this component.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RevoluteJointArmature {
+    /// Reflected motor inertia in kilogram-square-metres.
+    pub inertia_kg_m2: f64,
+}
+
 /// Revolute joint description for physics backends.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct RevoluteJointDesc {

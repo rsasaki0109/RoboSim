@@ -12,6 +12,7 @@ use rne_ecs::Parent;
 use rne_ecs::{Entity, World};
 use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
+use rne_physics::RevoluteJointArmature;
 use rne_physics::{
     Collider, CompoundCollider, ContactEvent, ContactPointSample, ExternalBodyWrench,
     FixedJointDesc, GravityScale, JointActuation, JointEffortMeasurement, JointMotor,
@@ -1019,6 +1020,24 @@ fn sync_joints_from_ecs(world: &World, state: &mut RapierWorldState) -> Result<(
 }
 
 fn apply_joint_motors(world: &World, state: &mut RapierWorldState) -> Result<(), PhysicsError> {
+    for id in sorted_entities(world) {
+        let entity = world.entity(id);
+        if let Some(armature) = entity.get::<RevoluteJointArmature>() {
+            if !cfg!(feature = "experimental-armature") && armature.inertia_kg_m2 != 0.0 {
+                return Err(invalid_passive_dynamics(entity.id(), "nonzero armature requires experimental-armature and the repository Rapier patch"));
+            }
+            if !armature.inertia_kg_m2.is_finite()
+                || armature.inertia_kg_m2 < 0.0
+                || !(armature.inertia_kg_m2 as f32).is_finite()
+                || (armature.inertia_kg_m2 > 0.0 && armature.inertia_kg_m2 as f32 == 0.0)
+                || entity.get::<RevoluteJointDesc>().is_none()
+                || entity.get::<MultibodyLink>().is_none()
+                || !state.entity_to_multibody_joint.contains_key(&entity.id())
+            {
+                return Err(invalid_passive_dynamics(entity.id(), "armature requires a realized revolute multibody joint and finite nonnegative representable inertia"));
+            }
+        }
+    }
     for (entity, joint_handle) in &state.entity_to_joint {
         let Some(axis) = motor_axis_for_entity(world, *entity) else {
             continue;
@@ -1055,6 +1074,15 @@ fn apply_joint_motors(world: &World, state: &mut RapierWorldState) -> Result<(),
                 *entity,
                 "supported articulated joints must have exactly one degree of freedom",
             ));
+        }
+        #[cfg(feature = "experimental-armature")]
+        {
+            let armature = world
+                .get::<RevoluteJointArmature>(*entity)
+                .map_or(0.0, |v| v.inertia_kg_m2 as f32);
+            if !multibody.set_armature(assembly_id, armature) {
+                return Err(PhysicsError::InitializationFailed);
+            }
         }
         if let Some(damping) = passive_viscous_damping(world, *entity)? {
             multibody.damping_mut()[assembly_id] = damping as f32;
@@ -2381,6 +2409,169 @@ mod tests {
             assert!(aligned > 0.01, "fixture must move: {aligned}");
             assert!((rotated-aligned).abs() < 1e-4,
                 "joint-origin rotation must preserve generalized effort: revolute={revolute}, aligned={aligned}, rotated={rotated}");
+        }
+    }
+
+    #[cfg(feature = "experimental-armature")]
+    fn armature_response(
+        armature: Option<f64>,
+        motor: bool,
+        floating: bool,
+    ) -> Result<f64, PhysicsError> {
+        let mut backend = RapierBackend::new();
+        let id = backend.create_world(PhysicsWorldDesc {
+            gravity_m_s2: Vec3::ZERO,
+            solver_iterations: 16,
+        })?;
+        let mut world = World::new();
+        let inertia = RigidBodyInertia {
+            center_of_mass_local_m: Vec3::ZERO,
+            ixx_kg_m2: 0.02,
+            iyy_kg_m2: 0.02,
+            izz_kg_m2: 0.02,
+            ixy_kg_m2: 0.0,
+            ixz_kg_m2: 0.0,
+            iyz_kg_m2: 0.0,
+        };
+        let parent = spawn_named(&mut world, "armature_parent");
+        world.entity_mut(parent).insert((
+            RigidBody {
+                body_type: if floating {
+                    RigidBodyType::Dynamic
+                } else {
+                    RigidBodyType::Fixed
+                },
+                mass_kg: 1.0,
+                ..RigidBody::default()
+            },
+            inertia,
+            MultibodyLink,
+            Transform3::default(),
+        ));
+        let child = spawn_named(&mut world, "armature_child");
+        world.entity_mut(child).insert((
+            RigidBody {
+                mass_kg: 1.0,
+                ..RigidBody::default()
+            },
+            inertia,
+            MultibodyLink,
+            Transform3::default(),
+            RevoluteJointDesc {
+                parent,
+                axis: Vec3::Z,
+                anchor_parent_m: Vec3::ZERO,
+                anchor_child_m: Vec3::ZERO,
+                relative_rotation: Quat::IDENTITY,
+                lower_rad: None,
+                upper_rad: None,
+            },
+            JointPassiveDynamics::Revolute {
+                viscous_damping_nm_s_per_rad: 0.0,
+                coulomb_friction_nm: 0.0,
+                coulomb_transition_velocity_rad_s: 0.0,
+            },
+        ));
+        if let Some(value) = armature {
+            world.entity_mut(child).insert(RevoluteJointArmature {
+                inertia_kg_m2: value,
+            });
+        }
+        if motor {
+            world.entity_mut(child).insert((
+                JointMotor {
+                    velocity_rad_s: 100.0,
+                    gain: 100.0,
+                    stiffness: 0.0,
+                    target_position: 0.0,
+                    max_force: 0.5,
+                },
+                JointMotorGainModel::ForceBased,
+            ));
+        } else {
+            world
+                .entity_mut(child)
+                .insert(JointActuation::RevoluteEffort {
+                    effort_nm: 0.5,
+                    max_effort_nm: 0.5,
+                });
+        }
+        // Remove the upstream free-root numerical damping too, so the
+        // floating two-body fixture has the undamped analytic inertia.
+        backend.sync_from_ecs(&mut world, id)?;
+        let state = backend.world_mut(id)?;
+        let handle = state.entity_to_multibody_joint[&child];
+        state
+            .multibody_joints
+            .get_mut(handle)
+            .unwrap()
+            .0
+            .damping_mut()
+            .fill(0.0);
+        backend.step(id, SimDuration::from_ticks(1_000_000))?;
+        backend.sync_to_ecs(&mut world, id)?;
+        let state = backend.world(id)?;
+        let body = &state.bodies[state.entity_to_body[&child]];
+        assert!((body.mass() - 1.0).abs() < 1e-6);
+        assert_eq!(*world.get::<RigidBodyInertia>(child).unwrap(), inertia);
+        let first = match *world.get::<JointState>(child).unwrap() {
+            JointState::Revolute { velocity_rad_s, .. } => velocity_rad_s,
+            _ => panic!("expected revolute state"),
+        };
+        if armature == Some(0.01) && !floating && !motor {
+            world.entity_mut(child).remove::<RevoluteJointArmature>();
+            step_physics(
+                &mut backend,
+                &mut world,
+                id,
+                SimDuration::from_ticks(1_000_000),
+            )?;
+            let JointState::Revolute { velocity_rad_s, .. } =
+                *world.get::<JointState>(child).unwrap()
+            else {
+                panic!("revolute")
+            };
+            assert!(
+                (velocity_rad_s - first - 0.025).abs() < 2e-5,
+                "removing armature must restore physical inertia"
+            );
+        }
+        Ok(first)
+    }
+
+    #[test]
+    #[cfg(feature = "experimental-armature")]
+    fn armature_matches_analytic_acceleration_for_effort_and_motor_impulses() {
+        for motor in [false, true] {
+            for floating in [false, true] {
+                for armature in [None, Some(0.0), Some(0.01), Some(0.04)] {
+                    let actual = armature_response(armature, motor, floating).unwrap();
+                    let physical = if floating { 0.01 } else { 0.02 };
+                    let expected = 0.5 * 0.001 / (physical + armature.unwrap_or(0.0));
+                    assert!((actual - expected).abs() < 2e-5, "motor={motor}, floating={floating}, armature={armature:?}: {actual} vs {expected}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "experimental-armature")]
+    fn armature_rejects_invalid_inertia() {
+        let mut backend = RapierBackend::new();
+        let id = backend
+            .create_world(PhysicsWorldDesc {
+                gravity_m_s2: Vec3::ZERO,
+                solver_iterations: 16,
+            })
+            .unwrap();
+        let mut world = World::new();
+        let entity = spawn_named(&mut world, "unsupported_armature");
+        world.entity_mut(entity).insert(RevoluteJointArmature {
+            inertia_kg_m2: 0.01,
+        });
+        assert!(backend.sync_from_ecs(&mut world, id).is_err());
+        for value in [-0.1, f64::NAN, f64::INFINITY, f64::MAX, f64::MIN_POSITIVE] {
+            assert!(armature_response(Some(value), false, false).is_err());
         }
     }
 

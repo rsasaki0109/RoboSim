@@ -534,3 +534,15 @@ remain unmatched; the option does not establish model equivalence.
 show that all three standing cases retain active ground pairs but fail the
 strict positive-impulse gate. Passive-loss flips reduce measured overspeed to
 1.70405/1.73428 at 0.5/0.125 ms, yet both collapse at 1.2 s.
+
+### Revolute motor armature
+
+Native candidate JSON may specify `joint_armature_kg_m2` (default 0, range
+0..=1). The probe attaches `RevoluteJointArmature` to all 23 movable joint child
+links before stepping. Use 0.01 with the passive-loss scene to compare the
+source's reflected motor inertia without changing physical link masses.
+The output records the requested coefficient; `--native-model-check` only
+checks scene structure and does not exercise these candidate overrides.
+
+[ADR 030](adr/030-revolute-joint-armature.md) describes the local Rapier patch,
+analytic tests, invalid-input behavior and repository-build limitation.

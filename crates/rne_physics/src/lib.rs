@@ -18,7 +18,8 @@ pub use components::{
     Collider, ColliderPart, ColliderShape, CollisionGroups, CompoundCollider, FixedJointDesc,
     GravityScale, JointActuation, JointEffortMeasurement, JointMotor, JointMotorGainModel,
     JointPassiveDynamics, JointState, MultibodyLink, PhysicsMaterial, PhysicsOwnedPose,
-    PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
+    PrismaticJointDesc, RevoluteJointArmature, RevoluteJointDesc, RigidBody, RigidBodyInertia,
+    RigidBodyType,
 };
 pub use events::{ContactEvent, ContactPointSample, ExternalBodyWrench, RaycastHit, RaycastQuery};
 pub use hash::{hash_physics_state, hash_physics_state_v2};
