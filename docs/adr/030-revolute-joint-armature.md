@@ -57,3 +57,8 @@ COM/kinematics; no claim is made that its inverse-dynamics or optimal-control
 mass matrix incorporates this new component. Model parity also requires
 contact, actuator, friction and collision coverage checks. Armature support
 alone is not evidence of a successful or hardware-ready backflip.
+
+The vendor subsequently also incorporates the independent
+[free-root COM correction](031-multibody-free-root-com.md). Zero-armature
+compatibility above refers to the armature addition itself; recordings before
+that numerical fix keep their historical source hashes.

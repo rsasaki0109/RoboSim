@@ -2412,6 +2412,70 @@ mod tests {
         }
     }
 
+    #[test]
+    fn floating_offset_com_rotates_about_stationary_center_of_mass() {
+        let mut backend = RapierBackend::new();
+        let id = backend
+            .create_world(PhysicsWorldDesc {
+                gravity_m_s2: Vec3::ZERO,
+                solver_iterations: 16,
+            })
+            .unwrap();
+        let mut world = World::new();
+        let parent = spawn_named(&mut world, "offset_root");
+        let child = spawn_named(&mut world, "offset_weld");
+        let com = Vec3::new(0.2, 0.0, 0.0);
+        for entity in [parent, child] {
+            world.entity_mut(entity).insert((
+                RigidBody {
+                    mass_kg: 1.0,
+                    ..RigidBody::default()
+                },
+                RigidBodyInertia {
+                    center_of_mass_local_m: com,
+                    ixx_kg_m2: 0.02,
+                    iyy_kg_m2: 0.02,
+                    izz_kg_m2: 0.02,
+                    ixy_kg_m2: 0.0,
+                    ixz_kg_m2: 0.0,
+                    iyz_kg_m2: 0.0,
+                },
+                MultibodyLink,
+                Transform3::default(),
+            ));
+        }
+        world.entity_mut(child).insert(FixedJointDesc {
+            parent,
+            anchor_parent_m: Vec3::ZERO,
+            anchor_child_m: Vec3::ZERO,
+            relative_rotation: Quat::IDENTITY,
+        });
+        backend.sync_from_ecs(&mut world, id).unwrap();
+        let state = backend.world_mut(id).unwrap();
+        let handle = state.entity_to_multibody_joint[&child];
+        let multibody = state.multibody_joints.get_mut(handle).unwrap().0;
+        multibody.damping_mut().fill(0.0);
+        multibody.generalized_velocity_mut()[5] = 10.0;
+        for _ in 0..100 {
+            backend
+                .step(id, SimDuration::from_ticks(1_000_000))
+                .unwrap();
+        }
+        backend.sync_to_ecs(&mut world, id).unwrap();
+        let state = backend.world(id).unwrap();
+        for entity in [parent, child] {
+            let body = &state.bodies[state.entity_to_body[&entity]];
+            let actual = vec3_from_rapier(body.center_of_mass().coords);
+            assert!(
+                (actual - com).length() < 1e-4,
+                "free-body COM drift: {:?}",
+                actual - com
+            );
+            assert!(body.linvel().norm() < 1e-4);
+            assert!(body.rotation().angle() > 0.9);
+        }
+    }
+
     #[cfg(feature = "experimental-armature")]
     fn armature_response(
         armature: Option<f64>,

@@ -110,7 +110,40 @@
                          self.accelerations = self
                              .accelerations
                              .index((prev_root_ndofs.., 0))
-@@ -1565,3 +1594,54 @@
+@@ -928,13 +957,25 @@
+                 self.root_is_dynamic = rb.is_dynamic();
+             }
+ 
+-            // Make sure the positions are properly set to match the rigid-body’s.
+-            if take_body_pose {
+-                if self.links[0].joint.data.locked_axes.is_empty() {
+-                    self.links[0].joint.set_free_pos(*rb.position());
+-                } else {
+-                    self.links[0].joint.data.local_frame1 = *rb.position();
+-                }
++            // The free-root generalized linear velocity is its COM velocity.
++            // Its translation coordinates must therefore locate the COM, not
++            // the body origin, or rotation spuriously translates the COM.
++            let joint = &mut self.links[0].joint;
++            if joint.data.locked_axes.is_empty() {
++                let local_com = rb.mprops.local_mprops.local_com.coords;
++                if take_body_pose || joint.data.local_frame2.translation.vector != local_com {
++                    let pose = if take_body_pose {
++                        *rb.position()
++                    } else {
++                        joint.body_to_parent()
++                    };
++                    joint.data.local_frame2.translation.vector = local_com;
++                    let mut com_pose = pose;
++                    com_pose.translation.vector += pose.rotation * local_com;
++                    joint.set_free_pos(com_pose);
++                }
++            } else if take_body_pose {
++                joint.data.local_frame1 = *rb.position();
+             }
+         }
+     }
+@@ -1565,3 +1606,87 @@
          );
      }
  }
@@ -149,6 +182,39 @@
 +        assert_eq!(split.len(), 2);
 +        assert_eq!(split[0].armature.as_slice(), &[0.01]);
 +        assert_eq!(split[1].armature.as_slice(), &[0.03]);
++    }
++
++    #[test]
++    fn free_root_com_coordinates_preserve_pose_and_type_transitions() {
++        for offset in [0.0, 0.2] {
++            for read_pose in [false, true] {
++                let mut bodies = RigidBodySet::new();
++                let root = bodies.insert(RigidBodyBuilder::dynamic().build());
++                let local_com = Point::new(offset, -offset, 0.0);
++                bodies[root].mprops.local_mprops.local_com = local_com;
++                let mut mb = Multibody::with_root(root, false);
++                mb.forward_kinematics(&bodies, true);
++                assert!(mb.links[0].local_to_world.translation.vector.norm() < 1.0e-6);
++                mb.velocities[0] = 0.3;
++                mb.velocities[5] = 10.0;
++                mb.integrate(0.1);
++                mb.forward_kinematics(&bodies, false);
++                let actual_com = mb.links[0].local_to_world * local_com;
++                assert!((actual_com - (local_com + Vector::new(0.03, 0.0, 0.0))).norm() < 1.0e-6);
++                mb.update_rigid_bodies(&mut bodies, true);
++                let pose = mb.links[0].local_to_world;
++                for kind in [RigidBodyType::Fixed, RigidBodyType::Dynamic] {
++                    bodies[root].set_body_type(kind, false);
++                    mb.forward_kinematics(&bodies, read_pose);
++                    assert!((mb.links[0].local_to_world.translation.vector - pose.translation.vector).norm() < 1.0e-6);
++                    assert!(mb.links[0].local_to_world.rotation.angle_to(&pose.rotation) < 1.0e-6);
++                }
++                // Changing the COM convention must not teleport the body.
++                bodies[root].mprops.local_mprops.local_com = Point::new(0.1, 0.2, -0.1);
++                mb.forward_kinematics(&bodies, read_pose);
++                assert!((mb.links[0].local_to_world.translation.vector - pose.translation.vector).norm() < 1.0e-6);
++            }
++        }
 +    }
 +
 +    #[test]
