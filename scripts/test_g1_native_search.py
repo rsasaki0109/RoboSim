@@ -161,6 +161,19 @@ class NativeSearchTest(unittest.TestCase):
                     dt_us=125,
                     motor_mode="effort",
                 )
+            with self.assertRaisesRegex(
+                ValueError, "landing_capture_gain_rad_per_m differs"
+            ):
+                search(
+                    binary,
+                    binary,
+                    dict(seed, landing_capture_gain_rad_per_m=1.0),
+                    base / "ignored-capture",
+                    0,
+                    1,
+                    dt_us=125,
+                    motor_mode="effort",
+                )
             for dt, mode in [(126, "effort"), (125, "implicit")]:
                 with self.assertRaisesRegex(ValueError, "supported step"):
                     search(

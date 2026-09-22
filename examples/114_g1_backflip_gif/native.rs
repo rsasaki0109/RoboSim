@@ -47,6 +47,16 @@ pub(super) fn run() {
     );
     let (landing_kp_nm_per_rad, landing_kd_nm_s_per_rad) =
         landing_gains(candidate.as_ref()).expect("valid landing gains");
+    let landing_capture_gain_rad_per_m = candidate
+        .as_ref()
+        .and_then(|v| v.get("landing_capture_gain_rad_per_m"))
+        .map(|v| v.as_f64().expect("numeric capture gain"))
+        .unwrap_or(0.0);
+    assert!(
+        landing_capture_gain_rad_per_m.is_finite()
+            && (0.0..=4.0).contains(&landing_capture_gain_rad_per_m),
+        "capture gain must be in 0..=4 rad/m"
+    );
     let roll_balance = candidate
         .as_ref()
         .and_then(|value| value.get("roll_balance"))
@@ -361,6 +371,22 @@ pub(super) fn run() {
                         *q = (*q + correction.clamp(-0.6, 0.6)).clamp(-0.85, 0.5);
                     }
                 }
+                if landing_capture_gain_rad_per_m > 0.0 && air_s < 0.012 {
+                    let (com, feet) = support_com(&sim, &model);
+                    let correction = capture_correction(
+                        com,
+                        feet,
+                        com_velocity.x,
+                        landing_capture_gain_rad_per_m,
+                    ) * ((t - landing) / 0.15).clamp(0.0, 1.0);
+                    for (name, value) in names.iter().zip(&mut q) {
+                        if name.contains("hip_pitch") {
+                            *value += correction;
+                        } else if name.contains("ankle_pitch") {
+                            *value -= correction;
+                        }
+                    }
+                }
                 (q, landing_kp_nm_per_rad, landing_kd_nm_s_per_rad)
             } else if let Some(start) = takeoff {
                 let elapsed = t - start;
@@ -547,17 +573,18 @@ pub(super) fn run() {
             max_tail_speed = max_tail_speed.max(velocity.length());
         }
         if step % (10_000 / dt_us) == 0 {
+            let (com_position, foot_center) = support_com(&sim, &model);
             history.push(json!({"time_s":t+dt_s,"base_translation_m":base.translation.to_array(),
                 "base_rotation_xyzw":base.rotation.to_array(),"pitch_rad":angle,"upright":upright,
                 "joint_positions_rad":names.iter().map(|n|sim.named_joint_position(n).unwrap()).collect::<Vec<_>>(),
-                "foot_contact":contact,"com_velocity_m_s":com_velocity.to_array()}));
+                "foot_contact":contact,"com_velocity_m_s":com_velocity.to_array(),"com_position_m":com_position.to_array(),"foot_center_m":foot_center.to_array()}));
         }
     }
     let output = json!({"backend":"RoboSim/Rapier","scene":scene_path,"compound_part_counts":compound_part_counts,"qualified_backflip":false,
         "velocity_servo":velocity_servo,"peak_joint_speed_ratio":peak_speed_ratio,"peak_speed_joint":peak_speed_joint,"peak_speed_time_s":peak_speed_time_s,"max_joint_position_excess_rad":max_position_excess_rad,
         "failure":failure,"completed_maneuver_time_s":completed_s,"implicit_position_motors":implicit,"declared_inertial_scene":declared,"standing_only":standing_only,"note":"Transfer probe: native primitive collisions, self-collision disabled; qualification pending",
         "joint_armature_kg_m2":joint_armature_kg_m2,"solver_iterations":solver_iterations,"final_second_contact_diagnostics":tail_diagnostics.report(dt_s),
-        "dt_s":dt_s,"contact_friction":contact_friction,"balance_velocity_source":if declared {"whole_robot_com"} else {"base_origin"},"parameters":p,"recovery_s":recovery_s,"landing_kp_nm_per_rad":landing_kp_nm_per_rad,"landing_kd_nm_s_per_rad":landing_kd_nm_s_per_rad,"roll_balance":roll_balance,"landing_stance_rad":landing_stance_rad,"stop_on_fall":stop_on_fall,"mass_kg":mass_kg,"knee_limit_nm":120.0,
+        "dt_s":dt_s,"contact_friction":contact_friction,"balance_velocity_source":if declared {"whole_robot_com"} else {"base_origin"},"parameters":p,"recovery_s":recovery_s,"landing_capture_gain_rad_per_m":landing_capture_gain_rad_per_m,"landing_kp_nm_per_rad":landing_kp_nm_per_rad,"landing_kd_nm_s_per_rad":landing_kd_nm_s_per_rad,"roll_balance":roll_balance,"landing_stance_rad":landing_stance_rad,"stop_on_fall":stop_on_fall,"mass_kg":mass_kg,"knee_limit_nm":120.0,
         "standing_passed":standing_only && failure.is_none() && completed_s>=4.999
             && min_tail_upright>0.99 && max_tail_speed<0.1 && tail_contact
             && last_position.y>0.65,"signed_rotation_rad":angle,
@@ -692,6 +719,36 @@ impl ContactDiagnostics {
     }
 }
 
+// Physical spatial COM, in the native y-up world; no kinematic pose writes.
+fn support_com(sim: &UrdfSceneSim, model: &ArticulatedModel) -> (Vec3, Vec3) {
+    let mut mass = 0.0;
+    let mut weighted = Vec3::ZERO;
+    for index in 0..model.link_count() {
+        let inertia = model.link_inertia(index).unwrap();
+        let pose = rne_world::world_transform_of(sim.world(), model.link_entity(index).unwrap());
+        weighted += inertia.mass_kg * (pose.translation + pose.rotation * inertia.center_of_mass_m);
+        mass += inertia.mass_kg;
+    }
+    let feet = (sim
+        .named_transform("left_ankle_roll_link")
+        .unwrap()
+        .translation
+        + sim
+            .named_transform("right_ankle_roll_link")
+            .unwrap()
+            .translation)
+        * 0.5;
+    (weighted / mass, feet)
+}
+
+// A sagittal LIPM capture-point heuristic for post-touchdown joint targets.
+// Equal/opposite hip and ankle changes retain their summed pitch angle.
+fn capture_correction(com: Vec3, feet: Vec3, velocity_x_m_s: f64, gain_rad_per_m: f64) -> f64 {
+    let horizon_s = ((com.y - feet.y).clamp(0.2, 1.2) / 9.81).sqrt();
+    let error_m = com.x - feet.x - 0.015 + horizon_s * velocity_x_m_s;
+    (-gain_rad_per_m * error_m).clamp(-0.35, 0.35)
+}
+
 // Contact-phase gains are independent of the flight opening servo.
 fn landing_gains(candidate: Option<&serde_json::Value>) -> Result<(f64, f64), &'static str> {
     let read = |key, default| -> Result<f64, &'static str> {
@@ -715,6 +772,25 @@ fn landing_gains(candidate: Option<&serde_json::Value>) -> Result<(f64, f64), &'
 #[cfg(test)]
 mod diagnostic_tests {
     use super::*;
+    #[test]
+    fn capture_feedback_is_translation_invariant_and_moves_hips_toward_support() {
+        let com = Vec3::new(0.08, 0.7, 0.0);
+        let feet = Vec3::ZERO;
+        let correction = capture_correction(com, feet, 0.1, 1.0);
+        assert!(correction < 0.0);
+        let shift = Vec3::new(12.0, 0.3, -8.0);
+        assert!(
+            (capture_correction(com + shift, feet + shift, 0.1, 1.0) - correction).abs() < 1e-12
+        );
+        assert_eq!(capture_correction(com, feet, 0.1, 0.0), 0.0);
+        assert_eq!(capture_correction(com, feet, 100.0, 4.0), -0.35);
+        assert_eq!(capture_correction(com, feet, -100.0, 4.0), 0.35);
+        // Two 0.3 m sagittal links: negative hip correction places the foot
+        // farther forward relative to the pelvis, shifting a supported pelvis back.
+        let foot_x = |hip: f64| -0.3 * hip.sin() - 0.3 * (hip + 0.36).sin();
+        assert!(foot_x(-0.18 + correction) > foot_x(-0.18));
+    }
+
     #[test]
     fn contact_gains_retain_defaults_and_reject_invalid_candidates() {
         assert_eq!(landing_gains(None), Ok((1000.0, 20.0)));

@@ -617,3 +617,21 @@ The coarse-step best extends time to collapse from 1.8595 to 2.743 s but reaches
 and [corrected launch search](evidence/g1-contact-backflip/native-transfer/corrected-launch-search/README.md).
 Remaining work is sustained landing balance and actuator/contact qualification;
 no native-success GIF has been generated.
+
+### Support-relative landing feedback
+
+`landing_capture_gain_rad_per_m` enables an optional sagittal capture-point
+heuristic after touchdown (default 0, accepted range 0..=4). It uses measured
+whole-robot COM position/velocity and the midpoint of the two ankle link
+origins. For the y-up, Earth-gravity probe, the horizon is
+`sqrt(clamp(COM_y - feet_y, 0.2, 1.2) / 9.81)` seconds. A 0.015 m forward offset
+sets the reference. Positive capture error bends hips backward and ankles
+forward by equal/opposite amounts, limited to 0.35 rad, before the existing
+joint and torque limits. The correction fades in over 0.15 s and is disabled
+after 12 ms without positive foot impulse. This is a bounded joint-target
+heuristic, not a contact-force feasibility guarantee or full WBC controller.
+
+Frames now record `com_position_m` and `foot_center_m` for inspecting landing
+geometry. The zero-gain path does not change motor targets. The search rejects
+older binaries that ignore a requested capture gain. Physical landing and
+measured-limit gates remain separate from this option and search scores.
