@@ -1,0 +1,14 @@
+{
+  "native_source_commit": "81179a5",
+  "binary_sha256": "cca047344687a034455e84130e9728380a4afe3d05ceaebeb4372709ed8054cd",
+  "artifact_sha256": {
+    "README.md": "9bf627720300903ddae32c6c1e17a8b291b70ea94d6cae1e64bca1f2e09b3364",
+    "candidate.json": "72dad5df3c27c200c53e19db8f07df130d8bf1bdd3b4772c6d5de20c36959f7f",
+    "knee-0p02.json": "7d86fbb96ef0277bd8453ece3ac7c77ce329362da34557d80d68c2941398d4bf",
+    "knee-0p02.rollout.json.gz": "55b8b9fa3e33d5929f8bcc1b496d757f11f121d0a8d33b4426788ef6ea63c474",
+    "knee-0p04.json": "fc234e6b550081bef02eeb1b05870c15a774dfcb4e340ed32d8066c5893546e4",
+    "knee-0p04.rollout.json.gz": "211c4036d066cf11200b08d39ae1abf73b762fec8a0e776ace0c7cc270fb88ae",
+    "step-500us-search.json": "225ef6e6dc258b6e20f4a7214375637097d82e38753431c61cfa23b8e9f7e339",
+    "step-500us.json.gz": "ebebf7e75b61cc13be5cfdd3fbb733b46e09ff7ccb0a4c7fc0dab86c8bdcd0d1"
+  }
+}
