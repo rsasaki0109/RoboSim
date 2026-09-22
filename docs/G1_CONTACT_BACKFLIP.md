@@ -583,3 +583,14 @@ path for inspecting the passive-loss scene. The latter scene's maximum
 translation residual fell from 21.6 µm to 0.67 µm. Quaternion norm error and
 normalized orientation agreement are checked separately. This regression does
 not establish a successful backflip or prove why landing fails.
+
+[The direct-torque search archive](evidence/g1-contact-backflip/native-transfer/effort-search/README.md)
+contains 13 failed pre-fix evaluations. The best score improved by 3.48%, but
+all trials collapsed. [The rotation-normalized comparison](evidence/g1-contact-backflip/native-transfer/rotation-normalization/README.md)
+also failed landing for the baseline and best candidate.
+
+A separate free-root integration defect was then reproduced: nonzero local
+COM rotated around the body origin despite zero reported COM linear velocity.
+[ADR 031](adr/031-multibody-free-root-com.md) explains the correction and the
+zero-gravity regression. Native transfer must be re-evaluated with this fix;
+prior failures do not characterize the corrected plant.
