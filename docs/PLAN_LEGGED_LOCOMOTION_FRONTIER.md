@@ -407,3 +407,13 @@ for 5 s. See [long validation evidence](evidence/g1-contact-backflip/native-tran
   Advance the +0.02 rad landing-knee margin candidate. Added per-step realized
   actuator effort aggregates, minimum tail height, and source standing-error
   telemetry plus a fail-closed recorded-metrics audit. No final qualification.
+
+- +0.02 rad landing-knee candidate holds 15 s at 500 µs: speed 1.031872x,
+  standing error 0.004656, tail base speed 0.002044 m/s, full-contact checks
+  pass. The new realized-effort telemetry reveals 120.00001526 Nm at a 120 Nm
+  ceiling; retain strict rejection and add 0.001 Nm command headroom. Cancelled
+  its unfinished finer-step runs for this measured failure; archive preserves
+  the completed coarse result and cancellation reasons. CI run 35685000529 is
+  live on eed9b41; its assets semver job flags the pre-existing main field
+  `UrdfRobotAsset.weld_fixed_children` (introduced by #291), not a new convex
+  extension field. Other CI stages remain under observation.

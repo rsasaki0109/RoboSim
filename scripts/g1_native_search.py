@@ -184,6 +184,7 @@ def search(
         ):
             raise ValueError("full-contact geometry and pair audit required")
         for field in (
+            "effort_headroom_nm",
             "recovery_s",
             "landing_kp_nm_per_rad",
             "landing_kd_nm_s_per_rad",

@@ -757,3 +757,11 @@ rejected even at zero impulse, while positive predictive gaps are allowed.
 Any nonfoot ground contact pair is rejected. A passing metrics report still
 requires producer/model provenance and independent timestep refinement; it does
 not establish hardware capability or alter the raw `qualified_backflip` flag.
+
+A candidate may set `effort_headroom_nm` in 0–1 Nm (default zero, direct-effort
+mode only). This subtracts from the commanded torque envelope; configured
+physical ratings and the strict measured-effort audit are unchanged. The
+full-contact +0.02 rad knee candidate initially recorded a 120.00001526 Nm peak
+at a 120 Nm ceiling due to f32 force accumulation/projection. It is rejected;
+the next verification uses 0.001 Nm command headroom rather than relaxing the
+gate or rounding away the measured excess.

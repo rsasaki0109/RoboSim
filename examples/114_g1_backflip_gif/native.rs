@@ -76,6 +76,9 @@ pub(super) fn run() {
     );
     let (landing_kp_nm_per_rad, landing_kd_nm_s_per_rad) =
         landing_gains(candidate.as_ref()).expect("valid landing gains");
+    let effort_headroom_nm =
+        bounded_candidate_parameter(candidate.as_ref(), "effort_headroom_nm", 0.0, (0.0, 1.0))
+            .expect("valid effort headroom");
     let landing_capture_gain_rad_per_m = bounded_candidate_parameter(
         candidate.as_ref(),
         "landing_capture_gain_rad_per_m",
@@ -184,6 +187,10 @@ pub(super) fn run() {
     );
     let declared = args.iter().any(|arg| arg == "--native-declared");
     let standing_only = args.iter().any(|arg| arg == "--native-stand");
+    assert!(
+        effort_headroom_nm == 0.0 || (!implicit && !velocity_servo),
+        "effort headroom requires direct effort control"
+    );
     let custom_scene = args
         .iter()
         .position(|arg| arg == "--native-scene")
@@ -592,10 +599,14 @@ pub(super) fn run() {
                     let q = sim.named_joint_position(name).expect("joint position");
                     let v = sim.named_joint_velocity(name).expect("joint velocity");
                     let ratio = v / limits[i].max_velocity;
-                    let lower = -torque[i] * ((1.0 + ratio) * 10.0).clamp(0.0, 1.0)
-                        + torque[i] * ((-ratio - 1.0) * 20.0).clamp(0.0, 1.0);
-                    let upper = torque[i] * ((1.0 - ratio) * 10.0).clamp(0.0, 1.0)
-                        - torque[i] * ((ratio - 1.0) * 20.0).clamp(0.0, 1.0);
+                    // Keep the measured actuator ceiling unchanged. A candidate
+                    // may command slightly less to accommodate f32 projection
+                    // and accumulation in the physics backend.
+                    let command_limit_nm = (torque[i] - effort_headroom_nm).max(0.0);
+                    let lower = -command_limit_nm * ((1.0 + ratio) * 10.0).clamp(0.0, 1.0)
+                        + command_limit_nm * ((-ratio - 1.0) * 20.0).clamp(0.0, 1.0);
+                    let upper = command_limit_nm * ((1.0 - ratio) * 10.0).clamp(0.0, 1.0)
+                        - command_limit_nm * ((ratio - 1.0) * 20.0).clamp(0.0, 1.0);
                     UrdfJointEffortTarget {
                         link_name: name,
                         effort_nm: (kp * (target[i] - q) - kd * v).clamp(lower, upper),
@@ -839,6 +850,7 @@ pub(super) fn run() {
     output["final_second_min_base_height_m"] =
         json!((completed_s >= complete_threshold_s).then_some(min_tail_height_m));
     output["effort_measurements_valid"] = json!(effort_measurements_valid);
+    output["effort_headroom_nm"] = json!(effort_headroom_nm);
     output["joint_effort_audit"] = json!(names
         .iter()
         .enumerate()
