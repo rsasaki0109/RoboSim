@@ -719,3 +719,19 @@ penalizes positive non-support contact impulses, including self-contact and
 non-foot environment contact. Foot/environment support is not penalized.
 Missing/nonfinite audit data is rejected or given failure cost. This score is
 not a qualification gate and does not change any measured-limit thresholds.
+
+### Signed contact distances and finer-step verification
+
+Native convex-model recordings also include `contact_separation_audit`: minimum
+signed solver-manifold separation, negative-separation counts and the first
+negative time for each pair, including zero-impulse pairs. Negative values mean
+shape overlap at the contact-generation pose used by the latest solver step;
+these are not fresh post-integration distance queries. No retained sample is
+not a general separation certificate. This evidence supplements impulses so
+zero force alone is never promoted to collision-free qualification.
+
+`--native-dt-us 62.5` supports a further half-step refinement. Simulation uses
+integer nanosecond ticks, preserving the exact 2 ms control period and 10 ms
+recording period at every accepted timestep. The search helper accepts 62.5 µs
+and scales validation timeouts with duration and the finer step. Existing
+integer-step timing and control schedules are unchanged.

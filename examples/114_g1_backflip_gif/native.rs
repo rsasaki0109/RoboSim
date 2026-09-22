@@ -10,6 +10,22 @@ use rne_physics::{
 use rne_robot::{Joint, Link};
 use serde_json::json;
 
+#[derive(Debug)]
+struct SeparationAudit {
+    reported_steps: u64,
+    negative_steps: u64,
+    min_separation_m: f64,
+    first_negative_time_s: Option<f64>,
+}
+
+fn native_step_ns(dt_us: f64) -> u64 {
+    assert!(
+        [62.5, 125.0, 250.0, 500.0, 1000.0].contains(&dt_us),
+        "supported steps: 62.5, 125, 250, 500, 1000 us"
+    );
+    (dt_us * 1000.0) as u64
+}
+
 fn ground_sole_contact(a: &str, b: &str, impulse_ns: f32) -> bool {
     let sole = |link: &str| matches!(link, "left_ankle_roll_link" | "right_ankle_roll_link");
     impulse_ns > 0.0 && ((a == "environment" && sole(b)) || (b == "environment" && sole(a)))
@@ -106,15 +122,12 @@ pub(super) fn run() {
         "joint armature must be in 0..=1 kg m²"
     );
     let stop_on_fall = args.iter().any(|arg| arg == "--native-stop-on-fall");
-    let dt_us: u64 = args
+    let dt_us: f64 = args
         .iter()
         .position(|arg| arg == "--native-dt-us")
-        .map(|i| args[i + 1].parse().expect("integer step in microseconds"))
-        .unwrap_or(125);
-    assert!(
-        [125, 250, 500, 1000].contains(&dt_us),
-        "supported steps: 125, 250, 500, 1000 us"
-    );
+        .map(|i| args[i + 1].parse().expect("step in microseconds"))
+        .unwrap_or(125.0);
+    let dt_ns = native_step_ns(dt_us);
     let maneuver_duration_s: u64 = args
         .iter()
         .position(|arg| arg == "--native-duration-s")
@@ -154,8 +167,8 @@ pub(super) fn run() {
         "output must not already exist"
     );
     let velocity_servo = args.iter().any(|arg| arg == "--native-velocity-servo");
-    let dt_s = dt_us as f64 * 1e-6;
-    let control_steps = 2000 / dt_us;
+    let dt_s = dt_us * 1e-6;
+    let control_steps = 2_000_000 / dt_ns;
     let implicit = args.iter().any(|arg| arg == "--native-implicit");
     assert!(
         !(implicit && velocity_servo),
@@ -181,7 +194,7 @@ pub(super) fn run() {
     let mut sim = UrdfSceneSim::from_scene_path_with_solver_iterations_and_fixed_delta(
         &scene_path,
         solver_iterations,
-        SimDuration::from_ticks(dt_us * 1000),
+        SimDuration::from_ticks(dt_ns),
     )
     .expect("native G1 scene");
     for name in ["ground", "left_ankle_roll_link", "right_ankle_roll_link"] {
@@ -266,6 +279,7 @@ pub(super) fn run() {
         }
         structural_excluded_pairs.sort();
     }
+    let mut separation_pairs = std::collections::BTreeMap::new();
     let mut contact_pairs: std::collections::BTreeMap<(String, String), (u64, f64, f64)> =
         std::collections::BTreeMap::new();
     if args.iter().any(|arg| arg == "--native-model-check") {
@@ -442,7 +456,7 @@ pub(super) fn run() {
     let mut peak_speed_joint = None;
     let mut peak_speed_time_s = 0.0;
     let mut max_position_excess_rad = 0.0_f64;
-    for step in 0..(maneuver_duration_s + 1) * 1_000_000 / dt_us {
+    for step in 0..(maneuver_duration_s + 1) * 1_000_000_000 / dt_ns {
         let t = step as f64 * dt_s - 1.0;
         if names.iter().zip(&limits).any(|(name, limit)| {
             let q = sim.named_joint_position(name).unwrap();
@@ -452,7 +466,7 @@ pub(super) fn run() {
             failure = Some(format!("Joint state diverged at maneuver time {t:.6} s"));
             break;
         }
-        if step % (500_000 / dt_us) == 0 {
+        if step % (500_000_000 / dt_ns) == 0 {
             eprintln!(
                 "native probe t={t:.3} s, base y={:.3} m, pitch={angle:.3} rad",
                 last_position.y
@@ -694,6 +708,37 @@ pub(super) fn run() {
             row.0 += 1;
             row.2 = row.2.max(event.impulse as f64);
         }
+        if convex_collider_count > 0 {
+            for sample in sim
+                .physics_contact_separations()
+                .expect("native separation evidence")
+            {
+                let name = |entity| {
+                    sim.world()
+                        .get::<Link>(entity)
+                        .map(|link| link.name.as_str())
+                        .unwrap_or("environment")
+                };
+                let (a, b) = (name(sample.entity_a), name(sample.entity_b));
+                let key = if a <= b {
+                    (a.to_owned(), b.to_owned())
+                } else {
+                    (b.to_owned(), a.to_owned())
+                };
+                let row = separation_pairs.entry(key).or_insert(SeparationAudit {
+                    reported_steps: 0,
+                    negative_steps: 0,
+                    min_separation_m: f64::INFINITY,
+                    first_negative_time_s: None,
+                });
+                row.reported_steps += 1;
+                row.min_separation_m = row.min_separation_m.min(sample.min_separation_m);
+                if sample.min_separation_m < 0.0 {
+                    row.negative_steps += 1;
+                    row.first_negative_time_s.get_or_insert(t);
+                }
+            }
+        }
         air_s = if contact { 0.0 } else { air_s + dt_s };
         if t >= 0.0 {
             longest_air_s = longest_air_s.max(air_s);
@@ -721,7 +766,7 @@ pub(super) fn run() {
             min_tail_upright = min_tail_upright.min(upright);
             max_tail_speed = max_tail_speed.max(velocity.length());
         }
-        if step % (10_000 / dt_us) == 0 {
+        if step % (10_000_000 / dt_ns) == 0 {
             let (com_position, foot_center) = support_com(&sim, &model);
             history.push(json!({"time_s":t+dt_s,"base_translation_m":base.translation.to_array(),
                 "base_rotation_xyzw":base.rotation.to_array(),"pitch_rad":angle,"upright":upright,
@@ -744,6 +789,10 @@ pub(super) fn run() {
     if convex_collider_count > 0 {
         output["note"] = json!("Transfer probe: native convex body geometry; inspect scene self-collision settings; qualification pending");
     }
+    output["contact_separation_audit"] = json!(separation_pairs.iter().map(|((a,b),row)|
+        json!({"link_a":a,"link_b":b,"reported_steps":row.reported_steps,
+            "negative_separation_steps":row.negative_steps,"min_solver_separation_m":row.min_separation_m,
+            "first_negative_time_s":row.first_negative_time_s})).collect::<Vec<_>>());
     output["structural_contact_filter"] = json!(structural_filter);
     output["structural_excluded_link_pairs"] = json!(structural_excluded_pairs);
     output["convex_collider_count"] = json!(convex_collider_count);
@@ -1019,6 +1068,23 @@ mod diagnostic_tests {
         // farther forward relative to the pelvis, shifting a supported pelvis back.
         let foot_x = |hip: f64| -0.3 * hip.sin() - 0.3 * (hip + 0.36).sin();
         assert!(foot_x(-0.18 + correction) > foot_x(-0.18));
+    }
+
+    #[test]
+    fn half_step_retains_exact_control_and_recording_periods() {
+        for us in [62.5, 125.0, 250.0, 500.0, 1000.0] {
+            let ns = native_step_ns(us);
+            assert_eq!((2_000_000 / ns) * ns, 2_000_000);
+            assert_eq!((10_000_000 / ns) * ns, 10_000_000);
+            assert_eq!((500_000_000 / ns) * ns, 500_000_000);
+        }
+        assert_eq!(native_step_ns(62.5), 62_500);
+    }
+
+    #[test]
+    #[should_panic(expected = "supported steps")]
+    fn rejects_step_that_would_truncate_control_period() {
+        native_step_ns(63.0);
     }
 
     #[test]

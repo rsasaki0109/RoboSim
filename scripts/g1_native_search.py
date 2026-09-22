@@ -107,13 +107,13 @@ def search(
         raise ValueError("built native binary and prepared scene required")
     if rounds < 0 or workers not in range(1, 5):
         raise ValueError("nonnegative rounds and 1..4 workers required")
-    if dt_us not in (125, 250, 500, 1000) or motor_mode not in ("velocity", "effort"):
+    if dt_us not in (62.5, 125, 250, 500, 1000) or motor_mode not in ("velocity", "effort"):
         raise ValueError("supported step and velocity/effort motor mode required")
     if not isinstance(duration_s, int) or duration_s not in range(5, 16):
         raise ValueError("integer maneuver duration in 5..15 required")
     if not isinstance(structural_filter, bool):
         raise ValueError("boolean structural_filter required")
-    timeout_s = 1200 if dt_us < 500 else 600
+    timeout_s = int((1200 if dt_us < 500 else 600) * max(1.0, 125 / dt_us) * duration_s / 5)
     if shutil.disk_usage(output.parent).free < 30 * 1024**3:
         raise RuntimeError("30 GiB disk reserve required")
     output.mkdir(exist_ok=False)
@@ -269,7 +269,7 @@ def main():
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--rounds", type=int, default=1)
     parser.add_argument("--workers", type=int, default=2)
-    parser.add_argument("--dt-us", type=int, choices=[125, 250, 500, 1000], default=500)
+    parser.add_argument("--dt-us", type=float, choices=[62.5, 125, 250, 500, 1000], default=500)
     parser.add_argument(
         "--motor-mode", choices=["velocity", "effort"], default="velocity"
     )

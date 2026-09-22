@@ -1069,6 +1069,16 @@ impl UrdfSceneSim {
         self.backend.contacts(self.physics_world)
     }
 
+    /// Returns signed solver-manifold separation evidence, including zero-impulse pairs.
+    ///
+    /// These are the latest contact-generation distances, not post-integration
+    /// geometric distance queries. No simulation step is taken.
+    pub fn physics_contact_separations(
+        &self,
+    ) -> Result<Vec<rne_physics::ContactSeparationSample>, rne_physics::PhysicsError> {
+        self.backend.contact_separations(self.physics_world)
+    }
+
     /// Returns whether two named entities contacted during the latest physics step.
     pub fn named_entities_in_contact(&self, first_name: &str, second_name: &str) -> bool {
         let Some(first) = find_entity_by_name(&self.world, first_name) else {

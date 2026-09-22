@@ -21,7 +21,10 @@ pub use components::{
     PhysicsOwnedPose, PrismaticJointDesc, RevoluteJointArmature, RevoluteJointDesc, RigidBody,
     RigidBodyInertia, RigidBodyType,
 };
-pub use events::{ContactEvent, ContactPointSample, ExternalBodyWrench, RaycastHit, RaycastQuery};
+pub use events::{
+    ContactEvent, ContactPointSample, ContactSeparationSample, ExternalBodyWrench, RaycastHit,
+    RaycastQuery,
+};
 pub use hash::{hash_physics_state, hash_physics_state_v2};
 pub use snapshot::{
     capture_physics_snapshot, PhysicsBodySnapshot, PhysicsContactSnapshot, PhysicsSnapshot,

@@ -133,6 +133,43 @@ impl RapierBackend {
         true
     }
 
+    /// Returns signed manifold separations, including pairs with zero impulse.
+    ///
+    /// Values describe the latest solver contact-generation pose, not a fresh
+    /// post-integration distance query. Contact filtering remains authoritative.
+    /// This optional Rapier query does not alter the public backend trait.
+    pub fn contact_separations(
+        &self,
+        id: PhysicsWorldId,
+    ) -> Result<Vec<rne_physics::ContactSeparationSample>, PhysicsError> {
+        let state = self.world(id)?;
+        let mut samples = Vec::new();
+        for pair in state.narrow_phase.contact_pairs() {
+            let (Some(&a), Some(&b)) = (
+                state.collider_to_entity.get(&pair.collider1),
+                state.collider_to_entity.get(&pair.collider2),
+            ) else {
+                continue;
+            };
+            let Some(distance) = pair
+                .manifolds
+                .iter()
+                .flat_map(|m| m.points.iter())
+                .map(|point| point.dist)
+                .reduce(f32::min)
+            else {
+                continue;
+            };
+            samples.push(rne_physics::ContactSeparationSample {
+                entity_a: if a.index() <= b.index() { a } else { b },
+                entity_b: if a.index() <= b.index() { b } else { a },
+                min_separation_m: f64::from(distance),
+            });
+        }
+        samples.sort_by_key(|s| (s.entity_a.index(), s.entity_b.index()));
+        Ok(samples)
+    }
+
     fn world(&self, id: PhysicsWorldId) -> Result<&RapierWorldState, PhysicsError> {
         self.worlds.get(&id).ok_or(PhysicsError::WorldNotFound)
     }
@@ -1585,6 +1622,66 @@ mod tests {
         ));
 
         (backend, physics_world, world, ground, cube)
+    }
+
+    #[test]
+    fn signed_contact_separations_include_zero_impulse_and_respect_filters() {
+        for (gap, filtered) in [(0.0, false), (0.001, false), (-0.1, false), (-0.1, true)] {
+            let mut backend = RapierBackend::new();
+            let id = backend
+                .create_world(PhysicsWorldDesc {
+                    gravity_m_s2: Vec3::ZERO,
+                    ..PhysicsWorldDesc::default()
+                })
+                .unwrap();
+            let mut world = World::new();
+            let a = spawn_named(&mut world, "a");
+            let b = spawn_named(&mut world, "b");
+            for (entity, x, kind) in [
+                (a, 0.0, RigidBodyType::Fixed),
+                (b, 2.0 + gap, RigidBodyType::Dynamic),
+            ] {
+                world.entity_mut(entity).insert((
+                    RigidBody {
+                        body_type: kind,
+                        ..RigidBody::default()
+                    },
+                    Collider {
+                        shape: ColliderShape::Sphere { radius_m: 1.0 },
+                        ..Collider::default()
+                    },
+                    Transform3::from_translation_rotation(Vec3::new(x, 0.0, 0.0), Quat::IDENTITY),
+                ));
+                if filtered {
+                    world
+                        .entity_mut(entity)
+                        .insert(rne_physics::CollisionGroups::without_self_collision(1));
+                }
+            }
+            backend.sync_from_ecs(&mut world, id).unwrap();
+            backend.step(id, fixed_step()).unwrap();
+            let samples = backend.contact_separations(id).unwrap();
+            if filtered {
+                assert!(samples.is_empty());
+                continue;
+            }
+            assert_eq!(samples.len(), 1);
+            assert_eq!((samples[0].entity_a, samples[0].entity_b), (a, b));
+            if gap < 0.0 {
+                // Solver substeps may already have reduced the initial overlap.
+                assert!(samples[0].min_separation_m < 0.0);
+                assert!(samples[0].min_separation_m >= gap - 1e-6);
+            } else {
+                assert_relative_eq!(samples[0].min_separation_m, gap, epsilon = 1e-6);
+            }
+            if gap >= 0.0 {
+                assert!(backend
+                    .contacts(id)
+                    .unwrap()
+                    .iter()
+                    .all(|c| c.impulse == 0.0));
+            }
+        }
     }
 
     #[test]
