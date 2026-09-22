@@ -13,7 +13,13 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "assets/robots/g1_description/g1_23dof.urdf"
 
 
-def prepare(source, output, source_soles=False, independent_soles=False):
+def prepare(
+    source,
+    output,
+    source_soles=False,
+    independent_soles=False,
+    source_passive_loss=False,
+):
     """Remove only empty fixed leaf frames; preserve every physical link and joint."""
     source, output = Path(source).resolve(), Path(output).resolve()
     robot = ET.parse(source).getroot()
@@ -59,6 +65,19 @@ def prepare(source, output, source_soles=False, independent_soles=False):
                 )
                 geometry = ET.SubElement(collision, "geometry")
                 ET.SubElement(geometry, "sphere", radius="0.002")
+    passive_joints = []
+    if source_passive_loss:
+        for joint in robot.findall("joint"):
+            if joint.get("type") == "fixed":
+                continue
+            if joint.get("type") not in ("revolute", "continuous"):
+                raise ValueError("source passive profile requires revolute joints")
+            dynamics = joint.find("dynamics")
+            if dynamics is None:
+                dynamics = ET.SubElement(joint, "dynamics")
+            dynamics.set("damping", "0.05")
+            dynamics.set("friction", "0.2")
+            passive_joints.append(joint.get("name"))
     mesh_count = len(robot.findall(".//collision/geometry/mesh"))
     merged = {
         link.get("name"): len(link.findall("collision"))
@@ -96,6 +115,16 @@ weld_fixed_children = true
     if independent_soles:
         config = output / "robot.rne.robot.toml"
         config.write_text(config.read_text() + "preserve_collision_parts = true\n")
+    if source_passive_loss:
+        config = output / "robot.rne.robot.toml"
+        config.write_text(
+            config.read_text()
+            + "".join(
+                f"\n[[urdf.joint_passive_dynamics]]\njoint = {json.dumps(name)}\n"
+                "coulomb_transition_velocity_rad_s = 0.1\n"
+                for name in passive_joints
+            )
+        )
     (output / "scene.rne.scene.toml").write_text("""[world]
 gravity_m_s2 = [0.0, -9.81, 0.0]
 seed = 2002
@@ -110,6 +139,9 @@ path = "robot.rne.robot.toml"
         "removed_empty_fixed_leaf_frames": removed,
         "declared_mass_kg": mass,
         "source_sole_dimensions": source_soles,
+        "source_passive_loss": source_passive_loss,
+        "passive_loss_joint_count": len(passive_joints),
+        "coulomb_transition_velocity_rad_s": 0.1 if source_passive_loss else None,
         "movable_joint_count": sum(
             j.get("type") != "fixed" for j in robot.findall("joint")
         ),
@@ -127,7 +159,11 @@ path = "robot.rne.robot.toml"
         )
         + [
             "Native mesh collisions are disabled; enabling them currently produces AABBs, not source convex meshes.",
-            "Source adds joint armature 0.01, damping 0.05 and Coulomb friction 0.2; native probe does not match these.",
+            (
+                "Source joint armature 0.01 remains unmatched; native damping 0.05 and regularized Coulomb 0.2 use tanh(v/0.1), not source constraint friction."
+                if source_passive_loss
+                else "Source adds joint armature 0.01, damping 0.05 and Coulomb friction 0.2; native probe does not match these."
+            ),
             "Different contact solvers and motor models; equal mass does not establish equivalent dynamics.",
         ],
     }
@@ -148,10 +184,21 @@ def main():
         action="store_true",
         help="preserve each sole sphere as a compound part",
     )
+    parser.add_argument(
+        "--source-passive-loss",
+        action="store_true",
+        help="apply damping 0.05 and regularized Coulomb 0.2 (transition 0.1 rad/s); armature remains unmatched",
+    )
     args = parser.parse_args()
     print(
         json.dumps(
-            prepare(SOURCE, args.output, args.source_soles, args.independent_soles),
+            prepare(
+                SOURCE,
+                args.output,
+                args.source_soles,
+                args.independent_soles,
+                args.source_passive_loss,
+            ),
             indent=2,
         )
     )

@@ -511,3 +511,21 @@ recorded simulated configurations; it does not invent or interpolate a flip.
 The search here evaluates low-dimensional trajectory/controller parameters in
 the contact plant directly. It is distinct from solving a whole-body NLP and
 assuming that a small transcription residual guarantees a trackable landing.
+
+### Contact and passive-loss diagnostics
+
+The native probe records `final_second_contact_diagnostics` at every physics
+step: zero-impulse count, missing active ground-pair count, longest consecutive
+zero-impulse interval, and extrema of the lowest sole-sphere world y coordinate.
+Sphere heights are measured after integration; contact pairs come from Rapier's
+latest step. They are separate diagnostics, not equivalent manifold distances.
+Heights are null unless both feet have sphere-only compound geometry. The
+existing positive-impulse standing gate is unchanged.
+
+`--native-solver-iterations 16|32|64` selects the solver iteration count (default
+16). To prepare a separate passive-loss comparison, add `--source-passive-loss`
+to the model-generation command above and choose a fresh output directory.
+It sets all 23 revolute joints to viscous damping 0.05 Nm·s/rad and regularized
+Coulomb loss `0.2 * tanh(velocity / 0.1)` Nm. This replaces Rapier's default
+angular damping 0.1. Source MuJoCo constraint friction and joint armature 0.01
+remain unmatched; the option does not establish model equivalence.

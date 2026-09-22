@@ -3,8 +3,10 @@
 use super::*;
 use rne_ai::UrdfJointEffortTarget;
 use rne_core::SimDuration;
-use rne_physics::{CompoundCollider, JointActuation, JointMotorGainModel, RigidBody};
-use rne_robot::Joint;
+use rne_physics::{
+    ColliderShape, CompoundCollider, JointActuation, JointMotorGainModel, RigidBody,
+};
+use rne_robot::{Joint, Link};
 use serde_json::json;
 
 pub(super) fn run() {
@@ -75,6 +77,20 @@ pub(super) fn run() {
         [125, 250, 500, 1000].contains(&dt_us),
         "supported steps: 125, 250, 500, 1000 us"
     );
+    let solver_iterations: usize = args
+        .iter()
+        .position(|arg| arg == "--native-solver-iterations")
+        .map(|i| {
+            args.get(i + 1)
+                .expect("solver iteration count")
+                .parse()
+                .expect("integer solver iteration count")
+        })
+        .unwrap_or(16);
+    assert!(
+        [16, 32, 64].contains(&solver_iterations),
+        "supported solver iterations: 16, 32, 64"
+    );
     let explicit_path = args
         .iter()
         .position(|arg| arg == "--native-output")
@@ -110,7 +126,7 @@ pub(super) fn run() {
     };
     let mut sim = UrdfSceneSim::from_scene_path_with_solver_iterations_and_fixed_delta(
         &scene_path,
-        16,
+        solver_iterations,
         SimDuration::from_ticks(dt_us * 1000),
     )
     .expect("native G1 scene");
@@ -242,6 +258,30 @@ pub(super) fn run() {
     let mut contact = true;
     let mut pitch_rate_rad_s = 0.0;
     let (mut roll_error, mut roll_rate_rad_s) = (0.0_f64, 0.0_f64);
+    // Read-only diagnostics: retain the positive-impulse standing gate.
+    let sole_spheres: Vec<_> = sim
+        .world()
+        .iter_entities()
+        .filter_map(|entity| {
+            let link = entity.get::<Link>()?;
+            if !["left_ankle_roll_link", "right_ankle_roll_link"].contains(&link.name.as_str()) {
+                return None;
+            }
+            let compound = entity.get::<CompoundCollider>()?;
+            let spheres: Option<Vec<_>> = compound
+                .parts
+                .iter()
+                .map(|part| match part.shape {
+                    ColliderShape::Sphere { radius_m } => {
+                        Some((part.local_offset.translation, radius_m))
+                    }
+                    _ => None,
+                })
+                .collect();
+            Some((link.name.clone(), spheres?))
+        })
+        .collect();
+    let mut tail_diagnostics = ContactDiagnostics::default();
     let mut tail_contact = true;
     let mut configured_gains = None;
     let mut min_tail_upright = 1.0_f64;
@@ -464,6 +504,23 @@ pub(super) fn run() {
         }
         let upright = (base.rotation * Vec3::Z).y;
         if t >= 4.0 {
+            let pair = ["left_ankle_roll_link", "right_ankle_roll_link"]
+                .iter()
+                .any(|name| sim.named_entities_in_contact(name, "ground"));
+            // World-space sphere bottom, relative to y=0. This is geometry,
+            // not Rapier's pre-integration contact manifold distance.
+            let bottom = (sole_spheres.len() == 2).then(|| {
+                sole_spheres
+                    .iter()
+                    .flat_map(|(name, spheres)| {
+                        let pose = sim.named_transform(name).expect("sole transform");
+                        spheres.iter().map(move |(center, radius)| {
+                            (pose.translation + pose.rotation * *center).y - radius
+                        })
+                    })
+                    .fold(f64::INFINITY, f64::min)
+            });
+            tail_diagnostics.record(contact, pair, bottom);
             tail_contact &= contact;
             min_tail_upright = min_tail_upright.min(upright);
             max_tail_speed = max_tail_speed.max(velocity.length());
@@ -478,6 +535,7 @@ pub(super) fn run() {
     let output = json!({"backend":"RoboSim/Rapier","scene":scene_path,"compound_part_counts":compound_part_counts,"qualified_backflip":false,
         "velocity_servo":velocity_servo,"peak_joint_speed_ratio":peak_speed_ratio,"peak_speed_joint":peak_speed_joint,"peak_speed_time_s":peak_speed_time_s,"max_joint_position_excess_rad":max_position_excess_rad,
         "failure":failure,"completed_maneuver_time_s":completed_s,"implicit_position_motors":implicit,"declared_inertial_scene":declared,"standing_only":standing_only,"note":"Transfer probe: native primitive collisions, self-collision disabled; qualification pending",
+        "solver_iterations":solver_iterations,"final_second_contact_diagnostics":tail_diagnostics.report(dt_s),
         "dt_s":dt_s,"contact_friction":contact_friction,"balance_velocity_source":if declared {"whole_robot_com"} else {"base_origin"},"parameters":p,"recovery_s":recovery_s,"roll_balance":roll_balance,"landing_stance_rad":landing_stance_rad,"stop_on_fall":stop_on_fall,"mass_kg":mass_kg,"knee_limit_nm":120.0,
         "standing_passed":standing_only && failure.is_none() && completed_s>=4.999
             && min_tail_upright>0.99 && max_tail_speed<0.1 && tail_contact
@@ -569,6 +627,74 @@ mod tests {
             ) - translation)
                 .length()
                 < 1e-12
+        );
+    }
+}
+
+// Counts every physics step, independently of the decimated render frames.
+#[derive(Debug, Default)]
+struct ContactDiagnostics {
+    steps: u64,
+    zero_impulse_steps: u64,
+    no_pair_steps: u64,
+    zero_run: u64,
+    longest_zero_run: u64,
+    min_bottom_m: Option<f64>,
+    max_bottom_m: Option<f64>,
+    max_unloaded_bottom_m: Option<f64>,
+}
+
+impl ContactDiagnostics {
+    fn record(&mut self, loaded: bool, pair: bool, bottom_m: Option<f64>) {
+        self.steps += 1;
+        self.no_pair_steps += u64::from(!pair);
+        self.zero_impulse_steps += u64::from(!loaded);
+        self.zero_run = if loaded { 0 } else { self.zero_run + 1 };
+        self.longest_zero_run = self.longest_zero_run.max(self.zero_run);
+        if let Some(bottom) = bottom_m {
+            self.min_bottom_m = Some(self.min_bottom_m.map_or(bottom, |v| v.min(bottom)));
+            self.max_bottom_m = Some(self.max_bottom_m.map_or(bottom, |v| v.max(bottom)));
+            if !loaded {
+                self.max_unloaded_bottom_m =
+                    Some(self.max_unloaded_bottom_m.map_or(bottom, |v| v.max(bottom)));
+            }
+        }
+    }
+
+    fn report(&self, dt_s: f64) -> serde_json::Value {
+        json!({"sampled_steps":self.steps,"zero_impulse_steps":self.zero_impulse_steps,
+            "no_active_ground_pair_steps":self.no_pair_steps,
+            "longest_zero_impulse_duration_s":self.longest_zero_run as f64 * dt_s,
+            "min_sphere_bottom_world_y_m":self.min_bottom_m,
+            "max_sphere_bottom_world_y_m":self.max_bottom_m,
+            "max_unloaded_sphere_bottom_world_y_m":self.max_unloaded_bottom_m})
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    #[test]
+    fn separates_unloaded_pairs_from_missing_contacts_and_counts_runs() {
+        let mut stats = ContactDiagnostics::default();
+        for (loaded, pair, bottom) in [
+            (true, true, -0.001),
+            (false, true, 0.002),
+            (false, false, 0.003),
+            (true, true, -0.002),
+            (false, true, 0.001),
+        ] {
+            stats.record(loaded, pair, Some(bottom));
+        }
+        let report = stats.report(0.0005);
+        assert_eq!(report["sampled_steps"], 5);
+        assert_eq!(report["zero_impulse_steps"], 3);
+        assert_eq!(report["no_active_ground_pair_steps"], 1);
+        assert_eq!(report["longest_zero_impulse_duration_s"], 0.001);
+        assert_eq!(report["min_sphere_bottom_world_y_m"], -0.002);
+        assert_eq!(report["max_unloaded_sphere_bottom_world_y_m"], 0.003);
+        assert!(
+            ContactDiagnostics::default().report(0.0005)["min_sphere_bottom_world_y_m"].is_null()
         );
     }
 }

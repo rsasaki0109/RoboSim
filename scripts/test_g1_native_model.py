@@ -7,6 +7,7 @@ from collections import namedtuple
 from pathlib import Path
 from unittest.mock import patch
 
+import tomllib
 from g1_native_model import SOURCE, prepare
 
 Usage = namedtuple("Usage", "total used free")
@@ -101,6 +102,51 @@ class ModelPreparationTest(unittest.TestCase):
                 "preserve_collision_parts = true",
                 (output / "robot.rne.robot.toml").read_text(),
             )
+            self.assertFalse(audit["qualification_ready"])
+
+    def test_passive_profile_preserves_inertia_and_covers_all_movable_joints(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch(
+                "g1_native_model.shutil.disk_usage",
+                return_value=Usage(100, 0, 32 * 1024**3),
+            ),
+        ):
+            output = Path(directory) / "model"
+            audit = prepare(
+                SOURCE, output, independent_soles=True, source_passive_loss=True
+            )
+            robot = ET.parse(output / "robot.urdf").getroot()
+            original = ET.parse(SOURCE).getroot()
+            config = tomllib.loads((output / "robot.rne.robot.toml").read_text())
+            overrides = config["urdf"]["joint_passive_dynamics"]
+            movable = [j for j in robot.findall("joint") if j.get("type") != "fixed"]
+            self.assertEqual(len(overrides), 23)
+            self.assertEqual(
+                {x["joint"] for x in overrides}, {j.get("name") for j in movable}
+            )
+            self.assertTrue(
+                all(x["coulomb_transition_velocity_rad_s"] == 0.1 for x in overrides)
+            )
+            for joint in movable:
+                self.assertEqual(
+                    joint.find("dynamics").attrib,
+                    {"damping": "0.05", "friction": "0.2"},
+                )
+            self.assertTrue(
+                all(
+                    j.find("dynamics") is None
+                    for j in robot.findall("joint")
+                    if j.get("type") == "fixed"
+                )
+            )
+            for link in robot.findall("link"):
+                source = original.find(f"link[@name='{link.get('name')}']")
+                self.assertEqual(
+                    [e.attrib for e in link.find("inertial").iter()],
+                    [e.attrib for e in source.find("inertial").iter()],
+                )
+            self.assertEqual(audit["passive_loss_joint_count"], 23)
             self.assertFalse(audit["qualification_ready"])
 
     def test_physical_or_branch_massless_link_rejected(self):
