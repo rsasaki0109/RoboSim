@@ -27,3 +27,20 @@ Native producer is commit `81179a5`; the normal binary hash is recorded in
 `../convex-full-contact/README.md`, with `--native-structural-filter` and direct
 joint effort. The additional signed-distance test verifies filtering after
 masks change; it does not step or modify the actual optimization recordings.
+
+## Finer-step rejection
+
+The 125 µs run completed 15 seconds without falling, with 0.9999995 minimum
+upright and 0.0010942 m/s maximum base speed during the final second. All
+8,000 final-second physics steps have positive foot support. Nonadjacent
+self-contact manifold gaps remain positive, and no nonfoot ground pairs occur.
+However, peak left-knee speed is **1.0502659798 times its rating**, above the
+strict `< 1.05` gate. This candidate is therefore rejected. The 62.5 µs run
+was deliberately cancelled after this failure; its partial log and reason are
+retained and are not a completed validation. Next candidate: +0.02 rad landing
+knee, which previously held at 500 µs with peak speed 1.031872x.
+
+These historical records lack per-step measured-effort aggregates, minimum
+tail height, and the source standing-error scalar. `g1_native_audit.py` rejects
+missing telemetry rather than substituting assumed values. New producer
+recordings must provide these fields before final qualification.

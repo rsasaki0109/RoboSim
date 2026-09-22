@@ -735,3 +735,25 @@ integer nanosecond ticks, preserving the exact 2 ms control period and 10 ms
 recording period at every accepted timestep. The search helper accepts 62.5 µs
 and scales validation timeouts with duration and the finer step. Existing
 integer-step timing and control schedules are unchanged.
+
+### Native measured-effort and completion audit
+
+New native recordings accumulate Rapier's `JointEffortMeasurement` after every
+physics step, including preparation. Each joint reports its limit, peak absolute
+realized actuator effort, and sample count; missing or nonfinite measurements
+invalidate the effort evidence. These are actuator torques, not contact reactions
+or a thermal/motor hardware model. The native probe also records minimum base
+height during the last second and the source standing error:
+`(1-upright)^2 + 3*(height-initial_height)^2 + 0.02*(|v|^2+|omega|^2)`.
+Here world-up is Y and linear velocity is measured at the base frame origin.
+
+Run `python3 scripts/g1_native_audit.py RECORDING.json [MORE.json.gz ...]` to
+check each recorded gate. Missing telemetry fails; old records are never filled
+with assumed values. The audit preserves strict speed `<1.05`, position excess
+`<0.02 rad`, rotation error `<0.25 rad`, standing error `<0.03`, and flight
+`>0.25 s`. Native final-second support, upright `>0.99`, speed `<0.1 m/s`,
+and height `>0.65 m` remain required. Negative nonadjacent solver gaps are
+rejected even at zero impulse, while positive predictive gaps are allowed.
+Any nonfoot ground contact pair is rejected. A passing metrics report still
+requires producer/model provenance and independent timestep refinement; it does
+not establish hardware capability or alter the raw `qualified_backflip` flag.

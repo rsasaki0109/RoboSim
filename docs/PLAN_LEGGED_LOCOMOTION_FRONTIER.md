@@ -399,3 +399,11 @@ negative nonadjacent self-contact separation. The 125 µs and 62.5 µs runs are
 still in progress, so full qualification remains open. A +0.02 rad landing-
 knee variant lowers coarse peak speed to 1.031872 but has only been checked
 for 5 s. See [long validation evidence](evidence/g1-contact-backflip/native-transfer/full-long-validation/README.md).
+
+- Native full-contact refinement: candidate 14 completed 15 s at 125 µs with
+  continuous final-second foot support and no nonadjacent self overlap, but
+  peak joint speed 1.05026598x exceeds the unchanged strict 1.05x gate. Rejected;
+  62.5 µs was explicitly cancelled for that failure (partial log preserved).
+  Advance the +0.02 rad landing-knee margin candidate. Added per-step realized
+  actuator effort aggregates, minimum tail height, and source standing-error
+  telemetry plus a fail-closed recorded-metrics audit. No final qualification.

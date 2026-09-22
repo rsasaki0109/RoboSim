@@ -167,12 +167,19 @@ pub(super) fn run() {
         }
     }
     drop(encoder);
-    let limits = number(&recording, "peak_joint_speed_ratio") <= 1.05
-        && number(&recording, "max_joint_position_excess_rad") <= 0.02;
+    let limits = number(&recording, "peak_joint_speed_ratio") < 1.05
+        && number(&recording, "max_joint_position_excess_rad") < 0.02;
     if render {
         let label = format!(
-            "dt {:.3} ms / foot contacts / peak speed {:.3}x / limits {}",
-            number(&recording, "dt_s") * 1000.0,
+            "dt {:.1} us / {} / speed {:.3}x / q,v gates {}",
+            number(&recording, "dt_s") * 1_000_000.0,
+            if recording["structural_contact_filter"] == true
+                && recording["convex_collider_count"].as_u64().unwrap_or(0) > 0
+            {
+                "full contacts"
+            } else {
+                "foot contacts"
+            },
             number(&recording, "peak_joint_speed_ratio"),
             if limits { "passed" } else { "NOT passed" }
         );

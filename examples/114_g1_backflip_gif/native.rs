@@ -18,6 +18,14 @@ struct SeparationAudit {
     first_negative_time_s: Option<f64>,
 }
 
+// Same dimension-weighted standing error as the source contact search. Native
+// world-up is Y; base linear velocity is measured at the frame origin.
+fn standing_error(upright: f64, height_delta_m: f64, linear: Vec3, angular: Vec3) -> f64 {
+    (1.0 - upright).powi(2)
+        + 3.0 * height_delta_m.powi(2)
+        + 0.02 * (linear.length_squared() + angular.length_squared())
+}
+
 fn native_step_ns(dt_us: f64) -> u64 {
     assert!(
         [62.5, 125.0, 250.0, 500.0, 1000.0].contains(&dt_us),
@@ -415,6 +423,8 @@ pub(super) fn run() {
     let mut history = Vec::new();
     let mut failure = None;
     let mut last_position = sim.named_transform("pelvis").unwrap().translation;
+    let initial_base_height_m = last_position.y;
+    let mut final_standing_error = f64::INFINITY;
     let mut velocity = Vec3::ZERO;
     let mut com_velocity = Vec3::ZERO;
     let mut contact = true;
@@ -448,6 +458,10 @@ pub(super) fn run() {
     let mut configured_gains = None;
     let mut min_tail_upright = 1.0_f64;
     let mut max_tail_speed = 0.0_f64;
+    let mut min_tail_height_m = f64::INFINITY;
+    let mut peak_measured_effort_nm = vec![0.0_f64; names.len()];
+    let mut measured_effort_samples = vec![0_u64; names.len()];
+    let mut effort_measurements_valid = true;
     let mut longest_air_s = 0.0_f64;
     // One second of actual motor-driven settling, followed by the maneuver.
     // No body pose or velocity is written after scene construction.
@@ -632,6 +646,21 @@ pub(super) fn run() {
             break;
         }
         completed_s = t + dt_s;
+        for (i, entity) in actuator_entities.iter().enumerate() {
+            match sim
+                .world()
+                .get::<rne_physics::JointEffortMeasurement>(*entity)
+            {
+                Some(rne_physics::JointEffortMeasurement::Revolute { measured_effort_nm })
+                    if measured_effort_nm.is_finite() =>
+                {
+                    peak_measured_effort_nm[i] =
+                        peak_measured_effort_nm[i].max(measured_effort_nm.abs());
+                    measured_effort_samples[i] += 1;
+                }
+                _ => effort_measurements_valid = false,
+            }
+        }
         for (name, limit) in names.iter().zip(&limits) {
             let q = sim.named_joint_position(name).unwrap();
             let v = sim.named_joint_velocity(name).unwrap();
@@ -744,6 +773,17 @@ pub(super) fn run() {
             longest_air_s = longest_air_s.max(air_s);
         }
         let upright = (base.rotation * Vec3::Z).y;
+        let angular_velocity = sim
+            .world()
+            .get::<RigidBody>(model.link_entity(0).unwrap())
+            .expect("base body")
+            .angular_velocity_rad_s;
+        final_standing_error = standing_error(
+            upright,
+            base.translation.y - initial_base_height_m,
+            velocity,
+            angular_velocity,
+        );
         if t >= final_second_start_s {
             let pair = ["left_ankle_roll_link", "right_ankle_roll_link"]
                 .iter()
@@ -765,6 +805,7 @@ pub(super) fn run() {
             tail_contact &= contact;
             min_tail_upright = min_tail_upright.min(upright);
             max_tail_speed = max_tail_speed.max(velocity.length());
+            min_tail_height_m = min_tail_height_m.min(base.translation.y);
         }
         if step % (10_000_000 / dt_ns) == 0 {
             let (com_position, foot_center) = support_com(&sim, &model);
@@ -793,6 +834,18 @@ pub(super) fn run() {
         json!({"link_a":a,"link_b":b,"reported_steps":row.reported_steps,
             "negative_separation_steps":row.negative_steps,"min_solver_separation_m":row.min_separation_m,
             "first_negative_time_s":row.first_negative_time_s})).collect::<Vec<_>>());
+    output["initial_base_height_m"] = json!(initial_base_height_m);
+    output["final_standing_error"] = json!(final_standing_error);
+    output["final_second_min_base_height_m"] =
+        json!((completed_s >= complete_threshold_s).then_some(min_tail_height_m));
+    output["effort_measurements_valid"] = json!(effort_measurements_valid);
+    output["joint_effort_audit"] = json!(names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| json!({"link_name":name,"limit_nm":torque[i],
+            "peak_measured_effort_nm":peak_measured_effort_nm[i],
+            "measured_steps":measured_effort_samples[i]}))
+        .collect::<Vec<_>>());
     output["structural_contact_filter"] = json!(structural_filter);
     output["structural_excluded_link_pairs"] = json!(structural_excluded_pairs);
     output["convex_collider_count"] = json!(convex_collider_count);
@@ -861,6 +914,15 @@ fn mass_weighted_velocity(links: impl IntoIterator<Item = (f64, Vec3)>) -> Vec3 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standing_error_preserves_source_weights_and_angular_motion() {
+        assert_eq!(standing_error(1.0, 0.0, Vec3::ZERO, Vec3::ZERO), 0.0);
+        let error = standing_error(0.9, 0.1, Vec3::X, 2.0 * Vec3::Z);
+        assert!((error - 0.14).abs() < 1e-12);
+        // An upright, stationary-origin robot is not settled while spinning.
+        assert!(standing_error(1.0, 0.0, Vec3::ZERO, 2.0 * Vec3::Z) > 0.03);
+    }
     #[test]
     fn velocity_command_is_bounded_and_retains_small_error_gain() {
         assert_eq!(velocity_target(0.1, 300.0, 10.0, 20.0), 3.0);
