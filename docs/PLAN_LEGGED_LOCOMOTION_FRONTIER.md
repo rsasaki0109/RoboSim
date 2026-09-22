@@ -10,14 +10,19 @@ below is an observed result, not an assumption. Detailed evidence lives in
 
 ## Non-RL G1 backflip contact benchmark
 
-The [optional optimization benchmark](G1_CONTACT_BACKFLIP.md) now demonstrates
-a full G1 backflip in MuJoCo using the repository's URDF, bounded joint motors,
-actual takeoff/landing contacts, and no RL. The pinned controller passes at
-0.125 ms and 0.0625 ms, including a final second of stable standing. A recorded
-physics GIF and replay-hash regression accompany the measurements. This is an
-external contact-plant milestone; native RNE/Rapier and hardware validation
-remain separate work. See the benchmark for mass policy, joint-stop tolerances,
-motor assumptions, and disabled self-collision.
+The [native backflip result](G1_CONTACT_BACKFLIP.md) now passes a backward
+revolution, feet-only landing and 15-second recovery in **RoboSim/Rapier at
+0.125 ms and 0.0625 ms**, with the same controller; 0.5 ms also passes.
+Full-body ground contact and nonadjacent self-collision are enabled. Original
+joint-speed/position, measured-torque and contact gates are retained. No root
+trajectory or external root wrench drives the maneuver. The final GIF comes
+from the successful 0.0625 ms native dynamics recording.
+
+[The evidence bundle](evidence/g1-contact-backflip/native-transfer/selected005-long-validation/README.md)
+contains all three runs, model/source hashes and a combined verifier. This is
+a native simulation milestone; hardware remains unvalidated. The earlier
+MuJoCo screening model is documented separately. Full repository CI is tracked
+in PR #311, and the historical campaign notes below remain as experiment logs.
 
 ## What is done
 
@@ -443,3 +448,14 @@ for 5 s. See [long validation evidence](evidence/g1-contact-backflip/native-tran
   existing-path regressions (366 pass, 10 fail, 12 ignored), including the
   procedural diff-drive rolling direction and other gait probes. Do not claim
   full CI success; continue the regression audit without weakening assertions.
+
+## Native G1 backflip refinement result
+
+The selected +0.005 rad knee refinement completes all three 15-second native
+runs. Peak speed ratios at 500/125/62.5 µs are 1.04385118/1.04447365/1.03942852,
+all below the unchanged strict 1.05 gate. All measured torque, position,
+standing, foot support and full-contact gates pass. The final native GIF and
+source/model/controller/recording hashes are archived in the selected-candidate
+bundle. Six negative-control/verifier tests pass. Local AI tests now pass
+376/376 with 12 existing ignored tests; whole-workspace CI is running on
+`021d40d`. Native simulation success does not establish hardware readiness.

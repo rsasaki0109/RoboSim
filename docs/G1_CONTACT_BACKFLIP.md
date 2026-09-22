@@ -1,16 +1,37 @@
 # G1 backflip with optimization and contact simulation
 
-This optional Python benchmark searches a finite set of maneuver parameters
-using differential evolution and bounded local sweeps. It uses no RL training,
-learned policy, external base wrench, or imposed floating-base trajectory.
-MuJoCo integrates the complete free-base robot and ground contacts; the motors
-receive joint targets and bounded effort.
+## Native RoboSim/Rapier result
 
-The robot is RNE's existing 23-joint G1 URDF. The original benchmark uses an external contact plant.
-The native Rapier probe now also demonstrates a held backflip in its foot-contact
-model, with measured speed violations and full-body qualification still open.
-The Python benchmark remains independent of the Rust engine. Example 114
-provides the RoboSim playback and a separate native transfer probe.
+The non-RL parameter search now produces a full G1 backflip **inside native
+RoboSim/Rapier**, followed by feet-only landing and recovery through 15 seconds.
+The identical controller passes at 0.125 ms and the finer 0.0625 ms; the
+0.5 ms comparison also passes. Joint-speed, position, measured-torque and
+full-contact criteria are unchanged. Motion uses bounded joint effort and
+gravity, without an imposed base trajectory or external root wrench.
+
+![Native RoboSim/Rapier G1 backflip at 62.5 µs](media/unitree-g1-robosim-native-backflip.gif)
+
+| Native step | Peak joint speed / rating | Final-second maximum base speed | Recorded physical gates |
+|---|---:|---:|---|
+| 500 µs | 1.04385118 | 0.549 mm/s | pass |
+| 125 µs | 1.04447365 | 1.066 mm/s | pass |
+| 62.5 µs | 1.03942852 | 0.000 mm/s | pass |
+
+The 34.13385728 kg declared model includes 21 convex body colliders, two
+four-sphere soles, all body-ground contacts and nonadjacent self-collision.
+Topology-derived structural exclusions are recorded. The GIF renders the
+finest successful native recording with the authored G1 materials and zero
+playback physics ticks. This is a simulator result; hardware is unvalidated.
+
+[Candidate, complete recordings, hashes, combined verifier and reproduction](evidence/g1-contact-backflip/native-transfer/selected005-long-validation/README.md)
+are retained. The Rust probe's raw diagnostic qualification flag is preserved;
+the independent combined audit verifies the three-step result. Repository-wide
+CI remains tracked in [PR #311](https://github.com/rsasaki0109/RoboSim/pull/311).
+
+The following sections retain the external MuJoCo benchmark and earlier
+native transfer experiments. Their failed or pending statements refer to those
+historical candidates and profiles. The external and native controllers use
+parameter optimization, with no RL training or learned policy.
 
 ## EDU partial-specification result
 
@@ -670,7 +691,7 @@ joint speed is 1.190973x at 500 µs and 1.171478x at 125 µs; both exceed the
 unchanged 1.05 gate. Full-body/self-collision is still disabled. This is a
 coarse-step held-motion result, not a timestep-converged or qualified backflip.
 
-![Native Rapier 500 µs diagnostic recording; limits failed](media/unitree-g1-robosim-native-backflip.gif)
+[Historical 500 µs foot-contact diagnostic GIF with failed limits](https://github.com/rsasaki0109/RoboSim/blob/021d40d4c39105c824c7339b0c9d713a775024e8/docs/media/unitree-g1-robosim-native-backflip.gif). The current GIF at the top of this document uses the successful full-contact 62.5 µs recording.
 
 Unlike the earlier external-state replay, this GIF displays states generated
 by native Rapier dynamics. Rendering itself only applies the recorded native

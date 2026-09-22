@@ -1,0 +1,41 @@
+{
+  "passed_recorded_refinement_gates": true,
+  "same_candidate_model_settings_and_producer": true,
+  "source_commit": "0c84bfdec8bdbdd3a4d9724e5bf13469fc895243",
+  "binary_sha256": "dcc339bfa4d739a991150b1ec2e14559c7b7524993e54e35068a43b6e82aa2c8",
+  "gif_sha256": "7bb09044bed6e2c4ca13570e7ff9504b78f34f06d0dc6158b258ddb772f8d898",
+  "hardware_validated": false,
+  "scope": "Native full-contact outcome reproduced at 125 and 62.5 us, with 500 us comparison; not a proof of trajectory convergence or hardware readiness.",
+  "runs": [
+    {
+      "dt_us": 500.0,
+      "rollout_sha256": "5443483625cdc7b2aca461d92a8eddbcad3b6e4e7c4dec8b4d592653c2fabec2",
+      "signed_rotation_rad": -6.278577363331621,
+      "peak_joint_speed_ratio": 1.0438511848449707,
+      "final_second_max_base_speed_m_s": 0.0005488327471722262,
+      "final_second_min_upright": 0.9999893779253993,
+      "final_standing_error": 0.004657574652831234,
+      "passed_recorded_gates": true
+    },
+    {
+      "dt_us": 125.0,
+      "rollout_sha256": "e00f24582b782d42fbb4d0d04d838f3ffa3285a641d48c46acf60b627de806f2",
+      "signed_rotation_rad": -6.284341624490536,
+      "peak_joint_speed_ratio": 1.044473648071289,
+      "final_second_max_base_speed_m_s": 0.001066240299940009,
+      "final_second_min_upright": 0.9999990550958733,
+      "final_standing_error": 0.00467076847826275,
+      "passed_recorded_gates": true
+    },
+    {
+      "dt_us": 62.5,
+      "rollout_sha256": "b549cfc8448eb559b661bfbbfa4f2dc5fe7f250e1ae3794c772a63eb822948cf",
+      "signed_rotation_rad": -6.283465994223092,
+      "peak_joint_speed_ratio": 1.0394285202026368,
+      "final_second_max_base_speed_m_s": 0.0,
+      "final_second_min_upright": 0.9999999604393275,
+      "final_standing_error": 0.004572108075025666,
+      "passed_recorded_gates": true
+    }
+  ]
+}
