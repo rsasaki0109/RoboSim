@@ -1,0 +1,54 @@
+[
+  {
+    "rollout": "../rotation-normalization/baseline.json",
+    "rollout_sha256": "490584ccfb81d6d79fe1449a79dbf9004d230fb90df4d761e8eb5ed7ff31982e",
+    "audit": "source URDF forward kinematics only; external simulation never stepped",
+    "native_mass_kg": 34.13385728,
+    "fk_model_mass_kg": 34.133858,
+    "start_s": 0.6401250000000002,
+    "end_s": 1.1301249999999998,
+    "sample_count": 50,
+    "max_ballistic_position_residual_m": 0.1521320395341114,
+    "max_ballistic_velocity_residual_m_s": 0.0014490797128472275,
+    "external_time_s": 0.0
+  },
+  {
+    "rollout": "source.json",
+    "rollout_sha256": "71947b8f4c40a73a128fca6a8a8f9abbd8176027ac54773392f051e7330f6994",
+    "audit": "source URDF forward kinematics only; external simulation never stepped",
+    "native_mass_kg": 34.13385728,
+    "fk_model_mass_kg": 34.133858,
+    "start_s": 0.6501250000000002,
+    "end_s": 1.0501249999999998,
+    "sample_count": 41,
+    "max_ballistic_position_residual_m": 0.00017997993062467355,
+    "max_ballistic_velocity_residual_m_s": 0.0006465523169081053,
+    "external_time_s": 0.0
+  },
+  {
+    "rollout": "open-5.json",
+    "rollout_sha256": "74e0a72464b02553ed7fd98d8f9f7867de37e4839cc922d58c95c7a7dd1588f3",
+    "audit": "source URDF forward kinematics only; external simulation never stepped",
+    "native_mass_kg": 34.13385728,
+    "fk_model_mass_kg": 34.133858,
+    "start_s": 0.6501250000000002,
+    "end_s": 1.0901249999999998,
+    "sample_count": 45,
+    "max_ballistic_position_residual_m": 0.00017129951392017657,
+    "max_ballistic_velocity_residual_m_s": 0.0006465523169081053,
+    "external_time_s": 0.0
+  },
+  {
+    "rollout": "search-best.json",
+    "rollout_sha256": "81ca33e6a9855b031f6b76d639694e889673334b58242cd4a490a757205a86b5",
+    "audit": "source URDF forward kinematics only; external simulation never stepped",
+    "native_mass_kg": 34.13385728,
+    "fk_model_mass_kg": 34.133858,
+    "start_s": 0.6501250000000002,
+    "end_s": 1.0701249999999998,
+    "sample_count": 43,
+    "max_ballistic_position_residual_m": 0.00015554802687443964,
+    "max_ballistic_velocity_residual_m_s": 0.0006284947914116586,
+    "external_time_s": 0.0
+  }
+]

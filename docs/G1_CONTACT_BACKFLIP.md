@@ -602,3 +602,9 @@ out-of-range values are rejected, and outputs record the applied gains. The
 search driver rejects ignored gain/recovery requests, including an older
 binary that does not report the requested fields. This enables native landing
 absorption experiments without changing launch or flight gains.
+
+[Corrected free-root COM evidence](evidence/g1-contact-backflip/native-transfer/free-root-com/README.md)
+retains the independent airborne audit and seven native collapse recordings.
+The original source candidate now rotates once and reaches ground contact,
+but rebounds and falls at 1.991125 s. Earlier opening and slower recovery
+also fail. Successful native standing recovery and its GIF remain open.

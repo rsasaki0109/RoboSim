@@ -296,3 +296,24 @@ under-rotates and falls. Native success/GIF remain open; launch, tuck and
 opening need optimization on the native plant. Full-body/self-contact,
 constraint friction, contact/limit solvers and free-root numerical damping
 remain different. See [armature comparison evidence](evidence/g1-contact-backflip/native-transfer/armature/README.md).
+
+### Native free-root COM integration and landing recovery
+
+A torque-excited G1 regression exposed f32-to-f64 quaternion norm error in the
+Rapier/world boundary; promoted rotations now normalize before hierarchical
+inverse transforms. A separate zero-gravity welded-pair regression then
+reproduced a free-root COM integration defect: root linear velocity describes
+the COM while translation coordinates previously described the body origin.
+The vendored Rapier patch now integrates free roots at their COM and retains
+body pose across COM and fixed/dynamic changes. See [ADR 031](adr/031-multibody-free-root-com.md).
+
+Independent source-URDF FK of native recordings reduces the same candidate's
+maximum airborne ballistic position residual from 0.152132 m to 0.0001713 m;
+external simulation time stays zero during this audit. The corrected source
+candidate rotates once and touches down, then rebounds and falls at 1.991125 s.
+Earlier-opening and slower-recovery probes also fail. Seven corrected-plant
+recordings are retained in [free-root COM evidence](evidence/g1-contact-backflip/native-transfer/free-root-com/README.md).
+Earlier search results apply to the pre-correction plant and retain separate
+hashes. Native stable landing/GIF remain open. Contact-phase stiffness and
+damping can now be varied independently of the flight servo to investigate
+rebound without changing launch or opening gains.
