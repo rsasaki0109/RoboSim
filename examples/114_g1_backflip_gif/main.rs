@@ -11,6 +11,7 @@
 mod native;
 mod native_recording;
 mod recording;
+mod structural_contact;
 
 use std::fs;
 use std::path::{Path, PathBuf};

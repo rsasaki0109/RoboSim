@@ -202,6 +202,70 @@ pub(super) fn run() {
         .iter_entities()
         .filter(|e| e.get::<rne_physics::ConvexCollider>().is_some())
         .count();
+    let structural_filter = args.iter().any(|arg| arg == "--native-structural-filter");
+    let mut structural_excluded_pairs = Vec::new();
+    if structural_filter {
+        assert!(
+            convex_collider_count > 0,
+            "structural filter requires convex body geometry"
+        );
+        assert_eq!(
+            sim.world()
+                .iter_entities()
+                .filter(|e| e.get::<Robot>().is_some())
+                .count(),
+            1,
+            "structural collision masks are scoped to this single-robot probe"
+        );
+        let entities: Vec<_> = (0..model.link_count())
+            .map(|i| model.link_entity(i).unwrap())
+            .collect();
+        let edges: Vec<_> = sim
+            .world()
+            .iter_entities()
+            .filter_map(|entity| {
+                let joint = entity.get::<Joint>()?;
+                Some((
+                    entities.iter().position(|e| *e == joint.parent_link)?,
+                    entities.iter().position(|e| *e == joint.child_link)?,
+                    joint.kind == rne_robot::JointKind::Fixed,
+                ))
+            })
+            .collect();
+        let masks = structural_contact::masks(entities.len(), &edges);
+        for (i, entity) in entities.iter().enumerate() {
+            if sim.world().get::<rne_physics::Collider>(*entity).is_none() {
+                continue;
+            }
+            assert_eq!(
+                sim.world()
+                    .get::<rne_physics::CollisionGroups>(*entity)
+                    .copied()
+                    .unwrap_or_default(),
+                rne_physics::CollisionGroups::default(),
+                "self-collision must already be enabled"
+            );
+            for j in 0..i {
+                if sim
+                    .world()
+                    .get::<rne_physics::Collider>(entities[j])
+                    .is_some()
+                    && masks[i].memberships & masks[j].filter == 0
+                {
+                    structural_excluded_pairs.push((
+                        sim.world().get::<Link>(*entity).unwrap().name.clone(),
+                        sim.world().get::<Link>(entities[j]).unwrap().name.clone(),
+                    ));
+                }
+            }
+        }
+        for (entity, mask) in entities.iter().zip(masks) {
+            if sim.world().get::<rne_physics::Collider>(*entity).is_some() {
+                sim.world_mut().entity_mut(*entity).insert(mask);
+            }
+        }
+        structural_excluded_pairs.sort();
+    }
     let mut contact_pairs: std::collections::BTreeMap<(String, String), (u64, f64, f64)> =
         std::collections::BTreeMap::new();
     if args.iter().any(|arg| arg == "--native-model-check") {
@@ -680,6 +744,8 @@ pub(super) fn run() {
     if convex_collider_count > 0 {
         output["note"] = json!("Transfer probe: native convex body geometry; inspect scene self-collision settings; qualification pending");
     }
+    output["structural_contact_filter"] = json!(structural_filter);
+    output["structural_excluded_link_pairs"] = json!(structural_excluded_pairs);
     output["convex_collider_count"] = json!(convex_collider_count);
     output["contact_pair_audit"] = json!(contact_pairs.iter().map(|((a,b),(count,first,impulse))|
         json!({"link_a":a,"link_b":b,"reported_steps":count,"first_time_s":first,"max_normal_impulse_ns":impulse}))

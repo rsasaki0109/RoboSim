@@ -701,3 +701,13 @@ pair, its first time, report count and maximum normal impulse, including the
 preparation interval. `environment` denotes non-robot entities (the ground in
 this probe scene). Foot support requires positive foot/environment impulse;
 foot/body self-contact cannot trigger takeoff/landing support.
+
+The optional native flag `--native-structural-filter` derives contact masks
+from the authored joint graph. Fixed-connected links form rigid clusters;
+contacts within a cluster and between directly joint-connected clusters are
+excluded. Nonadjacent self-contact and environmental contact remain enabled.
+This single-robot diagnostic supports at most 31 rigid clusters and requires
+convex body geometry with self-collision already enabled. It does not replace
+an existing custom collision policy. Excluded link pairs are recorded with the
+rollout, so the policy can be audited without relying on the resulting motion.
+The filters are independent of candidate parameters and observed contact pairs.
