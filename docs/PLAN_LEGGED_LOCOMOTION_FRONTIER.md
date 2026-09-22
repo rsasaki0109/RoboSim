@@ -417,3 +417,19 @@ for 5 s. See [long validation evidence](evidence/g1-contact-backflip/native-tran
   live on eed9b41; its assets semver job flags the pre-existing main field
   `UrdfRobotAsset.weld_fixed_children` (introduced by #291), not a new convex
   extension field. Other CI stages remain under observation.
+
+- Command-headroom producer 0c84bfd passes every recorded gate at 500 µs over
+  15 s: speed 1.03187251x, knee effort 119.99901581 Nm (<120 Nm), standing
+  error 0.00465579, continuous support and full-contact audit. Same-candidate
+  125/62.5 µs runs remain live. Archive: `full-headroom-validation`.
+- CI investigation confirms `UrdfRobotAsset.weld_fixed_children` also failed
+  the frozen-API baseline on the PR base 407acba (run 35480027356). Its smoke
+  stages passed then, so current smoke31/60 failures are regressions. Also
+  reproduced and fixed a CI changed-crate filter bug: `echo | grep -q` under
+  `pipefail` can return SIGPIPE on large file lists and skip changed packages;
+  a here-string preserves the intended check and unchanged-package skip.
+
+- Headroom candidate +0.02 rad fails at 62.5 µs: landing collapses at 2.98925 s,
+  so its coarse pass is not final qualification. Preserve the finer failed
+  rollout; begin three finer-step probes at +0.002/+0.005/+0.010 rad relative
+  to candidate 14, retaining 0.001 Nm headroom and all existing gates.

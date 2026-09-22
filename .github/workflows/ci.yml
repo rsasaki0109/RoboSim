@@ -325,7 +325,9 @@ jobs:
               <<<"$metadata")"
             crate_dir="${manifest%/Cargo.toml}"
             crate_dir="${crate_dir#"$GITHUB_WORKSPACE/"}"
-            if echo "$changed" | grep -q "^${crate_dir}/\|^Cargo\.lock$\|^Cargo\.toml$"; then
+            # grep -q can exit before echo drains a large diff. With pipefail,
+            # that SIGPIPE incorrectly skips a changed crate's compatibility check.
+            if grep -q "^${crate_dir}/\|^Cargo\.lock$\|^Cargo\.toml$" <<<"$changed"; then
               filtered+=("$flag" "$package")
             else
               echo "skip $package (no changes under $crate_dir)"
