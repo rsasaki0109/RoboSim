@@ -664,3 +664,17 @@ The current 0.x support status and the explicit commitment required before a
 1.0 promotion are defined in [the support policy](SUPPORT.md). The committed
 1.0 readiness tracker must remain empty rather than imply a maintainer, period,
 or published policy that has not been authorized.
+
+### New package API registration (2026-09-22)
+
+`rne_collision_bake` and `rne_usd` now have first immutable API baselines in
+`release/rust-api-additions-v1.toml`, pinned to their introducing main commit.
+The original registry and all existing package baselines are unchanged; see
+[ADR 033](adr/033-additive-package-api-baselines.md). Both registries ship in
+native bundles and their package sets are checked by the release gate.
+
+After integrating the normalized Rapier quaternion conversion, the physics
+conformance golden was regenerated from the CI runtime report at `7718c10`.
+Only four snapshot hashes and one articulation error measurement (about
+9.3e-8 m, still within its original tolerance) changed; no tolerance, case,
+expected physical value or pass/fail gate was changed.

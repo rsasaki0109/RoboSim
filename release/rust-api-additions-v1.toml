@@ -1,0 +1,14 @@
+# ADR 033: first immutable baselines for packages absent from the original registry.
+schema_version = 1
+release_version = "0.3.0"
+baseline_revision = "cd6848d555ab74d7735908887126f5e366bebc88"
+baseline_tree = "bc439dab3ce492f15788485aea9df8cbedc61f96"
+cargo_semver_checks_version = "0.49.0"
+
+[[package]]
+name = "rne_collision_bake"
+manifest_path = "crates/rne_collision_bake/Cargo.toml"
+
+[[package]]
+name = "rne_usd"
+manifest_path = "crates/rne_usd/Cargo.toml"

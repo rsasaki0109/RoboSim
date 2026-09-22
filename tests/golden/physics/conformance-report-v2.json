@@ -214,14 +214,14 @@
       "backend": "rapier",
       "capability": "articulation",
       "passed": true,
-      "snapshot_hash": 13795144852807488159,
+      "snapshot_hash": 1498855401900830695,
       "metrics": [
         {
           "id": "anchor_error_m",
           "unit": "m",
-          "measured": 7.219940074616746e-8,
+          "measured": 9.299025663956681e-8,
           "expected": 0.0,
-          "absolute_error": 7.219940074616746e-8,
+          "absolute_error": 9.299025663956681e-8,
           "tolerance": {
             "id": "revolute_anchor_m_v1",
             "absolute": 0.01,
@@ -254,7 +254,7 @@
       "backend": "rapier",
       "capability": "contact_force",
       "passed": true,
-      "snapshot_hash": 3156249424508582229,
+      "snapshot_hash": 7056287231214271674,
       "metrics": [
         {
           "id": "mean_normal_impulse_n_s",
@@ -319,7 +319,7 @@
       "backend": "rapier",
       "capability": "rigid_body",
       "passed": true,
-      "snapshot_hash": 3561298116671187316,
+      "snapshot_hash": 10289609359101989785,
       "metrics": [
         {
           "id": "resting_height_m",
@@ -368,7 +368,7 @@
       "backend": "rapier",
       "capability": "external_body_wrench",
       "passed": true,
-      "snapshot_hash": 12710253008367487674,
+      "snapshot_hash": 9246978701418855112,
       "metrics": [
         {
           "id": "forced_linear_velocity_x_m_s",

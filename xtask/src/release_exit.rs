@@ -731,8 +731,9 @@ fn validate_semver_packages(block: &str) -> anyhow::Result<()> {
     let normalized = normalize_workflow(block);
     for fixed_baseline_check in [
         "release/rust-api-baseline.toml",
+        "release/rust-api-additions-v1.toml",
         "cargo metadata --locked --no-deps --format-version 1",
-        "git diff --quiet \"$registry_guard_ref\" -- release/rust-api-baseline.toml",
+        "git diff --quiet \"$registry_guard_ref\" -- \"$registry_file\"",
         "previous[\"release_version\"]",
         "if [[ \"$previous_release\" == \"$current_release\" ]]",
         "Rust API baseline release version must increase",
