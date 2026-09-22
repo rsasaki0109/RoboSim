@@ -51,8 +51,22 @@ def loss(result):
     rotation, speed, excess, upright, height = values
     duration = max(0.0, min(5.0, result["completed_maneuver_time_s"]))
     tail_speed = result.get("final_second_max_base_speed_m_s")
+    contact_cost = 0.0
+    if result.get("structural_contact_filter"):
+        pairs = result.get("contact_pair_audit")
+        if not isinstance(pairs, list):
+            return 1e6
+        for pair in pairs:
+            impulse = pair.get("max_normal_impulse_ns")
+            if not isinstance(impulse, (int, float)) or not math.isfinite(impulse) or impulse < 0:
+                return 1e6
+            names = {pair.get("link_a"), pair.get("link_b")}
+            is_support = "environment" in names and bool(names & {"left_ankle_roll_link", "right_ankle_roll_link"})
+            if not is_support:
+                contact_cost += 250 * min(1.0, impulse)
     return (
-        50 * (5 - duration)
+        contact_cost
+        + 50 * (5 - duration)
         + 20 * abs(rotation + math.tau)
         + 40 * (1 - upright)
         + 100 * max(0.0, 0.65 - height)
@@ -81,6 +95,7 @@ def search(
     dt_us=500,
     motor_mode="velocity",
     duration_s=5,
+    structural_filter=False,
 ):
     """Evaluate each coordinate batch concurrently, then select in fixed order."""
     binary, scene, output = (
@@ -96,6 +111,8 @@ def search(
         raise ValueError("supported step and velocity/effort motor mode required")
     if not isinstance(duration_s, int) or duration_s not in range(5, 16):
         raise ValueError("integer maneuver duration in 5..15 required")
+    if not isinstance(structural_filter, bool):
+        raise ValueError("boolean structural_filter required")
     timeout_s = 1200 if dt_us < 500 else 600
     if shutil.disk_usage(output.parent).free < 30 * 1024**3:
         raise RuntimeError("30 GiB disk reserve required")
@@ -130,6 +147,8 @@ def search(
             "--native-output",
             str(rollout_path),
         ]
+        if structural_filter:
+            command.append("--native-structural-filter")
         if motor_mode == "velocity":
             command.append("--native-velocity-servo")
         with prefix.with_suffix(".log").open("w") as log:
@@ -156,6 +175,14 @@ def search(
             raise ValueError(
                 "rollout step, motor mode or armature differs from campaign"
             )
+        if result.get("structural_contact_filter", False) != structural_filter:
+            raise ValueError("rollout structural contact policy differs from campaign")
+        if structural_filter and (
+            result.get("convex_collider_count", 0) <= 0
+            or not isinstance(result.get("contact_pair_audit"), list)
+            or not isinstance(result.get("structural_excluded_link_pairs"), list)
+        ):
+            raise ValueError("full-contact geometry and pair audit required")
         for field in (
             "recovery_s",
             "landing_kp_nm_per_rad",
@@ -186,6 +213,7 @@ def search(
                 "workers": workers,
                 "dt_s": dt_us * 1e-6,
                 "motor_mode": motor_mode,
+                "structural_filter": structural_filter,
                 "timeout_s": timeout_s,
                 "maneuver_duration_s": duration_s,
                 "axes": axes,
@@ -246,6 +274,7 @@ def main():
         "--motor-mode", choices=["velocity", "effort"], default="velocity"
     )
     parser.add_argument("--axes", choices=["all", "launch-tuck-open"], default="all")
+    parser.add_argument("--structural-filter", action="store_true")
     args = parser.parse_args()
     search(
         args.binary,
@@ -257,6 +286,7 @@ def main():
         AXES if args.axes == "all" else LAUNCH_TUCK_OPEN_AXES,
         dt_us=args.dt_us,
         motor_mode=args.motor_mode,
+        structural_filter=args.structural_filter,
     )
 
 

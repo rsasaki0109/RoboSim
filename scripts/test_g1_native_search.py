@@ -32,6 +32,31 @@ def sample():
 
 
 class NativeSearchTest(unittest.TestCase):
+    def test_full_contact_score_penalizes_body_impulses_but_not_support(self):
+        good = sample()
+        good.update(structural_contact_filter=True, contact_pair_audit=[])
+        support = copy.deepcopy(good)
+        support["contact_pair_audit"] = [dict(link_a="environment", link_b="left_ankle_roll_link", max_normal_impulse_ns=10)]
+        body = copy.deepcopy(good)
+        body["contact_pair_audit"] = [dict(link_a="left_knee_link", link_b="torso_link", max_normal_impulse_ns=.5)]
+        self.assertEqual(loss(good), loss(support))
+        self.assertGreater(loss(body), loss(good))
+        body["contact_pair_audit"][0]["max_normal_impulse_ns"] = float("nan")
+        self.assertEqual(loss(body), 1e6)
+
+    def test_search_rejects_ignored_structural_policy(self):
+        def fixture(command, **kwargs):
+            self.assertIn("--native-structural-filter", command)
+            Path(command[command.index("--native-output") + 1]).write_text(json.dumps(sample()))
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "g1_native_search.shutil.disk_usage", return_value=Usage(100, 0, 32 * 1024**3)
+        ), patch("g1_native_search.subprocess.run", side_effect=fixture):
+            base = Path(directory)
+            binary, scene = base / "binary", base / "scene"
+            binary.write_text("fixture"); scene.write_text("fixture")
+            with self.assertRaisesRegex(ValueError, "structural contact policy"):
+                search(binary, scene, {"parameters": [2.] * 16}, base / "out", 0, 1, structural_filter=True)
+
     def test_collapsed_or_overspeed_flip_is_worse(self):
         good = sample()
         collapsed = copy.deepcopy(good)

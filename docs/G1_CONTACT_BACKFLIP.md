@@ -711,3 +711,11 @@ convex body geometry with self-collision already enabled. It does not replace
 an existing custom collision policy. Excluded link pairs are recorded with the
 rollout, so the policy can be audited without relying on the resulting motion.
 The filters are independent of candidate parameters and observed contact pairs.
+
+Native search accepts `--structural-filter` (or the Python helper keyword
+`structural_filter=True`) and verifies that the binary applied it with convex
+geometry and contact-pair evidence. Its diagnostic objective additionally
+penalizes positive non-support contact impulses, including self-contact and
+non-foot environment contact. Foot/environment support is not penalized.
+Missing/nonfinite audit data is rejected or given failure cost. This score is
+not a qualification gate and does not change any measured-limit thresholds.
