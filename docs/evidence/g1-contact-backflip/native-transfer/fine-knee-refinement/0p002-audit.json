@@ -1,0 +1,29 @@
+{
+  "passed_recorded_gates": false,
+  "gates": {
+    "native_direct_effort": true,
+    "completed": true,
+    "signed_rotation_rad": true,
+    "longest_air_s": true,
+    "flight_and_landing": true,
+    "peak_joint_speed_ratio": true,
+    "max_joint_position_excess_rad": true,
+    "final_second_min_upright": true,
+    "final_second_max_base_speed_m_s": false,
+    "final_second_min_base_height_m": true,
+    "final_standing_error": false,
+    "continuous_support": false,
+    "full_contact_profile": true,
+    "measured_effort_limits": true,
+    "contact_evidence": true,
+    "no_nonfoot_ground_contact": true,
+    "no_nonadjacent_self_overlap": true
+  },
+  "failed_gates": [
+    "final_second_max_base_speed_m_s",
+    "final_standing_error",
+    "continuous_support"
+  ],
+  "nonfoot_ground_pairs": [],
+  "overlapping_self_pairs": []
+}

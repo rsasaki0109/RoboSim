@@ -54,6 +54,23 @@ pub struct ContactEvent {
     pub impulse: f32,
 }
 
+/// Minimum signed solver-manifold separation for one collider pair.
+///
+/// Negative values indicate overlap at the contact-generation pose used by the
+/// latest physics step; positive values are predictive contact gaps. This is
+/// not recomputed at the post-integration pose and is reported even when the
+/// solved impulse is zero. Absence only means no manifold samples were retained,
+/// not an exact distance query between arbitrary shapes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ContactSeparationSample {
+    /// First entity in stable index order.
+    pub entity_a: Entity,
+    /// Second entity in stable index order.
+    pub entity_b: Entity,
+    /// Minimum signed separation over the pair's retained manifold points, in meters.
+    pub min_separation_m: f64,
+}
+
 /// Backend-neutral evidence for one solved contact point from the last step.
 ///
 /// Entities are stored in ascending stable entity-index order. The normal points

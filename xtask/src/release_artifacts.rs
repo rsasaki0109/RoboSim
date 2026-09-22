@@ -100,7 +100,7 @@ const EXTERNAL_FLAGSHIP_REQUIRED_PROOF_PATHS: [&str; 5] = [
 const MAX_EXTERNAL_SUBMISSION_BYTES: u64 = 128 * 1024;
 const MAX_EXTERNAL_LOG_BYTES: u64 = 16 * 1024 * 1024;
 
-const BUNDLE_FILES: [(&str, &str); 91] = [
+const BUNDLE_FILES: [(&str, &str); 92] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -182,6 +182,10 @@ const BUNDLE_FILES: [(&str, &str); 91] = [
     (
         "release/rust-api-baseline.toml",
         "release/rust-api-baseline.toml",
+    ),
+    (
+        "release/rust-api-additions-v1.toml",
+        "release/rust-api-additions-v1.toml",
     ),
     (
         "release/artifact-attestation.toml",
@@ -4957,6 +4961,10 @@ mod tests {
         let root = workspace_root().expect("workspace root");
         let output = tempfile::tempdir().expect("temporary bundle");
         stage_static_files(&root, output.path()).expect("stage bundle files");
+        assert_eq!(
+            fs::read(output.path().join("release/rust-api-additions-v1.toml")).unwrap(),
+            fs::read(root.join("release/rust-api-additions-v1.toml")).unwrap()
+        );
         assert_eq!(
             fs::read(output.path().join("release/one-zero-readiness.toml")).unwrap(),
             fs::read(root.join("release/one-zero-readiness.toml")).unwrap()

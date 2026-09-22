@@ -10,6 +10,8 @@
 //! bit-for-bit reproducible. A higher-quality convex-hull backend (for example
 //! CoACD) can be added behind a feature without changing the artifact format.
 
+#![deny(missing_docs)]
+
 use rne_math::{Quat, Vec3};
 use rne_physics::{ColliderShape, CompoundPart};
 use rne_world::Transform3;

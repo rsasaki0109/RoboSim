@@ -1,0 +1,56 @@
+{
+  "source_commit": "d39c2700b12498b0d42bc018c3f7d0f75f8e2d2a",
+  "source_sha256": {
+    "crates/rne_physics/src/components.rs": "cd7e284bb8fb062d7eb3a75388789a5d09ea698c6124807ddcccdc24e81e9989",
+    "crates/rne_physics/src/backend.rs": "40a826fd522d0dc39bf823f10267a48665e9544c05ce5b2a5035e2a41e3664a2",
+    "crates/rne_physics_rapier/src/backend.rs": "ad8c41fc7b7fa8f1e0ed0ac7d3e8f84d67410ba1424d16aa7cbc3bf71e9fc815",
+    "crates/rne_urdf_import/src/spawn.rs": "56ee63c7534ccc6dbdcd8ec678fedc028da3664800b0ca4f99e3e18176c2e848",
+    "crates/rne_assets/src/robot.rs": "387b93957b97727eae10fbfb960e23a81531f88fd562ee680d6f8a0aecc6cab7",
+    "crates/rne_assets/src/spawn.rs": "7899081c94ec64483e52e623d7f123c6311d47a896bd847f5877ce7675f00258",
+    "examples/114_g1_backflip_gif/native.rs": "a33c4f53bf8ba6f08acb4f400d62ac54745bd1172536dc7d7673ec5b90c536e7",
+    "scripts/g1_native_model.py": "34a9911fe9a2f8d1c62ca5518555bded58f3c0101d6665d61bc6d2166fbdafca",
+    "assets/robots/g1_description/g1_23dof.urdf": "b462e1367ccb50f148db8c82f93421cb3f47497b10b735e891d2c9d000870cfc",
+    "scripts/fixtures/g1_backflip_model.json": "94d2d9490321c93e6b7051a76281732d1a65c30794b1150251bc0455587b297a"
+  },
+  "binary_sha256": "e000f202b7b170cbc72261c19ace9c29f0413f8f098eb77cde5c7d8d99f84315",
+  "initial_recording_sources": {
+    "source_commit": "da27b965b7ef70eeccb0cc78c0b39ab087bf90eb",
+    "source_sha256": {
+      "crates/rne_physics/src/components.rs": "cd7e284bb8fb062d7eb3a75388789a5d09ea698c6124807ddcccdc24e81e9989",
+      "crates/rne_physics/src/backend.rs": "aa31b386db773cbb09f56a93747eb331aa5aafe246238bcbc41b8ed2262e1735",
+      "crates/rne_physics_rapier/src/backend.rs": "cee3e6b30faa11eed0ad8f3ed73edb774588fe9a68de363c8e381bb62acc6f66",
+      "crates/rne_urdf_import/src/spawn.rs": "859e11ef6b61de871f875ace4c939f840d69c7c3ddf0a9905bac9726563f30d2",
+      "crates/rne_assets/src/robot.rs": "2b8180389eeaed73a118f33591bc2cd13642f363b58a40a6dcde130575d2d505",
+      "crates/rne_assets/src/spawn.rs": "b276ea97d21296db1a8bab90025f8199fb311378874e1451bb6df25b558a0c02",
+      "examples/114_g1_backflip_gif/native.rs": "a33c4f53bf8ba6f08acb4f400d62ac54745bd1172536dc7d7673ec5b90c536e7",
+      "scripts/g1_native_model.py": "34a9911fe9a2f8d1c62ca5518555bded58f3c0101d6665d61bc6d2166fbdafca",
+      "assets/robots/g1_description/g1_23dof.urdf": "b462e1367ccb50f148db8c82f93421cb3f47497b10b735e891d2c9d000870cfc",
+      "scripts/fixtures/g1_backflip_model.json": "94d2d9490321c93e6b7051a76281732d1a65c30794b1150251bc0455587b297a"
+    },
+    "binary_sha256": "d014641afff61d1446c9e148521ffc70fd24b68557b4b680bd2a4562c80f34ee"
+  },
+  "recording_source_commit": {
+    "stand.json": "da27b965b7ef70eeccb0cc78c0b39ab087bf90eb",
+    "stand-125us.json": "da27b965b7ef70eeccb0cc78c0b39ab087bf90eb",
+    "legacy-box-check.json": "da27b965b7ef70eeccb0cc78c0b39ab087bf90eb",
+    "flip.json": "d39c2700b12498b0d42bc018c3f7d0f75f8e2d2a",
+    "flip-125us.json": "d39c2700b12498b0d42bc018c3f7d0f75f8e2d2a",
+    "model-check.json": "d39c2700b12498b0d42bc018c3f7d0f75f8e2d2a"
+  },
+  "artifact_sha256": {
+    "audit.json": "369ac359d715521a31220ef0a73fff0d7587da32af6e25e900d7917b1d06381e",
+    "candidate.json": "c18245611a8cc8bc4b51a2366a35f07a583a3ba0002692489470754bd71fdd63",
+    "flip-125us.json": "7b87d4504da75a1564a0edeab566cf11427055308239ab73da3105e322eabc3b",
+    "flip.json": "3324fd47b4b1178562a9d5076af3aa549ae5d457ef41693f8959fbb87ef40aa3",
+    "legacy-box-check.json": "eec288cd23296416cc57eaa3262ed75d2667840d089f03dfe2dd7d4f16ad732d",
+    "model-check.json": "900ce73d972681c470011d3074ef175179f15d14c938d4cdf8736722b7d415d8",
+    "stand-125us.json": "62d056515cd4366597883e48e41fd6fa7245ac55fc1a4b633fc29f79a753e0fd",
+    "stand.json": "ae738ad3e7bd9496467879be347c50e7cbca76d93e66130e70c7dc9e53664978"
+  },
+  "verification": {
+    "500us_repeat_byte_identical": true,
+    "compatibility_refactor_flips_byte_identical_at_both_steps": true,
+    "legacy_box_physical_frames_match_ed1b1c3_evidence": true
+  },
+  "qualified_backflip": false
+}

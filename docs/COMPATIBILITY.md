@@ -186,8 +186,12 @@ and reject trailing bytes; their combined reference shard digest is frozen.
 The real diff-drive reference capture additionally freezes its TaskSpec,
 manifest, complete shard, per-stream counts, terminal verdict, and recomputed
 RGB-D evaluation report in
-`tests/golden/datasets/diff-drive-reference-summary-v2.json`. Its v1 summary is
-retained as an older compatibility fixture. DataBus sensor sequence values are
+`tests/golden/datasets/diff-drive-reference-summary-v3.json`. The v1 and v2
+summaries remain unchanged as older compatibility fixtures. The v3 capture
+uses the corrected wheel layout, includes scene obstacles in its headless
+camera render, and places the wall ahead of the +X-facing camera. Each depth
+frame must see finite geometry; a pair of empty far-plane images cannot qualify
+solely because their added bias meets the unchanged 1 cm error tolerance. DataBus sensor sequence values are
 normalized to zero-based dataset-local sequence values; stream identity,
 timestamps, physical payload values, calibration, declared storage resolution,
 and noise behavior remain semantic.
@@ -660,3 +664,17 @@ The current 0.x support status and the explicit commitment required before a
 1.0 promotion are defined in [the support policy](SUPPORT.md). The committed
 1.0 readiness tracker must remain empty rather than imply a maintainer, period,
 or published policy that has not been authorized.
+
+### New package API registration (2026-09-22)
+
+`rne_collision_bake` and `rne_usd` now have first immutable API baselines in
+`release/rust-api-additions-v1.toml`, pinned to their introducing main commit.
+The original registry and all existing package baselines are unchanged; see
+[ADR 033](adr/033-additive-package-api-baselines.md). Both registries ship in
+native bundles and their package sets are checked by the release gate.
+
+After integrating the normalized Rapier quaternion conversion, the physics
+conformance golden was regenerated from the CI runtime report at `7718c10`.
+Only four snapshot hashes and one articulation error measurement (about
+9.3e-8 m, still within its original tolerance) changed; no tolerance, case,
+expected physical value or pass/fail gate was changed.

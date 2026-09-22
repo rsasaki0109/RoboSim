@@ -73,6 +73,14 @@ are evaluated as `BehaviorContract`s. Core crates do not depend on one another
 to fit this example: coordination stays at the application boundary, and both
 subsystems retain their independent tests.
 
+The high pickup approach advances a bounded joint-command trajectory from the
+measured entry pose. Later measurements still decide when the pose is reached,
+but do not restart that trajectory each tick: compliant servos must be able to
+catch up without spending the whole approach budget chasing a tiny offset from
+their current angle. Both engines use the same command increments, force limits,
+and cross-backend tolerances. A failed installed comparison reports the named
+checks, measured deltas, limits, and outcome statuses alongside its JSON report.
+
 The fault plan contains a boolean perception blackout plus seeded traffic
 departure and speed variations. The minimizer proves that the traffic
 variations are irrelevant to the selected failure and retains only the

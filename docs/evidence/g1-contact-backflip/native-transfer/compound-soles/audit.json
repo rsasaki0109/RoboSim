@@ -1,0 +1,38 @@
+{
+  "source_urdf_sha256": "b462e1367ccb50f148db8c82f93421cb3f47497b10b735e891d2c9d000870cfc",
+  "generated_urdf_sha256": "b7cc9fc26a72e8c0d32993f6d7b4fabbeed36a53b7f53314e6b7f329daf8d147",
+  "removed_empty_fixed_leaf_frames": [
+    {
+      "link": "imu_in_torso",
+      "joint": "imu_in_torso_joint"
+    },
+    {
+      "link": "imu_in_pelvis",
+      "joint": "imu_in_pelvis_joint"
+    },
+    {
+      "link": "d435_link",
+      "joint": "d435_joint"
+    },
+    {
+      "link": "mid360_link",
+      "joint": "mid360_joint"
+    }
+  ],
+  "declared_mass_kg": 34.13385728,
+  "source_sole_dimensions": true,
+  "movable_joint_count": 23,
+  "mesh_collision_elements_disabled": 21,
+  "multi_collision_links_merged_to_aabb": {},
+  "compound_link_part_counts": {
+    "left_ankle_roll_link": 4,
+    "right_ankle_roll_link": 4
+  },
+  "self_collision": false,
+  "qualification_ready": false,
+  "remaining_differences": [
+    "Native mesh collisions are disabled; enabling them currently produces AABBs, not source convex meshes.",
+    "Source adds joint armature 0.01, damping 0.05 and Coulomb friction 0.2; native probe does not match these.",
+    "Different contact solvers and motor models; equal mass does not establish equivalent dynamics."
+  ]
+}

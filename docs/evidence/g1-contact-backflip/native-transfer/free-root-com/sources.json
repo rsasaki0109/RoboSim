@@ -1,0 +1,40 @@
+{
+  "source_commit": "7abfe0f8a2bdbe0761590a3e0014ce9d858ffc15",
+  "binary_sha256": "51b4132cbb8b6e397be8ce945dd33cd4de0d2ff0ca5f2d3a2cc87a365d261394",
+  "scene_audit": "../contact-diagnostics/passive-model-audit.json",
+  "note": "Both quaternion normalization and free-root COM integration corrected. Native physics stepped; all seven candidates fail standing recovery.",
+  "validation": {
+    "backend_armature_tests": 30,
+    "backend_default_tests": 28,
+    "vendor_tests": 18,
+    "example_tests": 6,
+    "python_tests": 11,
+    "targeted_clippy": "passed -D warnings; 19 unchanged upstream warnings",
+    "workspace_format": "passed",
+    "full_workspace_ci": "not rerun to preserve 30 GiB reserve"
+  },
+  "artifact_sha256": {
+    "README.md": "a74f875f21c40fff1137e1ae5d582e602a5384c258b5e65eb319e57bff16b30b",
+    "flight-audit.json": "9efaa0d8d927519b3086f78e4265655ab72c606213721027db8cfc0d87b266a1",
+    "flight_audit.py": "5c13b7f0a38068ac4c39ee277e298d4f741c0ff7a037d4da49d78f15cdcf5e3b",
+    "open-5-candidate.json": "fd5f89d3ef5634d664db8f10465c3efc7c5b299f2f5731a75f6d606994f0d60e",
+    "open-5.json": "74e0a72464b02553ed7fd98d8f9f7867de37e4839cc922d58c95c7a7dd1588f3",
+    "open-5p5-candidate.json": "3508229ad8e52219f48b9c01be8ed3359aaab678dedf25558027aed42c9cd3ff",
+    "open-5p5.json": "5bc99dec02a5bd8da1426773beaa5032207e3d217d39b6865edb56dff95aeafe",
+    "open-5p75-candidate.json": "4aa4a7c66fcc2d2db9d4d79872ce0b89804d316b275130464c7760c2b12ca45c",
+    "open-5p75.json": "4247f91258bb27daa4610c5fcefbd36e6984dc6077a113505ca5be2f7fa486ae",
+    "open-5p875-candidate.json": "4c07c6ad7e552c8e324661f0e03061eb617f361b9bef253dfad0985df39cdac3",
+    "open-5p875.json": "50c456de295fa537b94f62ddc4eb803a48a240cf01e4c0724e871e05c34e2c6f",
+    "recovery-1p2-candidate.json": "77f1b950395ba9ed80a27f439275e5a7b21b045d172dbe528760c6f0f767170b",
+    "recovery-1p2.json": "496dd045017d25fe7ca8dc7e0981a596e4e828b4d096795ea0367a91d8fc8dcf",
+    "search-best-candidate.json": "09a4ba350e1a585982c5791d61b2f5b8bff3f7ba5e7462762b0b49bff9278398",
+    "search-best.json": "81ca33e6a9855b031f6b76d639694e889673334b58242cd4a490a757205a86b5",
+    "source-candidate.json": "1a12f8275b3016ccc3a32e55227c7b33a8f1bdc546459342adf1ceff558c5972",
+    "source.json": "71947b8f4c40a73a128fca6a8a8f9abbd8176027ac54773392f051e7330f6994"
+  },
+  "audit_environment": {
+    "mujoco": "3.13.0",
+    "numpy": "2.4.2",
+    "scipy": "1.17.0"
+  }
+}

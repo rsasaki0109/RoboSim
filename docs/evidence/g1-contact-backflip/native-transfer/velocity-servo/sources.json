@@ -1,0 +1,18 @@
+{
+  "source_commit": "fb5f6345b4c781be24435cad10d8304ca5b0bdf5",
+  "source_sha256": {
+    "examples/114_g1_backflip_gif/native.rs": "5edc0782de8460406886cc13bdefe38b2742b614f3cb1671aaaf2fe1aa559878",
+    "crates/rne_physics_rapier/src/backend.rs": "c333134a1e7804f2f1bb60673339a5b4e1574edb61f184d59db8f7ec68309414",
+    "assets/robots/unitree_g1_backflip_probe.rne.robot.toml": "a85c2731b3009d8eee308de5400c7d5588c9b414e1dada1a498db468e8fa9a12",
+    "assets/scenes/unitree_g1_backflip_probe.rne.scene.toml": "bdc5bd0c9e63af43f398ba7b4dd3be841736f07ec19378734f6bc8b7db5aeafb",
+    "assets/robots/g1_description/g1_23dof.urdf": "b462e1367ccb50f148db8c82f93421cb3f47497b10b735e891d2c9d000870cfc"
+  },
+  "artifact_sha256": {
+    "rejected-sweep.json": "95982cdf07b3ca354d328c3af1c9c33ef46ef5758c6b40589105d27b2dbadd10",
+    "velocity-bias27-candidate.json": "4007f39a886d01ff01822e9f94347986d412963ae3e633036b1f3806e22476a8",
+    "velocity-bias27-rollout.json": "30e7180c61c2df8cd094fa220e53d8a13f35cf9ec8113679928b98b4d5fa10af",
+    "velocity-tuck20-26-candidate.json": "6028e0edcf7319b63571903d65b5d9c33b7a892ecf740d530a97cb5a389525d1",
+    "velocity-tuck20-26-rollout.json": "cb030c508809af9bd4a8a54eca58b888bf8015a53debdfd88636987e5c94998e"
+  },
+  "qualified_backflip": false
+}

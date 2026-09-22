@@ -18,9 +18,11 @@ pub use pipeline::{
     AssetHotReloader, AssetRevision, SceneAssetBundle, ValidatedAsset,
 };
 pub use robot::{
-    load_robot_asset, load_robot_asset_passive_dynamics, parse_robot_asset,
-    parse_robot_asset_passive_dynamics, LidarRobotAsset, RobotAsset, RobotKind,
-    UrdfJointPassiveDynamicsAsset, UrdfRobotAsset, VisualsRobotAsset, WristCameraRobotAsset,
+    load_robot_asset, load_robot_asset_collision_parts, load_robot_asset_convex_collisions,
+    load_robot_asset_passive_dynamics, parse_robot_asset, parse_robot_asset_collision_parts,
+    parse_robot_asset_convex_collisions, parse_robot_asset_passive_dynamics, LidarRobotAsset,
+    RobotAsset, RobotKind, UrdfJointPassiveDynamicsAsset, UrdfRobotAsset, VisualsRobotAsset,
+    WristCameraRobotAsset,
 };
 pub use run::{
     load_run_manifest, parse_run_manifest, RunClock, RunController, RunControllerKind,

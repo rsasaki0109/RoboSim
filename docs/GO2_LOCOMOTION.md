@@ -465,3 +465,34 @@ contact and reshape the foot trajectory, which the current
 `UnitreeGo2TorqueOverlay` / `UnitreeGo2GaitSchedule` spaces were not asked to
 do for height. This is a campaign, not a parameter tweak; the boundary itself
 is now measured rather than assumed.
+
+### Normalized rotation calibration
+
+After promoting Rapier rotations to unit f64 quaternions, the historical robust
+feed-forward overlay reversed during its first measured turn window. A
+deterministic scalar sweep retuned the pinned `LEARNED_ROBUST_TURN` coefficients
+to 0.85 times the previous values. The existing sustained-turn, 3e-9 coefficient
+perturbation, repeatability, tilt and height assertions remain unchanged. Local
+release measurements are +0.169/+0.118 rad in the two windows; example 60 turns
++0.288 rad while translating 2.86 m. This calibrates the existing controller and
+does not lower the showcase gates or apply a base wrench.
+
+### Rotation-normalization calibration of earlier turning candidates
+
+The earlier torque overlay now scales its original coefficients by 0.95. On
+this Linux run its robust window is +0.304 rad and the later window -0.083 rad;
+the existing first-window, non-catastrophic-reversal, upright and deterministic
+repeat gates are unchanged. This is the earlier orbit-sensitive overlay, not
+the separately calibrated robust-turn overlay.
+
+The reference-free feedback policy scales only its two body-lean feature columns
+by 0.8. Its windows are +0.174/+0.291 rad with 5.59 m travel, maximum tilt 0.678
+rad and minimum height 0.168 m. The original two-window, travel, upright,
+3e-9 coefficient-perturbation and bit-identical-repeat assertions pass.
+
+The hand-designed yaw-rate-feedback gain-25 trial can now fall. The negative
+steering test records that as a rejected candidate: a successful result would
+require both the unchanged upright and sustained-turn criteria. The baseline,
+diagonal-twist and feed-forward-thrust trials still must stay upright, and the
+baseline still must travel more than 3 m. A rejected/fallen trial is never
+reported as a successful walk or turn.

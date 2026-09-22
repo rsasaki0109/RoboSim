@@ -1,0 +1,5 @@
+{
+  "status": "cancelled_after_coarse_measured_torque_failure",
+  "pid": 1782561,
+  "reason": "500us measured actuator peak 120.00001525878906 Nm exceeds unchanged 120 Nm ceiling. Retain strict gate and add 0.001 Nm command headroom before repeating."
+}

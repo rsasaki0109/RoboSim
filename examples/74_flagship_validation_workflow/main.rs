@@ -1108,11 +1108,30 @@ fn run(started: Instant) -> Result<()> {
         write_time_to_proof_report(&output, machine_label, started.elapsed())?;
     }
 
-    if cross_backend_evidence
+    if let Some(evidence) = cross_backend_evidence
         .as_ref()
-        .is_some_and(|evidence| evidence.report.status != "passed")
+        .filter(|evidence| evidence.report.status != "passed")
     {
-        bail!("Rapier/MuJoCo flagship comparison exceeded its registered contract");
+        let failed_checks = evidence
+            .report
+            .tolerance_checks
+            .iter()
+            .chain(&evidence.report.failure_tolerance_checks)
+            .filter(|check| check.status != "passed")
+            .collect::<Vec<_>>();
+        let outcomes = evidence
+            .report
+            .backends
+            .iter()
+            .map(|outcome| (outcome.backend_id, outcome.status))
+            .collect::<Vec<_>>();
+        let failure_outcomes = evidence
+            .report
+            .intentional_failures
+            .iter()
+            .map(|outcome| (outcome.backend_id, outcome.status))
+            .collect::<Vec<_>>();
+        bail!("Rapier/MuJoCo flagship comparison exceeded its registered contract: checks={failed_checks:?}, outcomes={outcomes:?}, failure_outcomes={failure_outcomes:?}; report={}", cross_backend_path.display());
     }
 
     println!(

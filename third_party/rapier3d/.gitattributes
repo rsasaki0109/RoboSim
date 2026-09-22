@@ -1,0 +1,7 @@
+# Preserve the licensed upstream package byte-for-byte, including CRLF.
+** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+# Original upstream doc comments retain trailing spaces.
+src/dynamics/rigid_body.rs -whitespace
+src/dynamics/rigid_body_set.rs -whitespace
+# Unified diff context lines intentionally contain one leading space.
+RNE.patch -whitespace

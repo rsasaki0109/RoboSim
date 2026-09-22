@@ -1,0 +1,21 @@
+{
+  "source_commit": "4784fd782b1078013b742b3d5bc9000975211358",
+  "source_sha256": {
+    "examples/114_g1_backflip_gif/native.rs": "9541ef521a271857ff1a386d77be79b887ff505babc3003b9fb6174856638c5a",
+    "crates/rne_physics_rapier/src/backend.rs": "c333134a1e7804f2f1bb60673339a5b4e1574edb61f184d59db8f7ec68309414",
+    "assets/robots/unitree_g1_backflip_probe.rne.robot.toml": "a85c2731b3009d8eee308de5400c7d5588c9b414e1dada1a498db468e8fa9a12",
+    "assets/scenes/unitree_g1_backflip_probe.rne.scene.toml": "bdc5bd0c9e63af43f398ba7b4dd3be841736f07ec19378734f6bc8b7db5aeafb",
+    "assets/robots/g1_description/g1_23dof.urdf": "b462e1367ccb50f148db8c82f93421cb3f47497b10b735e891d2c9d000870cfc"
+  },
+  "artifact_sha256": {
+    "friction05-open5-rollout.json": "7d90ea0e607b773519c06fbf479d17d9f856ad91c1f0904f8602d3a53f0989a9",
+    "friction05-open5.json": "d447191c4b603ee2c11ab8c3746d193ffa70174fea3c4ab05cc90c04b23acc7e",
+    "friction07-bias27-rollout.json": "a53aa8b428b7c0e80a11af36283546b519e8b6908dffae81353d3cfa9c23e9a7",
+    "friction07-bias27.json": "9ec35bf3b3915363f030ca5a5030253867bf0eb145933ade2fdeea36917b8ff4",
+    "friction07-canonical-rollout.json": "99a1f241f8f306a58591692fb5a0bc74f732b5efdde8006c4c48a098aa504b6f",
+    "friction07-canonical.json": "3e19d953ad735d0597988d0a926e966468f8e0537e8967261c66dcab26cdcc41",
+    "friction07-open5-rollout.json": "1d7593c61bc0db4e03ed58bfca84f47488a18efcca44653744359cb6c479ee00",
+    "friction07-open5.json": "e82c21be903bfebf5e64009db2db2b13b42778db983cef00af8c861ee37d0bb5"
+  },
+  "qualified_backflip": false
+}

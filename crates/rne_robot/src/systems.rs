@@ -4483,14 +4483,12 @@ fn sync_wheel_transforms(world: &mut World, drive: &DifferentialDrive, base: &Tr
     let wheel_y = world
         .get::<Collider>(drive.base_link)
         .and_then(|collider| match collider.shape {
-            ColliderShape::Cuboid { half_extents_m } => {
-                Some(-half_extents_m.y + drive.wheel_radius_m)
-            }
+            ColliderShape::Cuboid { half_extents_m } => Some(-half_extents_m.y),
             _ => None,
         })
         .unwrap_or(0.0);
 
-    for (wheel, x_offset) in [
+    for (wheel, z_offset) in [
         (drive.left_actuator, -half_track),
         (drive.right_actuator, half_track),
     ] {
@@ -4503,7 +4501,7 @@ fn sync_wheel_transforms(world: &mut World, drive: &DifferentialDrive, base: &Tr
         let Some(mut wheel_transform) = world.get_mut::<Transform3>(wheel_entity) else {
             continue;
         };
-        let offset = base.rotation * Vec3::new(x_offset, wheel_y, 0.0);
+        let offset = base.rotation * Vec3::new(0.0, wheel_y, z_offset);
         wheel_transform.translation = base.translation + offset;
         wheel_transform.rotation = base.rotation;
     }

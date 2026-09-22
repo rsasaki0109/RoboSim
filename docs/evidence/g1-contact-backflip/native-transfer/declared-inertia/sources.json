@@ -1,0 +1,23 @@
+{
+  "source_sha256": {
+    "crates/rne_physics_rapier/src/backend.rs": "c333134a1e7804f2f1bb60673339a5b4e1574edb61f184d59db8f7ec68309414",
+    "examples/114_g1_backflip_gif/native.rs": "6704302aa3baf22cb23fb64ad82d6d834ad8307c7a4aaf2569a442912c9097a0",
+    "assets/robots/unitree_g1_backflip_probe.rne.robot.toml": "a85c2731b3009d8eee308de5400c7d5588c9b414e1dada1a498db468e8fa9a12",
+    "assets/scenes/unitree_g1_backflip_probe.rne.scene.toml": "bdc5bd0c9e63af43f398ba7b4dd3be841736f07ec19378734f6bc8b7db5aeafb",
+    "assets/robots/g1_description/g1_23dof.urdf": "b462e1367ccb50f148db8c82f93421cb3f47497b10b735e891d2c9d000870cfc"
+  },
+  "source_base_commit": "413d250",
+  "backend": "Rapier 0.22.0",
+  "physical_qualification": false,
+  "self_collision": false,
+  "mesh_collisions": false,
+  "controller": "Native sampled PD effort or force-based position motor with preparation ankle feedback",
+  "recording_sha256": {
+    "g1-native-probe-500us-declared-flip-effort.json": "6e27d801b6881820d738dc3a43810dbb3ca45570bc829a81e1875f710ad82392",
+    "g1-native-probe-125us-declared-stand-effort.json": "30fbcf4007b606c9b7568acab4c652f280d915ed12f70bf03669e262a6eae78d",
+    "g1-native-probe-500us-declared-stand-implicit.json": "50758f146528a2747fcbca542e14d7b1b61da6b482399b6a2b71dcaa1dc3c6fb",
+    "g1-native-probe-500us-declared-stand-effort.json": "cd4f0de9ad32d73aff865b76491b36477736772a5525b5aca40563f654b46fd8",
+    "g1-native-probe-500us-declared-flip-implicit.json": "adb902b096703c2f6ff839e0f50de37e082bca4ecd8e0a0cf6db9faa0487e019",
+    "g1-native-probe-125us-declared-flip-effort.json": "67b2ab19b53cb50b451aed7f28ba02988aa974a9ed98f4b71b9045b8e79f6fec"
+  }
+}

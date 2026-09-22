@@ -6,8 +6,8 @@ use bevy_ecs::prelude::Component;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, JointMotor, PhysicsMaterial, RevoluteJointDesc, RigidBody,
-    RigidBodyType,
+    Collider, ColliderShape, ConvexCollider, FixedJointDesc, JointMotor, JointMotorGainModel,
+    PhysicsMaterial, RevoluteJointDesc, RigidBody, RigidBodyType,
 };
 use rne_world::Transform3;
 use serde::{Deserialize, Serialize};
@@ -102,11 +102,9 @@ pub fn spawn_diff_drive_robot(world: &mut World, config: &DiffDriveConfig) -> Di
     let right_actuator = spawn_named(world, "right_motor");
 
     let half_track = config.track_width_m * 0.5;
-    let wheel_offset = Vec3::new(
-        0.0,
-        -config.base_half_extents_m.y + config.wheel_radius_m,
-        0.0,
-    );
+    // +X is forward, +Y is up, and the axle spans Z. Place the axle at
+    // the chassis bottom so the wheel radius provides ground clearance.
+    let wheel_offset = Vec3::new(0.0, -config.base_half_extents_m.y, 0.0);
     let base_translation = base_translation_for_mode(config, wheel_offset.y);
 
     world.entity_mut(robot).insert(Robot {
@@ -134,11 +132,11 @@ pub fn spawn_diff_drive_robot(world: &mut World, config: &DiffDriveConfig) -> Di
         Collider::cuboid(config.base_half_extents_m),
     ));
 
-    for (wheel, name, x_offset, actuator_entity) in [
+    for (wheel, name, z_offset, actuator_entity) in [
         (left_wheel, "left_wheel", -half_track, left_actuator),
         (right_wheel, "right_wheel", half_track, right_actuator),
     ] {
-        let wheel_translation = base_translation + Vec3::new(x_offset, wheel_offset.y, 0.0);
+        let wheel_translation = base_translation + Vec3::new(0.0, wheel_offset.y, z_offset);
         world.entity_mut(wheel).insert((
             Link {
                 robot,
@@ -150,7 +148,7 @@ pub fn spawn_diff_drive_robot(world: &mut World, config: &DiffDriveConfig) -> Di
                 child_link: wheel,
                 kind: JointKind::Continuous,
                 limits: JointLimits::default(),
-                axis: Vec3::Y,
+                axis: Vec3::NEG_Z,
                 position: 0.0,
                 velocity: 0.0,
             },
@@ -173,19 +171,41 @@ pub fn spawn_diff_drive_robot(world: &mut World, config: &DiffDriveConfig) -> Di
                         friction: 1.2,
                         restitution: 0.0,
                     },
-                    local_offset: Transform3::IDENTITY,
+                    local_offset: Transform3::from_translation_rotation(
+                        Vec3::ZERO,
+                        Quat::from_rotation_x(std::f64::consts::FRAC_PI_2),
+                    ),
                     sensor: false,
+                },
+                // A capsule adds its radius to the axial width and penetrates the
+                // chassis. A thin convex cylinder keeps the rolling radius while
+                // fitting between the declared axle and chassis side.
+                ConvexCollider {
+                    vertices_m: [-config.wheel_radius_m * 0.1, config.wheel_radius_m * 0.1]
+                        .into_iter()
+                        .flat_map(|z| {
+                            (0..32).map(move |i| {
+                                let angle = i as f64 * std::f64::consts::TAU / 32.0;
+                                Vec3::new(
+                                    config.wheel_radius_m * angle.cos(),
+                                    config.wheel_radius_m * angle.sin(),
+                                    z,
+                                )
+                            })
+                        })
+                        .collect(),
                 },
                 RevoluteJointDesc {
                     parent: base_link,
-                    axis: Vec3::Y,
-                    anchor_parent_m: Vec3::new(x_offset, wheel_offset.y, 0.0),
+                    axis: Vec3::NEG_Z,
+                    anchor_parent_m: Vec3::new(0.0, wheel_offset.y, z_offset),
                     anchor_child_m: Vec3::ZERO,
                     relative_rotation: Quat::IDENTITY,
                     lower_rad: None,
                     upper_rad: None,
                 },
                 JointMotor::default(),
+                JointMotorGainModel::ForceBased,
             ));
         }
 
@@ -196,11 +216,52 @@ pub fn spawn_diff_drive_robot(world: &mut World, config: &DiffDriveConfig) -> Di
             mode: ControlMode::Velocity,
             target: ActuatorTarget::default(),
             limits: ActuatorLimits {
+                max_effort_nm: 1.0,
                 min_velocity_rad_s: -config.max_wheel_velocity_rad_s,
                 max_velocity_rad_s: config.max_wheel_velocity_rad_s,
                 ..ActuatorLimits::default()
             },
         });
+    }
+
+    if config.drive_mode == DiffDriveDriveMode::JointDriven {
+        // Two driven wheels alone leave pitch unsupported. These low-friction
+        // spherical skids keep the chassis clear of the floor without imposing
+        // a base pose or velocity; they are fixed supports, not rolling casters.
+        let radius_m = config.wheel_radius_m * 0.3;
+        for (name, sign) in [("front_caster", 1.0), ("rear_caster", -1.0)] {
+            let caster = spawn_named(world, name);
+            let offset = Vec3::new(
+                sign * config.base_half_extents_m.x * 0.8,
+                radius_m - base_translation.y,
+                0.0,
+            );
+            world.entity_mut(caster).insert((
+                Link {
+                    robot,
+                    name: name.into(),
+                },
+                Transform3::from_translation_rotation(base_translation + offset, Quat::IDENTITY),
+                RigidBody {
+                    body_type: RigidBodyType::Dynamic,
+                    mass_kg: 0.05,
+                    ..RigidBody::default()
+                },
+                Collider {
+                    material: PhysicsMaterial {
+                        friction: 0.0,
+                        restitution: 0.0,
+                    },
+                    ..Collider::sphere(radius_m)
+                },
+                FixedJointDesc {
+                    parent: base_link,
+                    anchor_parent_m: offset,
+                    anchor_child_m: Vec3::ZERO,
+                    relative_rotation: Quat::IDENTITY,
+                },
+            ));
+        }
     }
 
     let drive = DifferentialDrive {
@@ -277,5 +338,39 @@ mod tests {
             world.get::<RigidBody>(spawned.base_link).unwrap().body_type,
             RigidBodyType::Dynamic
         );
+    }
+
+    #[test]
+    fn wheel_geometry_rolls_forward_and_clears_the_chassis() {
+        let mut world = World::new();
+        let config = DiffDriveConfig {
+            drive_mode: DiffDriveDriveMode::JointDriven,
+            ..DiffDriveConfig::default()
+        };
+        let robot = spawn_diff_drive_robot(&mut world, &config);
+        let base = world.get::<Transform3>(robot.base_link).unwrap();
+        assert!(base.translation.y - config.base_half_extents_m.y > 0.0);
+        let left = world.get::<Transform3>(robot.left_wheel).unwrap();
+        let right = world.get::<Transform3>(robot.right_wheel).unwrap();
+        assert!((right.translation.z - left.translation.z - config.track_width_m).abs() < 1e-12);
+        for entity in [robot.left_wheel, robot.right_wheel] {
+            let joint = world.get::<RevoluteJointDesc>(entity).unwrap();
+            // A positive wheel command drives the ground contact toward -X,
+            // so no-slip rolling moves the chassis toward its declared +X.
+            let contact_velocity = joint.axis.cross(-Vec3::Y * config.wheel_radius_m);
+            assert!((contact_velocity + Vec3::X * config.wheel_radius_m).length() < 1e-12);
+            let collider = world.get::<Collider>(entity).unwrap();
+            let shape_axis = collider.local_offset.rotation * Vec3::Y;
+            assert!(shape_axis.dot(joint.axis).abs() > 1.0 - 1e-12);
+            let convex = world.get::<ConvexCollider>(entity).unwrap();
+            let wheel = world.get::<Transform3>(entity).unwrap();
+            for vertex in &convex.vertices_m {
+                // Convex vertices are in link coordinates, independent of the
+                // legacy collider's local offset. The entire wheel clears Z.
+                assert!((wheel.translation.z + vertex.z).abs() > config.base_half_extents_m.z);
+                assert!((vertex.x.hypot(vertex.y) - config.wheel_radius_m).abs() < 1e-12);
+                assert!(wheel.translation.y + vertex.y >= -1e-12);
+            }
+        }
     }
 }

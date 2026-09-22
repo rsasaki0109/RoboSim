@@ -159,6 +159,7 @@ jobs:
       matrix:
         packages:
           - "-p rne_ai -p rne_nav"
+          - "-p rne_collision_bake -p rne_usd"
           - "-p rne_py -p rne_planning"
           - "-p rne_assets -p rne_plateau -p rne_slam"
           - "-p rne_render_wgpu -p rne_sensor -p rne_physics_rapier -p rne_urdf_import"
@@ -180,20 +181,25 @@ jobs:
       - name: Reject breaking changes to frozen public APIs
         shell: bash
         run: |
+          registry_file="release/rust-api-baseline.toml"
+          if [[ "${{ matrix.packages }}" == *rne_collision_bake* ]]; then
+            # ADR 033: initial baselines for new packages; existing APIs retain theirs.
+            registry_file="release/rust-api-additions-v1.toml"
+          fi
+          export RNE_SEMVER_REGISTRY="$registry_file"
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             registry_guard_ref="origin/${{ github.base_ref }}"
           else
             registry_guard_ref="HEAD^"
           fi
-          if git cat-file -e "$registry_guard_ref:release/rust-api-baseline.toml" 2>/dev/null; then
-            if ! git diff --quiet "$registry_guard_ref" -- release/rust-api-baseline.toml; then
+          if git cat-file -e "$registry_guard_ref:$registry_file" 2>/dev/null; then
+            if ! git diff --quiet "$registry_guard_ref" -- "$registry_file"; then
               mapfile -t previous_baseline_metadata < <(python3 - <<PY
-          from pathlib import Path
           import subprocess
           import tomllib
 
           text = subprocess.check_output(
-              ["git", "show", "$registry_guard_ref:release/rust-api-baseline.toml"],
+              ["git", "show", "$registry_guard_ref:$registry_file"],
               text=True,
           )
           previous = tomllib.loads(text)
@@ -208,9 +214,10 @@ jobs:
                 && git merge-base --is-ancestor "$previous_baseline" HEAD; then
                 current_release="$(python3 - <<'PY'
           from pathlib import Path
+          import os
           import tomllib
 
-          current = tomllib.loads(Path("release/rust-api-baseline.toml").read_text(encoding="utf-8"))
+          current = tomllib.loads(Path(os.environ["RNE_SEMVER_REGISTRY"]).read_text(encoding="utf-8"))
           print(current["release_version"])
           PY
                 )"
@@ -246,9 +253,10 @@ jobs:
 
           mapfile -t baseline_metadata < <(python3 - <<'PY'
           from pathlib import Path
+          import os
           import tomllib
 
-          baseline = tomllib.loads(Path("release/rust-api-baseline.toml").read_text(encoding="utf-8"))
+          baseline = tomllib.loads(Path(os.environ["RNE_SEMVER_REGISTRY"]).read_text(encoding="utf-8"))
           for field in ("baseline_revision", "baseline_tree", "cargo_semver_checks_version"):
               print(baseline[field])
           PY
@@ -282,9 +290,10 @@ jobs:
             frozen_manifests["$package"]="$manifest"
           done < <(python3 - <<'PY'
           from pathlib import Path
+          import os
           import tomllib
 
-          baseline = tomllib.loads(Path("release/rust-api-baseline.toml").read_text(encoding="utf-8"))
+          baseline = tomllib.loads(Path(os.environ["RNE_SEMVER_REGISTRY"]).read_text(encoding="utf-8"))
           for package in baseline["package"]:
               print(f'{package["name"]}\t{package["manifest_path"]}')
           PY
@@ -325,7 +334,9 @@ jobs:
               <<<"$metadata")"
             crate_dir="${manifest%/Cargo.toml}"
             crate_dir="${crate_dir#"$GITHUB_WORKSPACE/"}"
-            if echo "$changed" | grep -q "^${crate_dir}/\|^Cargo\.lock$\|^Cargo\.toml$"; then
+            # grep -q can exit before echo drains a large diff. With pipefail,
+            # that SIGPIPE incorrectly skips a changed crate's compatibility check.
+            if grep -q "^${crate_dir}/\|^Cargo\.lock$\|^Cargo\.toml$" <<<"$changed"; then
               filtered+=("$flag" "$package")
             else
               echo "skip $package (no changes under $crate_dir)"

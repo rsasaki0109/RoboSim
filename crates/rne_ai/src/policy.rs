@@ -1057,6 +1057,7 @@ pub struct IkMobileLiftPickPlacePolicy {
     grasp_settle_started_step: Option<u64>,
     carry_joint_target: Option<MmLiftJointTarget>,
     lower_to_pick_start_lift_m: f64,
+    approach_joint_target: Option<MmLiftJointTarget>,
 }
 
 impl Default for IkMobileLiftPickPlacePolicy {
@@ -1076,6 +1077,7 @@ impl IkMobileLiftPickPlacePolicy {
             grasp_settle_started_step: None,
             carry_joint_target: None,
             lower_to_pick_start_lift_m: MOBILE_LIFT_CARRY_HEIGHT_M,
+            approach_joint_target: None,
         }
     }
 
@@ -1350,7 +1352,7 @@ impl IkMobileLiftPickPlacePolicy {
     }
 
     fn high_pick_pose_action(
-        &self,
+        &mut self,
         observation: &MobileManipulatorObservation,
     ) -> crate::MobileManipulatorAction {
         let fallback = MmLiftJointTarget {
@@ -1372,14 +1374,34 @@ impl IkMobileLiftPickPlacePolicy {
                 ),
             )
             .unwrap_or(fallback);
-        self.closed_loop_hold_action(
-            observation,
-            target,
-            crate::MobileManipulatorAction {
-                gripper_velocity_m_s: MOBILE_LIFT_OPEN_GRIPPER_M_S,
-                ..crate::MobileManipulatorAction::default()
-            },
-        )
+        // Advance the commanded trajectory, not a small offset from each new
+        // measurement. Otherwise a compliant servo can only move a fraction of
+        // the increment per tick and never reaches the pickup pose in budget.
+        // Initialize from the measured pose to avoid a discontinuity on entry.
+        let previous = self.approach_joint_target.unwrap_or(MmLiftJointTarget {
+            lift_m: observation.lift_position_m,
+            shoulder_rad: observation.shoulder_position_rad,
+            elbow_rad: observation.elbow_position_rad,
+        });
+        let commanded = MmLiftJointTarget {
+            lift_m: rate_limited_target(previous.lift_m, target.lift_m, MOBILE_LIFT_TARGET_STEP_M),
+            shoulder_rad: rate_limited_target(
+                previous.shoulder_rad,
+                target.shoulder_rad,
+                MOBILE_LIFT_ARM_TARGET_STEP_RAD,
+            ),
+            elbow_rad: rate_limited_target(
+                previous.elbow_rad,
+                target.elbow_rad,
+                MOBILE_LIFT_ARM_TARGET_STEP_RAD,
+            ),
+        };
+        self.approach_joint_target = Some(commanded);
+        crate::MobileManipulatorAction {
+            gripper_velocity_m_s: MOBILE_LIFT_OPEN_GRIPPER_M_S,
+            ..crate::MobileManipulatorAction::default()
+        }
+        .with_lift_joint_target(commanded)
     }
 
     fn lower_to_pick_action(
@@ -2246,6 +2268,53 @@ mod tests {
         obs.wrist_depth_center_m = 5.0;
         let action = policy.act(&obs);
         assert_relative_eq!(action.shoulder_velocity_rad_s, 0.875, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn mobile_lift_approach_progresses_with_lagging_joint_feedback() {
+        let mut policy = IkMobileLiftPickPlacePolicy::new();
+        let observation = MobileManipulatorObservation {
+            base_x_m: 1.26,
+            base_y_m: 0.25,
+            pick_object_x_m: 2.2,
+            pick_object_y_m: 0.235,
+            lift_position_m: MOBILE_LIFT_CARRY_HEIGHT_M,
+            ..MobileManipulatorObservation::default()
+        };
+        let goal = policy
+            .kinematics
+            .inverse_kinematics_at_base(
+                observation.base_x_m,
+                observation.base_y_m,
+                observation.base_z_m,
+                observation.base_yaw_rad,
+                MmLiftGripperTarget::new(2.2, 0.25 + MOBILE_LIFT_CARRY_HEIGHT_M, 0.0),
+            )
+            .unwrap();
+        let mut previous = MmLiftJointTarget {
+            lift_m: observation.lift_position_m,
+            shoulder_rad: observation.shoulder_position_rad,
+            elbow_rad: observation.elbow_position_rad,
+        };
+        // A stalled measurement must not reset the command ramp every tick.
+        // The command still respects its original per-step angular bound.
+        for _ in 0..200 {
+            let target = policy
+                .high_pick_pose_action(&observation)
+                .lift_joint_target
+                .unwrap();
+            assert!(
+                (target.shoulder_rad - previous.shoulder_rad).abs()
+                    <= MOBILE_LIFT_ARM_TARGET_STEP_RAD + 1e-12
+            );
+            assert!(
+                (target.elbow_rad - previous.elbow_rad).abs()
+                    <= MOBILE_LIFT_ARM_TARGET_STEP_RAD + 1e-12
+            );
+            previous = target;
+        }
+        assert_relative_eq!(previous.shoulder_rad, goal.shoulder_rad, epsilon = 1e-12);
+        assert_relative_eq!(previous.elbow_rad, goal.elbow_rad, epsilon = 1e-12);
     }
 
     #[test]

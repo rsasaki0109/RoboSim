@@ -1,0 +1,13 @@
+{
+  "source_commit": "08959cde8373c3ea500c91bec6d31b0d9e28f49d",
+  "binary_sha256": "a29678bd9af7f09ea7d0f2991bae341b39ff34793abfcc103d6165502db84dd3",
+  "scene_audit": "../contact-diagnostics/passive-model-audit.json",
+  "note": "Quaternion conversion fixed; free-root COM integration not yet corrected. Both flips collapsed.",
+  "artifact_sha256": {
+    "baseline-candidate.json": "fd5f89d3ef5634d664db8f10465c3efc7c5b299f2f5731a75f6d606994f0d60e",
+    "baseline.json": "490584ccfb81d6d79fe1449a79dbf9004d230fb90df4d761e8eb5ed7ff31982e",
+    "kinematic-audit.json": "d546eb345f3914153b71725666dbd23376a44b5259015feb02e0933f6c8fab55",
+    "search-best-candidate.json": "09a4ba350e1a585982c5791d61b2f5b8bff3f7ba5e7462762b0b49bff9278398",
+    "search-best.json": "2ad8c27093649d5cdf432cff8d8c67a95dd904dffced94edc90f6595816291f1"
+  }
+}

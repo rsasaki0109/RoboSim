@@ -42,7 +42,7 @@ struct Layer {
     activation: Activation,
 }
 
-/// Per-layer gradients matching [`Layer`]'s parameters.
+/// Per-layer gradients for dense-layer weights and biases.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayerGradient {
     /// Gradient with respect to the weights, row-major.

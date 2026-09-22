@@ -223,6 +223,79 @@ impl Default for ColliderShape {
     }
 }
 
+/// Optional convex-hull geometry replacing the companion [`Collider`]'s shape.
+///
+/// Vertices are expressed in entity-local meters; the companion's local offset
+/// is ignored. Material, sensor and collision groups still come from `Collider`.
+/// Author before the first physics synchronization; runtime geometry edits are
+/// unsupported. Rapier builds a three-dimensional convex hull and rejects
+/// nonfinite, degenerate or conflicting compound geometry. Backends without
+/// support must not be used to qualify convex-contact behavior. The companion
+/// primitive remains a bounding approximation for other consumers.
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ConvexCollider {
+    /// Deterministically ordered point cloud spanning a nonzero 3D volume.
+    pub vertices_m: Vec<Vec3>,
+}
+
+/// One finite primitive in a compound collision shape.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ColliderPart {
+    /// Primitive geometry; infinite planes are not supported in compounds.
+    pub shape: ColliderShape,
+    /// Pose relative to the entity, not to the companion collider's offset.
+    pub local_offset: Transform3,
+}
+
+/// Optional compound geometry replacing the companion [`Collider`]'s shape.
+///
+/// The companion retains material, sensor and collision-group behavior. Parts
+/// share one rigid body and do not add mass when declared inertia is present.
+/// Rapier supports this component at collider creation; author it before the
+/// first physics synchronization. Backends without compound support must not
+/// be used to validate compound-contact behavior. Legacy `Collider` geometry
+/// remains available as a broad bounding approximation for other consumers.
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompoundCollider {
+    /// Nonempty, deterministically ordered finite primitives.
+    pub parts: Vec<ColliderPart>,
+}
+
+impl CompoundCollider {
+    /// Returns whether all parts have finite poses and positive finite extents.
+    pub fn is_valid(&self) -> bool {
+        let positive =
+            |x: f64| x.is_finite() && x > 0.0 && (x as f32).is_finite() && (x as f32) > 0.0;
+        !self.parts.is_empty()
+            && self.parts.iter().all(|part| {
+                let pose = part.local_offset;
+                pose.translation.is_finite()
+                    && pose.rotation.is_finite()
+                    && (pose.rotation.length_squared() - 1.0).abs() < 1e-6
+                    && match part.shape {
+                        ColliderShape::Sphere { radius_m } => positive(radius_m),
+                        ColliderShape::Cuboid { half_extents_m } => {
+                            half_extents_m.to_array().into_iter().all(positive)
+                        }
+                        ColliderShape::Capsule {
+                            half_height_m,
+                            radius_m,
+                        } => {
+                            half_height_m.is_finite()
+                                && (half_height_m as f32).is_finite()
+                                && half_height_m >= 0.0
+                                && positive(radius_m)
+                        }
+                        ColliderShape::Plane { .. }
+                        | ColliderShape::ConvexHull { .. }
+                        | ColliderShape::TriMesh { .. }
+                        | ColliderShape::HeightField { .. }
+                        | ColliderShape::Compound { .. } => false,
+                    }
+            })
+    }
+}
+
 /// Collider attached to an entity.
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Collider {
@@ -333,12 +406,27 @@ impl Default for PhysicsMaterial {
     }
 }
 
+/// Constant diagonal inertia added to one revolute generalized coordinate.
+///
+/// Attach to the child link alongside `RevoluteJointDesc` and `MultibodyLink`.
+/// The Rapier backend with `experimental-armature` and the repository patch
+/// applies this to force and constraint dynamics without
+/// changing link spatial mass/inertia. Zero or absence preserves the original
+/// plant. Non-finite, negative, unrepresentable or unsupported configurations
+/// are rejected. Other backends do not yet implement this component.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RevoluteJointArmature {
+    /// Reflected motor inertia in kilogram-square-metres.
+    pub inertia_kg_m2: f64,
+}
+
 /// Revolute joint description for physics backends.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct RevoluteJointDesc {
     /// Parent rigid body entity.
     pub parent: Entity,
-    /// Joint axis in parent-local coordinates.
+    /// Joint axis before applying [`Self::relative_rotation`] and the parent
+    /// body rotation; the identity relative rotation preserves parent-local axes.
     pub axis: Vec3,
     /// Anchor point in the parent body's local frame.
     pub anchor_parent_m: Vec3,
@@ -364,7 +452,8 @@ pub struct RevoluteJointDesc {
 pub struct PrismaticJointDesc {
     /// Parent rigid body entity.
     pub parent: Entity,
-    /// Sliding axis in parent-local coordinates.
+    /// Sliding axis before applying [`Self::relative_rotation`] and the parent
+    /// body rotation; the identity relative rotation preserves parent-local axes.
     pub axis: Vec3,
     /// Anchor point in the parent body's local frame.
     pub anchor_parent_m: Vec3,

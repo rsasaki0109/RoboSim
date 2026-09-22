@@ -1,0 +1,96 @@
+{
+  "loss": 63.53507343166587,
+  "passed": false,
+  "parameters": [
+    2.797089327003262,
+    -0.15557284105206648,
+    0.07890891177309159,
+    0.8851568077606754,
+    0.4115440514153509,
+    0.5368623819048416,
+    2.485351033256301,
+    2.0394162392984865,
+    1.3882548925813847,
+    -1.4669448464471826,
+    -0.3564332989232133,
+    5.4786939023184535,
+    -0.17471723011299545
+  ],
+  "dt_s": 0.0005,
+  "signed_rotation_rad": -5.068169927369091,
+  "root_rise_m": 0.15745049079188378,
+  "takeoff_s": 0.6365,
+  "touchdown_s": 1.1155,
+  "longest_flight_s": 0.47850000000000037,
+  "nonfoot_ground_contact": true,
+  "final_root_height_m": 0.33494464542203134,
+  "stand_error": 1.4234021837008002,
+  "peak_torque_nm": 139.0,
+  "backend": "mujoco",
+  "backend_version": "3.13.0",
+  "urdf_sha256": "b462e1367ccb50f148db8c82f93421cb3f47497b10b735e891d2c9d000870cfc",
+  "joint_names": [
+    "left_hip_pitch_joint",
+    "left_hip_roll_joint",
+    "left_hip_yaw_joint",
+    "left_knee_joint",
+    "left_ankle_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_hip_pitch_joint",
+    "right_hip_roll_joint",
+    "right_hip_yaw_joint",
+    "right_knee_joint",
+    "right_ankle_pitch_joint",
+    "right_ankle_roll_joint",
+    "waist_yaw_joint",
+    "left_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "left_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "left_wrist_roll_joint",
+    "right_shoulder_pitch_joint",
+    "right_shoulder_roll_joint",
+    "right_shoulder_yaw_joint",
+    "right_elbow_joint",
+    "right_wrist_roll_joint"
+  ],
+  "balance_gains": [
+    1,
+    0,
+    0.6
+  ],
+  "numerical_failure": false,
+  "mass_policy": "rne",
+  "mass_kg": 38.13385800000001,
+  "stage": "flip",
+  "takeoff_angular_momentum_nms": [
+    -0.17590251398427334,
+    -20.141161532064036,
+    0.021084982824119903
+  ],
+  "takeoff_com_velocity_m_s": [
+    -0.3977092292861376,
+    0.00020335032779461156,
+    2.469679348302083
+  ],
+  "standing": false,
+  "peak_joint_position_excess_rad": 0.018962397494209693,
+  "final_second_min_upright": 1.0,
+  "final_second_max_base_speed": 0.0,
+  "simulation_time_s": 1.829499999999854,
+  "peak_joint_speed_ratio": 1.0368091512573738,
+  "nonfoot_contact_bodies": [
+    "right_wrist_roll_rubber_hand"
+  ],
+  "joint_limit_time_constant_s": 0.004,
+  "joint_limit_margin_rad": 0.0,
+  "early_balance_gains": [
+    1,
+    0.05
+  ],
+  "landing_gains": [
+    1000,
+    20
+  ],
+  "recovery_s": 0.5
+}

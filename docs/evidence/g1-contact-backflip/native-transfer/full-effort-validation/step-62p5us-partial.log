@@ -1,0 +1,8 @@
+native probe t=-1.000 s, base y=0.820 m, pitch=0.000 rad
+native probe t=-0.500 s, base y=0.782 m, pitch=0.007 rad
+native probe t=0.000 s, base y=0.786 m, pitch=0.007 rad
+native probe t=0.500 s, base y=0.273 m, pitch=-0.146 rad
+native probe t=1.000 s, base y=0.612 m, pitch=-6.409 rad
+native probe t=1.500 s, base y=0.590 m, pitch=-6.208 rad
+native probe t=2.000 s, base y=0.587 m, pitch=-6.450 rad
+native probe t=2.500 s, base y=0.602 m, pitch=-6.529 rad
