@@ -63,5 +63,9 @@ Validation: 12 example tests, 11 Python model/search tests and targeted release
 Clippy pass. The 500 µs five- and fifteen-second runs have identical recorded
 prefixes. Default early-feedback parameters exactly reproduce previous output
 apart from the new metadata. GIF inspection confirms the complete maneuver
-remains in view (204 frames, 15.21 s, 2,332,077 bytes). Full workspace/xtask CI
+remains in view (204 frames, 15.21 s, 2,247,358 bytes). Full workspace/xtask CI
 was not rerun to preserve the 30 GiB reserve; these checks are not full CI.
+
+The GIF now resolves G1’s authored named URDF colors. The native rollout and
+its producer hash are unchanged; renderer source/binary and GIF hashes were
+updated after visual inspection of the dark/light panels.
