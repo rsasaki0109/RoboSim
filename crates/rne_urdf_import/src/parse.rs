@@ -292,10 +292,27 @@ fn parse_material_rgba(node: roxmltree::Node<'_, '_>) -> Result<Option<[f32; 4]>
     else {
         return Ok(None);
     };
-    let Some(color) = material
+    let inline_color = material
         .children()
-        .find(|node| node.is_element() && node.tag_name().name() == "color")
-    else {
+        .find(|node| node.is_element() && node.tag_name().name() == "color");
+    // URDF visuals may reference a robot-level named material. Resolve directly
+    // from the document so definitions after the link work too. Inline color
+    // remains authoritative, and unresolved/texture-only references retain the
+    // existing renderer fallback.
+    let named_color = || {
+        let name = material.attribute("name")?;
+        node.document()
+            .root_element()
+            .children()
+            .find(|candidate| {
+                candidate.is_element()
+                    && candidate.tag_name().name() == "material"
+                    && candidate.attribute("name") == Some(name)
+            })?
+            .children()
+            .find(|child| child.is_element() && child.tag_name().name() == "color")
+    };
+    let Some(color) = inline_color.or_else(named_color) else {
         return Ok(None);
     };
     color.attribute("rgba").map(parse_rgba).transpose()
@@ -819,6 +836,34 @@ mod tests {
         assert_eq!(mimic.joint, "finger_a_joint");
         assert_eq!(mimic.multiplier, -1.0);
         assert_eq!(mimic.offset, 0.0);
+    }
+
+    #[test]
+    fn named_material_resolves_forward_references_and_inline_precedence() {
+        let robot = parse_urdf(r#"<robot name="colors"><link name="body">
+            <visual><geometry><sphere radius="1"/></geometry><material name="dark"/></visual>
+            <visual><geometry><sphere radius="1"/></geometry><material name="dark"><color rgba="1 0 0 1"/></material></visual>
+            <visual><geometry><sphere radius="1"/></geometry><material name="unknown"/></visual>
+            </link><material name="dark"><color rgba="0.2 0.2 0.2 1"/></material></robot>"#).unwrap();
+        let visuals = &robot.links[0].visuals;
+        assert_eq!(visuals[0].material_rgba, Some([0.2, 0.2, 0.2, 1.0]));
+        assert_eq!(visuals[1].material_rgba, Some([1.0, 0.0, 0.0, 1.0]));
+        assert_eq!(visuals[2].material_rgba, None);
+    }
+
+    #[test]
+    fn g1_named_materials_preserve_dark_and_light_panels() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/robots/g1_description/g1_23dof.urdf");
+        let robot = parse_urdf_file(&path).unwrap();
+        for (name, expected) in [
+            ("pelvis", [0.2, 0.2, 0.2, 1.0]),
+            ("pelvis_contour_link", [0.7, 0.7, 0.7, 1.0]),
+        ] {
+            let link = robot.links.iter().find(|link| link.name == name).unwrap();
+            let visual = crate::geometry::visual_from_element(&link.visuals[0], [0.5; 4]);
+            assert_eq!(visual.color_rgba, expected);
+        }
     }
 
     #[test]

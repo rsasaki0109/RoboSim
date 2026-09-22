@@ -679,3 +679,12 @@ ticks. The overlay identifies the native backend, timestep and failed limits.
 Run example 114 with `--native-recording` and the held-recovery directory for
 headless verification; add `--gif` to write a new GIF. Existing output is not
 overwritten, and a 30 GiB reserve is checked before streaming the GIF.
+
+### G1 visual material colors
+
+The URDF importer now resolves robot-level named material colors, including
+forward references, while preserving inline-color precedence. G1's `dark`
+(0.2 RGB) and `white` (0.7 RGB) panels therefore use their authored colors
+instead of a uniform fallback gray. This applies to normal scene rendering
+and native-recording playback; no custom palette or dynamics change is used.
+The native GIF is regenerated from the same recorded poses with these colors.
