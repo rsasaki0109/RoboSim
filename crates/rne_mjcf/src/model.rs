@@ -2,6 +2,7 @@
 
 use crate::MjcfError;
 use roxmltree::{Document, Node};
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::Path;
 
@@ -61,10 +62,11 @@ pub fn mjcf_to_urdf(text: &str) -> Result<String, MjcfError> {
     }
     reject_body_rotation(root_body)?;
 
+    let meshes = parse_asset_meshes(root)?;
     let model_name = root.attribute("model").unwrap_or("model");
     let mut out = String::from("<?xml version=\"1.0\"?>\n");
     out.push_str(&format!("<robot name=\"{}\">\n", escape_attr(model_name)));
-    render_body(root_body, None, angle, 0, &mut out)?;
+    render_body(root_body, None, angle, &meshes, 0, &mut out)?;
     out.push_str("</robot>\n");
     Ok(out)
 }
@@ -94,6 +96,7 @@ fn render_body(
     body: Node<'_, '_>,
     parent_link: Option<&str>,
     angle: AngleConvention,
+    meshes: &BTreeMap<String, MeshAsset>,
     depth: usize,
     out: &mut String,
 ) -> Result<(), MjcfError> {
@@ -102,21 +105,105 @@ fn render_body(
             "body nesting exceeds {MJCF_MAX_BODY_DEPTH} levels"
         )));
     }
-    reject_body_rotation(body)?;
     let name = required_attr(&body, "body", "name")?;
     if let Some(parent_link) = parent_link {
         render_joint(body, parent_link, name, angle, out)?;
     }
-    render_link(body, name, out)?;
+    render_link(body, name, angle, meshes, out)?;
     if out.len() > MJCF_MAX_OUTPUT_BYTES {
         return Err(MjcfError::Invalid(format!(
             "converted URDF exceeds {MJCF_MAX_OUTPUT_BYTES} bytes"
         )));
     }
     for child in child_elements(body).filter(|node| node.tag_name().name() == "body") {
-        render_body(child, Some(name), angle, depth + 1, out)?;
+        render_body(child, Some(name), angle, meshes, depth + 1, out)?;
     }
     Ok(())
+}
+
+/// A referenced mesh asset from `<asset>`.
+#[derive(Clone, Debug, PartialEq)]
+struct MeshAsset {
+    file: String,
+    scale: [f64; 3],
+}
+
+fn parse_asset_meshes(root: Node<'_, '_>) -> Result<BTreeMap<String, MeshAsset>, MjcfError> {
+    let mut meshes = BTreeMap::new();
+    let Some(asset) = first_child_element(root, "asset") else {
+        return Ok(meshes);
+    };
+    for mesh in child_elements(asset).filter(|node| node.tag_name().name() == "mesh") {
+        let name = required_attr(&mesh, "mesh", "name")?;
+        let file = required_attr(&mesh, "mesh", "file")?;
+        let scale = mesh
+            .attribute("scale")
+            .map(|value| parse_vec3(value, "mesh@scale"))
+            .transpose()?
+            .unwrap_or([1.0, 1.0, 1.0]);
+        meshes.insert(
+            name.to_string(),
+            MeshAsset {
+                file: file.to_string(),
+                scale,
+            },
+        );
+    }
+    Ok(meshes)
+}
+
+/// Converts a node's MJCF rotation attributes to URDF `rpy` (radians).
+fn node_rotation_rpy(node: Node<'_, '_>, angle: AngleConvention) -> Result<[f64; 3], MjcfError> {
+    if let Some(quat) = node.attribute("quat") {
+        let [w, x, y, z] = parse_vec4(quat, "quat")?;
+        return quat_to_rpy([w, x, y, z]);
+    }
+    if let Some(euler) = node.attribute("euler") {
+        let euler = parse_vec3(euler, "euler")?;
+        let scale = if angle == AngleConvention::Degree {
+            DEG_TO_RAD
+        } else {
+            1.0
+        };
+        return Ok([euler[0] * scale, euler[1] * scale, euler[2] * scale]);
+    }
+    if let Some(axisangle) = node.attribute("axisangle") {
+        let [x, y, z, a] = parse_vec4(axisangle, "axisangle")?;
+        return axis_angle_to_rpy([x, y, z], a);
+    }
+    if node.attribute("zaxis").is_some() {
+        return Err(MjcfError::Unsupported {
+            element: node.tag_name().name().to_string(),
+            reason: "`@zaxis` rotation is not supported".to_string(),
+        });
+    }
+    Ok([0.0, 0.0, 0.0])
+}
+
+fn quat_to_rpy(quat: [f64; 4]) -> Result<[f64; 3], MjcfError> {
+    let [w, x, y, z] = quat;
+    let length = (w * w + x * x + y * y + z * z).sqrt();
+    if !length.is_finite() || length < 1.0e-9 {
+        return Err(MjcfError::Invalid("quaternion is degenerate".to_string()));
+    }
+    let (w, x, y, z) = (w / length, x / length, y / length, z / length);
+    // Extrinsic XYZ (URDF roll-pitch-yaw).
+    let roll = (2.0 * (w * x + y * z)).atan2(1.0 - 2.0 * (x * x + y * y));
+    let pitch = (2.0 * (w * y - z * x)).clamp(-1.0, 1.0).asin();
+    let yaw = (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z));
+    Ok([roll, pitch, yaw])
+}
+
+fn axis_angle_to_rpy(axis: [f64; 3], angle: f64) -> Result<[f64; 3], MjcfError> {
+    let length = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+    if !length.is_finite() || length < 1.0e-9 {
+        return Err(MjcfError::Invalid(
+            "axisangle axis is degenerate".to_string(),
+        ));
+    }
+    let half = angle * 0.5;
+    let s = half.sin() / length;
+    quat_to_rpy([half.cos(), axis[0] * s, axis[1] * s, axis[2] * s])
 }
 
 fn reject_body_rotation(body: Node<'_, '_>) -> Result<(), MjcfError> {
@@ -181,9 +268,11 @@ fn render_joint(
         escape_attr(parent_link),
         escape_attr(child_link)
     ));
+    let body_rpy = node_rotation_rpy(body, angle)?;
     out.push_str(&format!(
-        "    <origin xyz=\"{}\" rpy=\"0 0 0\"/>\n",
-        vec3_string(&pos)
+        "    <origin xyz=\"{}\" rpy=\"{}\"/>\n",
+        vec3_string(&pos),
+        vec3_string(&body_rpy)
     ));
     out.push_str(&format!("    <axis xyz=\"{}\"/>\n", vec3_string(&axis)));
     out.push_str(&format!(
@@ -195,24 +284,24 @@ fn render_joint(
     Ok(())
 }
 
-fn render_link(body: Node<'_, '_>, name: &str, out: &mut String) -> Result<(), MjcfError> {
+fn render_link(
+    body: Node<'_, '_>,
+    name: &str,
+    angle: AngleConvention,
+    meshes: &BTreeMap<String, MeshAsset>,
+    out: &mut String,
+) -> Result<(), MjcfError> {
     out.push_str(&format!("  <link name=\"{}\">\n", escape_attr(name)));
     let mut has_geom = false;
     for geom in child_elements(body).filter(|node| node.tag_name().name() == "geom") {
-        for attribute in ["quat", "euler", "zaxis"] {
-            if geom.attribute(attribute).is_some() {
-                return Err(MjcfError::Unsupported {
-                    element: "geom".to_string(),
-                    reason: format!("geom `@{attribute}` rotation is not supported"),
-                });
-            }
-        }
         let pos = vec_attr(geom, "pos", [0.0, 0.0, 0.0]);
-        let geometry = render_geom_geometry(&geom)?;
+        let geom_rpy = node_rotation_rpy(geom, angle)?;
+        let geometry = render_geom_geometry(&geom, meshes)?;
         out.push_str("    <visual>\n");
         out.push_str(&format!(
-            "      <origin xyz=\"{}\" rpy=\"0 0 0\"/>\n",
-            vec3_string(&pos)
+            "      <origin xyz=\"{}\" rpy=\"{}\"/>\n",
+            vec3_string(&pos),
+            vec3_string(&geom_rpy)
         ));
         out.push_str(&format!("      {geometry}\n"));
         if let Some(rgba) = geom.attribute("rgba") {
@@ -225,8 +314,9 @@ fn render_link(body: Node<'_, '_>, name: &str, out: &mut String) -> Result<(), M
         out.push_str("    </visual>\n");
         out.push_str("    <collision>\n");
         out.push_str(&format!(
-            "      <origin xyz=\"{}\" rpy=\"0 0 0\"/>\n",
-            vec3_string(&pos)
+            "      <origin xyz=\"{}\" rpy=\"{}\"/>\n",
+            vec3_string(&pos),
+            vec3_string(&geom_rpy)
         ));
         out.push_str(&format!("      {geometry}\n"));
         out.push_str("    </collision>\n");
@@ -241,7 +331,10 @@ fn render_link(body: Node<'_, '_>, name: &str, out: &mut String) -> Result<(), M
     Ok(())
 }
 
-fn render_geom_geometry(geom: &Node<'_, '_>) -> Result<String, MjcfError> {
+fn render_geom_geometry(
+    geom: &Node<'_, '_>,
+    meshes: &BTreeMap<String, MeshAsset>,
+) -> Result<String, MjcfError> {
     let geom_type = geom.attribute("type").unwrap_or("sphere");
     let size = geom
         .attribute("size")
@@ -270,6 +363,26 @@ fn render_geom_geometry(geom: &Node<'_, '_>) -> Result<String, MjcfError> {
                 "<geometry><cylinder radius=\"{}\" length=\"{}\"/></geometry>",
                 num(radius),
                 num(length)
+            ))
+        }
+        "capsule" => {
+            // URDF has no capsule primitive; approximate with a cylinder.
+            let [radius, half_length] = two(size, "capsule geom size")?;
+            Ok(format!(
+                "<geometry><cylinder radius=\"{}\" length=\"{}\"/></geometry>",
+                num(radius),
+                num(2.0 * half_length)
+            ))
+        }
+        "mesh" => {
+            let name = required_attr(geom, "geom", "mesh")?;
+            let asset = meshes.get(name).ok_or_else(|| {
+                MjcfError::Invalid(format!("geom references unknown mesh asset `{name}`"))
+            })?;
+            Ok(format!(
+                "<geometry><mesh filename=\"{}\" scale=\"{}\"/></geometry>",
+                escape_attr(&asset.file),
+                vec3_string(&asset.scale)
             ))
         }
         other => Err(MjcfError::Unsupported {
@@ -429,5 +542,71 @@ mod tests {
         }
         xml.push_str("</worldbody></mujoco>");
         assert!(matches!(mjcf_to_urdf(&xml), Err(MjcfError::Invalid(_))));
+    }
+
+    #[test]
+    fn converts_mesh_assets() {
+        let xml = r#"
+<mujoco model="mesh_model">
+  <asset>
+    <mesh name="part" file="meshes/part.stl" scale="0.5 0.5 0.5"/>
+  </asset>
+  <worldbody>
+    <body name="base">
+      <geom type="mesh" mesh="part"/>
+    </body>
+  </worldbody>
+</mujoco>
+"#;
+        let urdf = mjcf_to_urdf(xml).expect("convert");
+        assert!(urdf.contains(r#"<mesh filename="meshes/part.stl" scale="0.5 0.5 0.5"/>"#));
+    }
+
+    #[test]
+    fn approximates_capsule_with_a_cylinder() {
+        let xml = r#"
+<mujoco model="capsule_model">
+  <worldbody>
+    <body name="base">
+      <geom type="capsule" size="0.1 0.2"/>
+    </body>
+  </worldbody>
+</mujoco>
+"#;
+        let urdf = mjcf_to_urdf(xml).expect("convert");
+        assert!(urdf.contains(r#"<cylinder radius="0.1" length="0.4"/>"#));
+    }
+
+    #[test]
+    fn converts_degree_euler_to_rpy() {
+        let xml = r#"
+<mujoco model="euler_model">
+  <worldbody>
+    <body name="base">
+      <geom type="sphere" size="0.1"/>
+      <body name="arm" pos="0 0.1 0" euler="0 0 90">
+        <joint name="j" type="hinge"/>
+        <geom type="sphere" size="0.05"/>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>
+"#;
+        let urdf = mjcf_to_urdf(xml).expect("convert");
+        assert!(urdf.contains(r#"rpy="0 0 1.5707963267948966""#));
+    }
+
+    #[test]
+    fn rejects_unknown_mesh_reference() {
+        let xml = r#"
+<mujoco model="bad_mesh">
+  <worldbody>
+    <body name="base">
+      <geom type="mesh" mesh="missing"/>
+    </body>
+  </worldbody>
+</mujoco>
+"#;
+        assert!(matches!(mjcf_to_urdf(xml), Err(MjcfError::Invalid(_))));
     }
 }

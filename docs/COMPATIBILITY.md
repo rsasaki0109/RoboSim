@@ -118,8 +118,12 @@ follow these rules:
 Current 0.1 formats include scene, robot, run, plugin, traffic, replay, Behavior
 CI, physics-conformance, scenario-scale, determinism-contract, capability,
 benchmark, and Failure Capsule artifacts. OpenSCENARIO, SDF, MJCF, URDF, SUMO,
-and PLATEAU inputs are import formats: accepted subsets are documented, and
-unsupported constructs remain explicit import errors.
+USD (`.usda`), and PLATEAU inputs are import formats: accepted subsets are
+documented, and unsupported constructs remain explicit import errors. Collision
+bakes
+(`.rne.collision.json`, schema v1) are native authoring artifacts produced by
+`rne-asset bake-collision`; URDF mesh collision loads a sidecar when present and
+otherwise keeps the historical AABB fallback.
 
 TaskSpec schema v1 rejects unknown fields and validates fixed tensor shape,
 dtype, row-major order, units, bounds, reward terms, termination, reset,
@@ -364,6 +368,19 @@ than silently weakening coverage.
 Manifest schema v2 adds `kinematic_body` as a refinement of `rigid_body`.
 Analytic and Rapier prove it with the shared external-pose vector; MuJoCo
 rejects it at preflight with `MissingCapabilities` before native compilation.
+Catalog v7 adds `rapier.convex_hull.resting_contact` and bumps the named
+tolerance registry to v5; the committed golden also tracks the live
+`adapter_version`, and a default-feature test compares `run_conformance()` output
+against it to prevent silent drift.
+
+`ColliderShape` grows `ConvexHull`, `TriMesh`, `HeightField`, and `Compound`
+variants and drops `Copy` (variable-size data lives behind `Arc`); dependents
+clone or borrow instead of copying. Rapier converts all four with typed
+`InvalidColliderShape` errors for degenerate input. MuJoCo rejects non-primitive
+colliders until Mesh/hfield compilation lands, and deformable contact,
+self-collision, and URDF AABB fallbacks approximate them as bounding spheres.
+This is a source-breaking change for downstream `Collider`/`ColliderShape`
+copies.
 
 External physics-backend conformance report schema v1 is a separate public
 authoring contract owned by the publishable `rne_physics_conformance` crate.

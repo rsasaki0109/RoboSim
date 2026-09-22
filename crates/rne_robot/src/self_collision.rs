@@ -58,7 +58,7 @@ impl CollisionPrimitive {
     /// Infinite planes are not supported by the self-collision checker and
     /// return `None`.
     pub fn from_shape(shape: &ColliderShape, transform: &Transform3) -> Option<Self> {
-        match *shape {
+        match shape {
             ColliderShape::Sphere { radius_m } => Some(Self::Sphere {
                 center_m: transform.translation,
                 radius_m: radius_m.abs(),
@@ -67,8 +67,8 @@ impl CollisionPrimitive {
                 half_height_m,
                 radius_m,
             } => {
-                let a = transform_point(transform, Vec3::new(0.0, -half_height_m, 0.0));
-                let b = transform_point(transform, Vec3::new(0.0, half_height_m, 0.0));
+                let a = transform_point(transform, Vec3::new(0.0, -*half_height_m, 0.0));
+                let b = transform_point(transform, Vec3::new(0.0, *half_height_m, 0.0));
                 Some(Self::Capsule {
                     a_m: a,
                     b_m: b,
@@ -92,6 +92,53 @@ impl CollisionPrimitive {
                 })
             }
             ColliderShape::Plane { .. } => None,
+            // Non-primitive shapes are approximated by their bounding sphere for
+            // the primitive self-collision checker.
+            ColliderShape::ConvexHull { points } => Some(Self::Sphere {
+                center_m: transform.translation,
+                radius_m: points
+                    .iter()
+                    .map(|point| point.length())
+                    .fold(0.0, f64::max),
+            }),
+            ColliderShape::TriMesh { vertices, .. } => Some(Self::Sphere {
+                center_m: transform.translation,
+                radius_m: vertices
+                    .iter()
+                    .map(|point| point.length())
+                    .fold(0.0, f64::max),
+            }),
+            ColliderShape::HeightField {
+                heights_m, scale, ..
+            } => {
+                let max_height_m = heights_m
+                    .iter()
+                    .fold(0.0_f64, |acc, height| acc.max(height.abs()))
+                    * scale.y.abs();
+                Some(Self::Sphere {
+                    center_m: transform.translation,
+                    radius_m: scale.length() * 0.5 + max_height_m,
+                })
+            }
+            ColliderShape::Compound { parts } => {
+                let mut radius_m = 0.0_f64;
+                for part in parts.iter() {
+                    let child_radius_m = match Self::from_shape(&part.shape, transform) {
+                        Some(Self::Sphere { radius_m, .. }) => radius_m,
+                        Some(Self::Capsule { a_m, b_m, radius_m }) => {
+                            a_m.distance(b_m) * 0.5 + radius_m
+                        }
+                        Some(Self::Cuboid { half_extents_m, .. }) => half_extents_m.length(),
+                        None => 0.0,
+                    };
+                    radius_m =
+                        radius_m.max(part.local_offset.translation.length() + child_radius_m);
+                }
+                Some(Self::Sphere {
+                    center_m: transform.translation,
+                    radius_m,
+                })
+            }
         }
     }
 }
@@ -920,7 +967,7 @@ impl CollisionWorld {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct LinkCollider {
     link: Entity,
     link_index: usize,
@@ -970,7 +1017,7 @@ impl SelfCollisionChecker {
             colliders.push(LinkCollider {
                 link,
                 link_index: index,
-                shape: collider.shape,
+                shape: collider.shape.clone(),
                 local_offset: collider.local_offset,
                 groups,
             });

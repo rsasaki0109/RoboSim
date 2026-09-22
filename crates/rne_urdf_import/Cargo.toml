@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+rne_collision_bake = { workspace = true }
 rne_ecs = { workspace = true }
 rne_math = { workspace = true }
 rne_physics = { workspace = true }

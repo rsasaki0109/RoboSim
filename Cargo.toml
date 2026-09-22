@@ -31,6 +31,7 @@ members = [
   "crates/rne_ai",
   "crates/rne_accelerator_contract",
   "crates/rne_assets",
+  "crates/rne_collision_bake",
   "crates/rne_py",
   "crates/rne_plateau",
   "crates/rne_traffic",
@@ -40,6 +41,7 @@ members = [
   "crates/rne_sumo",
   "crates/rne_traci",
   "crates/rne_urdf_import",
+  "crates/rne_usd",
   "adapters/ros2/rne_adapter_ros2",
   "adapters/ssl/rne_adapter_ssl",
   "adapters/hardware/rne_hardware_gateway",
@@ -156,6 +158,9 @@ members = [
   "examples/107_go2_hop",
   "examples/108_go2_jump_opt",
   "examples/109_go2_jump_sim",
+  "examples/110_collision_bake",
+  "examples/114_policy_artifact",
+  "examples/115_trainer",
   "tests/determinism",
   "tests/dynamics",
   "tests/mobility_benchmark",
@@ -194,6 +199,7 @@ rne_hardware_lekiwi = { version = "=0.3.0", path = "adapters/hardware/rne_hardwa
 rne_ai = { version = "=0.3.0", path = "crates/rne_ai" }
 rne_asset_cli = { version = "=0.3.0", path = "tools/rne_asset_cli" }
 rne_assets = { version = "=0.3.0", path = "crates/rne_assets" }
+rne_collision_bake = { version = "=0.3.0", path = "crates/rne_collision_bake" }
 rne_core = { version = "=0.3.0", path = "crates/rne_core" }
 rne_data = { version = "=0.3.0", path = "crates/rne_data" }
 rne_deformable = { version = "=0.3.0", path = "crates/rne_deformable" }
@@ -229,6 +235,7 @@ rne_sumo = { version = "=0.3.0", path = "crates/rne_sumo" }
 rne_traci = { version = "=0.3.0", path = "crates/rne_traci" }
 rne_traffic = { version = "=0.3.0", path = "crates/rne_traffic" }
 rne_urdf_import = { version = "=0.3.0", path = "crates/rne_urdf_import" }
+rne_usd = { version = "=0.3.0", path = "crates/rne_usd" }
 rne_world = { version = "=0.3.0", path = "crates/rne_world" }
 
 anyhow = "1"
@@ -239,7 +246,7 @@ libloading = "0.8"
 petgraph = "0.7"
 prost = "=0.13.5"
 rapier3d = "0.22"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 sha2 = "0.10"
 smallvec = { version = "1", features = ["serde"] }
 thiserror = "2"

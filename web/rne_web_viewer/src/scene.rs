@@ -240,15 +240,15 @@ fn append_entity_visual(scene: &mut RenderScene, world: &World, entity: Entity) 
 }
 
 fn collider_fallback_visual(collider: &Collider) -> Option<(VisualShape, [f32; 4])> {
-    match collider.shape {
+    match &collider.shape {
         rne_physics::ColliderShape::Cuboid { half_extents_m } => Some((
             VisualShape::Box {
-                size_m: half_extents_m * 2.0,
+                size_m: *half_extents_m * 2.0,
             },
             BASE_COLOR,
         )),
         rne_physics::ColliderShape::Sphere { radius_m } => {
-            Some((VisualShape::Sphere { radius_m }, BASE_COLOR))
+            Some((VisualShape::Sphere { radius_m: *radius_m }, BASE_COLOR))
         }
         _ => None,
     }

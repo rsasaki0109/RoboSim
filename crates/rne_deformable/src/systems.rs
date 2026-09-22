@@ -669,7 +669,7 @@ pub fn step_deformable_world(
         .query::<(rne_ecs::Entity, &RigidBody, &Collider)>()
         .iter(world)
         .filter(|(_, _, collider)| !collider.sensor)
-        .map(|(entity, _, collider)| (entity, *collider))
+        .map(|(entity, _, collider)| (entity, collider.clone()))
         .collect::<Vec<_>>();
     sampled.sort_by_key(|(entity, _)| entity.to_bits());
     let colliders = sampled
@@ -678,7 +678,7 @@ pub fn step_deformable_world(
             let world_transform =
                 world_transform_of(world, entity).mul_transform(&collider.local_offset);
             DeformableCollider {
-                shape: collider.shape,
+                shape: collider.shape.clone(),
                 world_transform: rne_math::Transform3 {
                     translation: world_transform.translation,
                     rotation: world_transform.rotation,
@@ -728,8 +728,8 @@ pub fn step_deformable_world(
                 .expect("entity selected by DeformableBody filter");
             colliders
                 .iter()
-                .copied()
-                .filter(|collider| collider_may_overlap_body(body, collider))
+                .filter(|&collider| collider_may_overlap_body(body, collider))
+                .cloned()
                 .collect::<Vec<_>>()
         };
         let mut body = world
@@ -747,7 +747,7 @@ pub fn step_deformable_world(
 }
 
 fn collider_may_overlap_body(body: &DeformableBody, collider: &DeformableCollider) -> bool {
-    if matches!(collider.shape, ColliderShape::Plane { .. }) {
+    if matches!(&collider.shape, ColliderShape::Plane { .. }) {
         return true;
     }
     let center_m = body
@@ -768,17 +768,46 @@ fn collider_may_overlap_body(body: &DeformableBody, collider: &DeformableCollide
         .abs()
         .max_element()
         .max(f64::EPSILON);
-    let collider_radius_m = match collider.shape {
+    let collider_radius_m = collider_shape_bounding_radius_m(&collider.shape) * max_scale;
+    center_m.distance_squared(collider.world_transform.translation)
+        <= (body_radius_m + collider_radius_m).powi(2)
+}
+
+/// Conservative bounding radius of a collider shape about its local origin.
+fn collider_shape_bounding_radius_m(shape: &ColliderShape) -> f64 {
+    match shape {
         ColliderShape::Plane { .. } => f64::INFINITY,
-        ColliderShape::Sphere { radius_m } => radius_m,
+        ColliderShape::Sphere { radius_m } => *radius_m,
         ColliderShape::Cuboid { half_extents_m } => half_extents_m.length(),
         ColliderShape::Capsule {
             half_height_m,
             radius_m,
         } => half_height_m + radius_m,
-    } * max_scale;
-    center_m.distance_squared(collider.world_transform.translation)
-        <= (body_radius_m + collider_radius_m).powi(2)
+        ColliderShape::ConvexHull { points } => points
+            .iter()
+            .map(|point| point.length())
+            .fold(0.0, f64::max),
+        ColliderShape::TriMesh { vertices, .. } => vertices
+            .iter()
+            .map(|point| point.length())
+            .fold(0.0, f64::max),
+        ColliderShape::HeightField {
+            heights_m, scale, ..
+        } => {
+            let max_height_m = heights_m
+                .iter()
+                .fold(0.0_f64, |acc, height| acc.max(height.abs()))
+                * scale.y.abs();
+            scale.length() * 0.5 + max_height_m
+        }
+        ColliderShape::Compound { parts } => parts
+            .iter()
+            .map(|part| {
+                part.local_offset.translation.length()
+                    + collider_shape_bounding_radius_m(&part.shape)
+            })
+            .fold(0.0, f64::max),
+    }
 }
 
 /// Attaches the nearest distinct unpinned particle to every world-space contact point.
@@ -1038,7 +1067,7 @@ fn project_particle(
 ) -> Option<(Vec3, Vec3)> {
     let inverse = collider.world_transform.inverse();
     let local = inverse.transform_point(position_m);
-    let (projected_local, normal_local) = match collider.shape {
+    let (projected_local, normal_local) = match &collider.shape {
         ColliderShape::Plane { normal } => {
             let normal = normal.normalize_or_zero();
             let distance = local.dot(normal);
@@ -1102,7 +1131,7 @@ fn project_particle(
             half_height_m,
             radius_m,
         } => {
-            let axis_point = Vec3::new(0.0, local.y.clamp(-half_height_m, half_height_m), 0.0);
+            let axis_point = Vec3::new(0.0, local.y.clamp(-half_height_m, *half_height_m), 0.0);
             let offset = local - axis_point;
             let distance = offset.length();
             let required = radius_m + particle_radius_m;
@@ -1115,6 +1144,26 @@ fn project_particle(
                 Vec3::X
             };
             (axis_point + normal * required, normal)
+        }
+        // Non-primitive shapes (convex hull, triangle mesh, height field,
+        // compound) use a conservative bounding sphere for particle contact;
+        // exact point-to-shape projection is deferred.
+        ColliderShape::ConvexHull { .. }
+        | ColliderShape::TriMesh { .. }
+        | ColliderShape::HeightField { .. }
+        | ColliderShape::Compound { .. } => {
+            let shape_radius_m = collider_shape_bounding_radius_m(&collider.shape);
+            let required = shape_radius_m + particle_radius_m;
+            let distance = local.length();
+            if distance >= required {
+                return None;
+            }
+            let normal = if distance > f64::EPSILON {
+                local / distance
+            } else {
+                Vec3::Y
+            };
+            (normal * required, normal)
         }
     };
     let projected_world = collider.world_transform.transform_point(projected_local);

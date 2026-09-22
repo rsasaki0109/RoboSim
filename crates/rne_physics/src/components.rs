@@ -1,5 +1,7 @@
 //! Physics ECS components.
 
+use std::sync::Arc;
+
 use bevy_ecs::prelude::Component;
 use rne_ecs::Entity;
 use rne_math::{Quat, Vec3};
@@ -140,7 +142,11 @@ impl RigidBodyInertia {
 }
 
 /// Collision shape definition.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+///
+/// Variable-size shapes ([`Self::ConvexHull`]) store their vertex data behind an
+/// [`Arc`] so cloning a collider stays cheap. This makes the type `Clone` rather
+/// than `Copy`; callers must clone or borrow instead of implicitly copying.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ColliderShape {
     /// Sphere with radius in meters.
     Sphere {
@@ -164,6 +170,49 @@ pub enum ColliderShape {
         /// Unit normal vector.
         normal: Vec3,
     },
+    /// Convex hull of a point cloud expressed in the collider's local frame.
+    ///
+    /// The points are the hull vertices; their convex hull defines the collider
+    /// volume. At least four points are required.
+    ConvexHull {
+        /// Hull points in the collider's local frame.
+        points: Arc<[Vec3]>,
+    },
+    /// Triangle mesh with indexed faces in the collider's local frame.
+    TriMesh {
+        /// Mesh vertices in the collider's local frame.
+        vertices: Arc<[Vec3]>,
+        /// Triangle indices (flat triples) into `vertices`.
+        indices: Arc<[u32]>,
+    },
+    /// Regular height field sampled over the local XZ plane.
+    ///
+    /// `heights_m` is row-major with `nrows * ncols` samples spanning
+    /// `scale.x` by `scale.z` metres; `scale.y` multiplies each height.
+    HeightField {
+        /// Number of grid rows (Z direction).
+        nrows: u32,
+        /// Number of grid columns (X direction).
+        ncols: u32,
+        /// Row-major height samples.
+        heights_m: Arc<[f64]>,
+        /// Axis-aligned extent of the field in metres.
+        scale: Vec3,
+    },
+    /// Union of child shapes with local offsets.
+    Compound {
+        /// Child shapes and their collider-local placements.
+        parts: Arc<[CompoundPart]>,
+    },
+}
+
+/// One child of a [`ColliderShape::Compound`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompoundPart {
+    /// Child shape.
+    pub shape: ColliderShape,
+    /// Pose of the child relative to the compound collider's local frame.
+    pub local_offset: Transform3,
 }
 
 impl Default for ColliderShape {
@@ -190,7 +239,7 @@ pub struct ConvexCollider {
 }
 
 /// One finite primitive in a compound collision shape.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ColliderPart {
     /// Primitive geometry; infinite planes are not supported in compounds.
     pub shape: ColliderShape,
@@ -237,14 +286,18 @@ impl CompoundCollider {
                                 && half_height_m >= 0.0
                                 && positive(radius_m)
                         }
-                        ColliderShape::Plane { .. } => false,
+                        ColliderShape::Plane { .. }
+                        | ColliderShape::ConvexHull { .. }
+                        | ColliderShape::TriMesh { .. }
+                        | ColliderShape::HeightField { .. }
+                        | ColliderShape::Compound { .. } => false,
                     }
             })
     }
 }
 
 /// Collider attached to an entity.
-#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Collider {
     /// Shape definition.
     pub shape: ColliderShape,
@@ -285,6 +338,18 @@ impl Collider {
     pub fn sphere(radius_m: f64) -> Self {
         Self {
             shape: ColliderShape::Sphere { radius_m },
+            material: PhysicsMaterial::default(),
+            local_offset: Transform3::IDENTITY,
+            sensor: false,
+        }
+    }
+
+    /// Creates a convex-hull collider from local-frame hull points.
+    pub fn convex_hull(points: impl Into<Arc<[Vec3]>>) -> Self {
+        Self {
+            shape: ColliderShape::ConvexHull {
+                points: points.into(),
+            },
             material: PhysicsMaterial::default(),
             local_offset: Transform3::IDENTITY,
             sensor: false,
@@ -836,8 +901,29 @@ impl Default for JointMotor {
 
 #[cfg(test)]
 mod tests {
-    use super::{JointActuation, JointPassiveDynamics, RigidBodyInertia};
+    use super::{Collider, ColliderShape, JointActuation, JointPassiveDynamics, RigidBodyInertia};
     use rne_math::Vec3;
+    use std::sync::Arc;
+
+    #[test]
+    fn convex_hull_collider_round_trips_through_serde() {
+        let points: Arc<[Vec3]> = vec![
+            Vec3::ZERO,
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        ]
+        .into();
+        let collider = Collider::convex_hull(points);
+        match &collider.shape {
+            ColliderShape::ConvexHull { points } => assert_eq!(points.len(), 4),
+            other => panic!("unexpected shape {other:?}"),
+        }
+
+        let json = serde_json::to_string(&collider).expect("serialize collider");
+        let decoded: Collider = serde_json::from_str(&json).expect("deserialize collider");
+        assert_eq!(decoded, collider);
+    }
 
     #[test]
     fn passive_joint_dynamics_require_finite_non_negative_coefficients() {

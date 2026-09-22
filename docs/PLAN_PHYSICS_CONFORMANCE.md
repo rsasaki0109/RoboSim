@@ -193,6 +193,23 @@ position bound to 1 cm, finds the first violation at a stable fixed step, and
 emits an existing-schema Behavior replay plus a deliberately failing report.
 The MuJoCo Windows/Linux job packages both into a verified Failure Capsule.
 
+Catalog v7 adds `rapier.convex_hull.resting_contact` and bumps the named
+tolerance registry to v5. `ColliderShape::ConvexHull` carries local-frame hull
+points behind an `Arc`; Rapier converts them with `SharedShape::convex_hull` and
+guards the parry builder against too-few-point inputs by returning a typed
+`PhysicsError::InvalidColliderShape` instead of panicking. The vector drops an
+axis-aligned hull cube onto a fixed ground body and checks the settled height and
+residual speed against `convex_hull_resting_height_m_v1` and
+`convex_hull_resting_speed_m_s_v1`; MuJoCo rejects hull colliders until it maps
+them to a compiled mesh asset.
+
+`ColliderShape` additionally carries `TriMesh`, `HeightField`, and `Compound`
+variants. Rapier converts them with `SharedShape::trimesh`, `heightfield`, and
+`compound`, validating flat index triples, grid extents, and non-empty
+compounds with typed errors. MuJoCo rejects all three until Mesh/hfield
+compilation lands. Deformable contact, self-collision, and URDF collision
+fallbacks treat non-primitive shapes as conservative bounding spheres.
+
 The next articulation observable is optional completed-step joint-effort
 evidence. `JointEffortMeasurement` keeps revolute N*m and prismatic N distinct;
 absence remains different from measured zero. The joint-feedback sensor samples

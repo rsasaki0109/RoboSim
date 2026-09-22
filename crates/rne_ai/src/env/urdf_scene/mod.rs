@@ -764,7 +764,7 @@ impl UrdfSceneSim {
                 let transform =
                     world_transform_of(&self.world, entity).mul_transform(&collider.local_offset);
                 Ok(DeformableCollider {
-                    shape: collider.shape,
+                    shape: collider.shape.clone(),
                     world_transform: rne_math::Transform3 {
                         translation: transform.translation,
                         rotation: transform.rotation,

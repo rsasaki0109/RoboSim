@@ -382,7 +382,7 @@ impl PhysicsBackend for RapierBackend {
                         }
                     }
                 }
-                sync_entity_collider(world, state, entity, body_handle, collider);
+                sync_entity_collider(world, state, entity, body_handle, collider)?;
                 continue;
             }
 
@@ -431,7 +431,7 @@ impl PhysicsBackend for RapierBackend {
             state.body_to_entity.insert(body_handle, entity);
             if let Some(collider) = collider {
                 let collider_handle = state.colliders.insert_with_parent(
-                    collider_builder(world, entity, collider).build(),
+                    collider_builder(world, entity, collider)?.build(),
                     body_handle,
                     &mut state.bodies,
                 );
@@ -813,12 +813,12 @@ fn sync_entity_collider(
     entity: Entity,
     body_handle: RigidBodyHandle,
     collider: Option<&Collider>,
-) {
+) -> Result<(), PhysicsError> {
     let existing = state.entity_to_collider.get(&entity).copied();
     match (existing, collider) {
         (None, Some(collider)) => {
             let handle = state.colliders.insert_with_parent(
-                collider_builder(world, entity, collider).build(),
+                collider_builder(world, entity, collider)?.build(),
                 body_handle,
                 &mut state.bodies,
             );
@@ -840,6 +840,7 @@ fn sync_entity_collider(
         }
         (None, None) => {}
     }
+    Ok(())
 }
 
 fn convex_shape(convex: &ConvexCollider) -> Option<SharedShape> {
@@ -863,7 +864,11 @@ fn convex_shape(convex: &ConvexCollider) -> Option<SharedShape> {
     (mass.is_finite() && mass > 0.0).then_some(shape)
 }
 
-fn collider_builder(world: &World, entity: Entity, collider: &Collider) -> ColliderBuilder {
+fn collider_builder(
+    world: &World,
+    entity: Entity,
+    collider: &Collider,
+) -> Result<ColliderBuilder, PhysicsError> {
     let (shape, offset) = if let Some(compound) = world.get::<CompoundCollider>(entity) {
         (
             SharedShape::compound(
@@ -871,12 +876,12 @@ fn collider_builder(world: &World, entity: Entity, collider: &Collider) -> Colli
                     .parts
                     .iter()
                     .map(|part| {
-                        (
+                        Ok((
                             transform_to_isometry(&part.local_offset),
-                            shape_to_shared(part.shape),
-                        )
+                            shape_to_shared(&part.shape)?,
+                        ))
                     })
-                    .collect(),
+                    .collect::<Result<Vec<_>, PhysicsError>>()?,
             ),
             Transform3::IDENTITY,
         )
@@ -886,7 +891,7 @@ fn collider_builder(world: &World, entity: Entity, collider: &Collider) -> Colli
             Transform3::IDENTITY,
         )
     } else {
-        (shape_to_shared(collider.shape), collider.local_offset)
+        (shape_to_shared(&collider.shape)?, collider.local_offset)
     };
     let mut builder = ColliderBuilder::new(shape)
         .position(transform_to_isometry(&offset))
@@ -897,7 +902,7 @@ fn collider_builder(world: &World, entity: Entity, collider: &Collider) -> Colli
     if world.get::<RigidBodyInertia>(entity).is_some() {
         builder = builder.density(0.0);
     }
-    builder
+    Ok(builder)
 }
 
 fn interaction_groups(world: &World, entity: Entity) -> InteractionGroups {

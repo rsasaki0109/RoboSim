@@ -107,7 +107,7 @@ impl JointSpec {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct BodyInput {
     entity: Entity,
     rigid_body: RigidBody,
@@ -214,7 +214,7 @@ pub(crate) fn compile_rigid_body_model(
         write_body(
             &mut mjcf,
             &bodies,
-            *body,
+            body,
             None,
             2,
             &mut bindings,
@@ -235,7 +235,7 @@ pub(crate) fn compile_rigid_body_model(
     let joint_dynamics = bodies
         .iter()
         .filter_map(|body| {
-            passive_damping(*body).map(|implicit_damping| JointDynamics {
+            passive_damping(body).map(|implicit_damping| JointDynamics {
                 entity: body.entity,
                 implicit_damping,
             })
@@ -254,7 +254,7 @@ fn collect_bodies(world: &World) -> Result<Vec<BodyInput>, CompileError> {
     for entity_ref in world.iter_entities() {
         let entity = entity_ref.id();
         let rigid_body = entity_ref.get::<RigidBody>().copied();
-        let collider = entity_ref.get::<Collider>().copied();
+        let collider = entity_ref.get::<Collider>().cloned();
         match (rigid_body, collider) {
             (None, Some(_)) => {
                 return Err(CompileError::ColliderWithoutRigidBody {
@@ -274,7 +274,7 @@ fn collect_bodies(world: &World) -> Result<Vec<BodyInput>, CompileError> {
                 // apply every parent transform twice for imported robots.
                 let transform = world_transform_of(world, entity);
                 let inertia = entity_ref.get::<RigidBodyInertia>().copied();
-                validate_body(entity, rigid_body, inertia, collider, transform)?;
+                validate_body(entity, rigid_body, inertia, collider.as_ref(), transform)?;
                 let joints = [
                     entity_ref
                         .get::<RevoluteJointDesc>()
@@ -504,8 +504,8 @@ fn validate_actuation(world: &World, entity: Entity, joint: JointSpec) -> Result
 fn write_body(
     output: &mut String,
     bodies: &[BodyInput],
-    body: BodyInput,
-    parent: Option<BodyInput>,
+    body: &BodyInput,
+    parent: Option<&BodyInput>,
     depth: usize,
     bindings: &mut Vec<BodyBinding>,
     topology: &mut Vec<BodyTopology>,
@@ -544,7 +544,7 @@ fn write_body(
     if let Some(inertia) = body.inertia {
         write_exact_inertial(output, body.rigid_body, inertia, depth + 1);
     }
-    if let Some(collider) = body.collider {
+    if let Some(collider) = body.collider.as_ref() {
         write_geom(
             output,
             index,
@@ -567,7 +567,7 @@ fn write_body(
         body_type: body.rigid_body.body_type,
         mass_kg: body.rigid_body.mass_kg,
         inertia: body.inertia,
-        collider: body.collider,
+        collider: body.collider.clone(),
         collision_groups: body.collision_groups,
         structural_transform: (body.rigid_body.body_type == RigidBodyType::Fixed
             || matches!(body.joint, Some(JointSpec::Fixed(_))))
@@ -583,7 +583,7 @@ fn write_body(
         write_body(
             output,
             bodies,
-            *child,
+            child,
             Some(body),
             depth + 1,
             bindings,
@@ -596,7 +596,7 @@ fn write_body(
 
 fn write_joint(
     output: &mut String,
-    body: BodyInput,
+    body: &BodyInput,
     relative: Transform3,
     depth: usize,
     actuators: &mut Vec<String>,
@@ -655,7 +655,7 @@ fn write_joint(
     }
 }
 
-fn passive_damping(body: BodyInput) -> Option<f64> {
+fn passive_damping(body: &BodyInput) -> Option<f64> {
     let revolute = matches!(body.joint, Some(JointSpec::Revolute(_)));
     let prismatic = matches!(body.joint, Some(JointSpec::Prismatic(_)));
     if !revolute && !prismatic {
@@ -688,7 +688,7 @@ fn passive_damping(body: BodyInput) -> Option<f64> {
     }
 }
 
-fn write_passive_damping(output: &mut String, body: BodyInput, revolute: bool) {
+fn write_passive_damping(output: &mut String, body: &BodyInput, revolute: bool) {
     let expected_joint = if revolute {
         matches!(body.joint, Some(JointSpec::Revolute(_)))
     } else {
@@ -724,7 +724,11 @@ fn relative_transform(parent: Transform3, child: Transform3) -> Transform3 {
 fn write_collision_exclusions(output: &mut String, bodies: &[BodyInput], bindings: &[BodyBinding]) {
     let colliders = bodies
         .iter()
-        .filter(|body| body.collider.is_some_and(|collider| !collider.sensor))
+        .filter(|body| {
+            body.collider
+                .as_ref()
+                .is_some_and(|collider| !collider.sensor)
+        })
         .collect::<Vec<_>>();
     let mut exclusions = Vec::new();
     for (index, left) in colliders.iter().enumerate() {
@@ -767,7 +771,7 @@ fn validate_body(
     entity: Entity,
     rigid_body: RigidBody,
     inertia: Option<RigidBodyInertia>,
-    collider: Option<Collider>,
+    collider: Option<&Collider>,
     transform: Transform3,
 ) -> Result<(), CompileError> {
     let entity_index = entity.index();
@@ -825,10 +829,12 @@ fn validate_body(
     {
         return Err(invalid(entity_index, "restitution"));
     }
-    match collider.shape {
-        ColliderShape::Sphere { radius_m } => validate_positive(entity_index, "radius_m", radius_m),
+    match &collider.shape {
+        ColliderShape::Sphere { radius_m } => {
+            validate_positive(entity_index, "radius_m", *radius_m)
+        }
         ColliderShape::Cuboid { half_extents_m } => {
-            validate_vec3(entity_index, "half_extents_m", half_extents_m)?;
+            validate_vec3(entity_index, "half_extents_m", *half_extents_m)?;
             if half_extents_m.min_element() <= 0.0 {
                 Err(invalid(entity_index, "half_extents_m"))
             } else {
@@ -839,17 +845,35 @@ fn validate_body(
             half_height_m,
             radius_m,
         } => {
-            validate_positive(entity_index, "half_height_m", half_height_m)?;
-            validate_positive(entity_index, "radius_m", radius_m)
+            validate_positive(entity_index, "half_height_m", *half_height_m)?;
+            validate_positive(entity_index, "radius_m", *radius_m)
         }
         ColliderShape::Plane { normal } => {
-            validate_vec3(entity_index, "plane normal", normal)?;
+            validate_vec3(entity_index, "plane normal", *normal)?;
             if rigid_body.body_type != RigidBodyType::Fixed || normal.length_squared() <= 1.0e-18 {
                 Err(invalid(entity_index, "fixed plane normal"))
             } else {
                 Ok(())
             }
         }
+        // M1 rejects convex hulls on the MuJoCo backend; a later increment maps
+        // them to a compiled `<mesh>` asset.
+        ColliderShape::ConvexHull { .. } => Err(invalid(
+            entity_index,
+            "convex hull collider unsupported by the mujoco backend",
+        )),
+        ColliderShape::TriMesh { .. } => Err(invalid(
+            entity_index,
+            "triangle mesh collider unsupported by the mujoco backend",
+        )),
+        ColliderShape::HeightField { .. } => Err(invalid(
+            entity_index,
+            "height field collider unsupported by the mujoco backend",
+        )),
+        ColliderShape::Compound { .. } => Err(invalid(
+            entity_index,
+            "compound collider unsupported by the mujoco backend",
+        )),
     }
 }
 
@@ -857,13 +881,15 @@ fn write_geom(
     output: &mut String,
     index: u32,
     rigid_body: RigidBody,
-    collider: Collider,
+    collider: &Collider,
     include_mass: bool,
     depth: usize,
 ) {
-    let (kind, size, alignment) = match collider.shape {
+    let (kind, size, alignment) = match &collider.shape {
         ColliderShape::Sphere { radius_m } => ("sphere", format!("{radius_m:.17}"), Quat::IDENTITY),
-        ColliderShape::Cuboid { half_extents_m } => ("box", vector(half_extents_m), Quat::IDENTITY),
+        ColliderShape::Cuboid { half_extents_m } => {
+            ("box", vector(*half_extents_m), Quat::IDENTITY)
+        }
         ColliderShape::Capsule {
             half_height_m,
             radius_m,
@@ -877,6 +903,28 @@ fn write_geom(
             "1 1 0.1".to_string(),
             Quat::from_rotation_arc(Vec3::Z, normal.normalize()),
         ),
+        // Validation rejects convex hulls on this backend; fall back to a
+        // conservative bounding sphere if that invariant is ever bypassed.
+        ColliderShape::ConvexHull { points } => {
+            let radius_m = points
+                .iter()
+                .map(|point| point.length())
+                .fold(0.0, f64::max);
+            ("sphere", format!("{radius_m:.17}"), Quat::IDENTITY)
+        }
+        ColliderShape::TriMesh { vertices, .. } => {
+            let radius_m = vertices
+                .iter()
+                .map(|point| point.length())
+                .fold(0.0, f64::max);
+            ("sphere", format!("{radius_m:.17}"), Quat::IDENTITY)
+        }
+        ColliderShape::HeightField { scale, .. } => (
+            "sphere",
+            format!("{:.17}", scale.length() * 0.5),
+            Quat::IDENTITY,
+        ),
+        ColliderShape::Compound { .. } => ("sphere", "0.0".to_string(), Quat::IDENTITY),
     };
     let rotation = collider.local_offset.rotation * alignment;
     let indent = "  ".repeat(depth);

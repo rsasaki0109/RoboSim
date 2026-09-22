@@ -1,0 +1,15 @@
+[package]
+name = "rne_usd"
+description = "Minimal ASCII Universal Scene Description (.usda) import for Robot Native Engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rne_math = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"

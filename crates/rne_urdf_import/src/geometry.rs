@@ -3,10 +3,11 @@
 use crate::parse::rpy_to_quat;
 use crate::schema::{UrdfGeometry, UrdfGeometryElement, UrdfLink};
 use rne_math::{Quat, Vec3};
-use rne_physics::{Collider, ColliderShape};
+use rne_physics::{Collider, ColliderShape, CompoundPart};
 use rne_render::{load_stl, resolve_package_uri, TriangleMesh, Visual, VisualShape};
 use rne_world::Transform3;
 use std::path::Path;
+use std::sync::Arc;
 
 /// Returns the extra rotation needed when mapping a URDF Z cylinder to a Y capsule.
 pub fn cylinder_collider_rotation() -> Quat {
@@ -35,6 +36,14 @@ pub fn collider_from_element(
         }
         UrdfGeometry::Mesh { path, scale } => {
             let root = assets_root?;
+            if let Some(shape) = baked_mesh_collider(path, *scale, root) {
+                return Some(Collider {
+                    shape,
+                    material: Default::default(),
+                    local_offset,
+                    sensor: false,
+                });
+            }
             let (center_m, half_extents_m) = mesh_aabb_collider(path, *scale, root)?;
             local_offset.translation += center_m;
             ColliderShape::Cuboid { half_extents_m }
@@ -145,10 +154,10 @@ pub fn mesh_aabb(mesh: &TriangleMesh, scale: Vec3) -> Option<(Vec3, Vec3)> {
 
 fn collider_local_aabb(collider: &Collider) -> Option<(Vec3, Vec3)> {
     let offset = collider.local_offset.translation;
-    let (half, extra_rotation) = match collider.shape {
-        ColliderShape::Cuboid { half_extents_m } => (half_extents_m, Quat::IDENTITY),
+    let (half, extra_rotation) = match &collider.shape {
+        ColliderShape::Cuboid { half_extents_m } => (*half_extents_m, Quat::IDENTITY),
         ColliderShape::Sphere { radius_m } => {
-            let r = Vec3::splat(radius_m);
+            let r = Vec3::splat(*radius_m);
             (r, Quat::IDENTITY)
         }
         ColliderShape::Capsule {
@@ -156,9 +165,54 @@ fn collider_local_aabb(collider: &Collider) -> Option<(Vec3, Vec3)> {
             radius_m,
         } => {
             let y = half_height_m + radius_m;
-            (Vec3::new(radius_m, y, radius_m), Quat::IDENTITY)
+            (Vec3::new(*radius_m, y, *radius_m), Quat::IDENTITY)
         }
         ColliderShape::Plane { .. } => return None,
+        ColliderShape::ConvexHull { points } => {
+            let mut extent = Vec3::ZERO;
+            for point in points.iter() {
+                extent = extent.max(point.abs());
+            }
+            (extent, Quat::IDENTITY)
+        }
+        ColliderShape::TriMesh { vertices, .. } => {
+            let mut extent = Vec3::ZERO;
+            for vertex in vertices.iter() {
+                extent = extent.max(vertex.abs());
+            }
+            (extent, Quat::IDENTITY)
+        }
+        ColliderShape::HeightField {
+            heights_m, scale, ..
+        } => {
+            let max_height_m = heights_m
+                .iter()
+                .fold(0.0_f64, |acc, height| acc.max(height.abs()));
+            (
+                Vec3::new(
+                    scale.x.abs() * 0.5,
+                    max_height_m * scale.y.abs(),
+                    scale.z.abs() * 0.5,
+                ),
+                Quat::IDENTITY,
+            )
+        }
+        ColliderShape::Compound { parts } => {
+            // Conservative bounding sphere around the child union.
+            let mut radius_m = 0.0_f64;
+            for part in parts.iter() {
+                let child = Collider {
+                    shape: part.shape.clone(),
+                    ..Collider::default()
+                };
+                if let Some((minor, major)) = collider_local_aabb(&child) {
+                    let child_radius_m = ((major - minor) * 0.5).length();
+                    radius_m =
+                        radius_m.max(part.local_offset.translation.length() + child_radius_m);
+                }
+            }
+            (Vec3::splat(radius_m), Quat::IDENTITY)
+        }
     };
 
     let rotated_half =
@@ -215,6 +269,76 @@ fn cylinder_to_capsule(radius_m: f64, length_m: f64) -> ColliderShape {
     ColliderShape::Capsule {
         half_height_m,
         radius_m,
+    }
+}
+
+/// Loads a baked collision sidecar next to a mesh, scaled into the mesh frame.
+///
+/// Returns `None` when no sidecar exists, when it cannot be parsed, or when it
+/// contains a shape that cannot be scaled; callers then fall back to the AABB.
+fn baked_mesh_collider(uri: &str, scale: Vec3, assets_root: &Path) -> Option<ColliderShape> {
+    let mesh_path = resolve_package_uri(uri, assets_root);
+    let sidecar = rne_collision_bake::sidecar_path(&mesh_path);
+    if !sidecar.is_file() {
+        return None;
+    }
+    let bake = rne_collision_bake::load_bake(&sidecar).ok()?;
+    scale_collider_shape(&bake.shape, scale)
+}
+
+fn scale_collider_shape(shape: &ColliderShape, scale: Vec3) -> Option<ColliderShape> {
+    match shape {
+        ColliderShape::Cuboid { half_extents_m } => Some(ColliderShape::Cuboid {
+            half_extents_m: Vec3::new(
+                half_extents_m.x * scale.x.abs(),
+                half_extents_m.y * scale.y.abs(),
+                half_extents_m.z * scale.z.abs(),
+            ),
+        }),
+        ColliderShape::Sphere { radius_m } => Some(ColliderShape::Sphere {
+            radius_m: radius_m * scale.abs().max_element(),
+        }),
+        ColliderShape::Capsule {
+            half_height_m,
+            radius_m,
+        } => Some(ColliderShape::Capsule {
+            half_height_m: half_height_m * scale.y.abs(),
+            radius_m: radius_m * scale.x.abs().max(scale.z.abs()),
+        }),
+        ColliderShape::ConvexHull { points } => Some(ColliderShape::ConvexHull {
+            points: points
+                .iter()
+                .map(|point| *point * scale)
+                .collect::<Vec<_>>()
+                .into(),
+        }),
+        ColliderShape::TriMesh { vertices, indices } => Some(ColliderShape::TriMesh {
+            vertices: vertices
+                .iter()
+                .map(|point| *point * scale)
+                .collect::<Vec<_>>()
+                .into(),
+            indices: indices.clone(),
+        }),
+        ColliderShape::Compound { parts } => {
+            let scaled = parts
+                .iter()
+                .map(|part| {
+                    Some(CompoundPart {
+                        shape: scale_collider_shape(&part.shape, scale)?,
+                        local_offset: Transform3 {
+                            translation: part.local_offset.translation * scale,
+                            rotation: part.local_offset.rotation,
+                            scale: part.local_offset.scale,
+                        },
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(ColliderShape::Compound {
+                parts: Arc::from(scaled),
+            })
+        }
+        ColliderShape::Plane { .. } | ColliderShape::HeightField { .. } => None,
     }
 }
 
@@ -315,5 +439,53 @@ mod tests {
             visual_from_element(&element, [1.0, 1.0, 1.0, 1.0]).color_rgba,
             [0.1, 0.2, 0.3, 1.0]
         );
+    }
+
+    #[test]
+    fn baked_sidecar_overrides_mesh_aabb() {
+        use rne_collision_bake::{
+            bake_voxel_decomposition, save_bake, sidecar_path, VoxelBakeConfig,
+        };
+
+        let directory = std::env::temp_dir().join(format!(
+            "rne_urdf_baked_sidecar_{}_{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(directory.join("meshes")).unwrap();
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/mesh_diff_drive_package/meshes/base_link.stl");
+        let mesh_path = directory.join("meshes/base_link.stl");
+        std::fs::copy(&fixture, &mesh_path).unwrap();
+
+        let positions = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        let indices = vec![0, 1, 2, 0, 2, 3, 0, 1, 3, 1, 2, 3];
+        let bake = bake_voxel_decomposition(&positions, &indices, VoxelBakeConfig::default())
+            .expect("bake");
+        save_bake(&sidecar_path(&mesh_path), &bake).expect("write sidecar");
+
+        let element = UrdfGeometryElement {
+            origin_xyz: Vec3::ZERO,
+            origin_rpy: Vec3::ZERO,
+            material_rgba: None,
+            geometry: UrdfGeometry::Mesh {
+                path: "meshes/base_link.stl".into(),
+                scale: Vec3::ONE,
+            },
+        };
+        let collider =
+            collider_from_element(&element, Some(directory.as_path())).expect("mesh collider");
+        assert!(
+            matches!(collider.shape, ColliderShape::Compound { .. }),
+            "a baked sidecar must replace the AABB fallback"
+        );
+
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

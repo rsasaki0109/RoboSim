@@ -64,13 +64,16 @@ fn degree_compiler_converts_hinge_ranges_to_radians() {
 }
 
 #[test]
-fn rejects_body_rotation() {
+fn supports_body_rotation_via_quaternion() {
     let text = fixture("two_link_arm.xml").replace(
         "<body name=\"upper_link\" pos=\"0 0.05 0\">",
-        "<body name=\"upper_link\" pos=\"0 0.05 0\" quat=\"1 0 0 0\">",
+        "<body name=\"upper_link\" pos=\"0 0.05 0\" quat=\"0.7071067811865476 0 0 0.7071067811865476\">",
     );
-    let error = mjcf_to_urdf(&text).expect_err("body quat must be rejected");
-    assert!(matches!(error, MjcfError::Unsupported { .. }));
+    let urdf = mjcf_to_urdf(&text).expect("body quat must convert");
+    assert!(
+        urdf.contains(r#"rpy="0 0 1.5707963267948968""#),
+        "converted URDF must carry the body rotation: {urdf}"
+    );
 }
 
 #[test]

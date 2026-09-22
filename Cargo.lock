@@ -697,6 +697,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "collision_bake"
+version = "0.3.0"
+dependencies = [
+ "rne_collision_bake",
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "rne_physics",
+ "rne_physics_rapier",
+ "rne_world",
+]
+
+[[package]]
 name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3381,6 +3394,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "policy_artifact"
+version = "0.3.0"
+dependencies = [
+ "rne_ai",
+]
+
+[[package]]
 name = "polling"
 version = "3.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3884,6 +3904,7 @@ dependencies = [
  "clap",
  "rne_ai",
  "rne_assets",
+ "rne_collision_bake",
  "rne_core",
  "rne_data",
  "rne_ecs",
@@ -3897,11 +3918,13 @@ dependencies = [
  "rne_physics_conformance",
  "rne_physics_rapier",
  "rne_plugin",
+ "rne_render",
  "rne_robot",
  "rne_sensor",
  "rne_sumo",
  "rne_traci",
  "rne_traffic",
+ "rne_usd",
  "rne_world",
  "serde",
  "serde_json",
@@ -3927,6 +3950,18 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "toml",
+]
+
+[[package]]
+name = "rne_collision_bake"
+version = "0.3.0"
+dependencies = [
+ "rne_math",
+ "rne_physics",
+ "rne_world",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4528,6 +4563,7 @@ name = "rne_urdf_import"
 version = "0.3.0"
 dependencies = [
  "approx",
+ "rne_collision_bake",
  "rne_core",
  "rne_ecs",
  "rne_math",
@@ -4537,6 +4573,15 @@ dependencies = [
  "rne_robot",
  "rne_world",
  "roxmltree",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "rne_usd"
+version = "0.3.0"
+dependencies = [
+ "approx",
+ "rne_math",
  "thiserror 2.0.18",
 ]
 
@@ -5296,6 +5341,13 @@ dependencies = [
  "rne_ecs",
  "rne_traffic",
  "uuid",
+]
+
+[[package]]
+name = "trainer"
+version = "0.3.0"
+dependencies = [
+ "rne_ai",
 ]
 
 [[package]]

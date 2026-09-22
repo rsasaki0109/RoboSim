@@ -1,14 +1,14 @@
 {
   "kind": "rne_physics_conformance_report",
   "schema_version": 2,
-  "catalog_version": 6,
-  "tolerance_registry_version": 4,
+  "catalog_version": 7,
+  "tolerance_registry_version": 5,
   "backends": [
     {
       "manifest": {
         "schema_version": 3,
         "backend_id": "analytic",
-        "adapter_version": "0.2.0",
+        "adapter_version": "0.3.0",
         "engine_id": "rne_analytic",
         "engine_version": "semi_implicit_euler_v1",
         "capabilities": [
@@ -36,7 +36,7 @@
       "manifest": {
         "schema_version": 3,
         "backend_id": "rapier",
-        "adapter_version": "0.2.0",
+        "adapter_version": "0.3.0",
         "engine_id": "rapier3d",
         "engine_version": "0.22",
         "capabilities": [
@@ -313,6 +313,46 @@
         }
       ],
       "detail": "60 of 60 settled steps reported canonical point-level load and kinematics; effective_mass_kg=2.125"
+    },
+    {
+      "id": "rapier.convex_hull.resting_contact",
+      "backend": "rapier",
+      "capability": "rigid_body",
+      "passed": true,
+      "snapshot_hash": 3561298116671187316,
+      "metrics": [
+        {
+          "id": "resting_height_m",
+          "unit": "m",
+          "measured": 0.24886204302310944,
+          "expected": 0.25,
+          "absolute_error": 0.001137956976890564,
+          "tolerance": {
+            "id": "convex_hull_resting_height_m_v1",
+            "absolute": 0.02,
+            "relative": 0.0,
+            "allowed_error": 0.02,
+            "rationale": "an axis-aligned convex-hull cube settles at its half extent within the solver penetration allowance"
+          },
+          "passed": true
+        },
+        {
+          "id": "resting_speed_m_s",
+          "unit": "m/s",
+          "measured": 0.0,
+          "expected": 0.0,
+          "absolute_error": 0.0,
+          "tolerance": {
+            "id": "convex_hull_resting_speed_m_s_v1",
+            "absolute": 0.02,
+            "relative": 0.0,
+            "allowed_error": 0.02,
+            "rationale": "a settled convex-hull body retains only sub-centimetre-per-second solver jitter"
+          },
+          "passed": true
+        }
+      ],
+      "detail": "axis-aligned convex-hull cube should settle on the ground at its half extent; resting_height_m=0.248862 resting_speed_m_s=0.000000"
     },
     {
       "id": "rapier.deterministic_step.repeat_snapshot",

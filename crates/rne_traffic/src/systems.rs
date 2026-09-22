@@ -1,5 +1,6 @@
 //! Deterministic traffic runtime systems.
 
+use crate::car_following::{idm_acceleration, CarFollowingModel};
 use crate::{
     SignalAspect, TrafficActor, TrafficActorKind, TrafficConflictControls, TrafficDeparture,
     TrafficPose, TrafficPoseSource, TrafficRoute, TrafficRouteCatalog, TrafficRouteFollower,
@@ -88,6 +89,12 @@ pub struct KinematicTrafficConfig {
     pub cross_route_vehicle_width_m: f64,
     /// Extra setback before a conflict movement for a vehicle without its reservation.
     pub conflict_stop_margin_m: f64,
+    /// Longitudinal model used for runtime-owned actors.
+    ///
+    /// Defaults to [`CarFollowingModel::Kinematic`] so recorded replays are
+    /// unchanged; selecting [`CarFollowingModel::Idm`] switches the runtime to
+    /// the Intelligent Driver Model.
+    pub car_following: CarFollowingModel,
 }
 
 impl Default for KinematicTrafficConfig {
@@ -100,6 +107,7 @@ impl Default for KinematicTrafficConfig {
             cross_route_headway_half_width_m: 1.8,
             cross_route_vehicle_width_m: 2.0,
             conflict_stop_margin_m: 2.0,
+            car_following: CarFollowingModel::Kinematic,
         }
     }
 }
@@ -411,6 +419,7 @@ fn advance_traffic(
     let mut updated = actors.clone();
     for indices in groups.values() {
         let leader_gaps = leader_gaps(indices, &actors, routes);
+        let leader_speeds = leader_speeds(indices, &actors, routes);
         for (position, actor_index) in indices.iter().copied().enumerate() {
             let actor = &actors[actor_index];
             let route = routes
@@ -441,23 +450,52 @@ fn advance_traffic(
             let departed = actor
                 .departure_time_s
                 .is_none_or(|departure_time_s| sim_time.as_seconds().value() >= departure_time_s);
-            let target_speed_m_s = actor
-                .follower
-                .desired_speed_m_s
-                .min(headway_speed_m_s)
-                .min(control_speed_m_s)
-                * if departed { 1.0 } else { 0.0 };
-            let speed_delta_m_s = if target_speed_m_s >= actor.follower.speed_m_s {
-                config.max_acceleration_m_s2 * delta_s
-            } else {
-                -config.max_braking_m_s2 * delta_s
+            let new_speed_m_s = match config.car_following {
+                CarFollowingModel::Kinematic => {
+                    let target_speed_m_s = actor
+                        .follower
+                        .desired_speed_m_s
+                        .min(headway_speed_m_s)
+                        .min(control_speed_m_s)
+                        * if departed { 1.0 } else { 0.0 };
+                    let speed_delta_m_s = if target_speed_m_s >= actor.follower.speed_m_s {
+                        config.max_acceleration_m_s2 * delta_s
+                    } else {
+                        -config.max_braking_m_s2 * delta_s
+                    };
+                    if speed_delta_m_s >= 0.0 {
+                        (actor.follower.speed_m_s + speed_delta_m_s).min(target_speed_m_s)
+                    } else {
+                        (actor.follower.speed_m_s + speed_delta_m_s).max(target_speed_m_s)
+                    }
+                    .max(0.0)
+                }
+                CarFollowingModel::Idm(params) => {
+                    // Only a same-route leader exposes a speed; a cross-route
+                    // leader is treated as stationary.
+                    let leader_speed_m_s = if leader_gaps[position].is_some() {
+                        leader_speeds[position].unwrap_or(0.0)
+                    } else {
+                        0.0
+                    };
+                    let gap_m = optional_gap_m.unwrap_or(1.0e3);
+                    let acceleration = idm_acceleration(
+                        &params,
+                        actor.follower.speed_m_s,
+                        leader_speed_m_s,
+                        gap_m,
+                    );
+                    let integrated = (actor.follower.speed_m_s + acceleration * delta_s).max(0.0);
+                    let limited = integrated
+                        .min(actor.follower.desired_speed_m_s)
+                        .min(control_speed_m_s);
+                    if departed {
+                        limited
+                    } else {
+                        0.0
+                    }
+                }
             };
-            let new_speed_m_s = if speed_delta_m_s >= 0.0 {
-                (actor.follower.speed_m_s + speed_delta_m_s).min(target_speed_m_s)
-            } else {
-                (actor.follower.speed_m_s + speed_delta_m_s).max(target_speed_m_s)
-            }
-            .max(0.0);
             let mut travel_m = (actor.follower.speed_m_s + new_speed_m_s) * 0.5 * delta_s;
             if let Some(gap_m) = optional_gap_m {
                 travel_m = travel_m.min((gap_m - config.minimum_gap_m).max(0.0));
@@ -837,6 +875,11 @@ fn validate_kinematic_config(config: KinematicTrafficConfig) -> Result<(), Kinem
             return Err(KinematicTrafficError::InvalidConfig { field });
         }
     }
+    if !config.car_following.is_valid() {
+        return Err(KinematicTrafficError::InvalidConfig {
+            field: "car_following",
+        });
+    }
     Ok(())
 }
 
@@ -913,6 +956,31 @@ fn leader_gaps(
                         + actors[leader_index].follower.length_m)
                         * 0.5,
             )
+        })
+        .collect()
+}
+
+fn leader_speeds(
+    indices: &[usize],
+    actors: &[ActorSnapshot],
+    routes: &TrafficRouteCatalog,
+) -> Vec<Option<f64>> {
+    if indices.len() < 2 {
+        return vec![None; indices.len()];
+    }
+    let route = routes
+        .get(&actors[indices[0]].follower.route_id)
+        .expect("group route validated");
+    indices
+        .iter()
+        .enumerate()
+        .map(|(position, _)| {
+            let leader_position = position + 1;
+            if leader_position == indices.len() && !route.is_closed() {
+                return None;
+            }
+            let leader_index = indices[leader_position % indices.len()];
+            Some(actors[leader_index].follower.speed_m_s)
         })
         .collect()
 }

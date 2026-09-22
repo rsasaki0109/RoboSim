@@ -11,12 +11,16 @@
 //! - one root `<worldbody><body>` with nested `<body>` elements
 //! - `hinge` and `slide` joints with `axis` and `range` (converted to radians
 //!   under the degree convention)
-//! - `box`, `sphere`, and `cylinder` geoms with `pos` and `rgba`
+//! - `box`, `sphere`, `cylinder`, `capsule` (approximated as a cylinder), and
+//!   `mesh` geoms with `pos`, `rgba`, and rotation
+//! - body/geom rotation via `quat`, `euler`, or `axisangle`, converted to URDF
+//!   `rpy` (extrinsic XYZ)
+//! - `<asset><mesh name file scale>` referenced by `type="mesh"` geoms
 //!
-//! Body/geom rotations (`quat`, `euler`, `zaxis`), free/ball/universal joints,
-//! meshes, capsules, and assets are rejected with a clear error instead of being
-//! silently dropped. Inertial is not derived from geoms; the URDF importer
-//! assigns its default masses.
+//! Free/ball/universal joints, `zaxis` rotations, `fromto`/`plane`/`ellipsoid`
+//! geoms, and other unsupported constructs are rejected with a clear error
+//! instead of being silently dropped. Inertial is not derived from geoms; the
+//! URDF importer assigns its default masses.
 //!
 //! [MuJoCo MJCF]: https://mujoco.readthedocs.io/en/stable/XMLreference.html
 
