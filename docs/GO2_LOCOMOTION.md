@@ -465,3 +465,14 @@ contact and reshape the foot trajectory, which the current
 `UnitreeGo2TorqueOverlay` / `UnitreeGo2GaitSchedule` spaces were not asked to
 do for height. This is a campaign, not a parameter tweak; the boundary itself
 is now measured rather than assumed.
+
+### Normalized rotation calibration
+
+After promoting Rapier rotations to unit f64 quaternions, the historical robust
+feed-forward overlay reversed during its first measured turn window. A
+deterministic scalar sweep retuned the pinned `LEARNED_ROBUST_TURN` coefficients
+to 0.85 times the previous values. The existing sustained-turn, 3e-9 coefficient
+perturbation, repeatability, tilt and height assertions remain unchanged. Local
+release measurements are +0.169/+0.118 rad in the two windows; example 60 turns
++0.288 rad while translating 2.86 m. This calibrates the existing controller and
+does not lower the showcase gates or apply a base wrench.

@@ -13,8 +13,8 @@ nonadjacent self-contact solver gaps. Peak realized knee effort is
 119.99901581 Nm, below the unchanged 120 Nm ceiling. All 23 joints have
 32,000 finite effort samples.
 
-125 µs and 62.5 µs runs of the exact same candidate and immutable producer
-are in progress. Passing a coarse recorded-metrics audit alone does not prove
+The 125 µs run also completes 15 seconds and passes every recorded gate:
+peak speed 1.03142250x. The 62.5 µs result fails as detailed below. Passing a coarse recorded-metrics audit alone does not prove
 timestep refinement or final qualification. A successful native GIF remains
 pending finer validation and review of producer/model provenance.
 
@@ -22,7 +22,7 @@ pending finer validation and review of producer/model provenance.
 
 The 62.5 µs rollout collapsed at 2.98925 s after landing. This rejects the
 +0.02 rad landing-knee candidate despite all coarse recorded gates passing.
-The 125 µs run remains live for comparison. Three 62.5 µs five-second probes
+The 125 µs run completed successfully for comparison. Three 62.5 µs five-second probes
 now test smaller knee increments (+0.002, +0.005, +0.010 rad relative to
 full-launch-open candidate 14), each with the same 0.001 Nm command headroom,
 full-contact model, control gains, and producer. No limits or contacts are

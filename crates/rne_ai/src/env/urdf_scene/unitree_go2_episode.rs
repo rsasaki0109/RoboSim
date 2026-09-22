@@ -1912,12 +1912,10 @@ mod tests {
         println!(
             "robust torque turn: windows {window_a:+.3}/{window_b:+.3} tilt {max_tilt:.3} height {min_height:.3}"
         );
-        // Persistent per-step ulp forcing — a different OS libm — settles the
-        // walk onto a nearby orbit whose windows are smaller but still both
-        // positive (measured: +0.250/+0.274 on Windows, +0.146/+0.121 on
-        // Linux CI). The cross-platform guarantee is therefore the *sustained
-        // turn*, not its exact rate; the fragile winner categorically fails
-        // this bar (its second window reverses).
+        // Require a sustained turn in both windows, not one positive net
+        // heading change hiding a reversal. After normalized f64 readback and
+        // gain retuning, Linux measures about +0.169/+0.118 rad. Exact rates
+        // can vary across floating-point platforms; retain the existing gates.
         assert!(
             window_a > 0.08 && window_b > 0.08,
             "robust turn must sustain both windows: {window_a:+.3}/{window_b:+.3}"

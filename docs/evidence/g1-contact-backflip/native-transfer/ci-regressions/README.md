@@ -27,3 +27,16 @@ Local builds reuse the release target and keep at least 30 GiB free. Full CI
 runs remotely to avoid exhausting the local disk reserve. Native physics jobs
 use immutable, hash-pinned producer executables and are independent of these
 regression builds.
+
+## Targeted repairs
+
+- Lift fingers: retain velocity gain 30 and bound torque at 0.3 Nm. The
+  production example 31 now carries 1.13 m and releases; all five `mm_lift`
+  filtered tests and six `pick_place` tests pass, including bitwise checkpoint
+  replay. Friction-mode finger limits remain configured by their own path.
+- Go2 overlay: scale the historical pinned coefficients by 0.85. The unchanged
+  sustained-turn/3e-9-perturbation/repeatability regression passes; production
+  example 60 measures +0.288 rad and 2.86 m displacement, with both robots
+  upright. No heading, displacement or height gate is lowered.
+- Full crate and final-head CI results remain to be collected. The earlier
+  failed workflow is retained as regression evidence, not represented as green.

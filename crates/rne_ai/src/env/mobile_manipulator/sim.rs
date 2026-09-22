@@ -778,6 +778,11 @@ const GRASP_PINCH_FALLBACK_HALF_WIDTH_M: f64 = 0.03;
 /// [`MobileManipulatorSim::find_graspable_in_contact`] unreachable no matter how
 /// long the close command ran.
 const LIFT_FINGER_MOTOR_GAIN: f64 = 30.0;
+/// Bound the lightweight lift claw's closing impulse so the first contacting
+/// finger does not eject the object before the opposite finger can establish
+/// the existing two-sided grasp gate. Friction-mode holds configure their own
+/// force limits separately.
+const LIFT_FINGER_MAX_FORCE_NM: f64 = 0.3;
 /// Position-hold stiffness for the planar (`mm_minimal`/`mm_mobile`) gripper
 /// finger joints. At the old pure velocity motor (gain 1.0, no restoring force) a
 /// zero command did not HOLD the fingers: the arm's own swing flung them about
@@ -3376,7 +3381,7 @@ impl MobileManipulatorSim {
                     motor.gain = LIFT_FINGER_MOTOR_GAIN;
                     motor.stiffness = 0.0;
                     motor.target_position = 0.0;
-                    motor.max_force = 0.0;
+                    motor.max_force = LIFT_FINGER_MAX_FORCE_NM;
                 } else if name == SO101_GRIPPER_JOINT {
                     motor.stiffness = SO101_FINGER_STIFFNESS;
                     motor.gain = SO101_FINGER_DAMPING;

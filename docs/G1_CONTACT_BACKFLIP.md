@@ -765,3 +765,15 @@ full-contact +0.02 rad knee candidate initially recorded a 120.00001526 Nm peak
 at a 120 Nm ceiling due to f32 force accumulation/projection. It is rejected;
 the next verification uses 0.001 Nm command headroom rather than relaxing the
 gate or rounding away the measured excess.
+
+### Regression checks for the shared rotation correction
+
+The normalized f64 rotation boundary also changed the trajectories of two
+existing demos. The lift claw's velocity motors now have a 0.3 Nm torque bound
+instead of an unbounded/default-force command, allowing both fingers to establish
+the existing grasp gate before the first finger pushes the cube away. Example 31
+again carries and releases the cube (1.13 m); lift and pick/place regressions pass.
+The Go2 robust overlay is retuned by a 0.85 coefficient scale, preserving its
+existing two-window, perturbation and repeatability tests and example 60's
+heading/transport/height gates. These checks are separate from G1 qualification;
+the native G1 validation continues using its immutable producer.

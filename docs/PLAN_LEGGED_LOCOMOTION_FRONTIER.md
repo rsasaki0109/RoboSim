@@ -433,3 +433,13 @@ for 5 s. See [long validation evidence](evidence/g1-contact-backflip/native-tran
   so its coarse pass is not final qualification. Preserve the finer failed
   rollout; begin three finer-step probes at +0.002/+0.005/+0.010 rad relative
   to candidate 14, retaining 0.001 Nm headroom and all existing gates.
+
+- The +0.02 rad headroom candidate also passes every recorded gate at 125 µs
+  over 15 s (speed 1.03142250x); 62.5 µs still rejects it. Three smaller-knee
+  finer-step probes remain active. Shared-engine repairs pass example 31
+  (1.13 m carry/release), example 60 (+0.288 rad turn, 2.86 m displacement),
+  five mm_lift tests, six pick/place tests, the unchanged robust Go2 turn test,
+  and rne_ai all-target release Clippy. Full rne_ai testing exposes additional
+  existing-path regressions (366 pass, 10 fail, 12 ignored), including the
+  procedural diff-drive rolling direction and other gait probes. Do not claim
+  full CI success; continue the regression audit without weakening assertions.
