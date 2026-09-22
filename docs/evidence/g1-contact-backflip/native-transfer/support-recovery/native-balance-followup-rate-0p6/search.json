@@ -1,0 +1,117 @@
+{
+  "algorithm": "bounded_coordinate_pattern_search",
+  "binary_sha256": "9a580390ee9c6f58a2f16a07aaf964e7cb70103f04121076fb905cf012e789fc",
+  "scene": "/home/sasaki/workspace/RoboSim/target/research/g1-backflip-pr/target/research/native-passive-loss/scene.rne.scene.toml",
+  "workers": 1,
+  "dt_s": 0.0005,
+  "motor_mode": "effort",
+  "timeout_s": 600,
+  "axes": [
+    [
+      0,
+      1.8,
+      2.7,
+      0.15
+    ],
+    [
+      3,
+      0.5,
+      2.0,
+      0.2
+    ],
+    [
+      6,
+      1.4,
+      2.7,
+      0.2
+    ],
+    [
+      7,
+      1.2,
+      2.7,
+      0.2
+    ],
+    [
+      11,
+      4.5,
+      6.1,
+      0.25
+    ],
+    [
+      10,
+      -0.7,
+      0.3,
+      0.15
+    ]
+  ],
+  "qualified_backflip": false,
+  "note": "Diagnostic model only; complete contact qualification remains open.",
+  "evaluations": [
+    {
+      "index": 0,
+      "loss": 215.15753087567444,
+      "candidate": {
+        "parameters": [
+          2.4503591083769627,
+          0.10817436928052093,
+          0.05780872536480677,
+          1.4803477814792914,
+          0.47587798711920926,
+          0.44946043494628396,
+          2.2749898448921093,
+          1.616356335374907,
+          1.5378026466363561,
+          -0.5498161057161908,
+          0.09202427761939469,
+          6.05,
+          -0.35249865432225197,
+          0.24179339803397693,
+          0.0,
+          0.6061082929282469
+        ],
+        "contact_friction": 0.7,
+        "joint_armature_kg_m2": 0.01,
+        "landing_kp_nm_per_rad": 500,
+        "landing_kd_nm_s_per_rad": 40,
+        "landing_pitch_rate_gain_s": 0.6
+      },
+      "qualified_backflip": false,
+      "rollout_sha256": "118d1ebb57242bdfe3b8506ff28d5c77632f8a62816edd0e9452cdf9c5851721",
+      "completed_maneuver_time_s": 2.8115,
+      "peak_joint_speed_ratio": 1.1909729957580566
+    }
+  ],
+  "best": {
+    "index": 0,
+    "loss": 215.15753087567444,
+    "candidate": {
+      "parameters": [
+        2.4503591083769627,
+        0.10817436928052093,
+        0.05780872536480677,
+        1.4803477814792914,
+        0.47587798711920926,
+        0.44946043494628396,
+        2.2749898448921093,
+        1.616356335374907,
+        1.5378026466363561,
+        -0.5498161057161908,
+        0.09202427761939469,
+        6.05,
+        -0.35249865432225197,
+        0.24179339803397693,
+        0.0,
+        0.6061082929282469
+      ],
+      "contact_friction": 0.7,
+      "joint_armature_kg_m2": 0.01,
+      "landing_kp_nm_per_rad": 500,
+      "landing_kd_nm_s_per_rad": 40,
+      "landing_pitch_rate_gain_s": 0.6
+    },
+    "qualified_backflip": false,
+    "rollout_sha256": "118d1ebb57242bdfe3b8506ff28d5c77632f8a62816edd0e9452cdf9c5851721",
+    "completed_maneuver_time_s": 2.8115,
+    "peak_joint_speed_ratio": 1.1909729957580566
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "rollout_sha256": "ab9571538c4e598be7f668a81209e6ca03941bc53828fba88da8dc4763283fee",
+  "visual_urdf_sha256": "b462e1367ccb50f148db8c82f93421cb3f47497b10b735e891d2c9d000870cfc",
+  "native_source_commit": "deb547e3a2dc621218859fc9fd5519b07363375c",
+  "native_binary_sha256": "f243f3df1046182e684915d85f8aa6e475570615e3eb4bad5fa272b8c30edebf",
+  "scope": "Native Rapier foot-contact dynamics at 500 us; measured joint speed gate failed; identical candidate collapses at 125 us; full-body qualification pending",
+  "renderer_source_commit": "5485f8c93faf03ea8b006ca7852eaceae5db33b4",
+  "renderer_binary_sha256": "9f522e1849112647a6bf944e63d16547f9145726a92610186f8b7aa97816ec85",
+  "native_model_sha256": {
+    "audit.json": "f9fb0341a8ce005321e00f4b290ba106385455aefeafb105c7b41f713ac249c5",
+    "robot.rne.robot.toml": "0fabb58eac1975efe7a8efc46068952cec0a945a1bb8d6b30c7f3aa90177888c",
+    "robot.urdf": "6c17434ee6c2b15aa28127a4a15fb45772917462dbf73293c08b4f2ccb35c213",
+    "scene.rne.scene.toml": "a0165e5bdb0bb9de83fd0187e87747edaecddc355c7b1260ddc82ff2e03b9fc5"
+  },
+  "gif_sha256": "ffb43b2555813984983b67d362d0275b5101be10690951c6380d4c9e1a6fdc6b",
+  "gif_frame_count": 204,
+  "gif_duration_ms": 15210
+}

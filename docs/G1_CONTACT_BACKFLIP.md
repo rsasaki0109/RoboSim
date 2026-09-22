@@ -654,3 +654,28 @@ recovery candidates to be checked after their standing transition has completed.
 The native search Python helper accepts `duration_s` and rejects a binary that
 ignores the requested duration. Its score remains a diagnostic, capped at
 five seconds of survival credit; extended rollouts do not bypass qualification.
+
+### Native held landing at 500 µs, rejected at 125 µs
+
+With early ankle pitch-rate gain 1 s and a 10 s standing recovery, the native
+foot-contact model completes a backward rotation and remains standing in a
+15 s rollout at 500 µs. Final-second root speed is at most 0.001789 m/s,
+upright cosine is at least 0.999989, and every final-second step has positive
+foot impulse. The source, candidate and failed comparisons are retained in
+[held recovery evidence](evidence/g1-contact-backflip/native-transfer/held-recovery/README.md)
+and [30 feedback/recovery probes](evidence/g1-contact-backflip/native-transfer/support-recovery/README.md).
+
+**The same candidate collapses at 2.575125 s with a 125 µs step.** Peak measured
+joint speed is 1.190973x at 500 µs and 1.171478x at 125 µs; both exceed the
+unchanged 1.05 gate. Full-body/self-collision is still disabled. This is a
+coarse-step held-motion result, not a timestep-converged or qualified backflip.
+
+![Native Rapier 500 µs diagnostic recording; limits failed](media/unitree-g1-robosim-native-backflip.gif)
+
+Unlike the earlier external-state replay, this GIF displays states generated
+by native Rapier dynamics. Rendering itself only applies the recorded native
+Y-up poses, checks model/recording hashes and verifies zero playback physics
+ticks. The overlay identifies the native backend, timestep and failed limits.
+Run example 114 with `--native-recording` and the held-recovery directory for
+headless verification; add `--gif` to write a new GIF. Existing output is not
+overwritten, and a 30 GiB reserve is checked before streaming the GIF.

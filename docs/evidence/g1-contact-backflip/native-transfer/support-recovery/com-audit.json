@@ -1,0 +1,6 @@
+{
+  "audit": "source URDF forward kinematics only; no external physics steps",
+  "maximum_com_position_disagreement_m": 2.4652190549153374e-07,
+  "samples": 375,
+  "external_time_s": 0.0
+}

@@ -326,3 +326,21 @@ The coarse-step best extends time to collapse from 1.8595 to 2.743 s but reaches
 and [corrected launch search](evidence/g1-contact-backflip/native-transfer/corrected-launch-search/README.md).
 Remaining work is sustained landing balance and actuator/contact qualification;
 no native-success GIF has been generated.
+
+
+### Native held landing and fine-step rejection
+
+Native early ankle pitch-rate feedback (1 s gain) and a 10 s recovery hold a
+backflip through 15 s at 500 µs. Final-second root speed is at most 1.789 mm/s,
+upright cosine exceeds 0.999989, and all final-second steps have positive foot
+impulse. A native-dynamics GIF now records this coarse-step result with its
+backend, timestep and failed actuator-limit status displayed.
+
+The identical candidate **falls at 2.575125 s at 125 µs**. Peak measured speed
+is 1.190973x at 500 µs and 1.171478x at 125 µs. Full-body/self-collision remains
+disabled and `qualified_backflip` remains false. Native robust landing,
+actuator compliance and full-contact qualification are still open; the GIF
+must not be interpreted as fine-step or hardware validation. Optional paired
+capture feedback alone did not solve balance. See
+[held recovery](evidence/g1-contact-backflip/native-transfer/held-recovery/README.md)
+and [support-feedback probes](evidence/g1-contact-backflip/native-transfer/support-recovery/README.md).
