@@ -621,13 +621,14 @@ no native-success GIF has been generated.
 ### Support-relative landing feedback
 
 `landing_capture_gain_rad_per_m` enables an optional sagittal capture-point
-heuristic after touchdown (default 0, accepted range 0..=4). It uses measured
+heuristic after touchdown (default 0, accepted range -4..=4). It uses measured
 whole-robot COM position/velocity and the midpoint of the two ankle link
 origins. For the y-up, Earth-gravity probe, the horizon is
 `sqrt(clamp(COM_y - feet_y, 0.2, 1.2) / 9.81)` seconds. A 0.015 m forward offset
 sets the reference. Positive capture error bends hips backward and ankles
-forward by equal/opposite amounts, limited to 0.35 rad, before the existing
-joint and torque limits. The correction fades in over 0.15 s and is disabled
+forward by equal/opposite amounts, limited to 0.35 rad and the intersection
+of both joint ranges. Negative gain reverses the experimental correction.
+The existing torque limits still apply. The correction fades in over 0.15 s and is disabled
 after 12 ms without positive foot impulse. This is a bounded joint-target
 heuristic, not a contact-force feasibility guarantee or full WBC controller.
 

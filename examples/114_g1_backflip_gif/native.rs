@@ -54,8 +54,8 @@ pub(super) fn run() {
         .unwrap_or(0.0);
     assert!(
         landing_capture_gain_rad_per_m.is_finite()
-            && (0.0..=4.0).contains(&landing_capture_gain_rad_per_m),
-        "capture gain must be in 0..=4 rad/m"
+            && (-4.0..=4.0).contains(&landing_capture_gain_rad_per_m),
+        "capture gain must be in -4..=4 rad/m"
     );
     let roll_balance = candidate
         .as_ref()
@@ -178,6 +178,20 @@ pub(super) fn run() {
         .movable_joint_entities()
         .iter()
         .map(|id| sim.world().get::<Joint>(*id).expect("joint limits").limits)
+        .collect();
+    let capture_joint_pairs: Vec<_> = ["left", "right"]
+        .iter()
+        .map(|side| {
+            let hip = names
+                .iter()
+                .position(|name| name == &format!("{side}_hip_pitch_link"))
+                .unwrap();
+            let ankle = names
+                .iter()
+                .position(|name| name == &format!("{side}_ankle_pitch_link"))
+                .unwrap();
+            (hip, ankle)
+        })
         .collect();
     let actuator_entities: Vec<_> = model
         .kinematic()
@@ -371,7 +385,7 @@ pub(super) fn run() {
                         *q = (*q + correction.clamp(-0.6, 0.6)).clamp(-0.85, 0.5);
                     }
                 }
-                if landing_capture_gain_rad_per_m > 0.0 && air_s < 0.012 {
+                if landing_capture_gain_rad_per_m != 0.0 && air_s < 0.012 {
                     let (com, feet) = support_com(&sim, &model);
                     let correction = capture_correction(
                         com,
@@ -379,12 +393,21 @@ pub(super) fn run() {
                         com_velocity.x,
                         landing_capture_gain_rad_per_m,
                     ) * ((t - landing) / 0.15).clamp(0.0, 1.0);
-                    for (name, value) in names.iter().zip(&mut q) {
-                        if name.contains("hip_pitch") {
-                            *value += correction;
-                        } else if name.contains("ankle_pitch") {
-                            *value -= correction;
-                        }
+                    for &(hip, ankle) in &capture_joint_pairs {
+                        let hip_bounds = (limits[hip].lower + 0.005, limits[hip].upper - 0.005);
+                        let ankle_bounds =
+                            (limits[ankle].lower + 0.005, limits[ankle].upper - 0.005);
+                        q[hip] = q[hip].clamp(hip_bounds.0, hip_bounds.1);
+                        q[ankle] = q[ankle].clamp(ankle_bounds.0, ankle_bounds.1);
+                        let delta = paired_capture_delta(
+                            q[hip],
+                            q[ankle],
+                            hip_bounds,
+                            ankle_bounds,
+                            correction,
+                        );
+                        q[hip] += delta;
+                        q[ankle] -= delta;
                     }
                 }
                 (q, landing_kp_nm_per_rad, landing_kd_nm_s_per_rad)
@@ -749,6 +772,20 @@ fn capture_correction(com: Vec3, feet: Vec3, velocity_x_m_s: f64, gain_rad_per_m
     (-gain_rad_per_m * error_m).clamp(-0.35, 0.35)
 }
 
+// Intersect both allowable changes before modifying either target. Independent
+// clipping would destroy the equal/opposite correction near an ankle stop.
+fn paired_capture_delta(
+    hip: f64,
+    ankle: f64,
+    hip_bounds: (f64, f64),
+    ankle_bounds: (f64, f64),
+    requested: f64,
+) -> f64 {
+    let lower = (hip_bounds.0 - hip).max(ankle - ankle_bounds.1);
+    let upper = (hip_bounds.1 - hip).min(ankle - ankle_bounds.0);
+    requested.clamp(lower, upper)
+}
+
 // Contact-phase gains are independent of the flight opening servo.
 fn landing_gains(candidate: Option<&serde_json::Value>) -> Result<(f64, f64), &'static str> {
     let read = |key, default| -> Result<f64, &'static str> {
@@ -772,6 +809,21 @@ fn landing_gains(candidate: Option<&serde_json::Value>) -> Result<(f64, f64), &'
 #[cfg(test)]
 mod diagnostic_tests {
     use super::*;
+    #[test]
+    fn paired_capture_saturation_preserves_both_limits_and_pitch_sum() {
+        for (hip, ankle, request) in [(0.0, 0.49, -0.35), (0.9, -0.8, 0.35), (-0.9, 0.0, -0.35)] {
+            let delta = paired_capture_delta(hip, ankle, (-1.0, 1.0), (-0.85, 0.5), request);
+            assert!((-1.0..=1.0).contains(&(hip + delta)));
+            assert!((-0.85..=0.5).contains(&(ankle - delta)));
+            assert!(((hip + delta) + (ankle - delta) - (hip + ankle)).abs() < 1e-12);
+            assert!(delta.abs() <= request.abs());
+        }
+        assert!(
+            (paired_capture_delta(0.0, 0.49, (-1.0, 1.0), (-0.85, 0.5), -0.35) + 0.01).abs()
+                < 1e-12
+        );
+    }
+
     #[test]
     fn capture_feedback_is_translation_invariant_and_moves_hips_toward_support() {
         let com = Vec3::new(0.08, 0.7, 0.0);
