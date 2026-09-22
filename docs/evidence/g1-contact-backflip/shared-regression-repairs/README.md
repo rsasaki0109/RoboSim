@@ -25,3 +25,14 @@ Positive behavior assertions are unchanged. The hand-designed gain-25 negative
 steering experiment now allows a fall as evidence of rejection; it must never
 be accepted as an upright sustained turn. Baseline and other hand-pattern
 upright/travel requirements remain in force. G1 backflip gates are untouched.
+
+The corrected wheel layout also exposed that the reference camera had seen a
+wheel rather than the intended scene. After the correction, the old capture
+was all far-plane depth (identical failing golden hash on Ubuntu and Windows).
+Example 73 now renders scene colliders/obstacles with a wall ahead of its +X
+camera and rejects empty or non-finite reference depth. Dataset v3 preserves
+471 records, zero drops and success termination; its 0.0050001144 m maximum
+depth error passes the unchanged 0.01 m tolerance. A fresh repeated capture
+matches the v3 golden exactly. The v1/v2 goldens are preserved unchanged.
+The guard test and release all-target example Clippy pass; cross-platform CI
+verification of v3 remains pending.

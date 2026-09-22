@@ -1,7 +1,7 @@
 //! Captures a real headless diff-drive episode into a streaming dataset bundle.
 
 use rne_ai::{
-    build_diff_drive_render_scene, diff_drive_goal_task_spec, DiffDriveAction, DiffDriveEpisode,
+    build_visual_render_scene, diff_drive_goal_task_spec, DiffDriveAction, DiffDriveEpisode,
     DiffDriveEpisodeConfig, DiffDriveRewardConfig, DiffDriveSim, Episode, TaskSpec,
 };
 use rne_core::SimDuration;
@@ -148,7 +148,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let mut manifest = DatasetManifest::new(
-        "rne-diff-drive-reference-v2",
+        "rne-diff-drive-reference-v3",
         sha256(&task_bytes),
         simulation.fixed_delta().ticks(),
         environment.world_seed(),
@@ -328,7 +328,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let summary_json = format!("{}\n", serde_json::to_string_pretty(&summary)?);
     if verify_golden {
         let golden = fs::read_to_string(
-            workspace.join("tests/golden/datasets/diff-drive-reference-summary-v2.json"),
+            workspace.join("tests/golden/datasets/diff-drive-reference-summary-v3.json"),
         )?;
         if summary_json != golden {
             return Err(io::Error::other(format!(
@@ -376,7 +376,7 @@ fn capture_rgbd(
         .get::<WorldTransform3>(robot.base_link)
         .copied()
         .ok_or_else(|| io::Error::other("reference robot base transform is missing"))?;
-    let scene = build_diff_drive_render_scene(simulation.world(), std::slice::from_ref(&robot));
+    let scene = build_visual_render_scene(simulation.world());
     let true_pose = camera_pose(base, CAMERA_FORWARD_OFFSET_M);
     let mut sensor = sample_camera_rgbd_keyed(
         render,
@@ -394,6 +394,7 @@ fn capture_rgbd(
         &scene,
         SensorNoiseKey::new(REFERENCE_SEED, 0, GROUND_TRUTH_DEPTH_STREAM.0, sequence),
     );
+    validate_reference_depth(&ground_truth.depth)?;
     canonicalize_depth(&mut ground_truth.depth);
     apply_depth_bias(&mut sensor.depth);
     let latency = SimDuration::from_ticks(CAMERA_LATENCY_TICKS);
@@ -424,6 +425,20 @@ fn capture_rgbd(
         capture_time,
         ground_truth.depth,
     ))?;
+    Ok(())
+}
+
+// A bias-only comparison of two far-plane images can pass while seeing no
+// scene geometry. Keep the reference capture informative after model changes.
+fn validate_reference_depth(image: &ImageDepth) -> io::Result<()> {
+    let far_m = rne_render::Camera::default().far_m as f32;
+    if !image.depth_m.iter().all(|d| d.is_finite() && *d >= 0.0)
+        || !image.depth_m.iter().any(|d| *d < far_m)
+    {
+        return Err(io::Error::other(
+            "reference depth must contain visible finite geometry",
+        ));
+    }
     Ok(())
 }
 
@@ -757,4 +772,17 @@ fn quantize(value: f64, resolution: f64) -> f64 {
 
 fn sha256(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reference_depth_requires_visible_finite_geometry() {
+        assert!(validate_reference_depth(&ImageDepth::new(2, 1, vec![100.0, 100.0])).is_err());
+        assert!(validate_reference_depth(&ImageDepth::new(2, 1, vec![7.5, 100.0])).is_ok());
+        assert!(validate_reference_depth(&ImageDepth::new(2, 1, vec![7.5, f32::NAN])).is_err());
+        assert!(validate_reference_depth(&ImageDepth::new(0, 0, vec![])).is_err());
+    }
 }

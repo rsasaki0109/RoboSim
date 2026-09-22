@@ -182,8 +182,12 @@ and reject trailing bytes; their combined reference shard digest is frozen.
 The real diff-drive reference capture additionally freezes its TaskSpec,
 manifest, complete shard, per-stream counts, terminal verdict, and recomputed
 RGB-D evaluation report in
-`tests/golden/datasets/diff-drive-reference-summary-v2.json`. Its v1 summary is
-retained as an older compatibility fixture. DataBus sensor sequence values are
+`tests/golden/datasets/diff-drive-reference-summary-v3.json`. The v1 and v2
+summaries remain unchanged as older compatibility fixtures. The v3 capture
+uses the corrected wheel layout, includes scene obstacles in its headless
+camera render, and places the wall ahead of the +X-facing camera. Each depth
+frame must see finite geometry; a pair of empty far-plane images cannot qualify
+solely because their added bias meets the unchanged 1 cm error tolerance. DataBus sensor sequence values are
 normalized to zero-based dataset-local sequence values; stream identity,
 timestamps, physical payload values, calibration, declared storage resolution,
 and noise behavior remain semantic.
