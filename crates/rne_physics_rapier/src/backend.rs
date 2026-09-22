@@ -14,12 +14,12 @@ use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
 use rne_physics::RevoluteJointArmature;
 use rne_physics::{
-    Collider, CompoundCollider, ContactEvent, ContactPointSample, ExternalBodyWrench,
-    FixedJointDesc, GravityScale, JointActuation, JointEffortMeasurement, JointMotor,
-    JointMotorGainModel, JointPassiveDynamics, JointState, MultibodyLink, PhysicsBackend,
-    PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCapability, PhysicsError,
-    PhysicsOwnedPose, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc, RaycastHit,
-    RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
+    Collider, CompoundCollider, ContactEvent, ContactPointSample, ConvexCollider,
+    ExternalBodyWrench, FixedJointDesc, GravityScale, JointActuation, JointEffortMeasurement,
+    JointMotor, JointMotorGainModel, JointPassiveDynamics, JointState, MultibodyLink,
+    PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCapability,
+    PhysicsError, PhysicsOwnedPose, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc,
+    RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::HashMap;
@@ -309,6 +309,15 @@ impl PhysicsBackend for RapierBackend {
                     })
             }) {
                 return Err(PhysicsError::InitializationFailed);
+            }
+            if let Some(convex) = world.get::<ConvexCollider>(entity) {
+                if collider.is_none()
+                    || world.get::<CompoundCollider>(entity).is_some()
+                    || (!state.entity_to_collider.contains_key(&entity)
+                        && convex_shape(convex).is_none())
+                {
+                    return Err(PhysicsError::InitializationFailed);
+                }
             }
             if collider.is_none() && world.get::<MultibodyLink>(entity).is_none() {
                 continue;
@@ -796,6 +805,27 @@ fn sync_entity_collider(
     }
 }
 
+fn convex_shape(convex: &ConvexCollider) -> Option<SharedShape> {
+    if convex.vertices_m.len() < 4
+        || convex
+            .vertices_m
+            .iter()
+            .any(|v| !v.is_finite() || v.to_array().iter().any(|x| !(*x as f32).is_finite()))
+    {
+        return None;
+    }
+    let points: Vec<_> = convex
+        .vertices_m
+        .iter()
+        .copied()
+        .map(vec3_to_point)
+        .collect();
+    let (vertices, indices) = rapier3d::parry::transformation::try_convex_hull(&points).ok()?;
+    let shape = SharedShape::convex_mesh(vertices, &indices)?;
+    let mass = shape.mass_properties(1.0).mass();
+    (mass.is_finite() && mass > 0.0).then_some(shape)
+}
+
 fn collider_builder(world: &World, entity: Entity, collider: &Collider) -> ColliderBuilder {
     let (shape, offset) = if let Some(compound) = world.get::<CompoundCollider>(entity) {
         (
@@ -811,6 +841,11 @@ fn collider_builder(world: &World, entity: Entity, collider: &Collider) -> Colli
                     })
                     .collect(),
             ),
+            Transform3::IDENTITY,
+        )
+    } else if let Some(convex) = world.get::<ConvexCollider>(entity) {
+        (
+            convex_shape(convex).expect("convex collider validated before creation"),
             Transform3::IDENTITY,
         )
     } else {
@@ -1550,6 +1585,97 @@ mod tests {
         ));
 
         (backend, physics_world, world, ground, cube)
+    }
+
+    #[test]
+    fn convex_hull_raycast_excludes_aabb_corners_and_preserves_declared_mass() {
+        let mut backend = RapierBackend::new();
+        let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+        let mut world = World::new();
+        let body = spawn_named(&mut world, "tetrahedron");
+        let mut collider = Collider::cuboid(Vec3::ONE);
+        collider.local_offset.translation = Vec3::splat(50.0);
+        world.entity_mut(body).insert((
+            RigidBody {
+                mass_kg: 3.0,
+                ..RigidBody::default()
+            },
+            RigidBodyInertia {
+                center_of_mass_local_m: Vec3::splat(0.25),
+                ixx_kg_m2: 0.1,
+                ixy_kg_m2: 0.0,
+                ixz_kg_m2: 0.0,
+                iyy_kg_m2: 0.1,
+                iyz_kg_m2: 0.0,
+                izz_kg_m2: 0.1,
+            },
+            collider,
+            ConvexCollider {
+                vertices_m: vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z],
+            },
+            Transform3::IDENTITY,
+        ));
+        backend.sync_from_ecs(&mut world, id).unwrap();
+        let hits = backend
+            .raycast(id, RaycastQuery::downward(Vec3::new(0.1, 2.0, 0.1), 3.0))
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].entity, body);
+        assert_relative_eq!(hits[0].point_m.y, 0.8, epsilon = 1e-5);
+        assert!(backend
+            .raycast(id, RaycastQuery::downward(Vec3::new(0.8, 2.0, 0.8), 3.0))
+            .unwrap()
+            .is_empty());
+        backend.step(id, fixed_step()).unwrap();
+        let state = backend.world(id).unwrap();
+        assert_relative_eq!(
+            state.bodies[state.entity_to_body[&body]].mass() as f64,
+            3.0,
+            epsilon = 1e-6
+        );
+    }
+
+    #[test]
+    fn convex_hull_rejects_invalid_geometry_and_conflicting_components() {
+        let valid = vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z];
+        for vertices_m in [
+            vec![],
+            vec![Vec3::ZERO; 4],
+            vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::X + Vec3::Y],
+            vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::splat(f64::NAN)],
+            vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::splat(f64::MAX)],
+        ] {
+            let mut backend = RapierBackend::new();
+            let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+            let mut world = World::new();
+            world.spawn((
+                RigidBody::default(),
+                Collider::default(),
+                ConvexCollider { vertices_m },
+            ));
+            assert!(matches!(
+                backend.sync_from_ecs(&mut world, id),
+                Err(PhysicsError::InitializationFailed)
+            ));
+        }
+        for with_companion in [false, true] {
+            let mut backend = RapierBackend::new();
+            let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+            let mut world = World::new();
+            let mut entity = world.spawn((
+                RigidBody::default(),
+                ConvexCollider {
+                    vertices_m: valid.clone(),
+                },
+            ));
+            if with_companion {
+                entity.insert((Collider::default(), CompoundCollider { parts: vec![] }));
+            }
+            assert!(matches!(
+                backend.sync_from_ecs(&mut world, id),
+                Err(PhysicsError::InitializationFailed)
+            ));
+        }
     }
 
     #[test]

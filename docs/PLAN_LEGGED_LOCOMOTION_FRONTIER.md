@@ -344,3 +344,17 @@ must not be interpreted as fine-step or hardware validation. Optional paired
 capture feedback alone did not solve balance. See
 [held recovery](evidence/g1-contact-backflip/native-transfer/held-recovery/README.md)
 and [support-feedback probes](evidence/g1-contact-backflip/native-transfer/support-recovery/README.md).
+
+### Full-body contact prerequisite: convex geometry
+
+Added backend-neutral `ConvexCollider` without changing the existing public
+shape enum or collider struct. Rapier builds a convex hull from local mesh
+vertices and retains declared inertia and collision groups. A tetrahedron
+regression verifies the actual sloped surface and empty AABB corner, and
+invalid/degenerate hulls are rejected without panicking. See
+[ADR 032](adr/032-convex-contact-geometry.md).
+
+This supplies the geometry prerequisite only: wire source collision meshes
+through the importer, enable self-contact and measure all body-ground pairs
+before the next full-body native optimization campaign. The existing 500 µs
+held result and rejected 125 µs result remain unchanged and unqualified.

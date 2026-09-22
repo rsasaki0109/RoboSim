@@ -174,6 +174,21 @@ impl Default for ColliderShape {
     }
 }
 
+/// Optional convex-hull geometry replacing the companion [`Collider`]'s shape.
+///
+/// Vertices are expressed in entity-local meters; the companion's local offset
+/// is ignored. Material, sensor and collision groups still come from `Collider`.
+/// Author before the first physics synchronization; runtime geometry edits are
+/// unsupported. Rapier builds a three-dimensional convex hull and rejects
+/// nonfinite, degenerate or conflicting compound geometry. Backends without
+/// support must not be used to qualify convex-contact behavior. The companion
+/// primitive remains a bounding approximation for other consumers.
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ConvexCollider {
+    /// Deterministically ordered point cloud spanning a nonzero 3D volume.
+    pub vertices_m: Vec<Vec3>,
+}
+
 /// One finite primitive in a compound collision shape.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ColliderPart {
