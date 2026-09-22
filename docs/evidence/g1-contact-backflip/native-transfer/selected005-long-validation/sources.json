@@ -1,0 +1,12 @@
+{
+  "source_commit": "0c84bfdec8bdbdd3a4d9724e5bf13469fc895243",
+  "binary": "/home/sasaki/workspace/RoboSim/target/research/g1-backflip-pr/target/research/native-producers/0c84bfdec8bdbdd3a4d9724e5bf13469fc895243/114_g1_backflip_gif",
+  "binary_sha256": "dcc339bfa4d739a991150b1ec2e14559c7b7524993e54e35068a43b6e82aa2c8",
+  "artifact_sha256": {
+    "500-audit.json": "190b4b09ea895f3d29cefa635a23fda67b3c74e918ec2d96c30c328307c88f0a",
+    "500-candidate-0000.json": "66d117eab72860d2ba3c4521e72d29dd2c48eb9f9bf8c9238c893a76f3fd62f6",
+    "500-rollout.json.gz": "bed79b772d6b00d5d17fe52257dcfbc13f080fda46f4ed8bc80fb0a0b41044d8",
+    "500-search.json": "7611b153225aab0d873ee15a3e3a9ea190dba5fe192bcad66d1b0648b9da607e",
+    "README.md": "26429017800c9f898ea20aa48327d7d8f460401e04c6558a17071d803b8df17e"
+  }
+}
