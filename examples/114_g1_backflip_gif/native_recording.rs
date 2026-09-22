@@ -171,7 +171,8 @@ pub(super) fn run() {
         && number(&recording, "max_joint_position_excess_rad") <= 0.02;
     if render {
         let label = format!(
-            "Foot-contact model / peak speed {:.3}x / limits {}",
+            "dt {:.3} ms / foot contacts / peak speed {:.3}x / limits {}",
+            number(&recording, "dt_s") * 1000.0,
             number(&recording, "peak_joint_speed_ratio"),
             if limits { "passed" } else { "NOT passed" }
         );
