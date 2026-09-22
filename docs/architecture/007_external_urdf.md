@@ -130,7 +130,11 @@ Mount URDF offsets `(x, y, 0)` map to world `(x, 0, -y)` under the spawn rotatio
 
 ## Intentionally unsupported (skipped)
 
-- `inertial`, `transmission`, `gazebo`, material references by name only
+- `transmission`, `gazebo`
 - Non-STL meshes (DAE, OBJ, PLY)
 - Mimic joint physics
 - Prismatic motor limits in Rapier (parsed only; see `docs/ROADMAP.md`)
+
+Visual `<material name="...">` references resolve against robot-level
+`<material name><color rgba/></material>` definitions; an inline `<color>` still
+takes precedence, and an unknown name leaves the color unset.

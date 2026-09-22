@@ -26,14 +26,18 @@ pub mod so101_kinematics;
 pub use so101_kinematics::{So101IkError, So101JointTarget, So101Kinematics};
 pub mod mobility_observation;
 pub mod multi_robot;
+pub mod neural;
 pub mod observation;
 pub mod policy;
+pub mod policy_artifact;
 pub mod portable_batch;
+pub mod ppo;
 pub mod reach;
 pub mod render;
 pub mod reward;
 pub mod rng;
 pub mod task;
+pub mod trainer;
 pub mod transport;
 pub mod vectorized;
 pub mod wheel_imu_odometry;
@@ -227,6 +231,7 @@ pub use multi_robot::{
     head_on_collision_configs, head_on_collision_sim, inter_robot_contacts, last_contacts,
     nearest_peer_observation, robot_separation_m, robots_in_contact, PeerObservation,
 };
+pub use neural::{Adam, LayerGradient, NeuralError, NeuralNet};
 pub use observation::{DiffDriveObservation, MobileManipulatorObservation};
 pub use policy::{
     ConstantVelocityPolicy, IkClutterPickPlacePolicy, IkLiftPickPlacePolicy,
@@ -234,11 +239,17 @@ pub use policy::{
     LocomotionPolicy, MobileLiftFailureClass, MobileLiftPickPlacePhase, Policy,
     So101MobileClutterPickPlacePolicy, VisuomotorReachPolicy,
 };
+pub use policy_artifact::{
+    diff_drive_observation_vector, Activation, DenseLayer, DiffDriveArtifactPolicy, PolicyArtifact,
+    PolicyArtifactError, DIFF_DRIVE_ACTION_WIDTH, DIFF_DRIVE_OBSERVATION_WIDTH,
+    POLICY_ARTIFACT_KIND, POLICY_ARTIFACT_SCHEMA_VERSION,
+};
 pub use portable_batch::{
     PortableBatchCheckpoint, PortableBatchConfig, PortableBatchError, PortableBatchLaneCheckpoint,
     PortableBatchOperation, PortableBatchRunner, PortableBatchStep,
     PORTABLE_BATCH_CHECKPOINT_VERSION,
 };
+pub use ppo::{PpoConfig, PpoEnv, PpoError, PpoReport, PpoStep, PpoTrainer};
 pub use reach::{
     ee_distance_to_target_m, reach_action_joint_proportional, reach_action_proportional,
     JointReachTarget, ReachCurriculum, ReachCurriculumConfig, ReachCurriculumSnapshot,
@@ -258,6 +269,7 @@ pub use task::{
     TerminationConditionSpec, TerminationKind, TerminationSpec, TASK_SPEC_KIND,
     TASK_SPEC_SCHEMA_VERSION,
 };
+pub use trainer::{cem_train, CemConfig, CemResult, CemTrainerError, MlpPolicyTemplate};
 pub use transport::{
     body_moved_at_least_m, body_within_zone_m, displacement_m, had_finger_contact,
     named_translation_m, TRANSPORT_SUCCESS_M,

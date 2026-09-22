@@ -6,6 +6,18 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- `ColliderShape` and `Collider` are no longer `Copy`. Variable-size collider
+  data (`ConvexHull`, `TriMesh`, `HeightField`, `Compound`) is stored behind
+  `Arc`, so dependents must clone or borrow instead of implicitly copying.
+  `rne_deformable::DeformableCollider` and `rne_robot`'s internal link collider
+  follow the same change. This is source-breaking for downstream copies.
+
+- Physics conformance catalog advances to v7 and the named tolerance registry to
+  v5. `rapier.convex_hull.resting_contact` drops an axis-aligned convex hull onto
+  a fixed ground body, and a default-feature test now compares the live
+  `run_conformance()` output to the committed golden so the artifact cannot drift
+  (this also refreshed a stale embedded `adapter_version`).
+
 - `examples/109_go2_jump_sim` whole-body stance now feeds the measured joint
   velocities to `rne_wbc` and pulls its posture task toward the planned joint
   angles. The previous all-zero velocity feed over-drove the center of mass and
@@ -28,6 +40,129 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+- `rne_slam::lio_inertial::LioInertialEkf` extends the tightly-coupled iEKF to a
+  15-DoF error state (`[rotation, translation, velocity, gyro_bias,
+  accel_bias]`): IMU samples propagate pose, velocity, and biases with the
+  error-state transition, and raw point-to-plane residuals correct all of them
+  through the iterated information-form update. The covariance is projected back
+  to positive definite (Gershgorin shift) so long stationary runs stay stable.
+
+- `rne_slam::lio_iekf::LioIekf` is the tightly-coupled counterpart to `LioEkf`:
+  it feeds raw point-to-plane residuals into an iterated information-form update
+  (`(P^-1 + H/sigma^2) delta = -g/sigma^2`, `P <- (P^-1 + H/sigma^2)^-1`) and
+  re-linearizes at the current pose. The state is pose-only; velocity and bias
+  estimation inside the filter remain future work.
+
+- `rne_ai::ppo` adds a deterministic PPO optimizer for continuous Gaussian
+  policies: `PpoTrainer` (policy + value networks, seeded rollouts, GAE,
+  clipped surrogate with value and entropy terms) over a `PpoEnv`, with
+  `to_policy_artifact` export. Tests train a continuous bandit to its target and
+  verify determinism. SAC and discrete/visual policies remain future work.
+
+- `rne_ai::neural` adds a dependency-free differentiable core: `NeuralNet` (a
+  deterministic dense MLP with hand-written backpropagation), `Adam`, and
+  `to_policy_artifact` export. Weights are seeded from `DeterministicRng`, and
+  `backward` returns per-layer `LayerGradient`s verified against finite
+  differences. On-policy optimizers (PPO/SAC) build on this module.
+
+- `rne_slam::lio_ekf::LioEkf` adds a covariance-aware LiDAR-inertial front-end: a
+  6-DoF pose EKF where IMU preintegration predicts and inflates the covariance,
+  a point-to-plane scan-to-map match supplies a pose measurement with the
+  registration information diagonal, and a Kalman update fuses them
+  (`pose_covariance`, `predicted_covariance_trace`). It is a loosely-coupled pose
+  EKF; a tightly-coupled iterated EKF is a later increment.
+
+- `rne_urdf_import` resolves visual `<material name="...">` references against
+  robot-level `<material name><color rgba/></material>` definitions. An inline
+  `<color>` still wins, and an unknown name leaves the color unset.
+
+- `rne_traffic::lane_change` composes IDM and MOBIL into `mobil_idm_decision`
+  (`MobilNeighbor` describes a lane's leader/follower): it computes IDM
+  accelerations for the subject and both followers before and after a candidate
+  change, then applies the MOBIL criterion. Autonomous lane selection is not yet
+  wired into the runtime; the OpenSCENARIO lane change remains scripted.
+
+- `KinematicTrafficConfig` gains an opt-in `car_following: CarFollowingModel`
+  field. It defaults to `Kinematic` so recorded replays are unchanged; selecting
+  `CarFollowingModel::Idm(IdmParams)` switches runtime-owned actors to the
+  Intelligent Driver Model using the same-route leader speed, still clamped by
+  signal and junction-reservation control. Invalid IDM parameters are rejected
+  during config validation.
+
+- `rne_mjcf` import fidelity: body and geom rotation via `quat`, `euler`, or
+  `axisangle` now converts to URDF `rpy` instead of being rejected; `capsule`
+  geoms approximate a cylinder; and `<asset><mesh>` referenced by
+  `type="mesh"` geoms emit URDF mesh geometry. `zaxis`, free/ball/universal
+  joints, and `fromto`/`plane`/`ellipsoid` geoms still fail closed.
+
+- `rne_traffic` gains standard microscopic traffic models as deterministic pure
+  functions: `car_following` (Intelligent Driver Model via `IdmParams` /
+  `idm_acceleration`, and the Krauss safe-velocity model via `KraussParams` /
+  `krauss_safe_speed` / `krauss_new_speed`) and `lane_change` (MOBIL incentive,
+  safety criterion, and decision via `mobil_incentive` / `mobil_safe` /
+  `mobil_should_change`). The runtime keeps its kinematic default so replays are
+  unchanged; these models are opt-in building blocks.
+
+- New offline `rne_usd` crate imports a strict ASCII `.usda` subset into
+  world-space triangle meshes: nested `Xform`/`Mesh` prims, `xformOp:translate`
+  and `xformOp:transform` (rigid), `points`, `faceVertexCounts`,
+  `faceVertexIndices`, and `primvars:displayColor`, with fan triangulation and
+  OBJ export. `rne-asset usd-import <INPUT.usda> --out-dir DIR` writes one OBJ
+  per mesh. Unsupported constructs fail closed.
+
+- `rne_slam` gains a point-to-plane and LiDAR-inertial front-end: `point_to_plane`
+  (`VoxelPointIndex` deterministic nearest neighbour, `estimate_normals`
+  neighbourhood PCA, `IcpPointToPlane::align` for scan-to-map registration with
+  an information diagonal) and `lio` (`LioOdometry` preintegrates IMU to predict
+  the next pose, registers each scan to a maintained local map with
+  point-to-plane ICP, and records keyframes plus `PoseGraph3dEdge`s). All
+  deterministic and backend-neutral.
+
+- `rne_slam` gains 3D LiDAR-inertial building blocks: `se3` (SE(3) exp/log,
+  SO(3) helpers, left Jacobian and inverse), `imu_preintegration`
+  (`ImuPreintegrator` folding gyroscope/accelerometer samples into a
+  pose-independent `PreintegratedDelta` with gravity-aware `predict`), and
+  `pose_graph3d` (`PoseGraph3d` SE(3) Gauss-Newton with numerical Jacobians and
+  dense Cholesky, anchoring one node). All are deterministic and backend-neutral.
+
+- `rne_ai` gains a native, dependency-free, seeded trainer (`cem_train`,
+  `CemConfig`, `CemResult`) that maximizes a deterministic fitness function over
+  a flat parameter vector using the cross-entropy method. `MlpPolicyTemplate`
+  describes a dense MLP and maps between the flat vector and a `PolicyArtifact`
+  (`parameter_count`, `to_artifact`), so trained weights export directly to the
+  loadable `.rne.policy.json` format. New `examples/115_trainer` trains a linear
+  policy to convergence and writes the artifact.
+
+- `rne_ai::PolicyArtifact` loads learned policies as versioned data
+  (`.rne.policy.json`, schema v1) instead of freezing weights as Rust constants.
+  The format is a dense feed-forward network with explicit activations and output
+  clamps; `evaluate` is a deterministic `f64` forward pass, and a single identity
+  layer expresses a linear CEM policy. `DiffDriveArtifactPolicy` binds an
+  artifact to the fixed 12-value diff-drive observation encoding and implements
+  `LocomotionPolicy` / `Policy<DiffDriveEpisode>`. New
+  `examples/114_policy_artifact` authors, saves, reloads, and evaluates one.
+
+- `ColliderShape` gains `ConvexHull`, `TriMesh`, `HeightField`, and `Compound`
+  (plus `CompoundPart`). Rapier converts each with `SharedShape::convex_hull`,
+  `trimesh`, `heightfield`, and `compound`, guarding degenerate input with a
+  typed `PhysicsError::InvalidColliderShape`. MuJoCo rejects non-primitive
+  colliders until Mesh/hfield compilation lands; deformable contact,
+  self-collision, and URDF AABB fallbacks approximate them as bounding spheres.
+
+- New offline `rne_collision_bake` crate performs a deterministic voxel
+  decomposition of a triangle mesh into a `Compound` of axis-aligned boxes
+  (surface voxelization with a triangle/box separating-axis test, then a
+  lexicographic greedy merge). It emits a versioned `.rne.collision.json`
+  sidecar (`rne_collision_bake`, schema v1) with save/load/validate and a
+  `sidecar_path` helper. `rne_urdf_import` loads a sidecar next to a mesh
+  collision element and replaces the AABB fallback with the scaled compound.
+
+- `rne-asset bake-collision <MESH> --out <PATH> [--max-cells-per-axis N]
+  [--max-parts N]` authors collision sidecars from `.stl`/`.obj` meshes.
+
+- `examples/110_collision_bake` bakes an L-shaped prism, writes the sidecar, and
+  drops a sphere onto the baked collider through Rapier.
+
 - `VehicleDynamics::four_wheel` (an optional `FourWheelVehicleSpec`) replaces the
   single-track axle abstraction with four explicit wheels when set: each front wheel
   gets a blended Ackermann steer angle, each wheel carries its own normal load and slip

@@ -4,7 +4,7 @@ use rne_math::Transform3;
 use rne_physics::ColliderShape;
 
 /// Sampled rigid collider used for one-way particle contact.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DeformableCollider {
     /// Collider shape without backend-specific handles.
     pub shape: ColliderShape,

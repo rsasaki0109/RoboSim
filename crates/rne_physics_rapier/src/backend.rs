@@ -322,7 +322,7 @@ impl PhysicsBackend for RapierBackend {
                         }
                     }
                 }
-                sync_entity_collider(world, state, entity, body_handle, collider);
+                sync_entity_collider(world, state, entity, body_handle, collider)?;
                 continue;
             }
 
@@ -371,7 +371,7 @@ impl PhysicsBackend for RapierBackend {
             state.body_to_entity.insert(body_handle, entity);
             if let Some(collider) = collider {
                 let collider_handle = state.colliders.insert_with_parent(
-                    collider_builder(world, entity, collider).build(),
+                    collider_builder(world, entity, collider)?.build(),
                     body_handle,
                     &mut state.bodies,
                 );
@@ -753,12 +753,12 @@ fn sync_entity_collider(
     entity: Entity,
     body_handle: RigidBodyHandle,
     collider: Option<&Collider>,
-) {
+) -> Result<(), PhysicsError> {
     let existing = state.entity_to_collider.get(&entity).copied();
     match (existing, collider) {
         (None, Some(collider)) => {
             let handle = state.colliders.insert_with_parent(
-                collider_builder(world, entity, collider).build(),
+                collider_builder(world, entity, collider)?.build(),
                 body_handle,
                 &mut state.bodies,
             );
@@ -780,10 +780,15 @@ fn sync_entity_collider(
         }
         (None, None) => {}
     }
+    Ok(())
 }
 
-fn collider_builder(world: &World, entity: Entity, collider: &Collider) -> ColliderBuilder {
-    let mut builder = ColliderBuilder::new(shape_to_shared(collider.shape))
+fn collider_builder(
+    world: &World,
+    entity: Entity,
+    collider: &Collider,
+) -> Result<ColliderBuilder, PhysicsError> {
+    let mut builder = ColliderBuilder::new(shape_to_shared(&collider.shape)?)
         .position(transform_to_isometry(&collider.local_offset))
         .friction(collider.material.friction)
         .restitution(collider.material.restitution)
@@ -792,7 +797,7 @@ fn collider_builder(world: &World, entity: Entity, collider: &Collider) -> Colli
     if world.get::<RigidBodyInertia>(entity).is_some() {
         builder = builder.density(0.0);
     }
-    builder
+    Ok(builder)
 }
 
 fn interaction_groups(world: &World, entity: Entity) -> InteractionGroups {

@@ -42,7 +42,7 @@ snapshot = 1
 backend_manifest = 3
 conformance_report = 2
 external_conformance_report = 1
-tolerance_registry = 4
+tolerance_registry = 5
 
 [determinism]
 contract = 1

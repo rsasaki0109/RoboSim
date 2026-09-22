@@ -30,7 +30,7 @@ use std::collections::BTreeSet;
 pub const CONFORMANCE_REPORT_KIND: &str = "rne_physics_conformance_report";
 
 /// Version of the shared capability-to-vector catalog.
-pub const CONFORMANCE_CATALOG_VERSION: u16 = 6;
+pub const CONFORMANCE_CATALOG_VERSION: u16 = 7;
 
 const BACKEND_ANALYTIC: &str = "analytic";
 #[cfg(feature = "mujoco")]
@@ -50,6 +50,7 @@ const CASE_RAPIER_CONTACT: &str = "rapier.contact_force.resting_impulse";
 #[cfg(feature = "mujoco")]
 const CASE_MUJOCO_CONTACT: &str = "mujoco.contact_force.resting_impulse";
 const CASE_RAPIER_RAYCAST: &str = "rapier.raycast_batch.ordered_hits";
+const CASE_RAPIER_CONVEX_HULL: &str = "rapier.convex_hull.resting_contact";
 const CASE_RAPIER_EXTERNAL_WRENCH: &str = "rapier.external_body_wrench.one_step_force_at_point";
 const CASE_BACKEND_COMPARISON: &str = "analytic_vs_rapier.free_fall";
 #[cfg(feature = "mujoco")]
@@ -257,6 +258,24 @@ const TOLERANCES: &[ToleranceSpec] = &[
         absolute: 1e-5,
         relative: 0.0,
         rationale: "axis-aligned cuboid intersections are exact up to f32 conversion",
+    },
+    ToleranceSpec {
+        id: "convex_hull_resting_height_m_v1",
+        case_id: CASE_RAPIER_CONVEX_HULL,
+        metric_id: "resting_height_m",
+        unit: MetricUnit::Metre,
+        absolute: 0.02,
+        relative: 0.0,
+        rationale: "an axis-aligned convex-hull cube settles at its half extent within the solver penetration allowance",
+    },
+    ToleranceSpec {
+        id: "convex_hull_resting_speed_m_s_v1",
+        case_id: CASE_RAPIER_CONVEX_HULL,
+        metric_id: "resting_speed_m_s",
+        unit: MetricUnit::MetrePerSecond,
+        absolute: 0.02,
+        relative: 0.0,
+        rationale: "a settled convex-hull body retains only sub-centimetre-per-second solver jitter",
     },
     ToleranceSpec {
         id: "external_wrench_linear_velocity_m_s_v1",
@@ -480,6 +499,17 @@ pub fn run_conformance() -> ConformanceReport {
         "backend_free_fall_position_delta_m_v1",
         "backend_free_fall_velocity_delta_m_s_v1",
     ));
+    cases.push(
+        match run_convex_hull_case(RapierBackend::new(), BACKEND_RAPIER) {
+            Ok(case) => case,
+            Err(error) => failed_case(
+                CASE_RAPIER_CONVEX_HULL,
+                BACKEND_RAPIER,
+                PhysicsCapability::RigidBody,
+                error.to_string(),
+            ),
+        },
+    );
     let backends = vec![analytic.conformance.backend, rapier.conformance.backend];
     #[cfg(feature = "mujoco")]
     let backends = {
@@ -1602,6 +1632,84 @@ fn run_raycast_case<B: PhysicsBackend>(
     })
 }
 
+fn run_convex_hull_case(
+    mut backend: RapierBackend,
+    backend_id: &str,
+) -> anyhow::Result<CaseReport> {
+    let physics_world = backend.create_world(PhysicsWorldDesc::default())?;
+    let mut world = World::new();
+    let ground = spawn_named(&mut world, "hull_ground");
+    world.entity_mut(ground).insert((
+        RigidBody {
+            body_type: RigidBodyType::Fixed,
+            ..RigidBody::default()
+        },
+        Collider::cuboid(Vec3::new(2.0, 0.5, 2.0)),
+        Transform3::from_translation_rotation(Vec3::new(0.0, -0.5, 0.0), Quat::IDENTITY),
+    ));
+    let half_extent_m = 0.25_f64;
+    let points = [
+        (-half_extent_m, -half_extent_m, -half_extent_m),
+        (half_extent_m, -half_extent_m, -half_extent_m),
+        (-half_extent_m, half_extent_m, -half_extent_m),
+        (half_extent_m, half_extent_m, -half_extent_m),
+        (-half_extent_m, -half_extent_m, half_extent_m),
+        (half_extent_m, -half_extent_m, half_extent_m),
+        (-half_extent_m, half_extent_m, half_extent_m),
+        (half_extent_m, half_extent_m, half_extent_m),
+    ]
+    .into_iter()
+    .map(|(x, y, z)| Vec3::new(x, y, z))
+    .collect::<Vec<_>>();
+    let hull = spawn_named(&mut world, "hull_cube");
+    world.entity_mut(hull).insert((
+        RigidBody {
+            mass_kg: 2.0,
+            ..RigidBody::default()
+        },
+        Collider::convex_hull(points),
+        Transform3::from_translation_rotation(Vec3::new(0.0, half_extent_m, 0.0), Quat::IDENTITY),
+    ));
+    for _ in 0..180 {
+        step_backend(&mut backend, &mut world, physics_world, fixed_dt())?;
+    }
+    let transform = world
+        .get::<Transform3>(hull)
+        .context("convex hull transform missing")?;
+    let rigid_body = world
+        .get::<RigidBody>(hull)
+        .context("convex hull rigid body missing")?;
+    let resting_height_m = transform.translation.y;
+    let resting_speed_m_s = rigid_body.linear_velocity_m_s.y.abs();
+    let metrics = vec![
+        metric(
+            "resting_height_m",
+            resting_height_m,
+            half_extent_m,
+            "convex_hull_resting_height_m_v1",
+        ),
+        metric(
+            "resting_speed_m_s",
+            resting_speed_m_s,
+            0.0,
+            "convex_hull_resting_speed_m_s_v1",
+        ),
+    ];
+    let contacts = backend.contacts(physics_world)?.to_vec();
+    let snapshot = capture_physics_snapshot(&world, &contacts, 180, fixed_dt().ticks() * 180)?;
+    Ok(CaseReport {
+        id: CASE_RAPIER_CONVEX_HULL.to_string(),
+        backend: backend_id.to_string(),
+        capability: PhysicsCapability::RigidBody,
+        passed: metrics.iter().all(|metric| metric.passed),
+        snapshot_hash: Some(snapshot.stable_hash()),
+        metrics,
+        detail: format!(
+            "axis-aligned convex-hull cube should settle on the ground at its half extent; resting_height_m={resting_height_m:.6} resting_speed_m_s={resting_speed_m_s:.6}"
+        ),
+    })
+}
+
 fn comparison_case(
     left: Result<&FreeFallResult, &anyhow::Error>,
     right: Result<&FreeFallResult, &anyhow::Error>,
@@ -1917,6 +2025,21 @@ mod tests {
                 && tolerance.absolute >= 0.0
                 && tolerance.relative >= 0.0
         }));
+    }
+
+    #[test]
+    #[cfg(not(feature = "mujoco"))]
+    fn report_runtime_output_matches_committed_golden() {
+        // The committed golden is generated with default features. Comparing the
+        // live `run_conformance()` output against it prevents the golden from
+        // silently drifting from what the engine actually emits (for example a
+        // stale embedded `adapter_version` after a crate version bump).
+        let golden = include_str!("../../golden/physics/conformance-report-v2.json");
+        let report = run_conformance();
+        assert_eq!(
+            serde_json::to_string_pretty(&report).expect("serialize live report"),
+            golden.trim_end()
+        );
     }
 
     #[test]

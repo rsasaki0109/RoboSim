@@ -68,11 +68,12 @@ fn parse_urdf_impl(
     let mut joints = Vec::new();
     let mut inertials = BTreeMap::new();
     let mut joint_dynamics = BTreeMap::new();
+    let materials = parse_robot_materials(robot)?;
 
     for child in robot.children().filter(|node| node.is_element()) {
         match child.tag_name().name() {
             "link" => {
-                let (link, inertial) = parse_link(child, retain_complete_inertials)?;
+                let (link, inertial) = parse_link(child, retain_complete_inertials, &materials)?;
                 if let Some(inertial) = inertial {
                     inertials.insert(link.name.clone(), inertial);
                 }
@@ -144,6 +145,7 @@ fn ensure_input_len(actual: usize) -> Result<(), UrdfParseError> {
 fn parse_link(
     node: roxmltree::Node<'_, '_>,
     retain_complete_inertial: bool,
+    materials: &BTreeMap<String, [f32; 4]>,
 ) -> Result<(UrdfLink, Option<UrdfInertial>), UrdfParseError> {
     let name = node
         .attribute("name")
@@ -156,8 +158,8 @@ fn parse_link(
     let mut inertial = None;
     for child in node.children().filter(|node| node.is_element()) {
         match child.tag_name().name() {
-            "collision" => collisions.push(parse_geometry_element(child)?),
-            "visual" => visuals.push(parse_geometry_element(child)?),
+            "collision" => collisions.push(parse_geometry_element(child, materials)?),
+            "visual" => visuals.push(parse_geometry_element(child, materials)?),
             "inertial" => {
                 (inertial_mass_kg, inertial) = parse_inertial(child, retain_complete_inertial)?;
             }
@@ -265,6 +267,7 @@ fn parse_inertial_origin(
 
 fn parse_geometry_element(
     node: roxmltree::Node<'_, '_>,
+    materials: &BTreeMap<String, [f32; 4]>,
 ) -> Result<UrdfGeometryElement, UrdfParseError> {
     let origin = node
         .children()
@@ -275,7 +278,7 @@ fn parse_geometry_element(
         .find(|node| node.is_element() && node.tag_name().name() == "geometry")
         .ok_or_else(|| UrdfParseError::Missing("geometry".into()))
         .and_then(parse_geometry)?;
-    let material_rgba = parse_material_rgba(node)?;
+    let material_rgba = parse_material_rgba(node, materials)?;
 
     Ok(UrdfGeometryElement {
         origin_xyz,
@@ -285,20 +288,51 @@ fn parse_geometry_element(
     })
 }
 
-fn parse_material_rgba(node: roxmltree::Node<'_, '_>) -> Result<Option<[f32; 4]>, UrdfParseError> {
+/// Collects robot-level `<material name><color rgba/></material>` definitions.
+fn parse_robot_materials(
+    robot: roxmltree::Node<'_, '_>,
+) -> Result<BTreeMap<String, [f32; 4]>, UrdfParseError> {
+    let mut materials = BTreeMap::new();
+    for child in robot
+        .children()
+        .filter(|node| node.is_element() && node.tag_name().name() == "material")
+    {
+        let (Some(name), Some(color)) = (
+            child.attribute("name"),
+            child
+                .children()
+                .find(|node| node.is_element() && node.tag_name().name() == "color"),
+        ) else {
+            continue;
+        };
+        if let Some(rgba) = color.attribute("rgba") {
+            materials.insert(name.to_string(), parse_rgba(rgba)?);
+        }
+    }
+    Ok(materials)
+}
+
+fn parse_material_rgba(
+    node: roxmltree::Node<'_, '_>,
+    materials: &BTreeMap<String, [f32; 4]>,
+) -> Result<Option<[f32; 4]>, UrdfParseError> {
     let Some(material) = node
         .children()
         .find(|node| node.is_element() && node.tag_name().name() == "material")
     else {
         return Ok(None);
     };
-    let Some(color) = material
+    if let Some(color) = material
         .children()
         .find(|node| node.is_element() && node.tag_name().name() == "color")
-    else {
-        return Ok(None);
-    };
-    color.attribute("rgba").map(parse_rgba).transpose()
+    {
+        return color.attribute("rgba").map(parse_rgba).transpose();
+    }
+    // Resolve a name-only material against the robot-level definitions.
+    if let Some(name) = material.attribute("name") {
+        return Ok(materials.get(name).copied());
+    }
+    Ok(None)
 }
 
 fn parse_geometry(node: roxmltree::Node<'_, '_>) -> Result<UrdfGeometry, UrdfParseError> {
@@ -844,5 +878,38 @@ mod tests {
             robot.links[0].visuals[0].material_rgba,
             Some([0.08, 0.08, 0.08, 1.0])
         );
+    }
+
+    #[test]
+    fn resolves_robot_level_material_by_name() {
+        let robot = parse_urdf(
+            r#"
+            <robot name="material_robot">
+              <material name="wheel_black">
+                <color rgba="0.08 0.08 0.08 1.0"/>
+              </material>
+              <link name="wheel">
+                <visual>
+                  <material name="wheel_black"/>
+                  <geometry>
+                    <cylinder radius="0.1" length="0.05"/>
+                  </geometry>
+                </visual>
+                <visual>
+                  <material name="missing"/>
+                  <geometry>
+                    <sphere radius="0.02"/>
+                  </geometry>
+                </visual>
+              </link>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            robot.links[0].visuals[0].material_rgba,
+            Some([0.08, 0.08, 0.08, 1.0])
+        );
+        assert_eq!(robot.links[0].visuals[1].material_rgba, None);
     }
 }

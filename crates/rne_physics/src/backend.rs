@@ -14,7 +14,7 @@ pub const PHYSICS_BACKEND_MANIFEST_SCHEMA_VERSION: u16 = 3;
 pub const PHYSICS_CONFORMANCE_REPORT_SCHEMA_VERSION: u16 = 2;
 
 /// Current version of the named, unit-bearing physics tolerance registry.
-pub const PHYSICS_TOLERANCE_REGISTRY_VERSION: u16 = 4;
+pub const PHYSICS_TOLERANCE_REGISTRY_VERSION: u16 = 5;
 
 /// Identifier for a backend-owned physics world instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -337,6 +337,12 @@ pub enum PhysicsError {
         /// Stable ECS entity index carrying the rejected command.
         entity_index: u32,
         /// Static validation reason shared by backend implementations.
+        reason: &'static str,
+    },
+    /// A collider shape could not be represented by the backend.
+    #[error("invalid collider shape: {reason}")]
+    InvalidColliderShape {
+        /// Static reason the shape was rejected.
         reason: &'static str,
     },
 }

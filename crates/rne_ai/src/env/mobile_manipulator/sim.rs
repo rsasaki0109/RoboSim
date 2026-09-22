@@ -3752,15 +3752,41 @@ fn smoothstep01(t: f64) -> f64 {
 fn object_half_width_m(world: &World, object: Entity) -> f64 {
     world
         .get::<Collider>(object)
-        .map(|collider| match collider.shape {
-            ColliderShape::Cuboid { half_extents_m } => {
-                half_extents_m.x.min(half_extents_m.y).min(half_extents_m.z)
-            }
-            ColliderShape::Sphere { radius_m } => radius_m,
-            ColliderShape::Capsule { radius_m, .. } => radius_m,
-            ColliderShape::Plane { .. } => GRASP_PINCH_FALLBACK_HALF_WIDTH_M,
-        })
+        .map(|collider| collider_half_width_m(&collider.shape))
         .unwrap_or(GRASP_PINCH_FALLBACK_HALF_WIDTH_M)
+}
+
+/// Conservative half-width (m) of a collision shape about its local origin.
+fn collider_half_width_m(shape: &ColliderShape) -> f64 {
+    match shape {
+        ColliderShape::Cuboid { half_extents_m } => {
+            half_extents_m.x.min(half_extents_m.y).min(half_extents_m.z)
+        }
+        ColliderShape::Sphere { radius_m } => *radius_m,
+        ColliderShape::Capsule { radius_m, .. } => *radius_m,
+        ColliderShape::Plane { .. } => GRASP_PINCH_FALLBACK_HALF_WIDTH_M,
+        ColliderShape::ConvexHull { points } => points
+            .iter()
+            .map(|point| point.length())
+            .fold(0.0, f64::max),
+        ColliderShape::TriMesh { vertices, .. } => vertices
+            .iter()
+            .map(|point| point.length())
+            .fold(0.0, f64::max),
+        ColliderShape::HeightField {
+            heights_m, scale, ..
+        } => {
+            let max_height_m = heights_m
+                .iter()
+                .fold(0.0_f64, |acc, height| acc.max(height.abs()))
+                * scale.y.abs();
+            scale.length() * 0.5 + max_height_m
+        }
+        ColliderShape::Compound { parts } => parts
+            .iter()
+            .map(|part| part.local_offset.translation.length() + collider_half_width_m(&part.shape))
+            .fold(0.0, f64::max),
+    }
 }
 
 /// Planar heading in radians, extracted by projecting the rotated +X axis onto the

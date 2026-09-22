@@ -1,0 +1,14 @@
+[package]
+name = "trainer"
+version = "0.3.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rne_ai = { workspace = true }
+
+[[example]]
+name = "115_trainer"
+path = "main.rs"

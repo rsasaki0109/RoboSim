@@ -7,11 +7,13 @@
 #![deny(missing_docs)]
 
 pub mod asset;
+pub mod car_following;
 pub mod components;
 pub mod error;
 pub mod events;
 pub mod id;
 pub mod io;
+pub mod lane_change;
 pub mod resources;
 pub mod routing;
 pub mod systems;
@@ -24,6 +26,10 @@ pub use asset::{
     TrafficConnection, TrafficNetwork, TrafficSignal, TRAFFIC_ASSET_SCHEMA,
     TRAFFIC_ASSET_SCHEMA_VERSION,
 };
+pub use car_following::{
+    idm_acceleration, krauss_new_speed, krauss_safe_speed, CarFollowingModel, IdmParams,
+    KraussParams,
+};
 pub use components::{
     TrafficActor, TrafficActorKind, TrafficDeparture, TrafficNetworkRoot, TrafficPose,
     TrafficPoseSource, TrafficRouteFollower,
@@ -34,6 +40,10 @@ pub use id::TrafficId;
 pub use io::{
     canonical_traffic_asset_bytes, load_traffic_asset, parse_traffic_asset, save_traffic_asset,
     TRAFFIC_ASSET_MAX_INPUT_BYTES,
+};
+pub use lane_change::{
+    mobil_idm_decision, mobil_incentive, mobil_safe, mobil_should_change, MobilNeighbor,
+    MobilParams,
 };
 pub use resources::{
     TrafficConflictControl, TrafficConflictControlError, TrafficConflictControls, TrafficRoute,

@@ -2,7 +2,7 @@
   "kind": "rne_compatibility_fixture_report",
   "schema_version": 1,
   "release_version": "0.3.0",
-  "registry_sha256": "sha256:955dfaaf313d5fd355fe0aba9a06600b4ac26d5967a24a006ba3518d137763fa",
+  "registry_sha256": "sha256:c4b63496d6e9d84edf6dcc4bbdbf4e788de4c3db737db4c056a96faef0530871",
   "checks": [
     {
       "id": "accelerator_capability_v1",
@@ -309,7 +309,7 @@
       "contract": "physics_conformance",
       "schema_version": 2,
       "path": "tests/golden/physics/conformance-report-v2.json",
-      "canonical_json_sha256": "sha256:bcc513eb446ca330954155d85864f35c980255fb0276aba8f3bc8e3958cb3c81",
+      "canonical_json_sha256": "sha256:91a5fffd336d1d0e5c7a4293ae5c3ac8df4338ef51d35f6af649f7a3116bfc29",
       "accepted": true,
       "future_schema_rejected": true,
       "unknown_field_rejected": true,

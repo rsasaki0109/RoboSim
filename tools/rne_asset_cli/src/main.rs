@@ -237,6 +237,28 @@ enum Commands {
         #[arg(long, default_value = "sumo")]
         network_id: String,
     },
+    /// Bake a deterministic compound collision sidecar from a mesh file.
+    BakeCollision {
+        /// Source mesh path (`.stl` or `.obj`).
+        mesh: PathBuf,
+        /// Output `.rne.collision.json` path.
+        #[arg(short, long)]
+        out: PathBuf,
+        /// Maximum voxels along the mesh's longest axis.
+        #[arg(long, default_value_t = 16)]
+        max_cells_per_axis: u32,
+        /// Maximum merged collision boxes before the bake fails.
+        #[arg(long, default_value_t = 2048)]
+        max_parts: u32,
+    },
+    /// Import an ASCII `.usda` layer into per-mesh OBJ files.
+    UsdImport {
+        /// ASCII `.usda` input path.
+        input: PathBuf,
+        /// Directory receiving one OBJ file per mesh.
+        #[arg(short, long)]
+        out_dir: PathBuf,
+    },
     /// Author and inspect controller plugins.
     Plugin {
         #[command(subcommand)]
@@ -419,6 +441,13 @@ fn main() -> Result<()> {
             out,
             network_id,
         } => sumo_net_command(&path, &out, &network_id),
+        Commands::BakeCollision {
+            mesh,
+            out,
+            max_cells_per_axis,
+            max_parts,
+        } => bake_collision_command(&mesh, &out, max_cells_per_axis, max_parts),
+        Commands::UsdImport { input, out_dir } => usd_import_command(&input, &out_dir),
         Commands::Plugin { command } => plugin_command(command),
         Commands::FailureCapsule { command } => failure_capsule_command(command),
         Commands::CoSim {
@@ -2858,6 +2887,67 @@ fn sumo_net_command(path: &Path, out: &Path, network_id: &str) -> Result<()> {
         out.display(),
         asset.network.id,
         asset.schema_version
+    );
+    Ok(())
+}
+
+fn usd_import_command(input: &Path, out_dir: &Path) -> Result<()> {
+    let scene = rne_usd::parse_usda_file(input)
+        .with_context(|| format!("import USD layer {}", input.display()))?;
+    let paths = scene
+        .write_obj_files(out_dir)
+        .with_context(|| format!("write OBJ meshes to {}", out_dir.display()))?;
+    let triangles: usize = scene.meshes.iter().map(|mesh| mesh.triangle_count()).sum();
+    println!(
+        "usd: imported {} meshes ({} triangles) from {}",
+        scene.meshes.len(),
+        triangles,
+        input.display()
+    );
+    for path in &paths {
+        println!("  wrote {}", path.display());
+    }
+    Ok(())
+}
+
+fn bake_collision_command(
+    mesh: &Path,
+    out: &Path,
+    max_cells_per_axis: u32,
+    max_parts: u32,
+) -> Result<()> {
+    let triangle_mesh =
+        rne_render::load_mesh(mesh).with_context(|| format!("load mesh {}", mesh.display()))?;
+    if triangle_mesh.indices.is_empty() {
+        anyhow::bail!(
+            "mesh {} has no triangle indices; collision bake needs an indexed mesh",
+            mesh.display()
+        );
+    }
+    let config = rne_collision_bake::VoxelBakeConfig {
+        max_cells_per_axis,
+        max_parts,
+    };
+    let bake = rne_collision_bake::bake_voxel_decomposition(
+        &triangle_mesh.positions,
+        &triangle_mesh.indices,
+        config,
+    )
+    .with_context(|| format!("bake collision for {}", mesh.display()))?;
+    if let Some(parent) = out.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create output directory {}", parent.display()))?;
+        }
+    }
+    rne_collision_bake::save_bake(out, &bake)
+        .with_context(|| format!("write collision bake {}", out.display()))?;
+    println!(
+        "collision: wrote {} (parts={} source_triangles={} schema_version={})",
+        out.display(),
+        bake.part_count,
+        bake.source_triangle_count,
+        bake.schema_version
     );
     Ok(())
 }
