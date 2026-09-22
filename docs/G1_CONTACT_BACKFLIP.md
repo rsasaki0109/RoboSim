@@ -688,3 +688,16 @@ forward references, while preserving inline-color precedence. G1's `dark`
 instead of a uniform fallback gray. This applies to normal scene rendering
 and native-recording playback; no custom palette or dynamics change is used.
 The native GIF is regenerated from the same recorded poses with these colors.
+
+### Full-contact native model preparation
+
+Add `--full-contact --independent-soles` to `scripts/g1_native_model.py` to
+request convex body meshes and self-collision. With the source sole/passive
+profiles, model inspection reports 21 convex body colliders, two four-part
+feet, 23 movable joints and 34.13385728 kg. This enables contact investigation;
+it does not certify a full-body backflip or assume adjacent-link exclusions
+match the external plant. The native probe now records every reported contact
+pair, its first time, report count and maximum normal impulse, including the
+preparation interval. `environment` denotes non-robot entities (the ground in
+this probe scene). Foot support requires positive foot/environment impulse;
+foot/body self-contact cannot trigger takeoff/landing support.

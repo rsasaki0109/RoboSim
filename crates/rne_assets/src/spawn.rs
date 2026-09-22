@@ -2,8 +2,8 @@
 
 use crate::error::AssetError;
 use crate::robot::{
-    load_robot_asset_collision_parts, load_robot_asset_passive_dynamics, LidarRobotAsset,
-    RobotAsset, RobotKind,
+    load_robot_asset_collision_parts, load_robot_asset_convex_collisions,
+    load_robot_asset_passive_dynamics, LidarRobotAsset, RobotAsset, RobotKind,
 };
 use crate::scene::{
     ObstacleBodyType, SceneAsset, SceneCollisionAsset, SceneDeformableAsset,
@@ -20,8 +20,8 @@ use rne_render::{Visual, VisualShape};
 use rne_robot::{spawn_diff_drive_robot, DiffDriveSpawned, Link};
 use rne_sensor::{Sensor, SensorKind, SensorState};
 use rne_urdf_import::{
-    attach_urdf_collision_parts, attach_urdf_document_articulation, attach_urdf_visuals,
-    parse_urdf_document, parse_urdf_document_file, parse_urdf_file,
+    attach_urdf_collision_parts, attach_urdf_convex_colliders, attach_urdf_document_articulation,
+    attach_urdf_visuals, parse_urdf_document, parse_urdf_document_file, parse_urdf_file,
     spawn_urdf_document_with_config, SpawnedUrdfRobot, UrdfDocument,
 };
 use rne_world::{
@@ -194,6 +194,12 @@ pub fn spawn_robot_asset_with_sources(
 
             if preserve_parts {
                 attach_urdf_collision_parts(world, &document.robot, &spawned, &spawn_config);
+            }
+            if asset_path.is_file() && load_robot_asset_convex_collisions(asset_path)? {
+                attach_urdf_convex_colliders(world, &document.robot, &spawned, &spawn_config)
+                    .map_err(|error| {
+                        AssetError::invalid(asset_path.display().to_string(), error.to_string())
+                    })?;
             }
             if wire_articulation && section.articulation {
                 attach_urdf_document_articulation(

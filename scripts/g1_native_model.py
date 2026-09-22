@@ -19,8 +19,11 @@ def prepare(
     source_soles=False,
     independent_soles=False,
     source_passive_loss=False,
+    full_contact=False,
 ):
     """Remove only empty fixed leaf frames; preserve every physical link and joint."""
+    if full_contact and not independent_soles:
+        raise ValueError("full contact requires independent sole primitives")
     source, output = Path(source).resolve(), Path(output).resolve()
     robot = ET.parse(source).getroot()
     links = robot.findall("link")
@@ -115,6 +118,11 @@ weld_fixed_children = true
     if independent_soles:
         config = output / "robot.rne.robot.toml"
         config.write_text(config.read_text() + "preserve_collision_parts = true\n")
+    if full_contact:
+        config = output / "robot.rne.robot.toml"
+        config.write_text(config.read_text().replace("mesh_collisions = false", "mesh_collisions = true")
+                          .replace("self_collisions = false", "self_collisions = true")
+                          + "convex_mesh_collisions = true\n")
     if source_passive_loss:
         config = output / "robot.rne.robot.toml"
         config.write_text(
@@ -145,10 +153,11 @@ path = "robot.rne.robot.toml"
         "movable_joint_count": sum(
             j.get("type") != "fixed" for j in robot.findall("joint")
         ),
-        "mesh_collision_elements_disabled": mesh_count,
+        "mesh_collision_elements_disabled": 0 if full_contact else mesh_count,
+        "convex_mesh_collision_elements": mesh_count if full_contact else 0,
         "multi_collision_links_merged_to_aabb": {} if independent_soles else merged,
         "compound_link_part_counts": merged if independent_soles else {},
-        "self_collision": False,
+        "self_collision": full_contact,
         "qualification_ready": False,
         "remaining_differences": (
             []
@@ -158,7 +167,8 @@ path = "robot.rne.robot.toml"
             ]
         )
         + [
-            "Native mesh collisions are disabled; enabling them currently produces AABBs, not source convex meshes.",
+            ("Native convex body meshes and self-collision are enabled; contact exclusions and full-body qualification require validation."
+             if full_contact else "Native mesh collisions are disabled; legacy mesh import uses AABBs."),
             (
                 "Source joint armature 0.01 remains unmatched; native damping 0.05 and regularized Coulomb 0.2 use tanh(v/0.1), not source constraint friction."
                 if source_passive_loss
@@ -189,6 +199,8 @@ def main():
         action="store_true",
         help="apply damping 0.05 and regularized Coulomb 0.2 (transition 0.1 rad/s); armature remains unmatched",
     )
+    parser.add_argument("--full-contact", action="store_true",
+                        help="enable convex body meshes and self-collision; requires --independent-soles")
     args = parser.parse_args()
     print(
         json.dumps(
@@ -198,6 +210,7 @@ def main():
                 args.source_soles,
                 args.independent_soles,
                 args.source_passive_loss,
+                args.full_contact,
             ),
             indent=2,
         )

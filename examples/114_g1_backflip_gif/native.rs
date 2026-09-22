@@ -10,6 +10,11 @@ use rne_physics::{
 use rne_robot::{Joint, Link};
 use serde_json::json;
 
+fn ground_sole_contact(a: &str, b: &str, impulse_ns: f32) -> bool {
+    let sole = |link: &str| matches!(link, "left_ankle_roll_link" | "right_ankle_roll_link");
+    impulse_ns > 0.0 && ((a == "environment" && sole(b)) || (b == "environment" && sole(a)))
+}
+
 pub(super) fn run() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let summary: serde_json::Value = serde_json::from_slice(
@@ -192,11 +197,18 @@ pub(super) fn run() {
         .filter_map(|entity| entity.get::<CompoundCollider>().map(|c| c.parts.len()))
         .collect();
     compound_part_counts.sort_unstable();
+    let convex_collider_count = sim
+        .world()
+        .iter_entities()
+        .filter(|e| e.get::<rne_physics::ConvexCollider>().is_some())
+        .count();
+    let mut contact_pairs: std::collections::BTreeMap<(String, String), (u64, f64, f64)> =
+        std::collections::BTreeMap::new();
     if args.iter().any(|arg| arg == "--native-model-check") {
         assert_eq!(sim.sim_time().ticks(), 0);
         println!(
             "{}",
-            json!({"mass_kg":mass_kg,"compound_part_counts":compound_part_counts,"movable_joint_count":names.len(),"scene":scene_path,"simulation_ticks":0,"qualified_backflip":false})
+            json!({"convex_collider_count":convex_collider_count,"mass_kg":mass_kg,"compound_part_counts":compound_part_counts,"movable_joint_count":names.len(),"scene":scene_path,"simulation_ticks":0,"qualified_backflip":false})
         );
         return;
     }
@@ -596,9 +608,28 @@ pub(super) fn run() {
         angle += pitch_delta;
         pitch_rate_rad_s = pitch_delta / dt_s;
         previous = pitch;
-        contact = ["left_ankle_roll_link", "right_ankle_roll_link"]
-            .iter()
-            .any(|name| sim.link_contact_impulse_ns(name) > 0.0);
+        contact = false;
+        for event in sim
+            .physics_contact_events()
+            .expect("native contact evidence")
+        {
+            let name = |entity| {
+                sim.world()
+                    .get::<Link>(entity)
+                    .map(|link| link.name.as_str())
+                    .unwrap_or("environment")
+            };
+            let (a, b) = (name(event.entity_a), name(event.entity_b));
+            contact |= ground_sole_contact(a, b, event.impulse);
+            let key = if a <= b {
+                (a.to_owned(), b.to_owned())
+            } else {
+                (b.to_owned(), a.to_owned())
+            };
+            let row = contact_pairs.entry(key).or_insert((0, t, 0.0));
+            row.0 += 1;
+            row.2 = row.2.max(event.impulse as f64);
+        }
         air_s = if contact { 0.0 } else { air_s + dt_s };
         if t >= 0.0 {
             longest_air_s = longest_air_s.max(air_s);
@@ -646,6 +677,13 @@ pub(super) fn run() {
         "final_second_continuous_foot_contact":(completed_s>=complete_threshold_s).then_some(tail_contact),
         "final_second_min_upright":(completed_s>=complete_threshold_s).then_some(min_tail_upright),"final_second_max_base_speed_m_s":(completed_s>=complete_threshold_s).then_some(max_tail_speed),
         "joint_link_names":names,"frames":history});
+    if convex_collider_count > 0 {
+        output["note"] = json!("Transfer probe: native convex body geometry; inspect scene self-collision settings; qualification pending");
+    }
+    output["convex_collider_count"] = json!(convex_collider_count);
+    output["contact_pair_audit"] = json!(contact_pairs.iter().map(|((a,b),(count,first,impulse))|
+        json!({"link_a":a,"link_b":b,"reported_steps":count,"first_time_s":first,"max_normal_impulse_ns":impulse}))
+        .collect::<Vec<_>>());
     output["maneuver_duration_s"] = json!(maneuver_duration_s);
     output["landing_pitch_rate_gain_s"] = json!(landing_pitch_rate_gain_s);
     output["landing_early_com_velocity_gain_s_per_m"] =
@@ -915,6 +953,31 @@ mod diagnostic_tests {
         // farther forward relative to the pelvis, shifting a supported pelvis back.
         let foot_x = |hip: f64| -0.3 * hip.sin() - 0.3 * (hip + 0.36).sin();
         assert!(foot_x(-0.18 + correction) > foot_x(-0.18));
+    }
+
+    #[test]
+    fn sole_self_contact_cannot_trigger_ground_support() {
+        assert!(ground_sole_contact(
+            "environment",
+            "left_ankle_roll_link",
+            0.1
+        ));
+        assert!(ground_sole_contact(
+            "right_ankle_roll_link",
+            "environment",
+            0.1
+        ));
+        assert!(!ground_sole_contact(
+            "left_ankle_roll_link",
+            "left_knee_link",
+            1.0
+        ));
+        assert!(!ground_sole_contact("left_knee_link", "environment", 1.0));
+        assert!(!ground_sole_contact(
+            "environment",
+            "left_ankle_roll_link",
+            0.0
+        ));
     }
 
     #[test]

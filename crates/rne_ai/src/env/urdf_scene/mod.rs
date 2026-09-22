@@ -1058,6 +1058,17 @@ impl UrdfSceneSim {
         Some(velocity.x.hypot(velocity.y).hypot(velocity.z))
     }
 
+    /// Returns backend-neutral contact pairs from the latest completed physics step.
+    ///
+    /// Entity identities and normal impulses permit whole-robot contact auditing
+    /// without repeated named-pair searches. The slice is invalidated by the next
+    /// mutable simulation operation. Backend errors are propagated.
+    pub fn physics_contact_events(
+        &self,
+    ) -> Result<&[rne_physics::ContactEvent], rne_physics::PhysicsError> {
+        self.backend.contacts(self.physics_world)
+    }
+
     /// Returns whether two named entities contacted during the latest physics step.
     pub fn named_entities_in_contact(&self, first_name: &str, second_name: &str) -> bool {
         let Some(first) = find_entity_by_name(&self.world, first_name) else {

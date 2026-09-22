@@ -14,6 +14,24 @@ Usage = namedtuple("Usage", "total used free")
 
 
 class ModelPreparationTest(unittest.TestCase):
+    def test_full_contact_requests_convex_meshes_and_preserves_sole_parts(self):
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "g1_native_model.shutil.disk_usage", return_value=Usage(100, 0, 32 * 1024**3)
+        ):
+            output = Path(directory) / "model"
+            audit = prepare(SOURCE, output, source_soles=True, independent_soles=True,
+                            source_passive_loss=True, full_contact=True)
+            config = tomllib.loads((output / "robot.rne.robot.toml").read_text())["urdf"]
+            self.assertTrue(config["convex_mesh_collisions"])
+            self.assertTrue(config["self_collisions"])
+            self.assertTrue(config["preserve_collision_parts"])
+            self.assertTrue(config["mesh_collisions"])
+            self.assertEqual(audit["mesh_collision_elements_disabled"], 0)
+            self.assertGreater(audit["convex_mesh_collision_elements"], 0)
+            self.assertFalse(audit["qualification_ready"])
+            with self.assertRaises(ValueError):
+                prepare(SOURCE, Path(directory) / "invalid", full_contact=True)
+
     def test_only_empty_fixed_leaves_removed(self):
         with (
             tempfile.TemporaryDirectory() as directory,

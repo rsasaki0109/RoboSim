@@ -33,3 +33,14 @@ this addition does not promote the earlier foot-only GIF to qualification.
 Tests raycast through the empty corner of a tetrahedron's bounding box and
 through its actual sloped face, verify the link identity and authored mass,
 and reject empty, coincident, planar, nonfinite and conflicting geometry.
+
+The additive `attach_urdf_convex_colliders` importer API now loads STL point
+clouds, applies mesh scale followed by collision-origin rotation/translation,
+and stores sorted unique local vertices. The opt-in TOML extension
+`urdf.convex_mesh_collisions = true` invokes it after ordinary collider import.
+It requires `mesh_collisions = true`. Primitive links retain their geometry;
+multiple/mixed collision elements on a mesh link fail explicitly rather than
+being fused into a hull. Missing meshes and conflicting compounds fail too.
+Existing public asset/spawn structs remain unchanged. Import tests verify
+transformed vertices, explicit opt-in, wrong option types and mixed-shape
+rejection. G1's 21 mesh links use this path; both soles retain four primitives.
