@@ -5,9 +5,11 @@
   "artifact_sha256": {
     "500-audit.json": "190b4b09ea895f3d29cefa635a23fda67b3c74e918ec2d96c30c328307c88f0a",
     "500-candidate-0000.json": "66d117eab72860d2ba3c4521e72d29dd2c48eb9f9bf8c9238c893a76f3fd62f6",
+    "500-render-manifest.json": "a836b0bf84b0a28324b80ef987f7bf73f0294c7aae808f4eadf86b82940e1fb4",
+    "500-render-verify.log": "ce9c9b4bde0c948ded6573c4458ec6746e926e05ec9d6eda363d7a2b566cf9d3",
     "500-rollout.json.gz": "bed79b772d6b00d5d17fe52257dcfbc13f080fda46f4ed8bc80fb0a0b41044d8",
     "500-search.json": "7611b153225aab0d873ee15a3e3a9ea190dba5fe192bcad66d1b0648b9da607e",
-    "README.md": "2572491e72d693396f34db0b60668bc39321627f3cafe5e7b109e1e1c3bb5ca1",
+    "README.md": "17b3b46dada6e22aa7b30814b7f387cb2e5380df65d85a5f17920a3f159cdc1f",
     "model-audit.json": "ddecf513dd2a8dd2a43c4e2533ee9abfba1db4694f1d34a4b4c62545b898bb0a",
     "model-provenance.json": "cede0e9a8beffa1ad0d818cabeb9b2e9d51be8a525a596f94f85547673639ca9",
     "model-robot.rne.robot.toml": "115cd53ad67041726f723f17a06209bc330e3ab4400d70d93d1dc8334fb6c6a4",

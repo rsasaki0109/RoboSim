@@ -17,3 +17,7 @@ against its preparation hash. This snapshot was taken after the coarse run
 and during the finer runs, not as a pre-run attestation. The model preparation
 audit predates the candidate armature override; see the rollout for the applied
 0.01 kg m² armature. Absolute mesh paths require regeneration on another checkout.
+
+The renderer also verified all 1,600 coarse-recording frames with zero physics
+ticks (`500-render-verify.log`); the render manifest checks the raw rollout and
+visual URDF hashes. This preflight produced no replacement GIF.
