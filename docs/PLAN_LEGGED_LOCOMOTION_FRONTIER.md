@@ -358,3 +358,14 @@ This supplies the geometry prerequisite only: wire source collision meshes
 through the importer, enable self-contact and measure all body-ground pairs
 before the next full-body native optimization campaign. The existing 500 µs
 held result and rejected 125 µs result remain unchanged and unqualified.
+
+### Convex full-contact model and structural interference
+
+G1 now imports 21 convex body meshes with self-collision enabled and retains
+the two four-part feet. Native full-contact standing stays up but fails the
+upright threshold (0.975959); the maneuver fails at 1.366 s. The contact audit
+shows fixed logo/torso interference up to 150.06 N·s, plus persistent joint-
+connected link contacts. Address topology-derived structural exclusions
+before optimizing this plant, retaining nonadjacent body/self and ground
+contacts. The foot-only observer regression matches all 600 prior frames
+exactly. See [full-contact evidence](evidence/g1-contact-backflip/native-transfer/convex-full-contact/README.md).

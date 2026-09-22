@@ -1,0 +1,7 @@
+{
+  "recorded_frames_exact": true,
+  "frame_count": 600,
+  "common_metrics_exact_except_scene_path": true,
+  "reference": "../support-recovery/native-balanced-recovery-10p0/candidate-0000.rollout.json.gz",
+  "new_rollout_sha256": "6ae1edd7e381e02968782d4a01fcf595dd96ebbf1966c7bd7311b95d142ac09c"
+}
