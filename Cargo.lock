@@ -4624,6 +4624,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "robot_workbench"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "image",
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "rne_mjcf",
+ "rne_physics",
+ "rne_physics_rapier",
+ "rne_render",
+ "rne_render_wgpu",
+ "rne_urdf_import",
+ "rne_world",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "robust"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

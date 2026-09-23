@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RoboSim · Robot Workbench</title><link rel="stylesheet" href="/workbench.css"></head>
+<body>
+<header><div><span class="brand">RoboSim</span><span class="badge">ROBOT WORKBENCH</span></div>
+<div class="transport"><button id="play" class="primary">▶ 再生</button><button id="step">1ステップ</button><button id="reset">リセット</button><output id="clock">0.000 s</output><span id="mode">一時停止</span></div></header>
+<div id="status" role="status" aria-live="polite">ネイティブシミュレーターに接続中…</div>
+<main>
+<aside>
+<section><h2>ロボット</h2><label>切り替えるプリセット<select id="preset"><option value="so101">SO-101 · URDFメッシュ</option><option value="arm">2関節アーム · MJCF</option><option value="slider">直動スライダー · URDF</option></select></label>
+<label class="file-button">URDF / MJCFを読み込む<input id="robot-file" type="file" accept=".urdf,.xml,.mjcf"></label>
+<p class="hint">固定ベースの物理プレビュー。メッシュ付きモデルは起動時にアセットルートを指定します。</p><p id="servo-note" class="hint"></p><label>物理モデル<select id="inertias"><option value="preview">簡易プレビュー（既定の質量）</option><option value="declared">URDFに記載された質量・慣性</option></select></label><label>入力モデルの上方向<select id="up-axis"><option value="y">Y-up</option><option value="z">Z-up → Y-upに変換</option></select></label></section>
+<section><h2>関節の目標</h2><p class="hint">目標値を設定して再生。実測値と目標値を別々に表示します。</p><div id="joints"></div></section>
+<section><h2>保存した姿勢</h2><div class="row"><input id="pose-name" aria-label="姿勢名" placeholder="姿勢名" maxlength="128"><button id="save-pose">目標を保存</button></div><div class="row"><select id="poses" aria-label="保存した姿勢"></select><button id="apply-pose">適用</button></div></section>
+<section><h2>プロジェクト</h2><button id="download-project">JSONを保存</button><label class="file-button">JSONを読み込む<input id="project-file" type="file" accept=".json"></label></section>
+</aside>
+<div class="stage">
+<section class="viewport"><div class="section-bar"><h2>シーン</h2><span>RoboSim / Rapier</span></div><img id="view" width="640" height="400" alt="現在のロボットとシーン">
+<div class="orbit"><label>旋回<input id="yaw" type="range" min="-3.14" max="3.14" step="0.02" value="0.7"></label><label>俯角<input id="pitch" type="range" min="0.15" max="1.45" step="0.02" value="1"></label><label>距離<input id="distance" type="range" min="0.3" max="10" step="0.1" value="1.8"></label></div></section>
+<div class="sensors">
+<section><h2>RGBカメラ</h2><canvas id="rgb" width="160" height="120"></canvas><div class="hint">固定観測カメラ · 160 × 120</div></section>
+<section><h2>深度 <small>m</small></h2><canvas id="depth" width="160" height="120"></canvas><output id="depth-value">画素にカーソルを合わせると距離を表示</output></section>
+<section><h2>LiDAR <small>XZ平面</small></h2><canvas id="lidar" width="240" height="180"></canvas><output id="lidar-info">—</output></section>
+</div><div id="sensor-time" class="hint"></div>
+</div>
+<aside class="scene-editor"><section><h2>床・障害物</h2><p class="hint">編集を反映するとロボットを初期状態に戻します。静的な箱を床や壁として配置できます。</p>
+<select id="objects" aria-label="シーンオブジェクト" size="5"></select>
+<label>名前<input id="object-name" maxlength="128"></label>
+<fieldset><legend>位置 <small>m</small></legend><div class="triple"><label>X<input id="pos-x" type="number" step="0.05"></label><label>Y<input id="pos-y" type="number" step="0.05"></label><label>Z<input id="pos-z" type="number" step="0.05"></label></div></fieldset>
+<fieldset><legend>サイズ <small>m</small></legend><div class="triple"><label>X<input id="size-x" type="number" step="0.05" min="0.001"></label><label>Y<input id="size-y" type="number" step="0.05" min="0.001"></label><label>Z<input id="size-z" type="number" step="0.05" min="0.001"></label></div></fieldset>
+<label>色<input id="object-color" type="color" value="#d98d42"></label>
+<button id="apply-object" class="primary">編集を反映してリセット</button><div class="row"><button id="add-object">箱を追加</button><button id="remove-object">削除</button></div>
+</section><section><h2>実行情報</h2><dl><dt>物理刻み</dt><dd>約 1 / 240 s</dd><dt>状態ハッシュ</dt><dd id="hash">—</dd><dt>センサー</dt><dd>瞬時取得・ノイズなし</dd></dl></section></aside>
+</main><script src="/workbench.js" defer></script></body></html>

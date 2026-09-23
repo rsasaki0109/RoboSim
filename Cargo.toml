@@ -161,6 +161,7 @@ members = [
   "examples/110_collision_bake",
   "examples/114_policy_artifact",
   "examples/115_trainer",
+  "examples/116_robot_workbench",
   "tests/determinism",
   "tests/dynamics",
   "tests/mobility_benchmark",
