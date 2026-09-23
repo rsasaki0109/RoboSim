@@ -20,11 +20,11 @@
     "frame_count": 48,
     "frame_pattern": "target/rne-showcase-nav/frame-%03d.png",
     "gif_path": "docs/media/showcase-nav.gif",
-    "gif_bytes": 1896014,
-    "gif_sha256": "5f7b6396901a5c9ab5b24f61c8a267d99b3e66ede9549fc3e609c2193f4accba",
+    "gif_bytes": 2042759,
+    "gif_sha256": "93090cf9a1cc27611fcd98fefbc2fa045e0c6c3b25876b94f0c59b252f800669",
     "poster_path": "docs/media/showcase-nav.png",
-    "poster_bytes": 24604,
-    "poster_sha256": "2dc5a47d837120b95e2046038fff4b530b456967b20c22926bb9473bd4cbf88a",
+    "poster_bytes": 43740,
+    "poster_sha256": "a73fd1b6de590ae242f1ea16a94adc0b74692cc0222c551545c505ed6cc091d2",
     "poster_frame": 24,
     "sampled_sim_steps": [
       22,
@@ -132,9 +132,9 @@
   },
   "camera": {
     "fov_y_rad": 0.7853981633974483,
-    "yaw_rad": 0.18,
-    "pitch_rad": 1.1,
-    "distance_m": 6.6
+    "yaw_rad": 0.32,
+    "pitch_rad": 0.78,
+    "distance_m": 6.4
   },
   "provenance": [
     "assets/scenes/office_agv_delivery.rne.scene.toml",

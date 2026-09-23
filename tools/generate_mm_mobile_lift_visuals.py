@@ -50,11 +50,15 @@ class MaterialSpec:
 
 
 MATERIALS: tuple[MaterialSpec, ...] = (
-    MaterialSpec("anodized_navy", (0.055, 0.16, 0.38, 1.0), 0.72, 0.26, (0.0, 0.0, 0.0)),
-    MaterialSpec("signal_orange", (0.92, 0.22, 0.035, 1.0), 0.40, 0.30, (0.0, 0.0, 0.0)),
-    MaterialSpec("machined_aluminum", (0.54, 0.62, 0.70, 1.0), 0.88, 0.22, (0.0, 0.0, 0.0)),
-    MaterialSpec("elastomer", (0.018, 0.024, 0.035, 1.0), 0.02, 0.80, (0.0, 0.0, 0.0)),
-    MaterialSpec("status_cyan", (0.02, 0.30, 0.55, 1.0), 0.16, 0.20, (0.0, 0.09, 0.34)),
+    # Brighter, more saturated shell/accent colors than the original dark
+    # navy give the robot enough contrast to read clearly against the muted,
+    # low-dynamic-range photoreal 3DGS room instead of blending into it as a
+    # dark silhouette.
+    MaterialSpec("anodized_navy", (0.12, 0.32, 0.66, 1.0), 0.55, 0.52, (0.0, 0.0, 0.0)),
+    MaterialSpec("signal_orange", (0.98, 0.33, 0.05, 1.0), 0.35, 0.25, (0.0, 0.0, 0.0)),
+    MaterialSpec("machined_aluminum", (0.68, 0.75, 0.82, 1.0), 0.80, 0.24, (0.0, 0.0, 0.0)),
+    MaterialSpec("elastomer", (0.028, 0.034, 0.045, 1.0), 0.03, 0.78, (0.0, 0.0, 0.0)),
+    MaterialSpec("status_cyan", (0.06, 0.48, 0.80, 1.0), 0.14, 0.18, (0.02, 0.30, 0.65)),
 )
 
 
