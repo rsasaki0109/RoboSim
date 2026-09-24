@@ -12,7 +12,7 @@ use std::io::{self, Read, Write};
 use thiserror::Error;
 
 /// Four-byte marker at the start of every transport frame.
-pub const TRANSPORT_MAGIC: [u8; 4] = *b"RNEF";
+pub(crate) const TRANSPORT_MAGIC: [u8; 4] = *b"RNEF";
 /// Size of the fixed little-endian transport header.
 pub const TRANSPORT_HEADER_BYTES: usize = 32;
 /// Current production transport protocol major version.
@@ -22,7 +22,7 @@ pub const TRANSPORT_PROTOCOL_MINOR: u16 = 0;
 /// Absolute payload safety limit used by the reference implementation.
 pub const TRANSPORT_MAX_PAYLOAD_BYTES: usize = 32 * 1024 * 1024;
 /// Maximum UTF-8 rejection detail carried on the wire.
-pub const TRANSPORT_MAX_REJECT_MESSAGE_BYTES: usize = 1024;
+pub(crate) const TRANSPORT_MAX_REJECT_MESSAGE_BYTES: usize = 1024;
 
 /// A message carried by the framed frontend transport.
 #[repr(u16)]
@@ -143,7 +143,7 @@ impl TransportFrame {
     }
 
     /// Returns header plus payload bytes retained by an egress queue.
-    pub fn encoded_len(&self) -> usize {
+    pub(crate) fn encoded_len(&self) -> usize {
         TRANSPORT_HEADER_BYTES.saturating_add(self.payload.len())
     }
 

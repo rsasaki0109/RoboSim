@@ -15,7 +15,7 @@ pub mod timed;
 /// Maximum scalar input records accepted by one analysis.
 pub const MAX_ALLAN_SAMPLES: usize = 1_000_000;
 /// Maximum requested averaging factors, bounding work to O(samples * factors).
-pub const MAX_ALLAN_FACTORS: usize = 64;
+pub(crate) const MAX_ALLAN_FACTORS: usize = 64;
 
 /// One scalar observation with its actual capture time in simulation ticks.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

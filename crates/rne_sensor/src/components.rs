@@ -51,7 +51,7 @@ impl LidarMaterial {
     }
 
     /// Returns this material with a retroreflective gain of at least `1.0`.
-    pub fn with_retroreflective_gain(mut self, gain: f64) -> Self {
+    pub(crate) fn with_retroreflective_gain(mut self, gain: f64) -> Self {
         self.retroreflective_gain = if gain.is_finite() { gain.max(1.0) } else { 1.0 };
         self
     }

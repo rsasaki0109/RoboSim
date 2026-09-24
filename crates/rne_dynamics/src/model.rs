@@ -83,7 +83,7 @@ impl ArticulatedModel {
     }
 
     /// Builds an articulated model with an explicit gravity vector.
-    pub fn from_robot_with_gravity(
+    pub(crate) fn from_robot_with_gravity(
         world: &World,
         robot: Entity,
         gravity_m_s2: Vec3,

@@ -82,15 +82,6 @@ impl WorldRandom {
         *self = Self::new(seed);
     }
 
-    /// Returns the main world stream.
-    ///
-    /// Prefer derived streams for ongoing systems such as sensors, domain
-    /// randomization, and agents so call-order changes do not shift unrelated
-    /// random samples.
-    pub fn main_stream_mut(&mut self) -> &mut DeterministicRng {
-        &mut self.main
-    }
-
     /// Returns the next value from the main world stream.
     pub fn next_u64(&mut self) -> u64 {
         self.main.next_u64()

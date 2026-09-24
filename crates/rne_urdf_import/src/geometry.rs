@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 /// Returns the extra rotation needed when mapping a URDF Z cylinder to a Y capsule.
-pub fn cylinder_collider_rotation() -> Quat {
+pub(crate) fn cylinder_collider_rotation() -> Quat {
     Quat::from_rotation_x(std::f64::consts::FRAC_PI_2)
 }
 
@@ -56,13 +56,6 @@ pub fn collider_from_element(
         local_offset,
         sensor: false,
     })
-}
-
-/// Builds a single collider for a link by merging all collision-element shapes.
-///
-/// Multiple primitives or mesh AABBs are unioned into one axis-aligned cuboid.
-pub fn collider_from_link(link: &UrdfLink, assets_root: Option<&Path>) -> Option<Collider> {
-    collider_from_link_with_meshes(link, assets_root, true)
 }
 
 /// Builds a single collider for a link, optionally excluding mesh collision geometry.
@@ -120,14 +113,18 @@ pub fn visual_from_element(element: &UrdfGeometryElement, color_rgba: [f32; 4]) 
 }
 
 /// Computes an axis-aligned bounding box for an STL mesh in the element's local frame.
-pub fn mesh_aabb_collider(uri: &str, scale: Vec3, assets_root: &Path) -> Option<(Vec3, Vec3)> {
+pub(crate) fn mesh_aabb_collider(
+    uri: &str,
+    scale: Vec3,
+    assets_root: &Path,
+) -> Option<(Vec3, Vec3)> {
     let path = resolve_package_uri(uri, assets_root);
     let mesh = load_stl(&path).ok()?;
     mesh_aabb(&mesh, scale)
 }
 
 /// Returns the AABB center and positive half-extents for a scaled mesh.
-pub fn mesh_aabb(mesh: &TriangleMesh, scale: Vec3) -> Option<(Vec3, Vec3)> {
+pub(crate) fn mesh_aabb(mesh: &TriangleMesh, scale: Vec3) -> Option<(Vec3, Vec3)> {
     if mesh.positions.is_empty() {
         return None;
     }

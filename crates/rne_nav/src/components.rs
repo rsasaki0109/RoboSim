@@ -23,13 +23,4 @@ impl NavGoal {
             tolerance_m: 0.1,
         }
     }
-
-    /// Creates a goal with a desired final yaw.
-    pub fn with_yaw(target_m: Vec3, yaw_rad: f64, tolerance_m: f64) -> Self {
-        Self {
-            target_m,
-            yaw_rad: Some(yaw_rad),
-            tolerance_m,
-        }
-    }
 }

@@ -119,7 +119,7 @@ impl LidarAtmosphere {
     /// The compact coefficients intentionally model deterministic first-order
     /// attenuation. More detailed wavelength/scattering backends can replace this
     /// model without changing the sensor or traffic APIs.
-    pub fn extinction_per_m(self) -> f64 {
+    pub(crate) fn extinction_per_m(self) -> f64 {
         self.fog_extinction_per_m.max(0.0)
             + self.rain_rate_mm_h.max(0.0) * 0.0001
             + self.dust_density_mg_m3.max(0.0) * 0.000_02
@@ -128,7 +128,7 @@ impl LidarAtmosphere {
 
     /// Returns the per-meter probability coefficient of a single pulse being blocked.
     ///
-    /// [`Self::extinction_per_m`] is the ensemble-average attenuation. Rain and snow
+    /// The crate-internal extinction coefficient is the ensemble-average attenuation. Rain and snow
     /// additionally consist of particles large enough to occlude a whole pulse, which
     /// shows up as isolated missing returns rather than as a uniform intensity loss.
     /// Fog and dust particles are too small for that and are excluded here.
@@ -334,12 +334,12 @@ impl Default for LidarSpec {
 
 impl LidarSpec {
     /// Returns the number of elevation channels, at least one.
-    pub fn effective_channel_count(&self) -> u16 {
+    pub(crate) fn effective_channel_count(&self) -> u16 {
         self.channel_count.max(1)
     }
 
     /// Returns the elevation angle of `channel` in radians.
-    pub fn channel_elevation_rad(&self, channel: u16) -> f64 {
+    pub(crate) fn channel_elevation_rad(&self, channel: u16) -> f64 {
         let channels = self.effective_channel_count();
         if channels <= 1 {
             return self.min_elevation_rad;
@@ -349,7 +349,7 @@ impl LidarSpec {
     }
 
     /// Returns the emission time of azimuth column `column` relative to scan start.
-    pub fn column_time_s(&self, column: u32) -> f64 {
+    pub(crate) fn column_time_s(&self, column: u32) -> f64 {
         if self.ray_count == 0 || self.rotation_period_s <= 0.0 {
             return 0.0;
         }

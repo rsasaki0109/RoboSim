@@ -158,7 +158,7 @@ impl ElevationMap {
     /// Projects a world point onto integer cell coordinates, if inside.
     ///
     /// The navigation plane is `world X-Z`; `world Y` is the height.
-    pub fn world_to_cell(&self, point_m: Vec3) -> Option<GridCoord> {
+    pub(crate) fn world_to_cell(&self, point_m: Vec3) -> Option<GridCoord> {
         if !point_m.is_finite() {
             return None;
         }

@@ -4,6 +4,23 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- Confirmed-dead `pub` items with zero references outside their defining file
+  removed from `rne_core`, `rne_nav`, `rne_robot`, `rne_sensor`, `rne_data`,
+  `rne_log`, `rne_slam`, `rne_assets`, `rne_planning`, `rne_plateau`,
+  `rne_plugin`, `rne_urdf_import`, `rne_world`, `rne_dynamics`, `rne_legged`,
+  `rne_physics`, and `rne_sumo`. Roughly forty items were unreachable from any
+  call site (delete); another ~65 that were used only within their own crate
+  are now `pub(crate)` instead of `pub`, shrinking the semver-relevant surface
+  without changing behavior. Items with plausible external callers -
+  importer entry points, error/result types required by another public
+  function's signature, and anything referenced from `docs/*.md` - were kept
+  public. `release/rust-api-baseline.toml` / `rust-api-additions-v1.toml` are
+  untouched here per ADR-020/ADR-033; retarget them at the next minor release
+  the way PR #275 did, using this entry for the removed-item list. See the PR
+  description for the full per-crate breakdown.
+
 ### Changed
 
 - `ColliderShape` and `Collider` are no longer `Copy`. Variable-size collider

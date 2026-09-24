@@ -154,7 +154,7 @@ pub struct KinematicModel {
 }
 
 /// Translation sampling range for a floating base, in meters.
-pub const FLOATING_BASE_TRANSLATION_LIMIT_M: f64 = 10.0;
+pub(crate) const FLOATING_BASE_TRANSLATION_LIMIT_M: f64 = 10.0;
 
 const FLOATING_BASE_DOF_NAMES: [&str; 6] = [
     "base_x",
@@ -589,7 +589,7 @@ impl KinematicModel {
     ///
     /// `base_pose` replaces the stored root link transform when provided, which
     /// is useful for evaluating a floating base without mutating the world.
-    pub fn forward_kinematics_with_base(
+    pub(crate) fn forward_kinematics_with_base(
         &self,
         q: &[f64],
         base_pose: Option<&Transform3>,
@@ -1174,7 +1174,7 @@ impl Jacobian {
     }
 
     /// Row-major view of the matrix.
-    pub fn rows_slice(&self) -> &[Vec<f64>] {
+    pub(crate) fn rows_slice(&self) -> &[Vec<f64>] {
         &self.data
     }
 
@@ -1717,21 +1717,6 @@ impl RobotState {
             .index_of(name)
             .ok_or_else(|| KinematicsError::UnknownJoint(name.to_string()))?;
         self.positions[index] = value;
-        Ok(())
-    }
-
-    /// Replaces all joint positions in degree-of-freedom order.
-    pub fn set_positions(&mut self, positions: &[f64]) -> Result<(), KinematicsError> {
-        if positions.len() != self.positions.len() {
-            return Err(KinematicsError::JointCountMismatch {
-                provided: positions.len(),
-                expected: self.positions.len(),
-            });
-        }
-        if positions.iter().any(|value| !value.is_finite()) {
-            return Err(KinematicsError::NonFiniteInput);
-        }
-        self.positions.copy_from_slice(positions);
         Ok(())
     }
 

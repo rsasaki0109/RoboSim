@@ -28,22 +28,11 @@ impl AppBuilder {
         }
     }
 
-    /// Sets the fixed simulation step size.
-    pub fn with_fixed_delta(mut self, fixed_delta: SimDuration) -> Self {
-        self.fixed_delta = fixed_delta;
-        self
-    }
-
     /// Registers a plugin.
     pub fn add_plugin<P: Plugin>(mut self, plugin: P) -> Self {
         plugin.build(&mut self.schedule);
         self.plugins.push(Box::new(plugin));
         self
-    }
-
-    /// Mutable access to the schedule during plugin registration.
-    pub fn schedule_mut(&mut self) -> &mut Schedule {
-        &mut self.schedule
     }
 
     /// Builds the runnable application.
@@ -80,11 +69,6 @@ impl RneApp {
     /// Returns a shared reference to the simulation clock.
     pub fn clock(&self) -> &SimClock {
         &self.clock
-    }
-
-    /// Returns a mutable reference to the simulation clock.
-    pub fn clock_mut(&mut self) -> &mut SimClock {
-        &mut self.clock
     }
 
     /// Returns the schedule.

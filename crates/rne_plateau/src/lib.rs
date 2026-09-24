@@ -414,16 +414,6 @@ pub fn import_citygml_file(
     import_citygml_impl(&xml, source_name, input_path.parent(), output_dir, options)
 }
 
-/// Imports CityGML text and writes deterministic RNE assets into `output_dir`.
-pub fn import_citygml_str(
-    xml: &str,
-    source_name: &str,
-    output_dir: &Path,
-    options: &ImportOptions,
-) -> Result<ImportResult, ImportError> {
-    import_citygml_impl(xml, source_name, None, output_dir, options)
-}
-
 fn import_citygml_impl(
     xml: &str,
     source_name: &str,

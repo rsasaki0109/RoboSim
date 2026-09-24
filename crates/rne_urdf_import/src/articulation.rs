@@ -13,9 +13,9 @@ use rne_robot::{Actuator, ActuatorLimits, ActuatorTarget, ControlMode, Joint};
 use std::collections::{BTreeMap, HashSet};
 
 /// Explicit regularization velocity assigned to URDF revolute-joint friction.
-pub const URDF_COULOMB_TRANSITION_VELOCITY_RAD_S: f64 = 0.01;
+pub(crate) const URDF_COULOMB_TRANSITION_VELOCITY_RAD_S: f64 = 0.01;
 /// Explicit regularization velocity assigned to URDF prismatic-joint friction.
-pub const URDF_COULOMB_TRANSITION_VELOCITY_M_S: f64 = 0.01;
+pub(crate) const URDF_COULOMB_TRANSITION_VELOCITY_M_S: f64 = 0.01;
 
 /// Configuration for [`attach_urdf_articulation`].
 #[derive(Clone, Copy, Debug, PartialEq)]

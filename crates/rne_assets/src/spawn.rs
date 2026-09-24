@@ -562,7 +562,7 @@ fn load_urdf_document(
 }
 
 /// Spawns a fixed ground plane collider used by built-in scenes.
-pub fn spawn_ground_plane(world: &mut World) -> Entity {
+pub(crate) fn spawn_ground_plane(world: &mut World) -> Entity {
     let ground = spawn_named(world, "ground");
     world.entity_mut(ground).insert((
         RigidBody {
@@ -769,21 +769,6 @@ fn spawn_robot_lidar(
         lidar,
         mount_offset_m: offset_m,
     }
-}
-
-/// Convenience wrapper returning full diff-drive spawn details.
-pub fn spawn_diff_drive_from_asset(
-    world: &mut World,
-    asset: &RobotAsset,
-) -> Result<DiffDriveSpawned, AssetError> {
-    let section = asset
-        .diff_drive
-        .as_ref()
-        .ok_or_else(|| AssetError::invalid("robot", "missing diff_drive section"))?;
-    Ok(spawn_diff_drive_robot(
-        world,
-        &section.to_config(&asset.model_name),
-    ))
 }
 
 fn vec3_from_array(values: [f64; 3]) -> Vec3 {

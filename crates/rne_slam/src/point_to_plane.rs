@@ -165,7 +165,7 @@ impl VoxelPointIndex {
     }
 
     /// Points within `radius_m` of `query`, as point positions.
-    pub fn within_radius(&self, query: Vec3, radius_m: f64) -> Vec<Vec3> {
+    pub(crate) fn within_radius(&self, query: Vec3, radius_m: f64) -> Vec<Vec3> {
         let cells = (radius_m / self.voxel_size_m).ceil().max(1.0) as i64;
         let center = key(query, self.voxel_size_m);
         let radius_squared = radius_m * radius_m;

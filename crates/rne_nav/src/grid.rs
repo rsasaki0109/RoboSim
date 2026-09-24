@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Fixed-point scale for log-odds stored as `i16`.
-pub const LOG_ODDS_SCALE: f64 = 1000.0;
+pub(crate) const LOG_ODDS_SCALE: f64 = 1000.0;
 /// Lower clamp for accumulated log-odds.
 pub const MIN_LOG_ODDS: i16 = -2000;
 /// Upper clamp for accumulated log-odds.
@@ -18,9 +18,9 @@ pub const DEFAULT_FREE_LOG_ODDS: f64 = -0.4;
 /// Probability at or above which a cell is reported occupied by default.
 pub const DEFAULT_OCCUPIED_PROBABILITY: f64 = 0.65;
 /// Probability at or below which a cell is reported free by default.
-pub const DEFAULT_FREE_PROBABILITY: f64 = 0.35;
+pub(crate) const DEFAULT_FREE_PROBABILITY: f64 = 0.35;
 /// Map cell value for an unknown cell, matching the ROS occupancy grid convention.
-pub const CELL_UNKNOWN: i8 = -1;
+pub(crate) const CELL_UNKNOWN: i8 = -1;
 /// Map cell value for free space.
 pub const CELL_FREE: i8 = 0;
 /// Map cell value for occupied space.

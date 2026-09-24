@@ -1,7 +1,6 @@
 //! Deterministic physics state hashing helpers.
 
 use crate::components::{JointState, RigidBody, RigidBodyType};
-use rne_ecs::Entity;
 use rne_ecs::World;
 use rne_world::Transform3;
 use std::collections::BTreeMap;
@@ -131,13 +130,6 @@ fn fnv1a_update(hash: &mut u64, bytes: &[u8]) {
 
 fn quantize(value: f64) -> i64 {
     (value * 1_000_000.0).round() as i64
-}
-
-/// Returns the translation of an entity for test assertions.
-pub fn entity_translation(world: &World, entity: Entity) -> Option<rne_math::Vec3> {
-    world
-        .get::<Transform3>(entity)
-        .map(|transform| transform.translation)
 }
 
 #[cfg(test)]

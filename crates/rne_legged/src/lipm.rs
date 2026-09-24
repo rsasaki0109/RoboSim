@@ -34,7 +34,7 @@ impl LimpParams {
     }
 
     /// Natural pendulum frequency `sqrt(g / h)` in radians per second.
-    pub fn omega_rad_s(&self) -> f64 {
+    pub(crate) fn omega_rad_s(&self) -> f64 {
         (self.gravity_m_s2 / self.com_height_m).sqrt()
     }
 

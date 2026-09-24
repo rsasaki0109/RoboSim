@@ -155,11 +155,6 @@ impl SimClock {
         self.time_scale
     }
 
-    /// Whether the clock is paused.
-    pub fn is_paused(&self) -> bool {
-        self.paused
-    }
-
     /// Sets the time scale multiplier.
     pub fn set_time_scale(&mut self, scale: f64) {
         self.time_scale = scale.max(0.0);

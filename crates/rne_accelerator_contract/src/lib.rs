@@ -43,7 +43,7 @@ pub use scaffold::{
 pub use scale::{AcceleratorScaleReport, AcceleratorScaleRun, ACCELERATOR_SCALE_REPORT_KIND};
 
 /// Stable capability-report discriminator.
-pub const ACCELERATOR_CAPABILITY_REPORT_KIND: &str = "rne_accelerator_capability_report";
+pub(crate) const ACCELERATOR_CAPABILITY_REPORT_KIND: &str = "rne_accelerator_capability_report";
 /// Current accelerator manifest schema.
 pub const ACCELERATOR_MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// Current accelerator protocol schema.

@@ -94,11 +94,6 @@ impl ImuPreintegrator {
         self.bias
     }
 
-    /// Updates the bias estimate without changing the accumulated delta.
-    pub fn set_bias(&mut self, bias: ImuBias) {
-        self.bias = bias;
-    }
-
     /// Accumulated delta.
     pub const fn delta(&self) -> PreintegratedDelta {
         self.delta

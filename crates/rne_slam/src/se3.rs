@@ -39,11 +39,6 @@ impl Se3 {
         }
     }
 
-    /// Converts from a world [`Transform3`], ignoring scale.
-    pub fn from_transform3(transform: &Transform3) -> Self {
-        Self::new(transform.rotation, transform.translation)
-    }
-
     /// Converts to a unit-scale [`Transform3`].
     pub fn to_transform3(self) -> Transform3 {
         Transform3 {

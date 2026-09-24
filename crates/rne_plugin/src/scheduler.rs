@@ -41,11 +41,6 @@ impl ControllerScheduler {
         self.state
     }
 
-    /// Returns registered controller IDs in deterministic scheduling order.
-    pub fn controller_ids(&self) -> impl Iterator<Item = &str> {
-        self.controllers.keys().map(String::as_str)
-    }
-
     /// Registers one controller and its sorted, unique robot assignment.
     pub fn register(
         &mut self,

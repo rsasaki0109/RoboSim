@@ -40,9 +40,6 @@ use std::fs;
 use std::io::Read;
 use std::path::Path;
 
-/// Current importer feature set version.
-pub const SUMO_IMPORT_VERSION: u32 = 1;
-
 /// Maximum accepted SUMO `.net.xml` input size.
 pub const SUMO_MAX_INPUT_BYTES: usize = 128 * 1024 * 1024;
 

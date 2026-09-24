@@ -66,7 +66,7 @@ pub struct DifferentialDrive {
 
 impl DifferentialDrive {
     /// Converts a body command into `(left, right)` wheel angular rates.
-    pub fn wheel_speeds(&self, command: VelocityCommand2d) -> WheelSpeeds {
+    pub(crate) fn wheel_speeds(&self, command: VelocityCommand2d) -> WheelSpeeds {
         let half_track = 0.5 * self.track_width_m;
         let left = (command.linear_m_s - command.angular_rad_s * half_track) / self.wheel_radius_m;
         let right = (command.linear_m_s + command.angular_rad_s * half_track) / self.wheel_radius_m;
@@ -138,7 +138,7 @@ pub struct MecanumDrive {
 impl MecanumDrive {
     /// Converts a body command into `(front-left, front-right, rear-left,
     /// rear-right)` wheel angular rates.
-    pub fn wheel_speeds(&self, command: VelocityCommand2d) -> [f64; 4] {
+    pub(crate) fn wheel_speeds(&self, command: VelocityCommand2d) -> [f64; 4] {
         let lever = self.half_length_m + self.half_width_m;
         let rotation = command.angular_rad_s * lever;
         let linear = command.linear_m_s;
@@ -175,7 +175,7 @@ pub enum DriveKind {
 
 impl DriveKind {
     /// The zero (hard-stop) actuation for this drive.
-    pub fn zero_actuation(&self) -> DriveActuation {
+    pub(crate) fn zero_actuation(&self) -> DriveActuation {
         match self {
             Self::Differential(_) => DriveActuation::Differential {
                 left_rad_s: 0.0,
@@ -300,16 +300,6 @@ impl MobileBase {
             applied: VelocityCommand2d::ZERO,
             disabled: false,
         })
-    }
-
-    /// The last command applied by [`MobileBase::command`].
-    pub fn applied_command(&self) -> VelocityCommand2d {
-        self.applied
-    }
-
-    /// Whether the base is disabled.
-    pub fn is_disabled(&self) -> bool {
-        self.disabled
     }
 
     /// Enables or disables the base.

@@ -262,11 +262,6 @@ impl ReplayRandomSnapshot {
         self
     }
 
-    /// Appends one named RNG state.
-    pub fn push_rng_state(&mut self, rng_state: ReplayRngState) {
-        self.rng_states.push(rng_state);
-    }
-
     /// Validates that this snapshot uses the current payload schema.
     pub fn validate_current_schema(&self) -> Result<(), ReplayRandomSnapshotError> {
         if self.schema_version == REPLAY_RANDOM_SNAPSHOT_VERSION {
@@ -378,11 +373,6 @@ impl SimulationLog {
         self.header.as_ref()
     }
 
-    /// Replaces replay metadata for this log.
-    pub fn set_header(&mut self, header: ReplayHeader) {
-        self.header = Some(header);
-    }
-
     /// Validates this log's replay header before deterministic playback.
     pub fn validate_compatibility(
         &self,
@@ -418,20 +408,9 @@ impl SimulationLog {
             .push(LogRecord::ReplayRandomSnapshot { snapshot });
     }
 
-    /// Records an IMU frame.
-    pub fn record_imu(&mut self, header: FrameHeader, payload: ImuSample) {
-        self.records.push(LogRecord::ImuFrame { header, payload });
-    }
-
     /// Records a LiDAR frame.
     pub fn record_lidar(&mut self, header: FrameHeader, payload: PointCloud) {
         self.records.push(LogRecord::LidarFrame { header, payload });
-    }
-
-    /// Records a wheel encoder frame.
-    pub fn record_wheel_encoder(&mut self, header: FrameHeader, payload: WheelEncoderSample) {
-        self.records
-            .push(LogRecord::WheelEncoderFrame { header, payload });
     }
 
     /// Returns all stored records.

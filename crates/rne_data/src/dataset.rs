@@ -33,9 +33,9 @@ pub const RENDERER_DATASET_CAPTURE_REPORT_SCHEMA_VERSION: u32 = 1;
 /// Stable renderer-backed dataset capture report discriminator.
 pub const RENDERER_DATASET_CAPTURE_REPORT_KIND: &str = "rne_renderer_dataset_capture_report";
 /// Maximum accepted manifest size.
-pub const DATASET_MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
+pub(crate) const DATASET_MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 /// Maximum number of declared streams in one bundle.
-pub const DATASET_MAX_STREAMS: usize = 4096;
+pub(crate) const DATASET_MAX_STREAMS: usize = 4096;
 
 const MANIFEST_NAME: &str = "manifest.json";
 const SHARD_NAME: &str = "records.rnedata";
@@ -700,7 +700,7 @@ impl DatasetBundleWriter {
     }
 
     /// Appends one typed or opaque payload after validating ordering and timing.
-    pub fn write_record(&mut self, record: &DatasetRecord) -> Result<(), DatasetError> {
+    pub(crate) fn write_record(&mut self, record: &DatasetRecord) -> Result<(), DatasetError> {
         self.validate_and_advance(record)?;
         self.write_encoded_record(record)
     }

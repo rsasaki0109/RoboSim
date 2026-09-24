@@ -116,11 +116,6 @@ impl ZmpPreviewController {
         self.sample_time_s
     }
 
-    /// Number of future ZMP samples used by the preview.
-    pub fn preview_steps(&self) -> usize {
-        self.preview_steps
-    }
-
     /// The controller gains.
     pub fn gains(&self) -> &PreviewGains {
         &self.gains

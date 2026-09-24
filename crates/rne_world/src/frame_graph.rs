@@ -11,7 +11,7 @@ pub struct FrameId(pub u32);
 
 impl FrameId {
     /// World frame identifier.
-    pub const WORLD: Self = Self(0);
+    pub(crate) const WORLD: Self = Self(0);
 }
 
 /// Named coordinate frame node.

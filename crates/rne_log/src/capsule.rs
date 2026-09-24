@@ -244,18 +244,6 @@ impl ArtifactRef {
         Ok(artifact)
     }
 
-    /// Creates a reference using the conventional `(path, role, kind, ... )`
-    /// naming at call sites.
-    pub fn from_path(
-        path: impl AsRef<str>,
-        role: impl Into<String>,
-        kind: impl Into<String>,
-        schema_version: u32,
-        sha256: impl Into<String>,
-    ) -> Result<Self, FailureCapsuleError> {
-        Self::new(role, kind, schema_version, path, sha256)
-    }
-
     /// Validates canonical path, identifier, schema-version, and digest rules.
     pub fn validate(&self) -> Result<(), FailureCapsuleError> {
         validate_artifact_identifier("artifact.role", &self.role, &self.path)?;

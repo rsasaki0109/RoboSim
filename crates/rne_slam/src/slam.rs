@@ -127,11 +127,6 @@ impl Slam2d {
         &self.loop_edges
     }
 
-    /// Consumes the estimator and returns the accumulated map.
-    pub fn into_grid(self) -> OccupancyGrid {
-        self.grid
-    }
-
     /// Processes a scan with its odometry pose and sensor mounting transform.
     pub fn process(
         &mut self,

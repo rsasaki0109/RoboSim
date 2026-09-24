@@ -44,11 +44,6 @@ impl TiledOccupancyGrid {
         self.resolution_m
     }
 
-    /// Tile edge length in cells.
-    pub fn tile_size_cells(&self) -> usize {
-        self.tile_size_cells
-    }
-
     /// Number of allocated tiles.
     pub fn tile_count(&self) -> usize {
         self.tiles.len()
@@ -70,7 +65,7 @@ impl TiledOccupancyGrid {
     }
 
     /// Occupancy probability at a world point, if the owning tile exists.
-    pub fn probability_at(&self, world_m: Vec3) -> Option<f64> {
+    pub(crate) fn probability_at(&self, world_m: Vec3) -> Option<f64> {
         let (tile, coord) = self.locate(world_m);
         self.tiles.get(&tile)?.probability(coord)
     }
@@ -80,34 +75,6 @@ impl TiledOccupancyGrid {
         self.probability_at(world_m)
             .map(|probability| probability >= crate::grid::DEFAULT_OCCUPIED_PROBABILITY)
             .unwrap_or(false)
-    }
-
-    /// World centers of occupied cells across all tiles.
-    pub fn occupied_world_cells(&self) -> Vec<Vec3> {
-        let mut cells = Vec::new();
-        for (tile_index, tile) in &self.tiles {
-            for y in 0..tile.height() {
-                for x in 0..tile.width() {
-                    let coord = GridCoord {
-                        x: x as isize,
-                        y: y as isize,
-                    };
-                    if tile.is_occupied(coord) {
-                        let local = tile_world_origin(self, *tile_index);
-                        let world = self.origin.transform_point(
-                            local
-                                + Vec3::new(
-                                    x as f64 * self.resolution_m,
-                                    y as f64 * self.resolution_m,
-                                    0.0,
-                                ),
-                        );
-                        cells.push(world);
-                    }
-                }
-            }
-        }
-        cells
     }
 
     fn apply(&mut self, world_m: Vec3, log_odds: f64, occupied: bool) -> bool {
