@@ -1050,13 +1050,11 @@ version = "0.3.0"
 dependencies = [
  "png",
  "rne_ai",
- "rne_core",
  "rne_math",
  "rne_render",
  "rne_render_3dgs",
  "rne_render_wgpu",
  "rne_sensor",
- "rne_world",
 ]
 
 [[package]]
@@ -1065,7 +1063,6 @@ version = "0.3.0"
 dependencies = [
  "rne_dynamics",
  "rne_ecs",
- "rne_math",
  "rne_robot",
  "rne_urdf_import",
 ]
@@ -1440,7 +1437,6 @@ dependencies = [
  "rne_render_wgpu",
  "rne_sensor",
  "rne_world",
- "serde",
  "serde_json",
  "sha2",
 ]
@@ -1676,10 +1672,8 @@ dependencies = [
  "rne_ecs",
  "rne_math",
  "rne_oc",
- "rne_physics",
  "rne_robot",
  "rne_urdf_import",
- "rne_world",
 ]
 
 [[package]]
@@ -1687,7 +1681,6 @@ name = "go2_jump_sim"
 version = "0.2.0"
 dependencies = [
  "glam",
- "image",
  "png",
  "rne_ai",
  "rne_dynamics",
@@ -1700,7 +1693,6 @@ dependencies = [
  "rne_robot",
  "rne_urdf_import",
  "rne_wbc",
- "rne_world",
 ]
 
 [[package]]
@@ -1727,7 +1719,6 @@ dependencies = [
 name = "go2_pure_torque"
 version = "0.3.0"
 dependencies = [
- "anyhow",
  "rne_ai",
  "rne_math",
 ]
@@ -2044,7 +2035,6 @@ dependencies = [
  "image",
  "png",
  "rne_core",
- "rne_data",
  "rne_ecs",
  "rne_math",
  "rne_physics",
@@ -2079,12 +2069,9 @@ dependencies = [
  "rne_assets",
  "rne_core",
  "rne_data",
- "rne_ecs",
  "rne_math",
- "rne_physics",
  "rne_render",
  "rne_render_wgpu",
- "rne_robot",
  "rne_sensor",
  "rne_world",
  "serde",
@@ -2711,7 +2698,6 @@ name = "nav_slam_mapping"
 version = "0.3.0"
 dependencies = [
  "rne_ecs",
- "rne_math",
  "rne_nav",
  "rne_slam",
 ]
@@ -3958,7 +3944,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -4040,8 +4025,6 @@ name = "rne_ecs"
 version = "0.3.0"
 dependencies = [
  "bevy_ecs",
- "rne_core",
- "rne_math",
  "serde",
  "smallvec",
  "uuid",
@@ -4159,8 +4142,6 @@ version = "0.3.0"
 dependencies = [
  "approx",
  "bevy_ecs",
- "rne_core",
- "rne_ecs",
  "rne_math",
  "serde",
  "serde_json",
@@ -4280,7 +4261,6 @@ dependencies = [
  "rne_math",
  "rne_physics",
  "rne_world",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4479,7 +4459,6 @@ dependencies = [
  "approx",
  "bevy_ecs",
  "rne_core",
- "rne_ecs",
  "rne_math",
  "rne_nav",
  "serde",
@@ -5013,7 +4992,6 @@ dependencies = [
 name = "ssl_physics_coupling"
 version = "0.3.0"
 dependencies = [
- "prost",
  "rne_adapter_ssl",
  "rne_ai",
 ]
@@ -5291,19 +5269,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
  "pin-project-lite",
- "tracing-attributes",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-attributes"
-version = "0.1.31"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
