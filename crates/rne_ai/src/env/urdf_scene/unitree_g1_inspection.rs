@@ -54,18 +54,23 @@ pub fn unitree_g1_inspection_targets(step: u64) -> [UrdfJointPositionTarget<'sta
     set_target(
         &mut targets,
         "right_shoulder_pitch_link",
-        super::unitree_g1_gait::ARM_HANG_PITCH_RAD - 1.21 * blend,
+        super::unitree_g1_gait::ARM_HANG_PITCH_RAD - 1.15 * blend,
     );
     set_target(
         &mut targets,
         "right_shoulder_roll_link",
-        -super::unitree_g1_gait::ARM_HANG_ROLL_RAD - 0.32 * blend,
+        -super::unitree_g1_gait::ARM_HANG_ROLL_RAD - 0.18 * blend,
     );
     set_target(&mut targets, "right_shoulder_yaw_link", -0.30 * blend);
+    // The rest elbow bend (`ARM_HANG_ELBOW_RAD`) hangs the forearm down;
+    // the point-and-confirm gesture straightens it back out toward 0.15 rad
+    // as the raised shoulder brings the arm up and forward, so the pointing
+    // hand reads as reaching rather than staying folded against the hip.
     set_target(
         &mut targets,
         "right_elbow_link",
-        super::unitree_g1_gait::ARM_HANG_ELBOW_RAD - 0.09 * blend,
+        super::unitree_g1_gait::ARM_HANG_ELBOW_RAD
+            - (super::unitree_g1_gait::ARM_HANG_ELBOW_RAD - 0.15) * blend,
     );
     set_target(&mut targets, "right_wrist_roll_rubber_hand", 0.35 * blend);
     targets

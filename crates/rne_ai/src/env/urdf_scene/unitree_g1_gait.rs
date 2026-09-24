@@ -104,21 +104,67 @@ pub fn unitree_g1_gait_targets(
     ]
 }
 
-/// Shoulder-pitch bias that lets the arm hang by the body instead of
-/// reaching forward at rest (`stride == 0`).
-pub(crate) const ARM_HANG_PITCH_RAD: f64 = 0.06;
-/// Shoulder-roll abduction that clears the hips during swing while keeping
-/// the arm close to the body, rather than the wide reach used previously.
-pub(crate) const ARM_HANG_ROLL_RAD: f64 = 0.06;
-/// Resting elbow bend for a relaxed, slightly bent arm instead of a
-/// forward-reaching "pushing a cart" pose.
-pub(crate) const ARM_HANG_ELBOW_RAD: f64 = 0.14;
+/// Shoulder-pitch bias at rest (`stride == 0`). Zero already hangs the
+/// *upper* arm (shoulder-to-elbow) correctly (see `ARM_HANG_ELBOW_RAD`).
+pub(crate) const ARM_HANG_PITCH_RAD: f64 = 0.0;
+/// Shoulder-roll abduction that clears the hips during swing. Matches the
+/// value the walking gait was originally tuned and pinned with
+/// (`learned_torques_make_the_g1_stride`,
+/// `v03_sustained_envelope_walks_50s_without_falling`): measurement showed
+/// a smaller roll (closer to zero, i.e. arms held tighter to the body)
+/// destabilizes those pinned locomotion gates even at an unchanged elbow,
+/// most likely from arm/hip self-contact while the legs swing through
+/// this reduced clearance.
+pub(crate) const ARM_HANG_ROLL_RAD: f64 = 0.20;
+/// Resting elbow bend that lets the forearm hang mostly down by the body
+/// instead of sticking out horizontally forward.
+///
+/// This link's zero position is *not* a straight arm: forward-kinematics
+/// measurement showed that at `elbow == 0` the forearm (elbow-to-hand
+/// vector) is almost perfectly horizontal, forward of the body
+/// (`hand - elbow ~= (+0.10, -0.01, 0.00) m`), even though the *upper* arm
+/// (shoulder-to-elbow) already hangs correctly at `shoulder_pitch == 0`
+/// (`~= (+0.02, -0.20, -0.05) m`). The forearm points straight down only
+/// once the elbow is bent roughly 84 degrees (`elbow ~= 1.47`); by
+/// `elbow ~= 0.9-1.1` it already reads as clearly hanging (roughly a
+/// 45-55 degree bend from vertical instead of horizontal).
+///
+/// This value is deliberately smaller than that, because the shared rest
+/// pose also has to survive the factory inspection task's different
+/// (smaller-stride, faster-cadence) walk command, not just the sustained
+/// walk's. At `ARM_HANG_ROLL_RAD == 0.20`, every value of `elbow` up to
+/// `0.90` passes the sustained-walk gates
+/// (`gait_is_periodic_and_clamps_commands`,
+/// `learned_torques_make_the_g1_stride`,
+/// `v03_sustained_envelope_walks_50s_without_falling`), but the factory
+/// inspection route (`factory_inspection_stays_upright_throughout`) tips
+/// the G1 over partway through at `elbow == 0.75` or above on this
+/// machine (a real fall that a naive "did it finish near the last marker"
+/// check does not catch, since the fallen G1 can still slide to a stop
+/// close enough — this was caught only by adding a height check, and
+/// separately reproduced the "factory episode did not reach a terminal
+/// step" CI failure on Linux at the larger `0.90` this constant was
+/// originally set to). `0.70` was the largest value measured safe on this
+/// machine; `0.50` keeps a wider margin under that boundary for
+/// platform-to-platform floating point differences (this G1 walking setup
+/// is well documented elsewhere in this codebase as chaotic: ULP-level
+/// perturbations can flip outcomes), while still reading as a visibly
+/// bent, forward-and-down hanging arm rather than the original
+/// near-horizontal forearm.
+pub(crate) const ARM_HANG_ELBOW_RAD: f64 = 0.50;
 /// Shoulder-pitch swing amplitude per unit of stride, counter-phase to the
-/// leg on the same side (left arm forward with right leg forward). This is
-/// large enough to read as a natural walking arm swing across the gait's
-/// validated stride envelope while remaining a position-servo target that
-/// does not change hip/knee torque tracking.
-const ARM_SWING_GAIN: f64 = 3.2;
+/// leg on the same side (left arm forward with right leg forward).
+///
+/// A much larger gain (`3.2`, giving an easily visible swing) was tried
+/// together with the hanging-elbow fix above; it passed every G1
+/// locomotion gate on its own, but combined with the factory inspection
+/// task's different (smaller-stride, faster-cadence) walk command it threw
+/// the G1 off its scripted path entirely (measured base position several
+/// meters from the inspection marker instead of a few centimeters).
+/// Reverting to this original, validated gain keeps the swing subtle but
+/// safe across every scripted G1 gait command in this codebase; the
+/// visible fix here is the hanging elbow, not swing amplitude.
+const ARM_SWING_GAIN: f64 = 0.7;
 
 fn gait_wave(phase: f64) -> (f64, f64) {
     const STANCE_FRACTION: f64 = 0.62;
