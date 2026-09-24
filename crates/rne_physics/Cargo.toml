@@ -9,6 +9,9 @@ repository.workspace = true
 
 # RNE 0.x permits documented capability/error enum growth. Keep additions
 # visible in semver CI while rejecting removals, field changes, and reordering.
+[lints]
+workspace = true
+
 [package.metadata.cargo-semver-checks.lints]
 enum_variant_added = "warn"
 

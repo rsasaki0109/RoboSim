@@ -8,6 +8,9 @@ license.workspace = true
 publish = false
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 rne_dynamics = { workspace = true }
 rne_ecs = { workspace = true }

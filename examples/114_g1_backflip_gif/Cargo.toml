@@ -1,10 +1,13 @@
 [package]
 name = "g1_backflip_gif"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+
+[lints]
+workspace = true
 
 [dependencies]
 rne_core = { workspace = true }
@@ -26,3 +29,9 @@ rne_world = { workspace = true }
 [[example]]
 name = "114_g1_backflip_gif"
 path = "main.rs"
+
+[package.metadata.cargo-machete]
+# rne_physics_rapier is only referenced through its "experimental-armature"
+# feature flag (activated here, consumed by native.rs's RevoluteJointArmature
+# usage); cargo-machete cannot see feature-only dependencies.
+ignored = ["rne_physics_rapier"]

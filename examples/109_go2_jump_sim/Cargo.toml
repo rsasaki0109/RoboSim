@@ -1,14 +1,16 @@
 [package]
 name = "go2_jump_sim"
 version = "0.2.0"
-edition = "2021"
+edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 glam = { workspace = true }
-image = { workspace = true }
 png = { workspace = true }
 rne_ai = { workspace = true }
 rne_dynamics = { workspace = true }
@@ -21,7 +23,6 @@ rne_render_wgpu = { workspace = true, features = ["viewer"] }
 rne_robot = { workspace = true }
 rne_urdf_import = { workspace = true }
 rne_wbc = { workspace = true }
-rne_world = { workspace = true }
 
 [[example]]
 name = "109_go2_jump_sim"

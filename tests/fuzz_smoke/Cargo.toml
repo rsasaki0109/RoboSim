@@ -1,10 +1,13 @@
 [package]
 name = "rne_fuzz_smoke"
-version = "0.3.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+
+[lints]
+workspace = true
 
 [dependencies]
 rne_data = { workspace = true }

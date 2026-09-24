@@ -1,16 +1,18 @@
 [package]
 name = "imu_dead_reckoning"
-version = "0.3.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+
+[lints]
+workspace = true
 
 [dependencies]
 image = "0.25"
 png = { workspace = true }
 rne_core = { workspace = true }
-rne_data = { workspace = true }
 rne_ecs = { workspace = true }
 rne_math = { workspace = true }
 rne_physics = { workspace = true }

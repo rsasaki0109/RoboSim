@@ -185,6 +185,21 @@ repository = "https://github.com/rsasaki0109/RoboSim"
 rust-version = "1.88.0"
 version = "0.3.0"
 
+[workspace.lints.rust]
+# CI runs clippy with `-D warnings`, so warn-level here is enforced as deny in CI.
+unreachable_pub = "warn"
+missing_debug_implementations = "warn"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+# Threshold raised in clippy.toml (too-many-lines-threshold = 150); pre-existing
+# offenders outside do-not-touch paths carry a targeted allow with a cleanup
+# note instead of being force-split in this metadata/lint-hardening PR.
+too_many_lines = "warn"
+
 [workspace.dependencies]
 # Internal crates use exact release requirements so packaged manifests resolve the
 # same release set from a registry after Cargo removes local paths.

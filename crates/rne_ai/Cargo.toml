@@ -7,6 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# Not opted into [workspace.lints]: src/env/urdf_scene/** is out of scope for
+# this crate-wide lint pass (parallel PR owns that tree) and would fail
+# missing_debug_implementations/too_many_lines there.
+
 [dependencies]
 bevy_ecs = { workspace = true }
 rne_assets = { workspace = true }
