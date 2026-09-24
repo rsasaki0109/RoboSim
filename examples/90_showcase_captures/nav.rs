@@ -21,9 +21,9 @@ const ENVIRONMENT_ID: &str = "nav";
 const SUBJECT: &str = "office AGV navigation: planned route, driven trajectory, and docking goal";
 const CAMERA: CameraEvidence = CameraEvidence {
     fov_y_rad: std::f64::consts::FRAC_PI_4,
-    yaw_rad: 0.18,
-    pitch_rad: 1.10,
-    distance_m: 6.6,
+    yaw_rad: 0.32,
+    pitch_rad: 0.78,
+    distance_m: 6.4,
 };
 
 /// Runs the dock-to-desk office mission and captures the AGV in the office with
@@ -49,7 +49,7 @@ pub fn run(repo_root: &Path, capture: bool) -> Result<ShowcaseMetadata> {
     let capture_evidence = if capture {
         let captured = rollout(true, Some(first.steps))?;
         let orbit = CameraOrbit {
-            focus: Vec3::new(4.65, 0.42, 0.0),
+            focus: Vec3::new(4.65, 0.55, 0.0),
             yaw_rad: CAMERA.yaw_rad,
             pitch_rad: CAMERA.pitch_rad,
             distance_m: CAMERA.distance_m,
@@ -59,7 +59,7 @@ pub fn run(repo_root: &Path, capture: bool) -> Result<ShowcaseMetadata> {
             ENVIRONMENT_ID,
             &captured.frames,
             orbit,
-            [0.075, 0.085, 0.105, 1.0],
+            [0.32, 0.36, 0.42, 1.0],
             FRAME_COUNT / 2,
         )?)
     } else {

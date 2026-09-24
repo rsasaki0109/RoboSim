@@ -1266,7 +1266,7 @@ fn render_capture(
         media_dir.join("house-mobile-manipulation.png"),
     )?;
     let gif_path = media_dir.join("house-mobile-manipulation.gif");
-    build_gif(capture_dir, &gif_path, 16)?;
+    build_gif(capture_dir, &gif_path, 224)?;
     let gif_bytes = fs::metadata(&gif_path)?.len();
     anyhow::ensure!(
         gif_bytes <= 5_000_000,
@@ -1311,7 +1311,7 @@ fn render_capture(
         follow_dir.join(format!("frame-{poster_frame:03}.png")),
         &follow_poster_path,
     )?;
-    build_gif(&follow_dir, &follow_gif_path, 16)?;
+    build_gif(&follow_dir, &follow_gif_path, 224)?;
     let follow_gif_bytes = fs::metadata(&follow_gif_path)?.len();
     anyhow::ensure!(
         follow_gif_bytes <= 5_000_000,
@@ -2345,10 +2345,18 @@ fn choose_poster_frame(rollout: &Rollout) -> usize {
         .unwrap_or(FRAME_COUNT / 2)
 }
 
-fn build_gif(frames_dir: &Path, gif_path: &Path, max_colors: u8) -> Result<()> {
+fn build_gif(frames_dir: &Path, gif_path: &Path, max_colors: u16) -> Result<()> {
     let input = frames_dir.join("frame-%03d.png");
+    // The Dr Johnson capture uses a fixed measured camera pose, so the
+    // photoreal 3DGS background is nearly static across frames while the
+    // robot foreground moves. A `diff`-mode palette biases its color budget
+    // toward the moving pixels and starves the richly textured background,
+    // which is what produced visible banding/posterization on the room. A
+    // `full`-mode statistics pass, a near-max color budget, and Bayer
+    // dithering keep the GIF within its size budget while removing the
+    // flat-color blobs from the walls and floor.
     let filter = format!(
-        "fps=8,scale=960:540:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors={max_colors}:stats_mode=diff[p];[s1][p]paletteuse=dither=none"
+        "fps=8,scale=960:540:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors={max_colors}:stats_mode=full[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3"
     );
     let status = std::process::Command::new("ffmpeg")
         .args([
