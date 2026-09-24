@@ -14,6 +14,20 @@ pub fn unitree_g1_inspection_targets(step: u64) -> [UrdfJointPositionTarget<'sta
     const TASK_STEPS: u64 = 120;
     let task_step = step % TASK_STEPS;
     if task_step < APPROACH_STEPS {
+        // NOTE: the scripted hybrid gait is a near-stationary stepper across
+        // its entire stable envelope (see docs/G1_LOCOMOTION.md): measured
+        // base displacement here is only a few centimeters regardless of
+        // stride amplitude, and this operating point is right at the
+        // hybrid tick's discrete-stability edge — even a modest
+        // `foot_lift_rad` increase (0.06 -> 0.08) was enough to blow the
+        // solver up to NaN in testing, and a larger stride carried the
+        // pelvis outside a marker's radius. So the pinned v0.1 stride/lift
+        // is kept exactly as validated. A visibly longer walk between
+        // markers needs the learned transport torque overlay
+        // (`UnitreeG1TorqueOverlay::LEARNED_STRIDE`, as used by example 92)
+        // ported into this approach phase under the same chaos-tested
+        // discipline, which also needs a step-budget change that touches
+        // the G1 workbench mission's walk timeout; left as follow-up.
         return unitree_g1_gait_targets(
             task_step,
             UnitreeG1GaitCommand {
@@ -32,15 +46,27 @@ pub fn unitree_g1_inspection_targets(step: u64) -> [UrdfJointPositionTarget<'sta
             cycle_steps: 60,
         },
     );
+    // Blend from the relaxed hanging-arm rest pose (see `ARM_HANG_*` in
+    // `unitree_g1_gait`) to a deliberate raised point-and-confirm gesture,
+    // rather than snapping from a forward-reaching idle into another forward
+    // reach, which used to read as an aimless jab.
     let blend = smoothstep((task_step - APPROACH_STEPS) as f64 / 30.0);
-    set_target(&mut targets, "right_shoulder_pitch_link", -1.15 * blend);
+    set_target(
+        &mut targets,
+        "right_shoulder_pitch_link",
+        super::unitree_g1_gait::ARM_HANG_PITCH_RAD - 1.21 * blend,
+    );
     set_target(
         &mut targets,
         "right_shoulder_roll_link",
-        -0.20 - 0.18 * blend,
+        -super::unitree_g1_gait::ARM_HANG_ROLL_RAD - 0.32 * blend,
     );
     set_target(&mut targets, "right_shoulder_yaw_link", -0.30 * blend);
-    set_target(&mut targets, "right_elbow_link", 0.42 - 0.24 * blend);
+    set_target(
+        &mut targets,
+        "right_elbow_link",
+        super::unitree_g1_gait::ARM_HANG_ELBOW_RAD - 0.09 * blend,
+    );
     set_target(&mut targets, "right_wrist_roll_rubber_hand", 0.35 * blend);
     targets
 }

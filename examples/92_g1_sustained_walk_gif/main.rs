@@ -43,7 +43,7 @@ const WALK_STRIDE_RAD: f64 = 0.065;
 const WALK_FOOT_LIFT_RAD: f64 = 0.12;
 const WALK_CYCLE_STEPS: u64 = 100;
 const TRAIL_EVERY_STEPS: u64 = 36;
-const CLEAR_COLOR: [f32; 4] = [0.025, 0.035, 0.05, 1.0];
+const CLEAR_COLOR: [f32; 4] = [0.11, 0.13, 0.155, 1.0];
 const COMMAND_MIN_WINDOW_M: f64 = 0.12;
 
 const SUSTAINED_YAW_RATE_RAD_S: f64 = 0.05;
@@ -514,15 +514,17 @@ fn append_realistic_test_bay(
 ) {
     // The G1 physics scene intentionally stays minimal. These render-only props make the
     // hero capture read as a real robotics test bay without changing contacts or dynamics.
-    const FLOOR: [f32; 4] = [0.19, 0.21, 0.22, 1.0];
-    const FLOOR_SEAM: [f32; 4] = [0.075, 0.09, 0.10, 1.0];
-    const SAFETY_YELLOW: [f32; 4] = [0.72, 0.46, 0.08, 1.0];
-    const WALL: [f32; 4] = [0.14, 0.17, 0.20, 1.0];
-    const WALL_PANEL: [f32; 4] = [0.09, 0.13, 0.17, 1.0];
-    const METAL: [f32; 4] = [0.30, 0.34, 0.36, 1.0];
-    const WINDOW: [f32; 4] = [0.035, 0.10, 0.14, 1.0];
-    const LIGHT: [f32; 4] = [0.82, 0.86, 0.78, 1.0];
-    const STATUS: [f32; 4] = [0.10, 0.74, 0.48, 1.0];
+    const FLOOR: [f32; 4] = [0.28, 0.30, 0.31, 1.0];
+    const FLOOR_SEAM: [f32; 4] = [0.12, 0.14, 0.16, 1.0];
+    const SAFETY_YELLOW: [f32; 4] = [0.86, 0.58, 0.10, 1.0];
+    const WALL: [f32; 4] = [0.26, 0.29, 0.33, 1.0];
+    const WALL_PANEL: [f32; 4] = [0.16, 0.22, 0.28, 1.0];
+    const METAL: [f32; 4] = [0.42, 0.46, 0.48, 1.0];
+    const WINDOW: [f32; 4] = [0.08, 0.20, 0.26, 1.0];
+    const LIGHT: [f32; 4] = [0.92, 0.94, 0.88, 1.0];
+    const STATUS: [f32; 4] = [0.14, 0.82, 0.54, 1.0];
+    const CART_BODY: [f32; 4] = [0.62, 0.20, 0.14, 1.0];
+    const CART_TRAY: [f32; 4] = [0.30, 0.32, 0.34, 1.0];
 
     let floor_center = Vec3::new(center_x_m + 0.25, -0.035, center_z_m - 0.35);
     push_box(scene, floor_center, Vec3::new(5.4, 0.07, 4.6), FLOOR);
@@ -655,6 +657,32 @@ fn append_realistic_test_bay(
             scene,
             Vec3::new(center_x_m + 0.20, 2.49, center_z_m + z_offset),
             Vec3::new(0.06, 0.12, 0.06),
+            METAL,
+        );
+    }
+
+    // A small tool cart against the far wall gives the bay a lived-in,
+    // purposeful read instead of an empty grid; it sits well clear of the
+    // walked lane and is render-only, like the rest of this dressing.
+    let cart_x_m = center_x_m + 2.0;
+    let cart_z_m = center_z_m + 1.75;
+    push_box(
+        scene,
+        Vec3::new(cart_x_m, 0.34, cart_z_m),
+        Vec3::new(0.46, 0.58, 0.30),
+        CART_BODY,
+    );
+    push_box(
+        scene,
+        Vec3::new(cart_x_m, 0.64, cart_z_m),
+        Vec3::new(0.50, 0.03, 0.34),
+        CART_TRAY,
+    );
+    for x_sign in [-1.0_f64, 1.0] {
+        push_box(
+            scene,
+            Vec3::new(cart_x_m + x_sign * 0.20, 0.07, cart_z_m + 0.12),
+            Vec3::new(0.05, 0.07, 0.05),
             METAL,
         );
     }

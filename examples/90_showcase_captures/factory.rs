@@ -220,30 +220,121 @@ fn render_scene(
         .filter(|item| item.mesh.is_some())
         .count();
     // Render-only factory dressing keeps the G1 silhouette separated from the
-    // dark rack and station without changing collision or task state.
-    push_box(
-        &mut scene,
-        Vec3::new(0.0, 1.55, -1.17),
-        Vec3::new(3.3, 0.08, 0.08),
-        [0.20, 0.28, 0.34, 1.0],
-    );
-    for x_m in [-1.25, 0.0, 1.25] {
-        push_cylinder(
-            &mut scene,
-            Vec3::new(x_m, 1.35, -1.08),
-            0.025,
-            2.6,
-            Quat::IDENTITY,
-            [0.26, 0.32, 0.38, 1.0],
-        );
+    // rack and station without changing collision or task state: a tiled
+    // floor with painted lane lines, overhead light fixtures, a control
+    // cabinet with indicator lights at each inspection stop, and safety
+    // bollards along the walked route.
+    const FLOOR_TILE: [f32; 4] = [0.40, 0.42, 0.44, 1.0];
+    const FLOOR_TILE_ALT: [f32; 4] = [0.20, 0.22, 0.24, 1.0];
+    const LANE_LINE: [f32; 4] = [0.88, 0.60, 0.10, 1.0];
+    const CABINET_BODY: [f32; 4] = [0.20, 0.24, 0.30, 1.0];
+    const CABINET_TRIM: [f32; 4] = [0.44, 0.48, 0.52, 1.0];
+    const BOLLARD: [f32; 4] = [0.82, 0.30, 0.14, 1.0];
+    const FIXTURE_BEAM: [f32; 4] = [0.24, 0.28, 0.33, 1.0];
+    const FIXTURE_LIGHT: [f32; 4] = [0.94, 0.95, 0.88, 1.0];
+    const PIPE: [f32; 4] = [0.36, 0.40, 0.43, 1.0];
+
+    // Painted floor tiles under and around the inspection route replace the
+    // flat untextured slab with visible scale and structure. The default
+    // collider-derived ground box's top surface sits at world y = 0.0, so
+    // these sit a visible few millimeters above it rather than underneath.
+    for (index, x_m) in [-0.6, -0.1, 0.4, 0.9].into_iter().enumerate() {
+        for (row, z_m) in [-1.0, -0.5, 0.0, 0.5].into_iter().enumerate() {
+            let alt = (index + row) % 2 == 0;
+            push_box(
+                &mut scene,
+                Vec3::new(x_m, 0.012, z_m),
+                Vec3::new(0.46, 0.024, 0.46),
+                if alt { FLOOR_TILE } else { FLOOR_TILE_ALT },
+            );
+        }
     }
+    // A painted lane line traces the approach route between markers.
     push_box_material(
         &mut scene,
-        Vec3::new(0.2, 0.02, 0.42),
-        Vec3::new(2.8, 0.035, 0.035),
-        Quat::IDENTITY,
-        [0.95, 0.62, 0.06, 1.0],
-        PbrMaterial::new([0.95, 0.62, 0.06, 1.0], 0.36, 0.5, [0.0; 3]),
+        Vec3::new(0.30, 0.014, -0.18),
+        Vec3::new(1.15, 0.006, 0.05),
+        Quat::from_rotation_y(-0.34),
+        LANE_LINE,
+        PbrMaterial::new(LANE_LINE, 0.55, 0.25, [0.0; 3]),
     );
+
+    // A control cabinet with an indicator light at each marker reads as a
+    // purposeful inspection stop rather than a bare box. Placed in front of
+    // the camera's focus area (near the existing inspection station/display)
+    // so all three are clearly on-screen rather than behind the parts rack.
+    for (x_m, z_m, lit) in [
+        (-0.35, -0.05, true),
+        (0.55, -0.15, false),
+        (1.05, -0.35, false),
+    ] {
+        push_box(
+            &mut scene,
+            Vec3::new(x_m, 0.95, z_m),
+            Vec3::new(0.24, 0.46, 0.18),
+            CABINET_BODY,
+        );
+        push_box(
+            &mut scene,
+            Vec3::new(x_m, 0.95, z_m + 0.10),
+            Vec3::new(0.26, 0.48, 0.02),
+            CABINET_TRIM,
+        );
+        push_box(
+            &mut scene,
+            Vec3::new(x_m, 1.11, z_m + 0.105),
+            Vec3::new(0.035, 0.035, 0.012),
+            if lit {
+                [0.16, 0.92, 0.52, 1.0]
+            } else {
+                [0.70, 0.20, 0.16, 1.0]
+            },
+        );
+    }
+
+    // Overhead light fixtures and a pipe run give the ceiling area depth.
+    push_box(
+        &mut scene,
+        Vec3::new(0.0, 1.62, -1.17),
+        Vec3::new(3.3, 0.08, 0.08),
+        FIXTURE_BEAM,
+    );
+    for x_m in [-1.25, -0.4, 0.45, 1.25] {
+        push_cylinder(
+            &mut scene,
+            Vec3::new(x_m, 1.42, -1.08),
+            0.022,
+            2.6,
+            Quat::IDENTITY,
+            PIPE,
+        );
+        push_box(
+            &mut scene,
+            Vec3::new(x_m, 2.05, 0.0),
+            Vec3::new(0.42, 0.04, 0.14),
+            FIXTURE_LIGHT,
+        );
+    }
+
+    // Safety bollards mark the edge of the walked lane, alongside the
+    // camera's focus area so they read clearly instead of sitting off-frame.
+    for (x_m, z_m) in [(-0.55, -0.05), (0.80, 0.05), (1.30, -0.30)] {
+        push_cylinder(
+            &mut scene,
+            Vec3::new(x_m, 0.22, z_m),
+            0.045,
+            0.44,
+            Quat::from_rotation_x(std::f64::consts::FRAC_PI_2),
+            BOLLARD,
+        );
+        push_cylinder(
+            &mut scene,
+            Vec3::new(x_m, 0.42, z_m),
+            0.055,
+            0.05,
+            Quat::from_rotation_x(std::f64::consts::FRAC_PI_2),
+            [0.95, 0.85, 0.15, 1.0],
+        );
+    }
     Ok((scene, mesh_items))
 }

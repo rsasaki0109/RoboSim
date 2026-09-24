@@ -29,11 +29,11 @@ observation state.
 | --- | --- | ---: | ---: | ---: |
 | Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 414,735 | 749,240 | 960 x 540 |
 | OpenArm v2 bimanual control | `showcase-openarm.gif` / `.png` | 2,341,410 | 53,829 | 960 x 540 |
-| Factory inspection | `showcase-factory.gif` / `.png` | 1,830,619 | 52,228 | 960 x 540 |
+| Factory inspection | `showcase-factory.gif` / `.png` | 2,089,648 | 61,623 | 960 x 540 |
 | Office AGV delivery | `showcase-office.gif` / `.png` | 1,812,046 | 47,795 | 960 x 540 |
 | PLATEAU UAV RGB-D flight | `showcase-uav.gif` / `.png` | 4,329,461 | 439,474 | 960 x 540 |
 
-The current GIF total is **10,728,271 bytes**, below the 12,000,000-byte
+The current GIF total is **10,987,300 bytes**, below the 12,000,000-byte
 combined ceiling. `showcase-media-check` verifies the exact total; regeneration
 must update the manifest's sizes and hashes in the same change.
 

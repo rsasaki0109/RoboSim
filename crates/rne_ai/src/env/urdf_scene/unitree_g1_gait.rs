@@ -85,18 +85,40 @@ pub fn unitree_g1_gait_targets(
         r[4],
         r[5],
         target("torso_link", 0.0),
-        target("left_shoulder_pitch_link", -0.7 * stride * left),
-        target("left_shoulder_roll_link", 0.20),
+        target(
+            "left_shoulder_pitch_link",
+            ARM_HANG_PITCH_RAD - ARM_SWING_GAIN * stride * left,
+        ),
+        target("left_shoulder_roll_link", ARM_HANG_ROLL_RAD),
         target("left_shoulder_yaw_link", 0.0),
-        target("left_elbow_link", 0.42),
+        target("left_elbow_link", ARM_HANG_ELBOW_RAD),
         target("left_wrist_roll_rubber_hand", 0.0),
-        target("right_shoulder_pitch_link", -0.7 * stride * right),
-        target("right_shoulder_roll_link", -0.20),
+        target(
+            "right_shoulder_pitch_link",
+            ARM_HANG_PITCH_RAD - ARM_SWING_GAIN * stride * right,
+        ),
+        target("right_shoulder_roll_link", -ARM_HANG_ROLL_RAD),
         target("right_shoulder_yaw_link", 0.0),
-        target("right_elbow_link", 0.42),
+        target("right_elbow_link", ARM_HANG_ELBOW_RAD),
         target("right_wrist_roll_rubber_hand", 0.0),
     ]
 }
+
+/// Shoulder-pitch bias that lets the arm hang by the body instead of
+/// reaching forward at rest (`stride == 0`).
+pub(crate) const ARM_HANG_PITCH_RAD: f64 = 0.06;
+/// Shoulder-roll abduction that clears the hips during swing while keeping
+/// the arm close to the body, rather than the wide reach used previously.
+pub(crate) const ARM_HANG_ROLL_RAD: f64 = 0.06;
+/// Resting elbow bend for a relaxed, slightly bent arm instead of a
+/// forward-reaching "pushing a cart" pose.
+pub(crate) const ARM_HANG_ELBOW_RAD: f64 = 0.14;
+/// Shoulder-pitch swing amplitude per unit of stride, counter-phase to the
+/// leg on the same side (left arm forward with right leg forward). This is
+/// large enough to read as a natural walking arm swing across the gait's
+/// validated stride envelope while remaining a position-servo target that
+/// does not change hip/knee torque tracking.
+const ARM_SWING_GAIN: f64 = 3.2;
 
 fn gait_wave(phase: f64) -> (f64, f64) {
     const STANCE_FRACTION: f64 = 0.62;
