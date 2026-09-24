@@ -25,6 +25,19 @@ All notable changes to Robot Native Engine are documented in this file.
   feed jumps 0.106 m with a 0.73 rad peak crouch lean (plan 0.250 m). New
   `--com-ff`, `--att-kp`, `--att-kd`, `--att-weight`, and `--apex` tuning knobs.
 
+- Prune orphaned examples found unreferenced by name from README/docs/CI/xtask:
+  `examples/107_go2_hop` (WBC jump superseded by the `106_go2_jump` ->
+  `108_go2_jump_opt` -> `109_go2_jump_sim` DDP progression; `rne_wbc` is still
+  demonstrated by `105_whole_body_control`), `examples/111_diff_drive_euroc_export`
+  and `examples/112_house_3dgs_euroc_export` (precursor EuRoC exports superseded
+  by the README-linked `113_drjohnson_euroc_export`), and `examples/18_readme_hero`
+  (superseded by `docs/media/generate-hero.sh` now rendering the README hero via
+  `32_lift_pick_place_hero`). `examples/110_collision_bake`,
+  `examples/114_policy_artifact`, `examples/115_trainer`, and
+  `examples/34_mobile_clutter_pick_place_e2e` were valuable but undocumented; they
+  now have `examples/README.md` rows and (for the first three) cross-links from
+  `docs/COLLISION_BAKE.md` / `docs/POLICY_ARTIFACT.md`.
+
 - Prepare the `0.3.0` release candidate and retarget the immutable Rust API
   baseline. All workspace packages and exact internal dependency requirements
   now use `0.3.0`; release metadata, native archive/wheel names, provenance

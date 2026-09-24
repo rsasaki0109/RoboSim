@@ -61,6 +61,15 @@ a `PpoEnv`, computes GAE advantages, and optimizes the clipped surrogate plus
 value and entropy terms. `to_policy_artifact` exports the deterministic mean
 policy. The tests train a continuous bandit to its target and check determinism.
 
+## Examples
+
+`examples/114_policy_artifact` authors a linear policy, saves it, reloads it,
+and evaluates it deterministically: `cargo run -p policy_artifact --example
+114_policy_artifact`. `examples/115_trainer` runs the seeded `cem_train`
+optimizer against a deterministic regression objective and exports the winner
+as a `.rne.policy.json` artifact: `cargo run -p trainer --example
+115_trainer`.
+
 ## Limits
 
 - The format is dense feed-forward only. Recurrent, convolutional, or branching

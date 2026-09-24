@@ -3,8 +3,9 @@
 //! Rendering uses the photorealistic 3DGS house background
 //! (`assets/environments/house_3dgs`) composited with an empty mesh foreground
 //! via `render_hybrid_scene_camera`. Physics (including the body-frame IMU)
-//! runs in a matching collision scene. Output layout matches example 111,
-//! plus `preview_rgb/{cam0,cam1}/<ns>.png` for visualization.
+//! runs in a matching collision scene. Output layout is the standard EuRoC
+//! `mav0/{cam0,cam1,imu0}` + `gt.tum` + `visloc_calib.json` tree, plus
+//! `preview_rgb/{cam0,cam1}/<ns>.png` for visualization.
 //!
 //! Usage: `113_drjohnson_euroc_export OUTPUT_DIR`
 
