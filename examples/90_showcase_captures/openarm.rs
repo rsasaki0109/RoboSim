@@ -18,8 +18,8 @@
 //! drops and settles under gravity, both at the relay point and on the pad.
 
 use super::media::{
-    capture_frames, push_box, push_box_material, push_cylinder, CameraEvidence, CaptureFrame,
-    ShowcaseMetadata, SimulationEvidence,
+    capture_frames, push_box, push_box_material, CameraEvidence, CaptureFrame, ShowcaseMetadata,
+    SimulationEvidence,
 };
 use anyhow::{Context, Result};
 use rne_ai::{
@@ -46,17 +46,21 @@ const CAPTURE_FRAME_COUNT: usize = 38;
 const CAPTURE_STRIDE: u64 = CAPTURE_STEPS / CAPTURE_FRAME_COUNT as u64;
 const PHYSICS_SUBSTEPS_PER_CONTROL_STEP: usize = 19;
 const JOINT_FEEDBACK_STREAM: StreamId = StreamId::new(9_090);
-// A more side-on yaw (vs. a near-frontal shot) matters here specifically
-// because the two arm bases are only 6.2 cm apart in world Z: at a near-0
-// yaw that separation reads almost entirely as depth and the two arms
-// visually fuse into one silhouette, especially in their shared, mirrored
-// `READY` pose. Pushing yaw further round turns that same separation into
-// visible screen-space width instead.
+// A closer, more side-on shot (vs. a distant near-frontal one) so the arms,
+// block, and pad fill most of the frame instead of leaving the composition
+// dominated by empty floor and background. The two arm base_link origins
+// are only 6.2 cm apart in world Z, but that understates the real shoulder
+// spread: joint 1's own fixed offset (URDF `openarm_*_joint1` origin, 6.25 cm
+// further out from each base) puts the actual shoulder pivots ~18.7 cm apart,
+// widening to ~31 cm between the wrists in the shared, mirrored `READY`
+// pose. A near-0 yaw still reads that spread mostly as depth (the two arms
+// visually fuse into one silhouette), so yaw stays pushed round toward
+// side-on to turn it into visible screen-space width instead.
 const CAMERA: CameraEvidence = CameraEvidence {
     fov_y_rad: std::f64::consts::FRAC_PI_4,
-    yaw_rad: 1.15,
-    pitch_rad: 0.85,
-    distance_m: 1.75,
+    yaw_rad: 0.85,
+    pitch_rad: 0.75,
+    distance_m: 1.05,
 };
 
 /// Name of the dynamic block the right arm picks up and the left arm places.
@@ -402,12 +406,15 @@ pub fn run(repo_root: &Path, capture: bool) -> Result<ShowcaseMetadata> {
             ENVIRONMENT_ID,
             &first.frames,
             CameraOrbit {
-                focus: Vec3::new(0.0, 0.56, 0.28),
+                focus: Vec3::new(0.0, 0.50, 0.28),
                 yaw_rad: CAMERA.yaw_rad,
                 pitch_rad: CAMERA.pitch_rad,
                 distance_m: CAMERA.distance_m,
             },
-            [0.025, 0.035, 0.055, 1.0],
+            // A bright, pleasant lab tone instead of a near-black void: the
+            // official robot mesh materials are unaffected, so this only
+            // lifts the backdrop the grey links read against.
+            [0.72, 0.78, 0.85, 1.0],
             22,
         )?)
     } else {
@@ -1054,16 +1061,17 @@ fn render_scene(
 }
 
 /// Render-only lab dressing: tiled floor, an aluminium-extrusion workbench
-/// frame under the authored tabletop, a partition wall, and a few props
-/// (parts bin, wall monitor, tool rack) so the cell reads as a real
-/// workspace instead of an empty void. None of this participates in
-/// physics; every transform here is a fixed function of world constants, so
-/// it is exactly reproduced on every replay.
+/// frame under the authored tabletop, trim/baseboard detail on the authored
+/// partition wall, and a small parts bin so the cell reads as a real
+/// workspace instead of an empty void. Everything here is placed to stay
+/// inside the showcase camera's frame (see `CAMERA`); none of it
+/// participates in physics, and every transform is a fixed function of
+/// world constants, so it is exactly reproduced on every replay.
 fn push_lab_dressing(scene: &mut RenderScene) {
     const FLOOR_Y_M: f64 = -0.012;
-    const FLOOR_COLOR: [f32; 4] = [0.58, 0.60, 0.63, 1.0];
-    const GROUT_COLOR: [f32; 4] = [0.46, 0.48, 0.51, 1.0];
-    let floor_material = PbrMaterial::new(FLOOR_COLOR, 0.62, 0.35, [0.0; 3]);
+    const FLOOR_COLOR: [f32; 4] = [0.74, 0.76, 0.80, 1.0];
+    const GROUT_COLOR: [f32; 4] = [0.60, 0.63, 0.68, 1.0];
+    let floor_material = PbrMaterial::new(FLOOR_COLOR, 0.55, 0.30, [0.0; 3]);
     push_box_material(
         scene,
         Vec3::new(0.05, FLOOR_Y_M, 0.15),
@@ -1114,71 +1122,75 @@ fn push_lab_dressing(scene: &mut RenderScene) {
         leg_material(),
     );
 
-    // Parts bin with a few spare stock cubes, to camera-right of the workbench.
-    const BIN_COLOR: [f32; 4] = [0.20, 0.24, 0.30, 1.0];
+    // Small parts bin with a few spare stock cubes, low and just past the
+    // pedestal on the camera-right side, comfortably inside the frame.
+    const BIN_COLOR: [f32; 4] = [0.30, 0.34, 0.40, 1.0];
     push_box(
         scene,
-        Vec3::new(0.98, 0.05, 0.30),
-        Vec3::new(0.30, 0.10, 0.22),
+        Vec3::new(0.46, 0.24, 0.16),
+        Vec3::new(0.20, 0.10, 0.16),
         BIN_COLOR,
     );
     push_box(
         scene,
-        Vec3::new(0.98, 0.135, 0.19),
-        Vec3::new(0.30, 0.03, 0.012),
+        Vec3::new(0.46, 0.30, 0.09),
+        Vec3::new(0.20, 0.03, 0.012),
         BIN_COLOR,
     );
     push_box(
         scene,
-        Vec3::new(0.98, 0.135, 0.41),
-        Vec3::new(0.30, 0.03, 0.012),
+        Vec3::new(0.46, 0.30, 0.23),
+        Vec3::new(0.20, 0.03, 0.012),
         BIN_COLOR,
     );
     push_box(
         scene,
-        Vec3::new(0.83, 0.135, 0.30),
-        Vec3::new(0.012, 0.03, 0.22),
+        Vec3::new(0.37, 0.30, 0.16),
+        Vec3::new(0.012, 0.03, 0.16),
         BIN_COLOR,
     );
     push_box(
         scene,
-        Vec3::new(1.13, 0.135, 0.30),
-        Vec3::new(0.012, 0.03, 0.22),
+        Vec3::new(0.55, 0.30, 0.16),
+        Vec3::new(0.012, 0.03, 0.16),
         BIN_COLOR,
     );
     for (offset_x, offset_z, color) in [
-        (-0.06, -0.04, [0.95, 0.55, 0.10, 1.0]),
-        (0.05, 0.02, [0.15, 0.70, 0.90, 1.0]),
-        (-0.01, 0.06, [0.85, 0.20, 0.30, 1.0]),
+        (-0.04, -0.02, [0.95, 0.55, 0.10, 1.0]),
+        (0.03, 0.01, [0.15, 0.70, 0.90, 1.0]),
+        (-0.01, 0.04, [0.85, 0.20, 0.30, 1.0]),
     ] {
         push_box(
             scene,
-            Vec3::new(0.98 + offset_x, 0.12, 0.30 + offset_z),
-            Vec3::new(0.045, 0.045, 0.045),
+            Vec3::new(0.46 + offset_x, 0.27, 0.16 + offset_z),
+            Vec3::new(0.035, 0.035, 0.035),
             color,
         );
     }
 
-    // Tool rack: a small back-wall panel with three hanging tool silhouettes.
-    const RACK_COLOR: [f32; 4] = [0.24, 0.27, 0.32, 1.0];
+    // Baseboard and trim on the authored partition wall (object
+    // `openarm_back_wall`: center (-0.10, 0.75, -0.85), half-extents
+    // 0.45 x 0.40 x 0.025) so it reads as a low detailed partition rather
+    // than a flat slab.
+    const TRIM_COLOR: [f32; 4] = [0.42, 0.46, 0.52, 1.0];
     push_box(
         scene,
-        Vec3::new(-1.05, 1.35, -0.695),
-        Vec3::new(0.28, 0.42, 0.02),
-        RACK_COLOR,
+        Vec3::new(-0.10, 0.37, -0.822),
+        Vec3::new(0.92, 0.05, 0.006),
+        TRIM_COLOR,
     );
-    for (offset_x, length, color) in [
-        (-0.09, 0.28, [0.85, 0.20, 0.18, 1.0]),
-        (0.0, 0.34, [0.90, 0.72, 0.10, 1.0]),
-        (0.09, 0.24, [0.20, 0.55, 0.90, 1.0]),
-    ] {
-        push_cylinder(
+    push_box(
+        scene,
+        Vec3::new(-0.10, 0.62, -0.822),
+        Vec3::new(0.92, 0.02, 0.006),
+        TRIM_COLOR,
+    );
+    for x_m in [-0.42, 0.02, 0.26] {
+        push_box(
             scene,
-            Vec3::new(-1.05 + offset_x, 1.35, -0.678),
-            0.014,
-            length,
-            Quat::from_rotation_x(std::f64::consts::FRAC_PI_2),
-            color,
+            Vec3::new(x_m, 0.75, -0.822),
+            Vec3::new(0.012, 0.78, 0.004),
+            TRIM_COLOR,
         );
     }
 }
@@ -1188,26 +1200,28 @@ fn push_control_panel(
     fixed_delta_ticks: u64,
     telemetry: ControlFrameTelemetry,
 ) {
-    // A clean wall-mounted HUD: a bezel, a lit screen inset, and three
-    // telemetry bars, all facing the same +Z direction as the back wall so
-    // it reads as a mounted display rather than a loose slab of boxes.
-    const PANEL_CENTER: Vec3 = Vec3::new(-0.60, 1.32, -0.695);
+    // A clean console HUD: a bezel, a lit screen inset, and three telemetry
+    // bars, all facing +Z toward the camera. Stood next to the pedestal (not
+    // on the now-small partition wall, which sits too far back to stay
+    // legible at this closer framing) so it reads as a mounted display
+    // rather than a loose slab of boxes, and stays inside the frame.
+    const PANEL_CENTER: Vec3 = Vec3::new(-0.36, 0.64, -0.05);
     const BEZEL_COLOR: [f32; 4] = [0.07, 0.08, 0.11, 1.0];
     const SCREEN_COLOR: [f32; 4] = [0.035, 0.055, 0.085, 1.0];
     const BAR_TRACK_COLOR: [f32; 4] = [0.08, 0.10, 0.14, 1.0];
-    const BAR_BOTTOM_Y_M: f64 = PANEL_CENTER.y - 0.095;
-    const BAR_MAX_HEIGHT_M: f64 = 0.19;
+    const BAR_BOTTOM_Y_M: f64 = PANEL_CENTER.y - 0.066;
+    const BAR_MAX_HEIGHT_M: f64 = 0.133;
 
     push_box(
         scene,
         PANEL_CENTER,
-        Vec3::new(0.46, 0.30, 0.03),
+        Vec3::new(0.32, 0.21, 0.021),
         BEZEL_COLOR,
     );
     push_box_material(
         scene,
-        Vec3::new(PANEL_CENTER.x, PANEL_CENTER.y, PANEL_CENTER.z + 0.016),
-        Vec3::new(0.40, 0.24, 0.006),
+        Vec3::new(PANEL_CENTER.x, PANEL_CENTER.y, PANEL_CENTER.z + 0.011),
+        Vec3::new(0.28, 0.17, 0.004),
         Quat::IDENTITY,
         SCREEN_COLOR,
         PbrMaterial::new(SCREEN_COLOR, 0.15, 0.05, [0.01, 0.02, 0.03]),
@@ -1230,22 +1244,22 @@ fn push_control_panel(
         [0.92, 0.18, 0.16, 1.0],
     ];
     for (index, (value, color)) in values.into_iter().zip(colors).enumerate() {
-        let x_m = PANEL_CENTER.x - 0.13 + index as f64 * 0.13;
+        let x_m = PANEL_CENTER.x - 0.091 + index as f64 * 0.091;
         push_box(
             scene,
             Vec3::new(
                 x_m,
                 BAR_BOTTOM_Y_M + BAR_MAX_HEIGHT_M * 0.5,
-                PANEL_CENTER.z + 0.024,
+                PANEL_CENTER.z + 0.017,
             ),
-            Vec3::new(0.07, BAR_MAX_HEIGHT_M, 0.02),
+            Vec3::new(0.049, BAR_MAX_HEIGHT_M, 0.014),
             BAR_TRACK_COLOR,
         );
         let height_m = (BAR_MAX_HEIGHT_M * value.clamp(0.03, 1.0)).max(0.01);
         push_box(
             scene,
-            Vec3::new(x_m, BAR_BOTTOM_Y_M + height_m * 0.5, PANEL_CENTER.z + 0.036),
-            Vec3::new(0.05, height_m, 0.02),
+            Vec3::new(x_m, BAR_BOTTOM_Y_M + height_m * 0.5, PANEL_CENTER.z + 0.025),
+            Vec3::new(0.035, height_m, 0.014),
             color,
         );
     }

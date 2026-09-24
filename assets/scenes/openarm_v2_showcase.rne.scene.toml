@@ -44,7 +44,7 @@ collision = { shape = "box", size_m = [0.055, 0.10, 0.055] }
 
 [[objects]]
 name = "openarm_back_wall"
-translation_m = [0.0, 1.05, -0.72]
+translation_m = [-0.10, 0.75, -0.85]
 body_type = "fixed"
-visual = { shape = "box", size_m = [1.80, 1.90, 0.05], color_rgba = [0.40, 0.44, 0.50, 1.0] }
-collision = { shape = "box", size_m = [1.80, 1.90, 0.05] }
+visual = { shape = "box", size_m = [0.90, 0.80, 0.05], color_rgba = [0.66, 0.70, 0.76, 1.0] }
+collision = { shape = "box", size_m = [0.90, 0.80, 0.05] }
