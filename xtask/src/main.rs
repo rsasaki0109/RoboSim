@@ -4,6 +4,7 @@ mod accelerator;
 mod benchmark;
 mod capability_report;
 mod dataset;
+mod docs_evidence_retention;
 mod evidence;
 mod external_intake;
 mod external_plugin;
@@ -192,6 +193,7 @@ fn run() -> anyhow::Result<()> {
         "accelerator-scale" => accelerator::accelerator_scale(&mut args),
         "dataset-check" => dataset::dataset_check(&mut args),
         "dataset-evaluate-depth" => dataset::dataset_evaluate_depth(&mut args),
+        "docs-evidence-check" => docs_evidence_retention::run(&mut args),
         "evidence" => evidence::evidence(&mut args),
         "external-intake-check" => external_intake::run(&mut args),
         "failure-capsule" => failure_capsule::run(&mut args),
@@ -4167,6 +4169,7 @@ fn ros_setup_available() -> bool {
 fn lint_boundaries() -> anyhow::Result<()> {
     let workspace_root = workspace_root()?;
     external_intake::validate_committed(&workspace_root)?;
+    docs_evidence_retention::validate_committed(&workspace_root)?;
     let forbidden = ["rcl", "rclrs", "rclcpp", "ros2", "adapters/", "../adapters"];
 
     for manifest in find_cargo_tomls(&workspace_root.join("crates"))? {

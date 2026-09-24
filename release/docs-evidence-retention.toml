@@ -1,0 +1,310 @@
+# Historical snapshot of docs/evidence files tracked before ADR 034
+# introduced the size threshold. Do not hand-edit; new large evidence
+# must use an external pointer file instead (see ADR 034).
+schema_version = 1
+
+[[entry]]
+path = "docs/evidence/g1-contact-backflip/native-transfer/held-recovery/rollout.json"
+sha256 = "sha256:ab9571538c4e598be7f668a81209e6ca03941bc53828fba88da8dc4763283fee"
+size_bytes = 1686310
+
+[[entry]]
+path = "docs/evidence/openarm-controller-lab/evidence/pid-controller-actions.json"
+sha256 = "sha256:1c1a09791b511064ecf8bc5bd3c174b938abfb5c0cc3a4a3e7db6ec81a4dfde0"
+size_bytes = 1177251
+
+[[entry]]
+path = "docs/evidence/openarm-controller-lab/evidence/pid-gazebo-success-trace.json"
+sha256 = "sha256:65e5c77bdc69088e7a431165779d0f4037545274ef380781b66eb11007b8d610"
+size_bytes = 8762206
+
+[[entry]]
+path = "docs/evidence/openarm-controller-lab/evidence/pid-mujoco-success-trace.json"
+sha256 = "sha256:e5d915f0c77d0cab7532e8303e004a380308a360fdb2d7a5bf41e1cb9e03cf3b"
+size_bytes = 11072271
+
+[[entry]]
+path = "docs/evidence/openarm-controller-lab/evidence/pid-rapier-success-trace.json"
+sha256 = "sha256:6b9adafeb7a409c1d4fa6f4ef543753cfc2ff958fcbbaea6903e3b007e275ede"
+size_bytes = 10883939
+
+[[entry]]
+path = "docs/evidence/openarm-controller-lab/evidence/state-feedback-controller-actions.json"
+sha256 = "sha256:3b5b3f0826c6f763c2aaf793bc6dee88610bd577742539628e484985a74d19d4"
+size_bytes = 1177271
+
+[[entry]]
+path = "docs/evidence/openarm-controller-lab/evidence/state-feedback-gazebo-success-trace.json"
+sha256 = "sha256:ddaa0118f643f83dc8acdca6eb4f98bdeee37caa64e75ae80bf3d81f4d2b2335"
+size_bytes = 8689148
+
+[[entry]]
+path = "docs/evidence/openarm-controller-lab/evidence/state-feedback-mujoco-success-trace.json"
+sha256 = "sha256:1851809a2a49198a2dd1f1e3f90d970dbfa65ea99542838610e3e7b6340036c6"
+size_bytes = 11049829
+
+[[entry]]
+path = "docs/evidence/openarm-controller-lab/evidence/state-feedback-rapier-success-trace.json"
+sha256 = "sha256:2b751d7e9ca12c193a7b528464dd616e1bcf9e60dfd2d9f4bc6578d09497576d"
+size_bytes = 10859456
+
+[[entry]]
+path = "docs/evidence/openarm-cross-sim/evidence/gazebo-success-trace.json"
+sha256 = "sha256:af3cb2ad8687aa2f15c9a5aef397b71335d2403eea312a82c581b65322f33288"
+size_bytes = 3904490
+
+[[entry]]
+path = "docs/evidence/openarm-cross-sim/evidence/mujoco-success-trace.json"
+sha256 = "sha256:eea12d87bceab37895722567e458d5bed08983355b881e33bff89775adebf07a"
+size_bytes = 5520789
+
+[[entry]]
+path = "docs/evidence/openarm-cross-sim/evidence/rapier-success-trace.json"
+sha256 = "sha256:d02df461e19764a1c5c0a5081c67c6865b7daa9d52990a09896ffdd3386ea4a5"
+size_bytes = 5464110
+
+[[entry]]
+path = "docs/evidence/openarm-plant-lab/evidence/controller-actions.json"
+sha256 = "sha256:cf61bbeccb52c7f8f327fca9eb1d07badd40e03df3405c8591dc73c6a843470e"
+size_bytes = 1177251
+
+[[entry]]
+path = "docs/evidence/openarm-plant-lab/evidence/gazebo-success-trace.json"
+sha256 = "sha256:6943092671c3ae53f79df599d2647b1988eb66836e847bb4079c60ceabd2ba48"
+size_bytes = 7055713
+
+[[entry]]
+path = "docs/evidence/openarm-plant-lab/evidence/mujoco-success-trace.json"
+sha256 = "sha256:1c35ad0efd1847cca25d75e9bb3554f32342ba3fab99728e80718d4a7df73f5a"
+size_bytes = 9422802
+
+[[entry]]
+path = "docs/evidence/openarm-plant-lab/evidence/rapier-success-trace.json"
+sha256 = "sha256:0923ed14d26c6d989ca69bcb11966ef572f802d90d7bc59b8d9e60cb57d27a58"
+size_bytes = 9235266
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/bias-000mrad-controller-actions.json"
+sha256 = "sha256:d4ee88c718e0c7123f55dba96938fc2ab23dc72adb80152e081043864faa61ea"
+size_bytes = 1177284
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/bias-000mrad-rapier-success-trace.json"
+sha256 = "sha256:792748cea9cdb1093c0a3735e97b1bcb75f43a93187f711b5d02250c218a6289"
+size_bytes = 10859569
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/bias-030mrad-controller-actions.json"
+sha256 = "sha256:d245881a7f5f6ef4975b7c2a314a7a562db989ec079bcb57d2ba665786466f39"
+size_bytes = 1177284
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/bias-030mrad-gazebo-success-trace.json"
+sha256 = "sha256:4ec705d692852d1ca9916e9ed01c6d5485d16a2a6db29866128f58182592fa79"
+size_bytes = 8689161
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/bias-030mrad-mujoco-success-trace.json"
+sha256 = "sha256:4b0d912fecd4a6338bd4ec8f62c72b7cce334afea6b98446ee9df83727849e9d"
+size_bytes = 11049842
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/bias-030mrad-rapier-success-trace.json"
+sha256 = "sha256:26a4ea809317d84561d5255399d1cf97889747569b31325a0c1e10a10237f2b9"
+size_bytes = 10859469
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/bias-060mrad-controller-actions.json"
+sha256 = "sha256:41b8c680944bfd2cf6ee9aa81463ac1be635985b462773bde849af074ccec3e4"
+size_bytes = 1177284
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/bias-060mrad-gazebo-success-trace.json"
+sha256 = "sha256:a1cf2de7ed0045f185e8e958310a81439441456c7feba07dddaa1e1d6abc6216"
+size_bytes = 8686414
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/bias-060mrad-mujoco-success-trace.json"
+sha256 = "sha256:a1d1b95da744279f530946f28f6706daf7ddb43290bb86b7840aec25a794d783"
+size_bytes = 11046829
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/bias-060mrad-rapier-success-trace.json"
+sha256 = "sha256:1066370ff73f1ee693c6f93db389b38da60051969ec6bc26726cbf7410ac7ac8"
+size_bytes = 10856670
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/bias-090mrad-controller-actions.json"
+sha256 = "sha256:29e644253d77b2bebf5cf14a357cf3b06bde530f22ef5eb50e552743e9565ad4"
+size_bytes = 1177284
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/bias-090mrad-rapier-success-trace.json"
+sha256 = "sha256:c4de63fc10b427a173bcfbf64c2df60ff488a52876b2c45e489604ab92dea6b2"
+size_bytes = 10856093
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/bias-120mrad-controller-actions.json"
+sha256 = "sha256:2df8fd8c971f3f01faafa92ea1f66fc81f1ec70107ad431057ba9778d5257357"
+size_bytes = 1177284
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/bias-120mrad-rapier-success-trace.json"
+sha256 = "sha256:8c9622d453e40369bbdad82d14219e61a8f0dbef90849cc636510be0bc5ebcbb"
+size_bytes = 10855787
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/openarm-robustness-report.html"
+sha256 = "sha256:dd34598b1361a1314a132b76d20e6589b2160533148fea505ad3b703002bfc5b"
+size_bytes = 3030923
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/evidence/openarm-robustness-report.json"
+sha256 = "sha256:40334959b57deb336f3b02d21294a48999bf8459e799722faa98ee83c0caa2da"
+size_bytes = 4778327
+
+[[entry]]
+path = "docs/evidence/openarm-robustness-lab/replay/minimum-bias-failure.rne-replay"
+sha256 = "sha256:4c4608c40ab174a1ea4fc82aa85bf4f491b28b98c91165496a18ef56cacbbe80"
+size_bytes = 2202949
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/dropout-000frames-controller-actions.json"
+sha256 = "sha256:92ca3eb9f5e1dc510dac4ffedf1e15f52db5934f6fb4c58bc3a7cba42e8a1797"
+size_bytes = 1177288
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/dropout-000frames-rapier-success-trace.json"
+sha256 = "sha256:b241a4ab8eca074dcb2221f8d737f2863ed6e4689573bb2ab95b4f7766c833bb"
+size_bytes = 13634386
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/dropout-001frames-controller-actions.json"
+sha256 = "sha256:9fb8266030e16f94480ad43b1c03d676efc2874c8db952c01b9c5b60586724b1"
+size_bytes = 1177288
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/dropout-001frames-rapier-success-trace.json"
+sha256 = "sha256:1d7ca873539b9f2cbb1e68ecbfed3f00674938b50ef85e665f26a300fdc2ed58"
+size_bytes = 13634575
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/dropout-002frames-controller-actions.json"
+sha256 = "sha256:d22f20d95b9bacdc414f6e6111774b1f73fa60b277d5f9af6cd951ffc7b391b4"
+size_bytes = 1177288
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/dropout-002frames-gazebo-success-trace.json"
+sha256 = "sha256:4959663272af90f6cfbf8e4e1b34b85399f281d9b5f9e2ffd0c5cddca84f3f9e"
+size_bytes = 11461544
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/dropout-002frames-mujoco-success-trace.json"
+sha256 = "sha256:23670ecb0ecde5d64f122e8b56149405240fff16d442584b5210df6713577ac0"
+size_bytes = 13811455
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/dropout-002frames-rapier-success-trace.json"
+sha256 = "sha256:2d52676b5ab6f59a75e0a7563999774dda1c33bbc58f9e1a36949896f611c334"
+size_bytes = 13634236
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/dropout-003frames-controller-actions.json"
+sha256 = "sha256:74613b2114248d29f1753dc47e18059c3c854eb5dfdcf71516eaef94848353c6"
+size_bytes = 1177288
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/dropout-003frames-gazebo-success-trace.json"
+sha256 = "sha256:aac96a2d6e74f7f7c9e1093c91d178559bb696f77dacb42a024d162037653bbf"
+size_bytes = 11461569
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/dropout-003frames-mujoco-success-trace.json"
+sha256 = "sha256:47b5bab2c0181360ffff41d751670f9f8e03f3c34c2a7d8a05334f73b045e4a2"
+size_bytes = 13811572
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/dropout-003frames-rapier-success-trace.json"
+sha256 = "sha256:7ba8b4f85e802214a7f34ec547d9dc49524f2787cbfafe02e99e78774b6962d4"
+size_bytes = 13634533
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/dropout-004frames-controller-actions.json"
+sha256 = "sha256:fe98a587e7582f4d036f9194851f893e212f23a3606e46b2a06a0737730696a8"
+size_bytes = 1177288
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/dropout-004frames-rapier-success-trace.json"
+sha256 = "sha256:315441ad226521360fbd5f8ef98d430c1cd4a25fc09b38f1812462e8b199251b"
+size_bytes = 13634673
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/openarm-sensor-dropout-robustness-report.html"
+sha256 = "sha256:f0f04a168090f721f731e3913592ac39e5cfead9156760f62d69858623d8ab1e"
+size_bytes = 3052409
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/evidence/openarm-sensor-dropout-robustness-report.json"
+sha256 = "sha256:adf74b92528c49f8c0c9a5289d08ff8752807f3532d0edda9b57b22ec79c831b"
+size_bytes = 4802989
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-dropout-robustness-lab/replay/openarm-sensor-dropout-failure.rne-replay"
+sha256 = "sha256:a0c88f3cf77d9fe8b326555774cd16943fd82eef2b347f9190fa003928cf6a67"
+size_bytes = 3777028
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-robustness-lab/evidence/openarm-sensor-bias-robustness-report.html"
+sha256 = "sha256:8b11758673a32c00cfe00781633a073cf4b8c44edecb9fce14275adaac66ac4f"
+size_bytes = 3041854
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-robustness-lab/evidence/openarm-sensor-bias-robustness-report.json"
+sha256 = "sha256:ab148b97c04460999bec8de2aa73b14b92da2121fbde7de456527911d9fa119f"
+size_bytes = 4791971
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-robustness-lab/evidence/sensor-bias-010mrad-controller-actions.json"
+sha256 = "sha256:cea0f84da400b10a7f758acdb5b7ea3654e5ede185534aa625538c1a07e4c6d5"
+size_bytes = 1177291
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-robustness-lab/evidence/sensor-bias-010mrad-gazebo-success-trace.json"
+sha256 = "sha256:2e6811f00f86ada20281bc16b60f3ffcd9c121826d19d0e681ba58a892a2312b"
+size_bytes = 10623028
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-robustness-lab/evidence/sensor-bias-010mrad-mujoco-success-trace.json"
+sha256 = "sha256:2ab6716ca62ec0f28cffd57fc38becee0dde58017856696aa9e188fdeb81a588"
+size_bytes = 12972110
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-robustness-lab/evidence/sensor-bias-010mrad-rapier-success-trace.json"
+sha256 = "sha256:42eb38b39e4a9853be8500d8ef7270f7afa57031cdc81c376877c094c196c327"
+size_bytes = 12795282
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-robustness-lab/evidence/sensor-bias-020mrad-controller-actions.json"
+sha256 = "sha256:4729217d7a2934b592451ecd7ef72d400099b862a19581ceec352768337e2ef8"
+size_bytes = 1177291
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-robustness-lab/evidence/sensor-bias-020mrad-gazebo-success-trace.json"
+sha256 = "sha256:48240f9c3674f96492ca5961ec3451b06ed5b7593cda40c9545831bd3d43587f"
+size_bytes = 10622776
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-robustness-lab/evidence/sensor-bias-020mrad-mujoco-success-trace.json"
+sha256 = "sha256:f590bbe76b2605792da3ea4dafc4c4f1360a6e61de59f8193eed6f4896f2876b"
+size_bytes = 12971784
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-robustness-lab/evidence/sensor-bias-020mrad-rapier-success-trace.json"
+sha256 = "sha256:b4ac2b650735f8526bbaac68c76592ba8659c1775630386cb03c25fb95c9ec64"
+size_bytes = 12794975
+
+[[entry]]
+path = "docs/evidence/openarm-sensor-robustness-lab/replay/minimum-sensor-bias-failure.rne-replay"
+sha256 = "sha256:1b7b115eb93d7795811c37981b97c699489dcdc44c050f0685eca49692f1e0e8"
+size_bytes = 2578098
+
