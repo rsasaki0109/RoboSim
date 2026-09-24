@@ -86,6 +86,23 @@ Indoor calibration uses the optional `rotation_xyzw = [x, y, z, w]` splat-
 manifest field. The loader rejects non-finite or zero quaternions, normalizes a
 valid value, and does not allow it together with a non-zero `rotation_y_rad`.
 
+## Indoor hero validation evidence
+
+A fail-closed fixture binds two real frames, COLMAP cameras, six registered
+landmarks, the floor plane, the pickup collision proxy, a same-camera
+real-versus-RNE RGB observation, and deterministic single-/multi-view depth
+evidence; the proxy projects onto the captured rug instead of arbitrary room
+space. The fixture passes 7/8 geometric-sensor contracts. Its RGB observation
+records 13.05 dB raw PSNR, 0.927 luminance correlation, and 0.688 gradient
+correlation; alpha-composited source-unit depth matches 6/6 semantic
+landmarks at 0.148 mean absolute error, and 40/42 two-camera tracks at
+0.0353 depth-delta MAE with 0/80 false occlusions. It remains explicitly
+non-qualifying -- and does not call reconstruction-unit depths metres --
+until an independent physical scale anchor is retained.
+
+- [Validation fixture](../assets/environments/voxel51_drjohnson_3dgs/drjohnson.validation.json)
+- [Multi-view depth evidence](../assets/environments/voxel51_drjohnson_3dgs/IMG_6292-IMG_6293.multiview-depth.json)
+
 ## Regeneration
 
 Run the renderer-independent gates first:

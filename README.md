@@ -7,21 +7,19 @@ simulation, embodied AI, synthetic sensors, and policy evaluation.
 [![CI](https://github.com/rsasaki0109/RoboSim/actions/workflows/ci.yml/badge.svg)](https://github.com/rsasaki0109/RoboSim/actions/workflows/ci.yml)
 
 RNE combines a headless, replayable simulation core with real wgpu rendering.
-Worlds contain robot, sensor, actuator, agent, and episode entities. Simulation
-does not require a renderer, and ROS 2 is an optional adapter rather than a core
-dependency.
+Worlds hold robot, sensor, actuator, agent, and episode entities; simulation
+needs no renderer, and ROS 2 is an optional adapter, not a core dependency.
 
 ## Real simulation showcase
 
-For hands-on joint sliders, saved poses, floor/obstacle editing, RGB/depth/LiDAR
-views and URDF/MJCF loading, start the [Robot workbench](docs/ROBOT_WORKBENCH.md):
+Hands-on joint sliders, scene editing, and RGB/depth/LiDAR views: start the
+[Robot workbench](docs/ROBOT_WORKBENCH.md) with
 `cargo run --release --locked -p robot_workbench`.
 
 [![Robot workbench showing SO-101 joint controls, scene editing, RGB, depth and LiDAR views](docs/media/robot-workbench.png)](docs/ROBOT_WORKBENCH.md)
 
 Every frame below is rendered by wgpu from deterministic simulation or pinned
-dataset/camera state. Reduced-motion clients receive the matching poster PNG.
-The quantitative gates and exact regeneration commands are in
+camera state; gates and regeneration commands are in
 [README showcase acceptance](docs/README_SHOWCASE.md).
 
 <table>
@@ -32,17 +30,17 @@ The quantitative gates and exact regeneration commands are in
         <img src="docs/media/house-mobile-manipulation.gif" alt="PBR mobile manipulator grasping, lifting, carrying, and placing an object in a real captured indoor 3DGS environment with live wrist RGB-D and a 2D task trace" width="900">
       </picture>
       <br><b>Real indoor 3DGS · mobile manipulation</b><br>
-      <sub>Voxel51 Dr Johnson is a real photo-derived interior 3DGS. A fail-closed fixture binds two real frames, COLMAP cameras, six registered landmarks, the floor plane, the pickup collision proxy, a same-camera real-versus-RNE RGB observation, and deterministic single-/multi-view depth evidence; the proxy projects onto the captured rug instead of arbitrary room space. The detailed 10-link PBR robot completes a floor-level friction grasp, 0.401 m lift, 1.559 m transport, and placement within 0.049 m. The fixture passes 7/8 geometric-sensor contracts. Its RGB observation records 13.05 dB raw PSNR, 0.927 luminance correlation, and 0.688 gradient correlation; alpha-composited source-unit depth matches 6/6 semantic landmarks at 0.148 mean absolute error, and 40/42 two-camera tracks at 0.0353 depth-delta MAE with 0/80 false occlusions. It remains explicitly non-qualifying—and does not call reconstruction-unit depths metres—until an independent physical scale anchor is retained. During final pickup alignment, rendered wrist RGB-D segments the payload, self-masks the known robot, back-projects depth, and drives analytic IK without payload truth; the live RGB/depth inset shows the detected reticle and the 2D task trace exposes base motion. <a href="assets/environments/voxel51_drjohnson_3dgs/drjohnson.validation.json">validation fixture</a> · <a href="assets/environments/voxel51_drjohnson_3dgs/IMG_6292-IMG_6293.multiview-depth.json">multi-view depth evidence</a> · <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
+      <sub>A real photo-derived interior (Voxel51 Dr Johnson 3DGS) bound to real cameras and landmarks by a fail-closed validation fixture. The 10-link PBR robot completes a floor-level friction grasp, 0.401 m lift, 1.559 m transport, and placement within 0.049 m; live wrist RGB-D self-masks the robot and drives the final approach without payload truth. <a href="docs/media/house-mobile-manipulation.json">metadata</a> · <a href="examples/89_house_mobile_lift_hero/main.rs">source</a></sub>
     </td>
   </tr>
   <tr>
     <td width="50%" align="center">
       <picture>
         <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-openarm.png">
-        <img src="docs/media/showcase-openarm.gif" alt="Official OpenArm v2 bimanual robot picking a block off a workbench, handing it mid-air to the other gripper, and placing it on a target pad under delayed joint-feedback control with live telemetry" width="460">
+        <img src="docs/media/showcase-openarm.gif" alt="Official OpenArm v2 bimanual robot picking a block, handing it to the other gripper, and placing it on a target pad under delayed joint-feedback control with live telemetry" width="460">
       </picture>
       <br><b>OpenArm v2 · bimanual control</b><br>
-      <sub>18-axis typed feedback with one-cycle latency, explicit PD effort limits, an inverse-kinematics-solved pick / handoff / place cycle on a real dynamic block gated on real fingertip contact, live error/effort telemetry, and exact Rapier replay over 1,400 fixed steps. <a href="docs/media/showcase-openarm.json">metadata</a> · <a href="examples/90_showcase_captures/openarm.rs">source</a></sub>
+      <sub>18-axis typed feedback, an IK-solved pick / handoff / place cycle gated on real fingertip contact, and exact Rapier replay over 1,400 steps. <a href="docs/media/showcase-openarm.json">metadata</a> · <a href="examples/90_showcase_captures/openarm.rs">source</a></sub>
     </td>
     <td width="50%" align="center">
       <picture>
@@ -68,136 +66,69 @@ The quantitative gates and exact regeneration commands are in
         <img src="docs/media/showcase-uav.gif" alt="Controlled quadrotor flying over a PLATEAU city model with onboard RGB and depth camera views" width="460">
       </picture>
       <br><b>PLATEAU UAV · RGB-D flight</b><br>
-      <sub>A visible multirotor flies 76.6 m over imported city geometry with bounded control, 12.21 m building clearance, zero collisions, and synchronized onboard RGB-D. <a href="docs/media/showcase-uav.json">metadata</a> · <a href="examples/46_plateau_drone_gif/main.rs">source</a></sub>
+      <sub>A visible multirotor flies 76.6 m over imported city geometry with 12.21 m building clearance, zero collisions, and synchronized onboard RGB-D. <a href="docs/media/showcase-uav.json">metadata</a> · <a href="examples/46_plateau_drone_gif/main.rs">source</a></sub>
     </td>
   </tr>
 </table>
 
 ## Highlights
 
-| Area | What is included | Start here |
+| Area | Included | Docs |
 | --- | --- | --- |
-| City simulation | Official PLATEAU import, traffic routing/signals, dynamic vehicles, LiDAR, RGB-D camera, and OSM HUD | [PLATEAU import](docs/PLATEAU_IMPORT.md), examples 46–47 |
-| Vehicle dynamics | Dynamic bicycle model, tire saturation, explicit differential-drive caster and four-wheel Ackermann suspension dynamics, metric grade/roughness/curb/drop excitation, deterministic suspension/tire-log identification with direct Rapier/MuJoCo parameter application, sensor-only Ackermann speed/yaw control, deterministic Mobility domain-randomization reference batches, cross-backend contact/load evidence, sensor latency, and deterministic evaluation | [Vehicle dynamics](docs/VEHICLE_DYNAMICS.md), [caster benchmark](docs/MOBILITY_DIFFERENTIAL_CASTER_V1.md), [Ackermann dynamics](docs/MOBILITY_ACKERMANN_SUSPENSION_V1.md), [road excitation](docs/MOBILITY_ROAD_EXCITATION_V1.md), [suspension identification](docs/MOBILITY_SUSPENSION_IDENTIFICATION_V1.md), [tire identification](docs/MOBILITY_TIRE_IDENTIFICATION_V1.md), [domain randomization](docs/MOBILITY_DOMAIN_RANDOMIZATION_V1.md), [Ackermann sensor loop](docs/MOBILITY_ACKERMANN_SENSOR_CLOSED_LOOP_V1.md), examples 49–51 |
-| Quadruped locomotion | Official Unitree Go2, torque control, disturbances, steering, velocity/terrain policy, and replay tests | [GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md), examples 52–65 |
-| Humanoid locomotion | Official Unitree G1 23-DoF articulation, balance, learned stride, typed commands, bounded heading-yaw, and CEM evaluation | [G1_LOCOMOTION.md](docs/G1_LOCOMOTION.md), examples 39, 63, 67, 68 |
-| Manipulation | Authored PBR mobile manipulator, real-capture indoor 3DGS hybrid rendering, friction grasp/release episodes, articulated Dex3 hands, and task markers | [Showcase contract](docs/README_SHOWCASE.md), examples 32, 40–42, 89 |
-| Deformables | Backend-neutral XPBD cable and cloth with deterministic headless replay | examples 43–45 |
-
+| City simulation | PLATEAU import, traffic, LiDAR, RGB-D, OSM HUD | [docs](docs/PLATEAU_IMPORT.md), ex. 46–47 |
+| Vehicle dynamics | Bicycle/Ackermann, tire saturation, suspension, road excitation | [docs](docs/VEHICLE_DYNAMICS.md), ex. 49–51 |
+| Quadruped locomotion | Official Go2, torque control, disturbances, steering | [docs](docs/GO2_LOCOMOTION.md), ex. 52–65 |
+| Humanoid locomotion | Official G1 23-DoF, balance, learned stride, CEM eval | [docs](docs/G1_LOCOMOTION.md), ex. 39, 63, 67, 68 |
+| Manipulation | PBR/3DGS mobile manipulator, friction grasp, Dex3 hands | [docs](docs/README_SHOWCASE.md), ex. 32, 40–42, 89 |
+| Deformables | XPBD cable and cloth, deterministic headless replay | ex. 43–45 |
+| More demos | Localization, native planning/dynamics/legged/WBC/OC, Go2 jump | [docs](docs/DEMOS.md) |
 
 ## Independent validation wanted
 
-RNE remains below 1.0 until real projects outside this repository reproduce
-tasks and independently maintained extensions pass the shipped conformance
-kits. Native release bundles include the required tools; cloning the RNE
-source tree is not required to submit evidence.
+RNE remains below 1.0 until outside projects reproduce tasks and pass the
+shipped conformance kits (native bundles include the tools; no source
+checkout needed).
 
-The current campaign accepts only [v0.3.0 official
-assets](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.3.0). If that
-release page does not yet contain the native archives and `SHA256SUMS`, prepare
-the repository and checklist but do not open an evidence issue. The published
-v0.1.0 prerelease does not qualify for this campaign.
+Only [v0.3.0 official
+assets](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.3.0) qualify;
+if that page lacks the native archives and `SHA256SUMS` yet, prepare the
+checklist but do not open an evidence issue (v0.1.0 does not qualify).
 
-- [Reproduce an external project task and Failure Capsule](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-project-evidence.yml)
-- [Measure the installed flagship from an official release archive](https://github.com/rsasaki0109/RoboSim/issues/new?template=installed-flagship-reproduction.yml)
-- [Conform a third-party controller plugin](https://github.com/rsasaki0109/RoboSim/issues/new?template=third-party-plugin-evidence.yml)
-- [Conform an external physics backend, simulator adapter, hardware adapter, or accelerator adapter](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-system-evidence.yml)
+- [External project reproduction + Failure Capsule](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-project-evidence.yml)
+- [Installed flagship reproduction](https://github.com/rsasaki0109/RoboSim/issues/new?template=installed-flagship-reproduction.yml)
+- [Third-party plugin conformance](https://github.com/rsasaki0109/RoboSim/issues/new?template=third-party-plugin-evidence.yml)
+- [External physics/simulator/hardware/accelerator conformance](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-system-evidence.yml)
 
-Read the [external evidence intake guide](docs/EXTERNAL_EVIDENCE_INTAKE.md)
-before running a qualifying test. Opening an issue is only the start of review:
-it does not imply acceptance, and in-repository reference implementations do
-not count as independent evidence. Tagged releases retain a release-level
-`SHA256SUMS`, platform attestation bundles, and attested install reports beside
-the native archives so another machine can audit the exact operator input.
+See the [external evidence intake guide](docs/EXTERNAL_EVIDENCE_INTAKE.md).
+Opening an issue is only the start of review: it does not imply acceptance;
+in-repo reference implementations do not count as independent evidence.
 
 ## Vehicle dynamics at the grip limit
 
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/vehicle-dynamics.png">
-    <img src="docs/media/vehicle-dynamics.gif" alt="The same pure-pursuit controller driving RNE kinematic and tire-limited dynamic vehicle models through a fast corner" width="800">
-  </picture>
-  <br>
-  <sub>One controller, two plants: the dynamic car's trail turns red when the front axle saturates.</sub>
-</p>
+![Pure-pursuit controller driving kinematic and tire-limited dynamic vehicle models through a fast corner](docs/media/vehicle-dynamics.gif)
 
-Example 49 runs both cars from the same commands at 240 Hz, records their pose and
-tire telemetry deterministically, then renders the 12-second comparison and a
-reduced-motion poster. The no-slip car follows the requested line; the dynamic car
-runs wide once the 18 m corner asks for more lateral force than its tires can supply.
-
-```bash
-cargo run --release -p vehicle_dynamics_compare --example 49_vehicle_dynamics
-RNE_SKIP_GPU=1 cargo run -p vehicle_dynamics_compare --example 49_vehicle_dynamics
-```
-
-Model equations, measured errors, and acceptance tests are in
-[Vehicle dynamics](docs/VEHICLE_DYNAMICS.md).
+*Same controller, two plants: the dynamic car's trail turns red once the front axle saturates.* No-slip follows the line; the dynamic car runs wide past tire grip. [Vehicle dynamics](docs/VEHICLE_DYNAMICS.md).
 
 ## Navigation, SLAM, and multi-robot
 
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-nav.png">
-    <img src="docs/media/showcase-nav.gif" alt="A mobile AGV driving through a PBR office environment along a planned route to a docking goal, with its driven trajectory trailing behind" width="820">
-  </picture>
-  <br>
-  <sub>Office AGV navigation in the PBR office scene: the planned route (amber), the driven trajectory (cyan), and the docking goal (green).</sub>
-</p>
+![Mobile AGV driving a planned route to a docking goal, driven trajectory trailing behind](docs/media/showcase-nav.gif)
 
-`rne_nav` and `rne_slam` are the deterministic, ROS-free navigation core: occupancy
-grids and costmaps, a timestamped transform tree, A*/Dijkstra planning, pure-pursuit
-and DWA control, multi-robot sense-and-avoid, drive actuators with limits, an
-odometry/IMU/GPS EKF, 2.5D elevation and terrain layering, 3D ICP, and online 2D SLAM
-with pose-graph loop closure and AMCL. A ROS 2 adapter maps the same types to
-`nav_msgs`/`sensor_msgs`/`tf2` and exposes Nav2 action servers, so the algorithms stay
-independent of the transport. Every scenario replays bit-for-bit.
-
-```bash
-# Capture the office navigation showcase (shared GPU showcase pipeline)
-WGPU_BACKEND=vulkan cargo run --release -p showcase_captures --example 90_showcase_captures -- --capture --environment nav
-
-cargo run -p nav_slam_mapping --example 97_nav_slam_mapping
-cargo run -p nav_slam_physics --example 98_nav_slam_physics
-cargo run -p multi_robot_avoidance --example 99_multi_robot_avoidance
-cargo run -p nav_elevation_icp --example 100_nav_elevation_icp
-```
-
-Data structures, algorithms, and limits are in
-[Navigation](docs/NAVIGATION.md) and [SLAM](docs/SLAM.md).
+`rne_nav`/`rne_slam`: deterministic, ROS-free costmaps, a transform tree,
+A*/DWA/pure-pursuit, multi-robot avoidance, an EKF, 3D ICP, and online 2D
+SLAM with loop closure and AMCL (a ROS 2 adapter maps to Nav2). Details:
+[Navigation](docs/NAVIGATION.md), [SLAM](docs/SLAM.md).
 
 ## G1 locomotion
 
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-g1-sustained-walk.png">
-    <img src="docs/media/unitree-g1-sustained-walk.gif" alt="The official Unitree G1 walking a sustained curved path for 50 seconds in a robotics test bay" width="760">
-  </picture>
-  <br>
-  <sub>v0.3 long-horizon walk: the official G1 holds its feet for 50 s (six times the v0.2.1 horizon) under a forward+turn command, upright the whole way, with the walked curve drawn as a floor trail.</sub>
-</p>
+![The official Unitree G1 walking a sustained curved path for 50 seconds in a robotics test bay](docs/media/unitree-g1-sustained-walk.gif)
 
-Example 67 evaluates typed forward, stop, and differential-steering commands
-without a renderer. Example 68 adds a bounded 240-tick true body-heading
-candidate and the v0.3 sustained envelope: the same validated heading candidate
-walks 3000 ticks (50 s) without falling (pelvis > 0.784 m, tilt < 0.13 rad) with
-the correct mean yaw-rate sign. The integrated yaw stays bounded by the clamped
-target — an eight-dimension gait-schedule search found **no** upright sustained
-turn on this official contact schedule, so sustained turning remains open and
-v0.3 is a stability claim rather than a sustained-turn claim.
+*v0.3 long-horizon walk: the official G1 holds its feet for 50 s under a forward+turn command, upright throughout, walked curve drawn as a floor trail.*
 
-```bash
-cargo run --release -p g1_commanded_locomotion --example 67_g1_commanded_locomotion
-cargo run --release -p g1_commanded_locomotion --example 67_g1_commanded_locomotion -- --train
-cargo run --release -p g1_heading_turn --example 68_g1_heading_turn
-cargo run --release -p g1_heading_turn --example 68_g1_heading_turn -- --train
-
-# Regenerate the wgpu hero GIFs and reduced-motion PNGs
-cargo run --release -p g1_stride_gif --example 63_g1_stride_gif
-cargo run --release -p g1_sustained_walk_gif --example 92_g1_sustained_walk_gif
-```
-
-The full measurements and limitations are in [docs/G1_LOCOMOTION.md](docs/G1_LOCOMOTION.md).
+Example 67 evaluates typed commands headlessly; example 68 adds a bounded
+heading candidate and the v0.3 sustained envelope (3000 ticks / 50 s, correct
+yaw-rate sign). A gait-schedule search found **no** upright sustained turn on
+the official contact schedule, so v0.3 is a stability claim, not a turning
+claim. Details: [docs/G1_LOCOMOTION.md](docs/G1_LOCOMOTION.md).
 
 ## Quickstart
 
@@ -206,43 +137,13 @@ git clone https://github.com/rsasaki0109/RoboSim.git
 cd RoboSim
 cargo run -p hello_world --example 00_hello_world
 cargo run -p falling_cube --example 01_falling_cube
-cargo run -p diff_drive_lidar --example 01_diff_drive_lidar
-
-# Run an asset scene headlessly with a fixed-step physics replay
-cargo run --release -p rne_asset_cli -- simulate assets/scenes/mesh_diff_drive.rne.scene.toml --steps 600 --hz 60 --wheel-velocity-rad-s 6 --determinism-check --replay-out target/runs/mesh_diff_drive.rne-replay
-cargo run --release -p rne_asset_cli -- replay target/runs/mesh_diff_drive.rne-replay
-
-# Run a named URDF joint and record joint/sensor observations
-cargo run --release -p rne_asset_cli -- run assets/runs/mm_minimal_joint_velocity.rne.run.toml
-
-# Run the same experiment from a versioned manifest
-cargo run --release -p rne_asset_cli -- run assets/runs/mesh_diff_drive.rne.run.toml
-
-# Record full typed sensor payloads through a manifest [[sensors]] subscription
-cargo run --release -p rne_asset_cli -- run assets/runs/mesh_diff_drive_lidar_payload.rne.run.toml
-cargo run --release -p rne_asset_cli -- replay target/runs/mesh_diff_drive_lidar_payload.rne-replay
-
-# Run an OpenSCENARIO speed scenario over the traffic runtime
-cargo run --release -p rne_asset_cli -- run assets/runs/scenario_speed.rne.run.toml
-
-# Drive a named joint through a multi-joint position trajectory
-cargo run --release -p rne_asset_cli -- run assets/runs/mm_minimal_joint_trajectory.rne.run.toml
-
-# Run on the deterministic analytic physics backend
-cargo run --release -p rne_asset_cli -- run assets/runs/cart_analytic.rne.run.toml
 ```
 
-For a complete local validation:
-
-```bash
-cargo run -p xtask -- ci
-```
-
-The long example smoke gate is split for CI into `manipulator`, `locomotion`,
-`assets`, and `media` partitions; run one locally with, for example,
-`cargo run -p xtask -- ci-smoke media`.
-
-See [examples/README.md](examples/README.md) for the complete example index.
+For a complete local validation, run `cargo run -p xtask -- ci` (the long
+smoke gate splits into `manipulator`/`locomotion`/`assets`/`media`
+partitions, e.g. `cargo run -p xtask -- ci-smoke media`). The headless asset
+CLI, replay, and determinism-check commands, and the full example index, are
+in [examples/README.md](examples/README.md).
 
 ## Independent integrations
 
@@ -253,259 +154,34 @@ The native release archive includes a one-command installed product proof:
   --measure-on "lab-workstation-a" --verify-installed-bundle .
 ```
 
-It runs the unchanged indoor mobile-manipulation TaskSpec and controller through
-Rapier and the bundled MuJoCo runtime for both a successful episode and the same
-deterministic perception blackout. It compares named SI-unit tolerances and the
-first violation, verifies both replays and the Failure Capsule, and writes a
-self-contained browser inspector plus a SHA-256-bound
-`installed-proof-report.json`. The report also binds the exact packaged
-`rne-flagship-proof` executable that produced it. Before creating output, the
-same command verifies the exact regular-file graph declared by the extracted
-bundle's `SHA256SUMS` and binds that result into the proof and Failure Capsule.
-No source checkout, renderer,
-ROS 2, separate MuJoCo installation, or network connection is required after
-extraction.
-The explicit hardware label also writes a separate
-`time-to-proof-report.json`; it measures full installed-bundle verification
-through verified capsule and bound proof report against the 15-minute target without contaminating
-deterministic correctness evidence.
-An independent operator can bind those outputs to the exact clean tagged
-archive with `xtask external-flagship-check`; CI and placeholder machine labels
-are rejected as external evidence.
+It runs the same indoor TaskSpec through Rapier and bundled MuJoCo, verifies
+both replays plus the Failure Capsule against `SHA256SUMS`, and writes a
+SHA-256-bound report with no source checkout, renderer, or network needed.
+Details: [flagship validation](docs/FLAGSHIP_VALIDATION_WORKFLOW.md).
 
-Third-party controller plugins, physics backends, simulator adapters, hardware adapters, and real
-external task reproductions can be submitted through the fixed
-[external evidence intake](docs/EXTERNAL_EVIDENCE_INTAKE.md). The repository
-validates all required issue-form fields with `xtask external-intake-check`;
-submission never implies acceptance or 1.0 readiness. Native bundles expose
-`rne-asset failure-capsule create|verify`, so an independent project can retain
-its required replay evidence from the extracted release without cloning the
-RNE source tree. Maintainers use `xtask external-project-check` to rebind the
-clean external Git revision, official release archive, TaskSpec, every Capsule
-member, and committed command logs before either adoption slot can count.
-
-## Selected demos
-
-### Camera-based localization with visloc-rs
-
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/triple_demo.png">
-    <img src="docs/media/triple_demo.gif" alt="Third-person 3DGS view of a URDF diff-drive robot carrying a stereo camera, the first-person view, and a 2D map with ground truth and the localized trail" width="640">
-  </picture>
-  <br>
-  <sub>A URDF mobile base with a stereo camera drives a U-shaped route through the real-capture Dr Johnson 3DGS interior. Top: third-person view. Bottom-left: first-person (the exported cameras). Bottom-right: the prebuilt COLMAP map, ground truth (black), and the localized trail (red). Stereo + IMU VIO reaches 0.029 m ATE; map matching relocalizes 377/400 frames at 0.058 m.</sub>
-</p>
-
-Example 113 runs a deterministic diff-drive episode in a photo-derived 3DGS
-interior and exports an EuRoC-format stereo + IMU dataset (cameras at 20 Hz,
-IMU at 60 Hz, ground truth, Double-Sphere calibration). The RNE side owns the
-scene, the robot, and the sensors; [visloc-rs](https://github.com/rsasaki0109/visloc-rs)
-consumes the export for VIO and map-matching relocalization against a map built
-from a separate episode.
-
-```bash
-cargo run -p drjohnson_euroc_export --example 113_drjohnson_euroc_export -- target/drjohnson_euroc
-```
-
-Details: [navigation integration plan](docs/VISLOC_NAVIGATION_PLAN.md),
-[source](examples/113_drjohnson_euroc_export/main.rs).
-
-### PLATEAU city and sensors
-
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/plateau-car.png">
-    <img src="docs/media/plateau-car.gif" alt="Vehicle driving through an official PLATEAU Sanjo City tile with traffic signals, lanes, and LiDAR overlay" width="800">
-  </picture>
-  <br>
-  <sub>PLATEAU city import: official tile, traffic signals, kinematic vehicles, and sensor overlay.</sub>
-</p>
-
-Example 46 imports a bounded official PLATEAU Sanjo City tile once, then renders
-both the deterministic 100-actor traffic capture and a bounded, controlled
-quadrotor flight through the same detailed streetscape. Example 47 replays the
-traffic runtime headlessly. The hero vehicle carries physics-aware LiDAR and
-RGB-D sensors with seeded noise, material response, timing, and replayable output.
-
-```bash
-cargo run -p plateau_drone_gif --example 46_plateau_drone_gif
-cargo run -p traffic_city_replay --example 47_traffic_city_replay
-```
-
-Details: [PLATEAU import](docs/PLATEAU_IMPORT.md),
-[traffic runtime](docs/TRAFFIC_RUNTIME.md),
-[LiDAR](docs/LIDAR_SIMULATION.md), and [camera](docs/CAMERA_SIMULATION.md).
-
-### Go2 learning boundary
-
-The shared `LocomotionPolicy` contract supports seeded Go2/G1 batches,
-checkpoints, replay digests, CEM smoke tests, and a Python PPO smoke path.
-
-```bash
-cargo run --release -p go2_pure_torque --example 64_go2_pure_torque
-cargo run --release -p go2_velocity_terrain --example 65_go2_velocity_terrain
-cargo run --release -p locomotion_vectorized --example 66_locomotion_vectorized
-```
-
-See [docs/GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md) and
-[docs/ROADMAP.md](docs/ROADMAP.md).
-
-### G1 manipulation and deformables
-
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-g1-dex3.png">
-    <img src="docs/media/unitree-g1-dex3.gif" alt="Unitree G1 Dex3 two-contact grasp" width="520">
-  </picture>
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/unitree-g1-cloth.png">
-    <img src="docs/media/unitree-g1-cloth.gif" alt="Unitree G1 Dex3 cloth handling" width="520">
-  </picture>
-</p>
-
-```bash
-# Two-contact Dex3 grasp, lift, carry, and release
-cargo run -p unitree_g1_dex3_pick_place --example 42_unitree_g1_dex3_pick_place
-
-# G1 hand handling live XPBD cloth
-cargo run --release -p unitree_g1_cloth_handling --example 45_unitree_g1_cloth_handling
-
-# Deterministic cable and cloth rollouts
-cargo run -p deformable_cable --example 43_deformable_cable
-cargo run -p deformable_cloth --example 44_deformable_cloth
-```
-
-### Native motion planning
-
-`rne_planning` is a deterministic, MoveIt-inspired joint-space planning layer
-built on the generic `rne_robot` kinematic model and collision checker: planning
-scene and SRDF groups, goal and path constraints, a planner registry and
-pipeline, PTP/LIN/CIRC motions, RRT-Connect, RRT*, informed RRT*, PRM,
-BIT\*-style, CHOMP and STOMP trajectory optimization, hybrid planning, and
-request adapters with velocity- and acceleration-limited time parameterization.
-No MoveIt or ROS dependency is added to core.
-
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/motion-planning.png">
-    <img src="docs/media/motion-planning.gif" alt="The OpenArm v2 7-DOF arm driven by rne_planning: RRT-Connect swings the dark arm and gripper around a red spherical obstacle, leaving a cyan end-effector trail, while straight joint interpolation is blocked" width="820">
-  </picture>
-  <br>
-  <sub>The checked-in RNE-converted <b>OpenArm v2 left arm</b> (7-DOF, GLB meshes), planned by RRT-Connect and rendered by the real wgpu renderer. A collision object blocks straight joint interpolation; the cyan trail traces the collision-free end-effector detour. <a href="examples/102_motion_planning_media/main.rs">capture source</a> · <a href="docs/architecture/011_joint_motion_planning.md">architecture</a></sub>
-</p>
-
-```bash
-cargo run -p motion_planning --example 101_motion_planning
-cargo run --release -p motion_planning_media --example 102_motion_planning_media
-cargo run -p motion_planning_media --example 102_motion_planning_media -- --smoke
-```
-
-See [joint-space motion planning](docs/architecture/011_joint_motion_planning.md).
-
-### Native articulated dynamics
-
-`rne_dynamics` is the backend-neutral, deterministic articulated-body dynamics
-layer that model-based legged and mobile-manipulation control builds on: spatial
-algebra, the composite-rigid-body mass matrix, recursive Newton-Euler inverse
-dynamics with gravity and velocity bias, deterministic forward dynamics, the
-center of mass, and the center-of-mass Jacobian. Fixed- and floating-base trees
-are supported, and the Go2 diagnostics example checks the equation of motion on
-a real 18-DoF quadruped.
-
-```bash
-cargo run -p dynamics_diagnostics --example 103_dynamics_diagnostics
-```
-
-See [articulated-body dynamics](docs/architecture/012_dynamics.md).
-
-### Native legged walking templates
-
-`rne_legged` is the deterministic, backend-free template layer for legged
-walking: the Linear Inverted Pendulum Model, Divergent Component of Motion and
-capture point, closed-form capture-point foot placement, Kajita-style ZMP
-preview control, footstep plans with smooth double-support transitions, and a
-full center-of-mass walking pattern. It turns a footstep request into a
-replayable trajectory without a physics backend or renderer.
-
-```bash
-cargo run -p legged_pattern --example 104_legged_pattern
-```
-
-See [legged walking templates](docs/architecture/013_legged_templates.md).
-
-The same crate adds a classical **centroidal layer** for dynamic maneuvers: a
-single-rigid-body contact-force distribution with a Coulomb friction cone,
-Raibert foot placement, and a minimal-jerk swing trajectory, following the
-open-source `cajun` and `go2-convex-mpc` centroidal controllers. This is the
-reduced-order abstraction a push-off / flight / landing controller needs.
-
-### Native whole-body control
-
-`rne_wbc` realizes task-space objectives as joint torques on a floating-base
-articulated model: a deterministic weighted inverse-dynamics solve over joint
-accelerations and contact wrenches, with the floating-base equations of motion
-and contact no-slip rows, friction-cone projection, and torque recovery from
-`rne_dynamics`. The Go2 example supports the exact body weight through four foot
-contacts with a base-residual below `1e-8`.
-
-```bash
-cargo run -p whole_body_control --example 105_whole_body_control
-```
-
-See [whole-body control](docs/architecture/014_whole_body_control.md).
-
-### Native optimal control
-
-`rne_oc` is the native Crocoddyl-style layer for generating agile maneuvers:
-a discrete shooting problem solved by **DDP** with Levenberg-Marquardt
-regularization and a backtracking line search, central-difference dynamics
-derivatives, quadratic running/terminal costs, and an `ArticulatedDynamics`
-adapter that integrates `rne_dynamics` forward dynamics. A pendulum swings up
-from hanging to upright under the solver, deterministically and without any
-external optimal-control library.
-
-See [native optimal control](docs/architecture/015_native_optimal_control.md).
-
-Example 109 plans a Go2 **crouch–push–flight jump** with the FDDP solver and
-executes it with the whole-body controller.
-
-<p align="center">
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/go2-jump.png">
-    <img src="docs/media/go2-jump.gif" alt="A Unitree Go2 crouches, pushes off, tucks its legs in flight, and lands upright" width="460">
-  <br>
-  <sub>Crouch–push–flight jump planned by the native FDDP solver, executed by the whole-body controller with torque feed-forward and low-gain tracking. The body rises 0.107 m, the feet clear 44 mm, and the peak lean is 0.33 rad (0.73 rad before the feed-forward). <a href="examples/109_go2_jump_sim/main.rs">source</a></sub>
-</p>
-
-```bash
-cargo run --release -p go2_jump_sim --example 109_go2_jump_sim -- --wbc-stance
-```
+Third-party plugins, physics backends, adapters, and external task
+reproductions go through the fixed
+[external evidence intake](docs/EXTERNAL_EVIDENCE_INTAKE.md); submission
+never implies acceptance.
 
 ## Architecture
 
 The workspace is split by responsibility:
 
-- `rne_core`, `rne_math`, `rne_ecs`: schedules, time, events, diagnostics, ECS, and spatial math.
-- `rne_world`, `rne_robot`, `rne_sensor`, `rne_ai`, `rne_data`: world/entity conventions, robot control, sensors, learning interfaces, and typed data streams.
-- `rne_planning`: backend-neutral joint-space planning scene, goal constraints, planners, and pipeline.
-- `rne_dynamics`: backend-neutral articulated-body dynamics: mass matrix, inverse dynamics, center of mass, and Jacobians.
-- `rne_legged`: backend-neutral legged walking templates: LIPM/DCM, capture-point foot placement, ZMP preview control, and footstep plans.
-- `rne_wbc`: backend-neutral whole-body control: weighted inverse dynamics, contact and friction handling, and joint torque recovery.
-- `rne_physics` and `rne_physics_rapier`: backend-neutral traits and the Rapier implementation.
-- `rne_render` and `rne_render_wgpu`: renderer traits and the optional wgpu backend.
-- `rne_asset`, `rne_plugin`, `rne_traffic`: assets, plugin interfaces, and backend-neutral traffic.
-- `adapters/ros2`: ROS 2 integration. Core crates remain ROS 2-free.
-
-Important boundaries are recorded in [docs/architecture](docs/architecture/000_overview.md).
+- `rne_core`/`rne_math`/`rne_ecs`/`rne_world`/`rne_robot`/`rne_sensor`/`rne_ai`/`rne_data`: schedules, ECS, spatial math, entity/robot control, sensors, learning interfaces, typed data streams.
+- `rne_planning`/`rne_dynamics`/`rne_legged`/`rne_wbc`: backend-neutral joint-space planning, articulated dynamics, legged templates, whole-body control.
+- `rne_physics`/`rne_physics_rapier` and `rne_render`/`rne_render_wgpu`: backend-neutral traits plus the Rapier and wgpu implementations.
+- `rne_asset`/`rne_plugin`/`rne_traffic`: assets, plugin interfaces, backend-neutral traffic.
+- `adapters/ros2`: ROS 2 integration; core crates remain ROS 2-free.
 
 ## Determinism and testing
 
-- Simulation uses `SimClock`, explicit seeds, stable entity ordering, and replay digests.
-- Headless examples and tests do not initialize a renderer.
-- Public APIs use explicit units such as `_m`, `_rad`, `_s`, and `_hz`.
-- Physics backends do not leak engine-specific handles through public core traits.
+Simulation uses `SimClock`, explicit seeds, stable entity ordering, and
+replay digests; headless examples/tests never initialize a renderer; public
+APIs use explicit units (`_m`, `_rad`, `_s`, `_hz`); physics backends never
+leak engine-specific handles through core traits.
 
-Run the standard checks:
+Standard checks:
 
 ```bash
 cargo fmt --all
@@ -527,37 +203,16 @@ python3 -m venv .venv
 .venv/bin/python examples/04_python_policy/run.py
 ```
 
-ROS 2 is optional and isolated under [adapters/ros2](adapters/ros2). See the
-[ROS 2 bridge README](adapters/ros2/rne_ros2_bridge/README.md) for setup.
+ROS 2 is optional, isolated under [adapters/ros2](adapters/ros2); see the
+[bridge README](adapters/ros2/rne_ros2_bridge/README.md) for setup.
 
 ## Documentation
 
-- [Architecture overview](docs/architecture/000_overview.md)
-- [Roadmap](docs/ROADMAP.md)
-- [OSS parity baseline](docs/OSS_PARITY.md)
-- [Controller plugin SDK](docs/PLUGIN_SDK.md)
-- [External physics backend conformance](docs/EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md)
-- [External hardware adapter conformance](docs/HARDWARE_ADAPTER_CONFORMANCE.md)
-- [External simulator adapter conformance](docs/EXTERNAL_SIMULATOR_ADAPTER_CONFORMANCE.md)
-- [OpenArm Rapier / native MuJoCo / Gazebo proof](docs/OPENARM_CROSS_SIM_PROOF.md), including official arm-only versus pinch-gripper coupled-inertia evidence, seven-joint held-out MIMO identification, and typed-sensor dropout, stale-age, recovery, repeated-burst re-arm, position-quantization, position-saturation, and stuck-value boundaries
-- [Compatibility fixture corpus](docs/COMPATIBILITY_CORPUS.md)
-- [Support policy and 1.0 commitment](docs/SUPPORT.md)
-- [Evidence-backed 1.0 readiness](docs/ONE_ZERO_READINESS.md)
-- [Browser viewer and replay inspector](web/rne_web_viewer/README.md)
-- [Flagship validation workflow](docs/FLAGSHIP_VALIDATION_WORKFLOW.md)
-- [Tsukuba confirmation run](docs/TSUKUBA_CONFIRMATION_RUN.md)
-- [Tsukuba full run](docs/TSUKUBA_FULL_RUN.md)
-- [SSL small-pitch 2v2](docs/SSL_SMALL_PITCH.md)
-- [SSL simulation-protocol adapter](docs/SSL_ADAPTER.md)
-- [G1 workbench mission](docs/G1_WORKBENCH_MISSION.md)
-- [Tsukuba 3DGS background](docs/TSUKUBA_3DGS_BACKGROUND.md)
-- [G1 head × splat background](docs/G1_HEAD_SPLAT_BACKGROUND.md)
-- [G1 locomotion](docs/G1_LOCOMOTION.md)
-- [Go2 locomotion](docs/GO2_LOCOMOTION.md)
-- [Legged locomotion frontier plan](docs/PLAN_LEGGED_LOCOMOTION_FRONTIER.md)
-- [Sensor simulation](docs/IMU_SIMULATION.md)
-- [Examples](examples/README.md)
-- [Changelog](CHANGELOG.md)
+- [Architecture](docs/architecture/000_overview.md) · [Roadmap](docs/ROADMAP.md) · [OSS parity](docs/OSS_PARITY.md) · [Plugin SDK](docs/PLUGIN_SDK.md) · [Browser viewer](web/rne_web_viewer/README.md)
+- Conformance/readiness: [physics](docs/EXTERNAL_PHYSICS_BACKEND_CONFORMANCE.md) · [hardware](docs/HARDWARE_ADAPTER_CONFORMANCE.md) · [simulator](docs/EXTERNAL_SIMULATOR_ADAPTER_CONFORMANCE.md) · [OpenArm cross-sim](docs/OPENARM_CROSS_SIM_PROOF.md) · [compat corpus](docs/COMPATIBILITY_CORPUS.md) · [support](docs/SUPPORT.md) · [1.0 readiness](docs/ONE_ZERO_READINESS.md) · [flagship validation](docs/FLAGSHIP_VALIDATION_WORKFLOW.md)
+- Locomotion: [G1](docs/G1_LOCOMOTION.md)/[workbench](docs/G1_WORKBENCH_MISSION.md)/[splat bg](docs/G1_HEAD_SPLAT_BACKGROUND.md) · [Go2](docs/GO2_LOCOMOTION.md) · [frontier plan](docs/PLAN_LEGGED_LOCOMOTION_FRONTIER.md) · [sensors](docs/IMU_SIMULATION.md)
+- Case studies: [Tsukuba](docs/TSUKUBA_CONFIRMATION_RUN.md)/[full](docs/TSUKUBA_FULL_RUN.md)/[3DGS bg](docs/TSUKUBA_3DGS_BACKGROUND.md) · [SSL 2v2](docs/SSL_SMALL_PITCH.md)/[adapter](docs/SSL_ADAPTER.md)
+- [More demos](docs/DEMOS.md) · [Examples](examples/README.md) · [Changelog](CHANGELOG.md)
 
 ## License
 
