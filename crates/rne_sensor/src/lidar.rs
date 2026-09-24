@@ -128,7 +128,7 @@ impl LidarAtmosphere {
 
     /// Returns the per-meter probability coefficient of a single pulse being blocked.
     ///
-    /// [`Self::extinction_per_m`] is the ensemble-average attenuation. Rain and snow
+    /// The crate-internal extinction coefficient is the ensemble-average attenuation. Rain and snow
     /// additionally consist of particles large enough to occlude a whole pulse, which
     /// shows up as isolated missing returns rather than as a uniform intensity loss.
     /// Fog and dust particles are too small for that and are excluded here.
