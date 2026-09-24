@@ -22,7 +22,116 @@ impl Default for UnitreeG1GaitCommand {
     }
 }
 
-/// Generates one deterministic 23-DoF G1 walking pose.
+/// Arm rest/swing pose used by the deterministic G1 gait generator.
+///
+/// [`Self::Reaching`] is the original pose every pinned G1 locomotion
+/// result in this codebase (the commanded-heading candidates, the learned
+/// transport overlay, the sustained-walk envelope, examples 62/63/67/68/
+/// 70/71/77/81, ...) was measured and validated against; changing it
+/// changes the robot's mass distribution enough to flip chaos-sensitive
+/// sign gates (confirmed on Linux CI: a naive across-the-board elbow
+/// change flipped `v02_heading_candidate_flips_body_yaw_sign_and_reports_turn_metrics`'s
+/// turn direction even though every gate stayed green on this developer
+/// machine). It stays the default everywhere so those results stay
+/// bit-for-bit identical.
+///
+/// [`Self::Hanging`] is a purely visual variant, opted into only by the two
+/// call sites whose own gates were re-validated against it: the
+/// `92_g1_sustained_walk_gif` hero capture and the factory inspection
+/// episode/showcase (`unitree_g1_inspection.rs`, which the workbench
+/// mission and examples 39/41 also build on). See [`ARM_HANG_ELBOW_RAD`]
+/// for how that value was chosen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum UnitreeG1ArmPose {
+    /// The original, pinned rest/swing pose.
+    #[default]
+    Reaching,
+    /// The visual hanging-arm pose used by the sustained-walk hero capture
+    /// and the factory inspection episode/showcase.
+    Hanging,
+}
+
+impl UnitreeG1ArmPose {
+    /// Shoulder-pitch bias at rest (`stride == 0`). Identical for both
+    /// poses: zero already hangs the *upper* arm (shoulder-to-elbow)
+    /// correctly; see [`Self::elbow_rad`].
+    #[must_use]
+    pub const fn pitch_bias_rad(self) -> f64 {
+        0.0
+    }
+
+    /// Shoulder-roll abduction that clears the hips during swing. Identical
+    /// for both poses: a smaller roll (arms held tighter to the body)
+    /// destabilizes the pinned sustained-walk gates via arm/hip
+    /// self-contact while the legs swing through the reduced clearance.
+    #[must_use]
+    pub const fn roll_rad(self) -> f64 {
+        0.20
+    }
+
+    /// Resting elbow bend. See [`ARM_HANG_ELBOW_RAD`] for how the
+    /// [`Self::Hanging`] value was chosen.
+    #[must_use]
+    pub const fn elbow_rad(self) -> f64 {
+        match self {
+            UnitreeG1ArmPose::Reaching => 0.42,
+            UnitreeG1ArmPose::Hanging => ARM_HANG_ELBOW_RAD,
+        }
+    }
+
+    /// Shoulder-pitch swing amplitude per unit of stride, counter-phase to
+    /// the leg on the same side (left arm forward with right leg forward).
+    /// Identical for both poses: a much larger gain (`3.2`, an easily
+    /// visible swing) passed every sustained-walk gate on its own, but
+    /// combined with the factory inspection task's different
+    /// (smaller-stride, faster-cadence) walk command it threw the G1 off
+    /// its scripted path by several meters.
+    #[must_use]
+    pub const fn swing_gain(self) -> f64 {
+        0.7
+    }
+}
+
+/// Resting elbow bend that lets the forearm hang mostly down by the body
+/// instead of sticking out horizontally forward, used only by
+/// [`UnitreeG1ArmPose::Hanging`].
+///
+/// This link's zero position is *not* a straight arm: forward-kinematics
+/// measurement showed that at `elbow == 0` the forearm (elbow-to-hand
+/// vector) is almost perfectly horizontal, forward of the body
+/// (`hand - elbow ~= (+0.10, -0.01, 0.00) m`), even though the *upper* arm
+/// (shoulder-to-elbow) already hangs correctly at `shoulder_pitch == 0`
+/// (`~= (+0.02, -0.20, -0.05) m`). The forearm points straight down only
+/// once the elbow is bent roughly 84 degrees (`elbow ~= 1.47`); by
+/// `elbow ~= 0.9-1.1` it already reads as clearly hanging (roughly a
+/// 45-55 degree bend from vertical instead of horizontal).
+///
+/// This value is deliberately smaller than that, because the two call
+/// sites this pose is used by include the factory inspection task's
+/// different (smaller-stride, faster-cadence) walk command, not just the
+/// sustained walk's. At `roll_rad() == 0.20`, every value of `elbow` up to
+/// `0.90` passes the sustained-walk gates
+/// (`gait_is_periodic_and_clamps_commands`,
+/// `learned_torques_make_the_g1_stride`,
+/// `v03_sustained_envelope_walks_50s_without_falling`), but the factory
+/// inspection route (`factory_inspection_stays_upright_throughout`) tips
+/// the G1 over partway through at `elbow == 0.75` or above on this
+/// machine (a real fall that a naive "did it finish near the last marker"
+/// check does not catch, since the fallen G1 can still slide to a stop
+/// close enough — this was caught only by adding a height check, and
+/// separately reproduced the "factory episode did not reach a terminal
+/// step" CI failure on Linux at the larger `0.90` this constant was
+/// originally set to). `0.70` was the largest value measured safe on this
+/// machine; `0.50` keeps a wider margin under that boundary for
+/// platform-to-platform floating point differences (this G1 walking setup
+/// is well documented elsewhere in this codebase as chaotic: ULP-level
+/// perturbations can flip outcomes), while still reading as a visibly
+/// bent, forward-and-down hanging arm rather than the original
+/// near-horizontal forearm.
+pub const ARM_HANG_ELBOW_RAD: f64 = 0.50;
+
+/// Generates one deterministic 23-DoF G1 walking pose with the original,
+/// pinned [`UnitreeG1ArmPose::Reaching`] arm pose.
 ///
 /// The returned targets use child-link names, matching
 /// [`super::UrdfSceneSim::step_joint_position_targets`]. Left and right legs
@@ -30,6 +139,15 @@ impl Default for UnitreeG1GaitCommand {
 pub fn unitree_g1_gait_targets(
     step: u64,
     command: UnitreeG1GaitCommand,
+) -> [UrdfJointPositionTarget<'static>; 23] {
+    unitree_g1_gait_targets_with_arm_pose(step, command, UnitreeG1ArmPose::Reaching)
+}
+
+/// Like [`unitree_g1_gait_targets`], with an explicit [`UnitreeG1ArmPose`].
+pub fn unitree_g1_gait_targets_with_arm_pose(
+    step: u64,
+    command: UnitreeG1GaitCommand,
+    arm_pose: UnitreeG1ArmPose,
 ) -> [UrdfJointPositionTarget<'static>; 23] {
     let stride = command.stride_rad.clamp(0.0, 0.35);
     let lift = command.foot_lift_rad.clamp(0.0, 0.45);
@@ -87,84 +205,22 @@ pub fn unitree_g1_gait_targets(
         target("torso_link", 0.0),
         target(
             "left_shoulder_pitch_link",
-            ARM_HANG_PITCH_RAD - ARM_SWING_GAIN * stride * left,
+            arm_pose.pitch_bias_rad() - arm_pose.swing_gain() * stride * left,
         ),
-        target("left_shoulder_roll_link", ARM_HANG_ROLL_RAD),
+        target("left_shoulder_roll_link", arm_pose.roll_rad()),
         target("left_shoulder_yaw_link", 0.0),
-        target("left_elbow_link", ARM_HANG_ELBOW_RAD),
+        target("left_elbow_link", arm_pose.elbow_rad()),
         target("left_wrist_roll_rubber_hand", 0.0),
         target(
             "right_shoulder_pitch_link",
-            ARM_HANG_PITCH_RAD - ARM_SWING_GAIN * stride * right,
+            arm_pose.pitch_bias_rad() - arm_pose.swing_gain() * stride * right,
         ),
-        target("right_shoulder_roll_link", -ARM_HANG_ROLL_RAD),
+        target("right_shoulder_roll_link", -arm_pose.roll_rad()),
         target("right_shoulder_yaw_link", 0.0),
-        target("right_elbow_link", ARM_HANG_ELBOW_RAD),
+        target("right_elbow_link", arm_pose.elbow_rad()),
         target("right_wrist_roll_rubber_hand", 0.0),
     ]
 }
-
-/// Shoulder-pitch bias at rest (`stride == 0`). Zero already hangs the
-/// *upper* arm (shoulder-to-elbow) correctly (see `ARM_HANG_ELBOW_RAD`).
-pub(crate) const ARM_HANG_PITCH_RAD: f64 = 0.0;
-/// Shoulder-roll abduction that clears the hips during swing. Matches the
-/// value the walking gait was originally tuned and pinned with
-/// (`learned_torques_make_the_g1_stride`,
-/// `v03_sustained_envelope_walks_50s_without_falling`): measurement showed
-/// a smaller roll (closer to zero, i.e. arms held tighter to the body)
-/// destabilizes those pinned locomotion gates even at an unchanged elbow,
-/// most likely from arm/hip self-contact while the legs swing through
-/// this reduced clearance.
-pub(crate) const ARM_HANG_ROLL_RAD: f64 = 0.20;
-/// Resting elbow bend that lets the forearm hang mostly down by the body
-/// instead of sticking out horizontally forward.
-///
-/// This link's zero position is *not* a straight arm: forward-kinematics
-/// measurement showed that at `elbow == 0` the forearm (elbow-to-hand
-/// vector) is almost perfectly horizontal, forward of the body
-/// (`hand - elbow ~= (+0.10, -0.01, 0.00) m`), even though the *upper* arm
-/// (shoulder-to-elbow) already hangs correctly at `shoulder_pitch == 0`
-/// (`~= (+0.02, -0.20, -0.05) m`). The forearm points straight down only
-/// once the elbow is bent roughly 84 degrees (`elbow ~= 1.47`); by
-/// `elbow ~= 0.9-1.1` it already reads as clearly hanging (roughly a
-/// 45-55 degree bend from vertical instead of horizontal).
-///
-/// This value is deliberately smaller than that, because the shared rest
-/// pose also has to survive the factory inspection task's different
-/// (smaller-stride, faster-cadence) walk command, not just the sustained
-/// walk's. At `ARM_HANG_ROLL_RAD == 0.20`, every value of `elbow` up to
-/// `0.90` passes the sustained-walk gates
-/// (`gait_is_periodic_and_clamps_commands`,
-/// `learned_torques_make_the_g1_stride`,
-/// `v03_sustained_envelope_walks_50s_without_falling`), but the factory
-/// inspection route (`factory_inspection_stays_upright_throughout`) tips
-/// the G1 over partway through at `elbow == 0.75` or above on this
-/// machine (a real fall that a naive "did it finish near the last marker"
-/// check does not catch, since the fallen G1 can still slide to a stop
-/// close enough — this was caught only by adding a height check, and
-/// separately reproduced the "factory episode did not reach a terminal
-/// step" CI failure on Linux at the larger `0.90` this constant was
-/// originally set to). `0.70` was the largest value measured safe on this
-/// machine; `0.50` keeps a wider margin under that boundary for
-/// platform-to-platform floating point differences (this G1 walking setup
-/// is well documented elsewhere in this codebase as chaotic: ULP-level
-/// perturbations can flip outcomes), while still reading as a visibly
-/// bent, forward-and-down hanging arm rather than the original
-/// near-horizontal forearm.
-pub(crate) const ARM_HANG_ELBOW_RAD: f64 = 0.50;
-/// Shoulder-pitch swing amplitude per unit of stride, counter-phase to the
-/// leg on the same side (left arm forward with right leg forward).
-///
-/// A much larger gain (`3.2`, giving an easily visible swing) was tried
-/// together with the hanging-elbow fix above; it passed every G1
-/// locomotion gate on its own, but combined with the factory inspection
-/// task's different (smaller-stride, faster-cadence) walk command it threw
-/// the G1 off its scripted path entirely (measured base position several
-/// meters from the inspection marker instead of a few centimeters).
-/// Reverting to this original, validated gain keeps the swing subtle but
-/// safe across every scripted G1 gait command in this codebase; the
-/// visible fix here is the hanging elbow, not swing amplitude.
-const ARM_SWING_GAIN: f64 = 0.7;
 
 fn gait_wave(phase: f64) -> (f64, f64) {
     const STANCE_FRACTION: f64 = 0.62;
@@ -814,6 +870,26 @@ pub fn unitree_g1_gait_targets_for_velocity(
     unitree_g1_gait_targets_for_velocity_with_yaw_stride(step, base_command, command, 0.0)
 }
 
+/// Like [`unitree_g1_gait_targets_for_velocity`], with an explicit
+/// [`UnitreeG1ArmPose`]. Used by the sustained-walk hero capture
+/// (`examples/92_g1_sustained_walk_gif`), whose stability gates were
+/// re-validated against [`UnitreeG1ArmPose::Hanging`].
+pub fn unitree_g1_gait_targets_for_velocity_with_arm_pose(
+    step: u64,
+    base_command: UnitreeG1GaitCommand,
+    command: UnitreeG1VelocityCommand,
+    arm_pose: UnitreeG1ArmPose,
+) -> [UrdfJointPositionTarget<'static>; 23] {
+    unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase_and_arm_pose(
+        step,
+        base_command,
+        command,
+        0.0,
+        0.0,
+        arm_pose,
+    )
+}
+
 /// Converts a velocity command into hybrid G1 targets with an optional
 /// differential stride channel.
 ///
@@ -850,6 +926,24 @@ pub fn unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase(
     yaw_stride_scale_per_rad_s: f64,
     yaw_phase_offset_s_per_rad_s: f64,
 ) -> [UrdfJointPositionTarget<'static>; 23] {
+    unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase_and_arm_pose(
+        step,
+        base_command,
+        command,
+        yaw_stride_scale_per_rad_s,
+        yaw_phase_offset_s_per_rad_s,
+        UnitreeG1ArmPose::Reaching,
+    )
+}
+
+fn unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase_and_arm_pose(
+    step: u64,
+    base_command: UnitreeG1GaitCommand,
+    command: UnitreeG1VelocityCommand,
+    yaw_stride_scale_per_rad_s: f64,
+    yaw_phase_offset_s_per_rad_s: f64,
+    arm_pose: UnitreeG1ArmPose,
+) -> [UrdfJointPositionTarget<'static>; 23] {
     let command = command.clamped();
     let nominal = 0.0276;
     let speed_scale = (command.forward_m_s / nominal).clamp(0.0, 1.6);
@@ -860,7 +954,7 @@ pub fn unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase(
         foot_lift_rad: lift,
         cycle_steps: base_command.cycle_steps,
     };
-    let mut targets = unitree_g1_gait_targets(step, gait_command);
+    let mut targets = unitree_g1_gait_targets_with_arm_pose(step, gait_command, arm_pose);
     let cycle = gait_command.cycle_steps.clamp(40, 180);
     let phase_gain = if yaw_phase_offset_s_per_rad_s.is_finite() {
         yaw_phase_offset_s_per_rad_s.clamp(-10.0, 10.0)
@@ -874,7 +968,7 @@ pub fn unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase(
         } else {
             step.wrapping_sub(phase_offset_steps.unsigned_abs())
         };
-        let shifted = unitree_g1_gait_targets(shifted_step, gait_command);
+        let shifted = unitree_g1_gait_targets_with_arm_pose(shifted_step, gait_command, arm_pose);
         for index in [6, 7, 8, 9, 10, 11, 18] {
             targets[index].position = shifted[index].position;
         }

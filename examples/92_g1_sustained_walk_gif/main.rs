@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
-    build_visual_render_scene, unitree_g1_dynamic_scene_path, unitree_g1_gait_targets_for_velocity,
+    build_visual_render_scene, unitree_g1_dynamic_scene_path,
+    unitree_g1_gait_targets_for_velocity_with_arm_pose, UnitreeG1ArmPose,
     UnitreeG1CommandedTorquePolicy, UnitreeG1GaitCommand, UnitreeG1VelocityCommand,
     UnitreeG1VelocityPolicyInput, UrdfJointPositionTarget, UrdfJointTorqueTarget, UrdfSceneSim,
 };
@@ -91,10 +92,11 @@ impl G1Walker {
         let mut sim = UrdfSceneSim::from_scene_path(&unitree_g1_dynamic_scene_path())
             .expect("load dynamic G1");
         sim.configure_position_motors(220.0, 24.0, TORQUE_LIMIT_NM);
-        let stand = unitree_g1_gait_targets_for_velocity(
+        let stand = unitree_g1_gait_targets_for_velocity_with_arm_pose(
             0,
             walk_command(),
             UnitreeG1VelocityCommand::default(),
+            UnitreeG1ArmPose::Hanging,
         );
         for _ in 0..SETTLE_STEPS {
             sim.step_joint_position_targets(&stand);
@@ -167,8 +169,12 @@ impl G1Walker {
             if self.capture_active && self.capture_step.is_multiple_of(TRAIL_EVERY_STEPS) {
                 self.record_trail();
             }
-            let targets =
-                unitree_g1_gait_targets_for_velocity(self.step, walk_command(), self.command);
+            let targets = unitree_g1_gait_targets_for_velocity_with_arm_pose(
+                self.step,
+                walk_command(),
+                self.command,
+                UnitreeG1ArmPose::Hanging,
+            );
             let servo: Vec<UrdfJointPositionTarget<'_>> = targets
                 .iter()
                 .filter(|target| !TORQUE_LINKS.contains(&target.link_name))

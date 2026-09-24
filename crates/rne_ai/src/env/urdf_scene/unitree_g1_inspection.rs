@@ -1,7 +1,18 @@
 use super::{
-    step_unitree_g1_hybrid_joint_targets, unitree_g1_gait_targets, UnitreeG1GaitCommand,
-    UrdfJointPositionTarget, UrdfSceneSim,
+    step_unitree_g1_hybrid_joint_targets, unitree_g1_gait_targets_with_arm_pose, UnitreeG1ArmPose,
+    UnitreeG1GaitCommand, UrdfJointPositionTarget, UrdfSceneSim,
 };
+
+/// Arm pose used by the factory inspection task's walk-and-point sequence.
+///
+/// Opted into [`UnitreeG1ArmPose::Hanging`] rather than the shared default:
+/// this task's own gates (`factory_inspection_completes_inside_named_marker`,
+/// `factory_inspection_stays_upright_throughout`,
+/// `inspection_sequence_walks_then_points_and_repeats`) were re-validated
+/// against it, unlike the wider gait-generator consumers that keep the
+/// original pinned pose. See [`UnitreeG1ArmPose`] for why this needs to be
+/// explicit instead of a codebase-wide default.
+const INSPECTION_ARM_POSE: UnitreeG1ArmPose = UnitreeG1ArmPose::Hanging;
 
 /// Generates a deterministic G1 walk-and-inspect task pose.
 ///
@@ -28,49 +39,52 @@ pub fn unitree_g1_inspection_targets(step: u64) -> [UrdfJointPositionTarget<'sta
         // ported into this approach phase under the same chaos-tested
         // discipline, which also needs a step-budget change that touches
         // the G1 workbench mission's walk timeout; left as follow-up.
-        return unitree_g1_gait_targets(
+        return unitree_g1_gait_targets_with_arm_pose(
             task_step,
             UnitreeG1GaitCommand {
                 stride_rad: 0.06,
                 foot_lift_rad: 0.06,
                 cycle_steps: 60,
             },
+            INSPECTION_ARM_POSE,
         );
     }
 
-    let mut targets = unitree_g1_gait_targets(
+    let mut targets = unitree_g1_gait_targets_with_arm_pose(
         0,
         UnitreeG1GaitCommand {
             stride_rad: 0.0,
             foot_lift_rad: 0.0,
             cycle_steps: 60,
         },
+        INSPECTION_ARM_POSE,
     );
-    // Blend from the relaxed hanging-arm rest pose (see `ARM_HANG_*` in
-    // `unitree_g1_gait`) to a deliberate raised point-and-confirm gesture,
-    // rather than snapping from a forward-reaching idle into another forward
-    // reach, which used to read as an aimless jab.
+    // Blend from the relaxed hanging-arm rest pose (see
+    // `UnitreeG1ArmPose::Hanging` in `unitree_g1_gait`) to a deliberate
+    // raised point-and-confirm gesture, rather than snapping from a
+    // forward-reaching idle into another forward reach, which used to read
+    // as an aimless jab.
     let blend = smoothstep((task_step - APPROACH_STEPS) as f64 / 30.0);
     set_target(
         &mut targets,
         "right_shoulder_pitch_link",
-        super::unitree_g1_gait::ARM_HANG_PITCH_RAD - 1.15 * blend,
+        INSPECTION_ARM_POSE.pitch_bias_rad() - 1.15 * blend,
     );
     set_target(
         &mut targets,
         "right_shoulder_roll_link",
-        -super::unitree_g1_gait::ARM_HANG_ROLL_RAD - 0.18 * blend,
+        -INSPECTION_ARM_POSE.roll_rad() - 0.18 * blend,
     );
     set_target(&mut targets, "right_shoulder_yaw_link", -0.30 * blend);
-    // The rest elbow bend (`ARM_HANG_ELBOW_RAD`) hangs the forearm down;
-    // the point-and-confirm gesture straightens it back out toward 0.15 rad
-    // as the raised shoulder brings the arm up and forward, so the pointing
-    // hand reads as reaching rather than staying folded against the hip.
+    // The rest elbow bend (`UnitreeG1ArmPose::elbow_rad`) hangs the forearm
+    // down; the point-and-confirm gesture straightens it back out toward
+    // 0.15 rad as the raised shoulder brings the arm up and forward, so the
+    // pointing hand reads as reaching rather than staying folded against
+    // the hip.
     set_target(
         &mut targets,
         "right_elbow_link",
-        super::unitree_g1_gait::ARM_HANG_ELBOW_RAD
-            - (super::unitree_g1_gait::ARM_HANG_ELBOW_RAD - 0.15) * blend,
+        INSPECTION_ARM_POSE.elbow_rad() - (INSPECTION_ARM_POSE.elbow_rad() - 0.15) * blend,
     );
     set_target(&mut targets, "right_wrist_roll_rubber_hand", 0.35 * blend);
     targets
