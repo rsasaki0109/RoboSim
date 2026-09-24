@@ -50,6 +50,11 @@ When present and parseable, the baked compound is scaled into the mesh frame and
 used instead of the AABB fallback; otherwise behavior is unchanged.
 `rne_asset_cli` can also inspect and validate the artifact as JSON.
 
+`examples/110_collision_bake` bakes a concave L-shaped mesh in-process and drops
+a sphere onto the baked compound under Rapier, demonstrating the sidecar as a
+live static collider end to end: `cargo run -p collision_bake --example
+110_collision_bake`.
+
 ## Determinism and limits
 
 - Pure integer/f64 grid arithmetic with fixed iteration order; identical inputs
