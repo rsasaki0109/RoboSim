@@ -225,6 +225,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn factory_inspection_stays_upright_throughout() {
+        // `factory_inspection_completes_inside_named_marker` only checks the
+        // *final* horizontal distance to the last marker, which a G1 that
+        // fell over and slid to a stop near the right spot could still
+        // satisfy (`marker_distance_m` is computed from base X/Z only, with
+        // no height or orientation check) — exactly the failure mode this
+        // test caught during arm-pose tuning: a rest elbow bend that was
+        // safe for the sustained-walk gait command silently toppled the G1
+        // partway through the factory approach's different (smaller-stride,
+        // faster-cadence) command while still ending up close enough to the
+        // final marker to pass the other test. README_SHOWCASE.md's task
+        // gate is explicitly "completes all three markers upright", so this
+        // checks the G1 never dips below half its ~0.79 m standing height
+        // for the entire scripted route.
+        let mut episode = UnitreeG1InspectionEpisode::new(Default::default())
+            .expect("factory inspection episode");
+        let mut min_height_m = f64::MAX;
+        for _ in 0..INSPECTION_COMPLETE_STEP * 3 {
+            episode.step(UnitreeG1InspectionAction { advance: true });
+            min_height_m = min_height_m.min(episode.simulation().observe().base_y_m);
+        }
+        assert!(
+            min_height_m > 0.5,
+            "G1 must stay upright through the whole inspection route, min height {min_height_m:.3} m"
+        );
+    }
+
+    #[test]
     fn factory_inspection_completes_inside_named_marker() {
         let mut episode = UnitreeG1InspectionEpisode::new(Default::default())
             .expect("factory inspection episode");

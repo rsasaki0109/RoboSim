@@ -54,8 +54,10 @@ pub use unitree_g1_episode::{
 };
 pub use unitree_g1_gait::{
     unitree_g1_gait_targets, unitree_g1_gait_targets_for_velocity,
+    unitree_g1_gait_targets_for_velocity_with_arm_pose,
     unitree_g1_gait_targets_for_velocity_with_yaw_stride,
-    unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase, UnitreeG1CommandedTorquePolicy,
+    unitree_g1_gait_targets_for_velocity_with_yaw_stride_phase,
+    unitree_g1_gait_targets_with_arm_pose, UnitreeG1ArmPose, UnitreeG1CommandedTorquePolicy,
     UnitreeG1GaitCommand, UnitreeG1TorqueOverlay, UnitreeG1TorquePolicyInput,
     UnitreeG1VelocityCommand, UnitreeG1VelocityPolicyInput,
 };
