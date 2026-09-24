@@ -1,4 +1,4 @@
-//! Loads vendored external URDF scenes (SO-101 arm, minimal cart, LeKiwi base, composite).
+//! Loads vendored external URDF scenes (SO-101 arm, minimal cart, `LeKiwi` base, composite).
 
 use rne_ai::{
     build_visual_render_scene, cart_minimal_scene_path, lekiwi_scene_path, lekiwi_so101_scene_path,

@@ -1,4 +1,4 @@
-//! Stream identifiers for typed DataBus channels.
+//! Stream identifiers for typed `DataBus` channels.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;

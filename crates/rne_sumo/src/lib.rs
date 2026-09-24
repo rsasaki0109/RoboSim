@@ -483,7 +483,7 @@ fn aspect_from_char(character: char) -> SignalAspect {
 fn apply_signal_plan(
     network: &mut TrafficNetwork,
     plan: &SumoSignalPlan,
-) -> Result<Vec<rne_traffic::TrafficSignal>, SumoImportError> {
+) -> Result<Vec<TrafficSignal>, SumoImportError> {
     if plan.logics.is_empty() {
         return Ok(Vec::new());
     }

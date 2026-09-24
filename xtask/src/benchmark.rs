@@ -433,6 +433,7 @@ fn build_scenario_case(scenario: &Value, evidence: &[BenchmarkEvidence]) -> Resu
     )
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn build_case(
     id: String,

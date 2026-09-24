@@ -35,6 +35,15 @@ pub struct GaussianSplatBackground {
     environment: GaussianSplatEnvironment,
 }
 
+impl std::fmt::Debug for GaussianSplatBackground {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `Viewer` is an opaque GPU resource handle and does not implement `Debug`.
+        f.debug_struct("GaussianSplatBackground")
+            .field("environment", &self.environment)
+            .finish_non_exhaustive()
+    }
+}
+
 impl GaussianSplatBackground {
     /// Loads a splat cloud from an environment manifest entry.
     pub fn from_environment(

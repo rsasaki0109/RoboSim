@@ -1,4 +1,4 @@
-//! Bounded OpenMCT raw-log ingestion, without calibration or resampling.
+//! Bounded `OpenMCT` raw-log ingestion, without calibration or resampling.
 //!
 //! Loop intervals and GUI/DMM timestamps are source declarations, not certified
 //! capture clocks. PWM is not terminal voltage and filtered current is not truth.
@@ -77,7 +77,7 @@ impl OpenMctSeries {
     }
 }
 
-/// Read a strict ten-column OpenMCT capture without dropping invalid records.
+/// Read a strict ten-column `OpenMCT` capture without dropping invalid records.
 ///
 /// Requires UTF-8, three metadata/header lines, at most 100,000 data rows,
 /// and lines no longer than 1,024 bytes. Reused DMM IDs must retain exact current

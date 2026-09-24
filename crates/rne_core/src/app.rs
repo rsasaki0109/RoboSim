@@ -19,6 +19,16 @@ pub struct AppBuilder {
     fixed_delta: SimDuration,
 }
 
+impl std::fmt::Debug for AppBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppBuilder")
+            .field("plugin_count", &self.plugins.len())
+            .field("schedule", &self.schedule)
+            .field("fixed_delta", &self.fixed_delta)
+            .finish_non_exhaustive()
+    }
+}
+
 impl AppBuilder {
     /// Creates a new application builder with the default 60 Hz fixed step.
     pub fn new() -> Self {
@@ -49,8 +59,21 @@ impl AppBuilder {
 pub struct RneApp {
     clock: SimClock,
     schedule: Schedule,
+    // Kept alive for the app's lifetime: `Plugin::build` may register systems
+    // that capture plugin state by reference, so the field is never read
+    // directly but must outlive the schedule it configured.
     #[allow(dead_code)]
     plugins: Vec<Box<dyn Plugin>>,
+}
+
+impl std::fmt::Debug for RneApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RneApp")
+            .field("clock", &self.clock)
+            .field("schedule", &self.schedule)
+            .field("plugin_count", &self.plugins.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl RneApp {

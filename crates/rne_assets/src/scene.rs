@@ -761,7 +761,7 @@ mod tests {
 
     #[test]
     fn parses_scene_fixture() {
-        let scene = super::parse_scene_asset(SCENE, Path::new("scene.toml")).unwrap();
+        let scene = parse_scene_asset(SCENE, Path::new("scene.toml")).unwrap();
         assert_eq!(scene.world.seed, 42);
         assert!(scene.ground.enabled);
         assert_eq!(scene.robots.len(), 1);

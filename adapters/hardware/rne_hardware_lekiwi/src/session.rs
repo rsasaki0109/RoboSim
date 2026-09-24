@@ -1,4 +1,4 @@
-//! Profile-bound host runner and complete LeKiwi session evidence.
+//! Profile-bound host runner and complete `LeKiwi` session evidence.
 //!
 //! The runner owns protocol ordering and gateway decisions, but not a clock or
 //! transport implementation. Hosts inject monotonic ticks and a bounded
@@ -21,7 +21,7 @@ use rne_hardware_gateway::{
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Schema version for a complete profile-bound LeKiwi session artifact.
+/// Schema version for a complete profile-bound `LeKiwi` session artifact.
 pub const LEKIWI_REFERENCE_SESSION_SCHEMA_VERSION: u32 = 1;
 
 /// Stable discriminator for [`LeKiwiReferenceSessionEvidence`].
@@ -39,7 +39,7 @@ pub trait LeKiwiMonotonicClock {
     fn now_ms(&mut self) -> u64;
 }
 
-/// One bounded request/response transport to a LeKiwi device bridge.
+/// One bounded request/response transport to a `LeKiwi` device bridge.
 ///
 /// Implementations must place their own finite I/O timeout around every
 /// exchange. The physical bridge has an independent watchdog, but that does
@@ -260,7 +260,7 @@ enum RunnerState {
     Failed,
 }
 
-/// Stateful host runner for the exact LeKiwi + SO-101 v1 profile.
+/// Stateful host runner for the exact `LeKiwi` + SO-101 v1 profile.
 #[derive(Debug)]
 pub struct LeKiwiReferenceSessionRunner<T, C> {
     transport: T,

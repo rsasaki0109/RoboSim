@@ -45,7 +45,7 @@ pub(crate) fn dataset_reference_smoke() -> Result<()> {
     ));
     if let Err(error) = capture {
         if output.exists() {
-            std::fs::remove_dir_all(&output)
+            fs::remove_dir_all(&output)
                 .with_context(|| format!("remove failed reference capture {}", output.display()))?;
         }
         return Err(error);
@@ -54,7 +54,7 @@ pub(crate) fn dataset_reference_smoke() -> Result<()> {
     let verification = DatasetBundle::open(&output)
         .and_then(|bundle| bundle.verify())
         .with_context(|| format!("verify generated reference capture {}", output.display()));
-    std::fs::remove_dir_all(&output)
+    fs::remove_dir_all(&output)
         .with_context(|| format!("remove reference capture {}", output.display()))?;
     let verification = verification?;
     anyhow::ensure!(

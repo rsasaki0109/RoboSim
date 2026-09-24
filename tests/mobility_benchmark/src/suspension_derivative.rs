@@ -202,7 +202,7 @@ pub struct SuspensionAffineErrorModel {
     pub kind: String,
     /// Currently 1; independent of the additive error model.
     pub schema_version: u32,
-    /// Explicit WorldRandom seed.
+    /// Explicit `WorldRandom` seed.
     pub seed: u64,
     /// Number of realizations, in 1..=4096.
     pub draws: usize,

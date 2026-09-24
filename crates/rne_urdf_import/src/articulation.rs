@@ -387,8 +387,8 @@ mod tests {
         world
             .entity_mut(spawned.base_link)
             .insert(Transform3::from_translation_rotation(
-                rne_math::Vec3::new(0.0, 0.3, 0.0),
-                rne_math::Quat::IDENTITY,
+                Vec3::new(0.0, 0.3, 0.0),
+                Quat::IDENTITY,
             ));
         (world, spawned)
     }
@@ -506,8 +506,8 @@ mod tests {
         world
             .entity_mut(spawned.base_link)
             .insert(Transform3::from_translation_rotation(
-                rne_math::Vec3::new(0.0, 0.5, 0.0),
-                rne_math::Quat::IDENTITY,
+                Vec3::new(0.0, 0.5, 0.0),
+                Quat::IDENTITY,
             ));
 
         let slider = spawned.links["slider_link"];
@@ -596,13 +596,13 @@ mod tests {
         assert!(world.get::<JointMotor>(upper_arm).is_some());
         assert_eq!(
             world
-                .get::<rne_robot::Joint>(spawned.joints["shoulder_joint"])
+                .get::<Joint>(spawned.joints["shoulder_joint"])
                 .unwrap()
                 .kind,
             JointKind::Revolute
         );
         let actuator = world
-            .get::<rne_robot::Actuator>(spawned.joints["shoulder_joint"])
+            .get::<Actuator>(spawned.joints["shoulder_joint"])
             .expect("named URDF joint actuator");
         assert_eq!(actuator.name, "shoulder_joint_actuator");
         assert_eq!(actuator.joint, Some(spawned.joints["shoulder_joint"]));
@@ -618,11 +618,8 @@ mod tests {
                 body_type: RigidBodyType::Fixed,
                 ..RigidBody::default()
             },
-            Collider::cuboid(rne_math::Vec3::new(10.0, 0.05, 10.0)),
-            Transform3::from_translation_rotation(
-                rne_math::Vec3::new(0.0, -0.05, 0.0),
-                rne_math::Quat::IDENTITY,
-            ),
+            Collider::cuboid(Vec3::new(10.0, 0.05, 10.0)),
+            Transform3::from_translation_rotation(Vec3::new(0.0, -0.05, 0.0), Quat::IDENTITY),
         ));
 
         let forearm = spawned.links["forearm_link"];

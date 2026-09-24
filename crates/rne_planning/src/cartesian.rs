@@ -1,11 +1,11 @@
 //! Cartesian waypoint path planning.
 //!
-//! This is the RNE analogue of MoveIt's `CartesianInterpolator` and the Pilz
+//! This is the RNE analogue of `MoveIt`'s `CartesianInterpolator` and the Pilz
 //! `LIN` motion: a sequence of end-link poses is interpolated in Cartesian
 //! space, each interpolated pose is solved with inverse kinematics seeded from
 //! the previous configuration, and the resulting joint path is collision
 //! checked. Planning may stop early and report the completed fraction, matching
-//! MoveIt's `computeCartesianPath` return shape.
+//! `MoveIt`'s `computeCartesianPath` return shape.
 
 use crate::error::PlanningError;
 use crate::request::PlanningOptions;

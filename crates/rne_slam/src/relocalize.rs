@@ -74,6 +74,7 @@ pub struct RelocalizationResult {
 }
 
 /// Scores candidate poses against a prior map.
+#[derive(Debug)]
 pub struct GlobalRelocalizer {
     field: LikelihoodField,
     min_x_m: f64,
@@ -152,6 +153,7 @@ impl GlobalRelocalizer {
         Ok(best.filter(|result| result.score >= self.config.min_score))
     }
 
+    // Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
     #[allow(clippy::too_many_arguments)]
     fn search(
         &self,

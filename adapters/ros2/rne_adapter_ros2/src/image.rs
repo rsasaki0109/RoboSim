@@ -6,7 +6,7 @@ use rne_data::ImageRgb8;
 use crate::clock::to_ros_time;
 use crate::messages::{RosHeader, RosImage};
 
-/// Maps a DataBus [`ImageRgb8`] payload to `sensor_msgs/Image`.
+/// Maps a `DataBus` [`ImageRgb8`] payload to `sensor_msgs/Image`.
 pub fn to_ros_image(image: &ImageRgb8, sim_time: SimTime, frame_id: &str) -> RosImage {
     let width = image.width;
     let height = image.height;

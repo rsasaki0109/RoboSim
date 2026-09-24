@@ -10,10 +10,10 @@ pub use transform::{y_up_euler_rad, yaw_rad, Pose3, Transform3, Velocity3};
 pub use units::{Hertz, Meters, Radians, Seconds};
 
 /// Three-dimensional vector using double precision.
-pub type Vec3 = glam::DVec3;
+pub type Vec3 = DVec3;
 
 /// Unit quaternion using double precision.
-pub type Quat = glam::DQuat;
+pub type Quat = DQuat;
 
 /// Four-by-four matrix using double precision.
-pub type Mat4 = glam::DMat4;
+pub type Mat4 = DMat4;

@@ -26,7 +26,7 @@ pub enum SimulatorArtifactRole {
     World,
     /// Robot model and its joints, collision shapes, and sensors.
     RobotModel,
-    /// Adapter mapping between TaskSpec fields and simulator entities.
+    /// Adapter mapping between `TaskSpec` fields and simulator entities.
     AdapterConfig,
 }
 
@@ -58,7 +58,7 @@ pub struct SimulatorRuntimeManifest {
     pub simulator_version: String,
     /// Distribution or release train, such as `harmonic`.
     pub distribution: String,
-    /// Expected simulation-time ticks per TaskSpec action step.
+    /// Expected simulation-time ticks per `TaskSpec` action step.
     pub fixed_delta_ticks: u64,
     /// Canonically ordered world, robot model, and adapter configuration files.
     pub artifacts: Vec<SimulatorRuntimeArtifact>,

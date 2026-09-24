@@ -1,4 +1,4 @@
-//! Deterministic 2.5D elevation map for 3D LiDAR and point-cloud mapping.
+//! Deterministic 2.5D elevation map for 3D `LiDAR` and point-cloud mapping.
 //!
 //! [`ElevationMap`] stores a running minimum, maximum, and mean height per grid
 //! cell. Points are projected onto the navigation plane (`world X-Z`) and keep

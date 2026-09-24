@@ -2,7 +2,7 @@
 //!
 //! Walks the dynamic G1 into the 0.5 m park, closes to the 0.2 m arm window,
 //! then runs the pelvis-pinned Dex3 workcell with an explicit horizontal carry
-//! before place. This is not Nav2 or MoveIt.
+//! before place. This is not Nav2 or `MoveIt`.
 
 use rne_ai::{
     run_behavior_scenarios, unitree_g1_workbench_task_spec, BehaviorContractStatus,

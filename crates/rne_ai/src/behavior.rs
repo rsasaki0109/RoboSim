@@ -454,7 +454,7 @@ impl BehaviorReport {
         true
     }
 
-    /// Serializes a JUnit XML test suite suitable for CI annotations.
+    /// Serializes a `JUnit` XML test suite suitable for CI annotations.
     pub fn to_junit_xml(&self) -> String {
         let tests = self
             .seeds

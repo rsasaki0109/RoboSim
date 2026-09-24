@@ -126,9 +126,9 @@ pub struct AcceleratorProcessConformanceSubject {
     pub runtime_file: String,
     /// SHA-256 of the exact runtime-contract bytes.
     pub runtime_sha256: String,
-    /// TaskSpec file name.
+    /// `TaskSpec` file name.
     pub task_file: String,
-    /// SHA-256 of the exact TaskSpec bytes.
+    /// SHA-256 of the exact `TaskSpec` bytes.
     pub task_sha256: String,
 }
 
@@ -158,11 +158,11 @@ pub struct AcceleratorProcessConformanceReport {
     pub subject: AcceleratorProcessConformanceSubject,
     /// Stable adapter identifier from the selected manifest.
     pub adapter_id: String,
-    /// Stable task identifier from the bound TaskSpec.
+    /// Stable task identifier from the bound `TaskSpec`.
     pub task_id: String,
-    /// Bound TaskSpec schema.
+    /// Bound `TaskSpec` schema.
     pub task_spec_schema: u32,
-    /// Canonical TaskSpec digest used by the protocol transcript.
+    /// Canonical `TaskSpec` digest used by the protocol transcript.
     pub task_spec_sha256: String,
     /// Exercised accelerator protocol schema.
     pub protocol_schema: u32,
@@ -417,7 +417,7 @@ pub enum AcceleratorProcessConformanceError {
     /// Process launch configuration is invalid.
     #[error("invalid accelerator conformance config: {0}")]
     InvalidConfig(String),
-    /// Manifest, runtime contract, or TaskSpec input is invalid.
+    /// Manifest, runtime contract, or `TaskSpec` input is invalid.
     #[error("invalid accelerator conformance contract: {0}")]
     InvalidContract(String),
     /// Report fields or aggregate verdict are inconsistent.

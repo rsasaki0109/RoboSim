@@ -1,6 +1,6 @@
 //! Goal-constraint sampling.
 //!
-//! This is the RNE analogue of MoveIt's `ConstraintSampler`: it draws a
+//! This is the RNE analogue of `MoveIt`'s `ConstraintSampler`: it draws a
 //! collision-free configuration that satisfies a [`GoalConstraint`], using
 //! seeded random-restart inverse kinematics for pose, position, and orientation
 //! goals.

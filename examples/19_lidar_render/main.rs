@@ -1,4 +1,4 @@
-//! Renders a diff-drive LiDAR scan as sphere markers in a wgpu scene pass.
+//! Renders a diff-drive `LiDAR` scan as sphere markers in a wgpu scene pass.
 
 use rne_core::{SimDuration, SimTime};
 use rne_data::{DataBus, InMemoryDataBus, PointCloud, StreamId};

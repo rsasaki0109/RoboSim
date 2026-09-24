@@ -1,4 +1,4 @@
-//! RoboCup SSL simulation-protocol adapter.
+//! `RoboCup` SSL simulation-protocol adapter.
 //!
 //! Speaks the official UDP ports from
 //! <https://github.com/RoboCup-SSL/ssl-simulation-protocol> without pulling
@@ -37,26 +37,26 @@ pub use udp::{
 use prost::Message;
 
 /// Decode a `SimulatorCommand` datagram (port 10300).
-pub fn decode_simulator_command(bytes: &[u8]) -> Result<proto::SimulatorCommand, SslUdpError> {
-    proto::SimulatorCommand::decode(bytes).map_err(SslUdpError::Decode)
+pub fn decode_simulator_command(bytes: &[u8]) -> Result<SimulatorCommand, SslUdpError> {
+    SimulatorCommand::decode(bytes).map_err(SslUdpError::Decode)
 }
 
 /// Encode a `SimulatorCommand` datagram.
-pub fn encode_simulator_command(command: &proto::SimulatorCommand) -> Vec<u8> {
+pub fn encode_simulator_command(command: &SimulatorCommand) -> Vec<u8> {
     command.encode_to_vec()
 }
 
 /// Build an empty successful `SimulatorResponse`.
 #[must_use]
-pub fn empty_simulator_response() -> proto::SimulatorResponse {
-    proto::SimulatorResponse { errors: Vec::new() }
+pub fn empty_simulator_response() -> SimulatorResponse {
+    SimulatorResponse { errors: Vec::new() }
 }
 
 /// Build a `SimulatorResponse` that reports an unsupported feature.
 #[must_use]
-pub fn unsupported_simulator_response(code: &str, message: &str) -> proto::SimulatorResponse {
-    proto::SimulatorResponse {
-        errors: vec![proto::SimulatorError {
+pub fn unsupported_simulator_response(code: &str, message: &str) -> SimulatorResponse {
+    SimulatorResponse {
+        errors: vec![SimulatorError {
             code: Some(code.to_string()),
             message: Some(message.to_string()),
         }],
@@ -64,21 +64,21 @@ pub fn unsupported_simulator_response(code: &str, message: &str) -> proto::Simul
 }
 
 /// Encode a `SimulatorResponse` datagram.
-pub fn encode_simulator_response(response: &proto::SimulatorResponse) -> Vec<u8> {
+pub fn encode_simulator_response(response: &SimulatorResponse) -> Vec<u8> {
     response.encode_to_vec()
 }
 
 /// Decode a `SimulatorResponse` datagram.
-pub fn decode_simulator_response(bytes: &[u8]) -> Result<proto::SimulatorResponse, SslUdpError> {
-    proto::SimulatorResponse::decode(bytes).map_err(SslUdpError::Decode)
+pub fn decode_simulator_response(bytes: &[u8]) -> Result<SimulatorResponse, SslUdpError> {
+    SimulatorResponse::decode(bytes).map_err(SslUdpError::Decode)
 }
 
 /// Construct a ball-teleport `SimulatorCommand` used by the spike smoke test.
 #[must_use]
-pub fn teleport_ball_command(x_m: f32, y_m: f32, z_m: f32) -> proto::SimulatorCommand {
-    proto::SimulatorCommand {
-        control: Some(proto::SimulatorControl {
-            teleport_ball: Some(proto::TeleportBall {
+pub fn teleport_ball_command(x_m: f32, y_m: f32, z_m: f32) -> SimulatorCommand {
+    SimulatorCommand {
+        control: Some(SimulatorControl {
+            teleport_ball: Some(TeleportBall {
                 x: Some(x_m),
                 y: Some(y_m),
                 z: Some(z_m),

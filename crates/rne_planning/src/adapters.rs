@@ -1,6 +1,6 @@
 //! Planning request adapters and trajectory time parameterization.
 //!
-//! This is the RNE analogue of MoveIt's `PlanningRequestAdapter` chain. An
+//! This is the RNE analogue of `MoveIt`'s `PlanningRequestAdapter` chain. An
 //! adapter may transform a request before planning (`adapt_request`) or a
 //! response afterwards (`adapt_response`). `FixStartStateBounds` clamps the
 //! start state to joint limits and `AddTimeParameterization` retimes a
@@ -58,7 +58,7 @@ pub trait PlanningRequestAdapter: Send + Sync + std::fmt::Debug {
 
 /// Clamps the start state into the model's joint limits.
 ///
-/// This mirrors MoveIt's `FixStartStateBounds`: a start configuration slightly
+/// This mirrors `MoveIt`'s `FixStartStateBounds`: a start configuration slightly
 /// outside the declared limits is projected back onto the bounds instead of
 /// rejecting the request.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -95,7 +95,7 @@ impl PlanningRequestAdapter for FixStartStateBounds {
 
 /// Retimes a trajectory to respect joint velocity limits.
 ///
-/// This mirrors MoveIt's `AddTimeParameterization` (time-optimal for piecewise
+/// This mirrors `MoveIt`'s `AddTimeParameterization` (time-optimal for piecewise
 /// constant velocity; acceleration limits are not modeled because the robot
 /// model only carries a maximum velocity). The requested
 /// [`crate::PlanningOptions::velocity_scaling_factor`] scales every limit. When
@@ -135,7 +135,7 @@ impl PlanningRequestAdapter for AddTimeParameterization {
 
 /// Clamps a goal position into the scene workspace box.
 ///
-/// This mirrors MoveIt's `FixWorkspaceBounds`. It only acts on position and
+/// This mirrors `MoveIt`'s `FixWorkspaceBounds`. It only acts on position and
 /// pose goals and does nothing when the scene has no workspace bounds.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FixWorkspaceBounds;
@@ -175,7 +175,7 @@ impl PlanningRequestAdapter for FixWorkspaceBounds {
 
 /// Rejects a goal position outside the scene workspace box.
 ///
-/// This mirrors MoveIt's `ValidateWorkspaceBounds`; it does nothing when the
+/// This mirrors `MoveIt`'s `ValidateWorkspaceBounds`; it does nothing when the
 /// scene has no workspace bounds.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ValidateWorkspaceBounds;
@@ -235,7 +235,7 @@ fn within_bounds(value: rne_math::Vec3, min: rne_math::Vec3, max: rne_math::Vec3
 
 /// Moves a colliding start state to a nearby collision-free one.
 ///
-/// This mirrors MoveIt's `FixStartStateCollision`: when the start state is in
+/// This mirrors `MoveIt`'s `FixStartStateCollision`: when the start state is in
 /// collision, the adapter draws seeded per-joint perturbations up to
 /// `perturbation` (radians or meters) and keeps the first valid state. If none
 /// is found the request is returned unchanged, so the planner still reports
@@ -318,7 +318,7 @@ impl PlanningRequestAdapter for FixStartStateCollision {
 
 /// Removes redundant waypoints whose shortcut is collision free.
 ///
-/// This mirrors a MoveIt trajectory simplification response adapter. It greedily
+/// This mirrors a `MoveIt` trajectory simplification response adapter. It greedily
 /// keeps the farthest directly reachable waypoint and re-times the result with
 /// `waypoint_duration_s`; a following time-parameterization adapter can retime it
 /// again.

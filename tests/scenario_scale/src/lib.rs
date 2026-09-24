@@ -1,4 +1,4 @@
-//! Deterministic M5 OpenSCENARIO scale benchmark and report.
+//! Deterministic M5 `OpenSCENARIO` scale benchmark and report.
 
 #![deny(missing_docs)]
 
@@ -64,9 +64,9 @@ pub struct ScenarioScaleReport {
     pub schema_version: u32,
     /// Named runner class on which throughput was measured.
     pub benchmark_class: String,
-    /// Committed OpenSCENARIO fixture path.
+    /// Committed `OpenSCENARIO` fixture path.
     pub scenario_path: String,
-    /// Stable digest of the exact OpenSCENARIO bytes.
+    /// Stable digest of the exact `OpenSCENARIO` bytes.
     pub scenario_digest: u64,
     /// Committed traffic-network fixture path.
     pub network_path: String,

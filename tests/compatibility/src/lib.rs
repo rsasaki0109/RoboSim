@@ -1037,8 +1037,7 @@ pub fn read_registry(path: &Path) -> anyhow::Result<CompatibilityFixtureRegistry
     );
     ensure!(
         metadata.len() <= MAX_REGISTRY_BYTES,
-        "compatibility registry exceeds {} bytes",
-        MAX_REGISTRY_BYTES
+        "compatibility registry exceeds {MAX_REGISTRY_BYTES} bytes"
     );
     let bytes = fs::read(path)
         .with_context(|| format!("read compatibility registry {}", path.display()))?;
@@ -1087,6 +1086,7 @@ pub fn run_compatibility(
 /// This source-checkout gate is intentionally separate from
 /// [`run_compatibility`], because an extracted native bundle contains the
 /// content-addressed fixtures but not the repository's Git object database.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (202/150 lines); see PR body
 pub fn verify_historical_source_history(root: &Path) -> anyhow::Result<()> {
     for source in HISTORICAL_SOURCE_SPECS {
         git_text(
@@ -1309,8 +1309,7 @@ pub fn write_report(report: &CompatibilityFixtureReport, path: &Path) -> anyhow:
 fn validate_registry(registry: &CompatibilityFixtureRegistry) -> anyhow::Result<()> {
     ensure!(
         registry.schema_version == COMPATIBILITY_FIXTURE_REGISTRY_SCHEMA_VERSION,
-        "compatibility registry schema must be {}",
-        COMPATIBILITY_FIXTURE_REGISTRY_SCHEMA_VERSION
+        "compatibility registry schema must be {COMPATIBILITY_FIXTURE_REGISTRY_SCHEMA_VERSION}"
     );
     ensure!(
         !registry.release_version.trim().is_empty(),
@@ -1405,8 +1404,7 @@ fn try_check_fixture(
     );
     ensure!(
         metadata.len() <= MAX_FIXTURE_BYTES,
-        "fixture exceeds {} bytes",
-        MAX_FIXTURE_BYTES
+        "fixture exceeds {MAX_FIXTURE_BYTES} bytes"
     );
     let bytes = fs::read(&path)
         .with_context(|| format!("read compatibility fixture {}", path.display()))?;
@@ -1491,6 +1489,7 @@ fn validate_typed_input(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (159/150 lines); see PR body
 fn validate_typed(root: &Path, spec: FixtureSpec, value: Value) -> anyhow::Result<()> {
     let actual_schema = value
         .get(spec.version_field)
@@ -2499,8 +2498,9 @@ fn json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
         .try_fold(value, |current, key| current.get(key))
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (187/150 lines); see PR body
 fn current_controller_c_abi() -> ControllerCAbiFixture {
-    let pointer_size = std::mem::size_of::<*const std::ffi::c_char>();
+    let pointer_size = size_of::<*const std::ffi::c_char>();
     ControllerCAbiFixture {
         kind: CONTROLLER_C_ABI_LAYOUT_KIND.to_string(),
         schema_version: RNE_CONTROLLER_C_ABI_LAYOUT_SCHEMA_VERSION,
@@ -2526,8 +2526,8 @@ fn current_controller_c_abi() -> ControllerCAbiFixture {
         structs: vec![
             CAbiStructLayout {
                 name: "RneJointPosition".to_string(),
-                size_bytes: std::mem::size_of::<RneJointPosition>(),
-                align_bytes: std::mem::align_of::<RneJointPosition>(),
+                size_bytes: size_of::<RneJointPosition>(),
+                align_bytes: align_of::<RneJointPosition>(),
                 fields: vec![
                     c_abi_field(
                         "name",
@@ -2539,14 +2539,14 @@ fn current_controller_c_abi() -> ControllerCAbiFixture {
                         "position_rad",
                         "double",
                         std::mem::offset_of!(RneJointPosition, position_rad),
-                        std::mem::size_of::<f64>(),
+                        size_of::<f64>(),
                     ),
                 ],
             },
             CAbiStructLayout {
                 name: "RneJointVelocity".to_string(),
-                size_bytes: std::mem::size_of::<RneJointVelocity>(),
-                align_bytes: std::mem::align_of::<RneJointVelocity>(),
+                size_bytes: size_of::<RneJointVelocity>(),
+                align_bytes: align_of::<RneJointVelocity>(),
                 fields: vec![
                     c_abi_field(
                         "name",
@@ -2558,14 +2558,14 @@ fn current_controller_c_abi() -> ControllerCAbiFixture {
                         "velocity_rad_s",
                         "double",
                         std::mem::offset_of!(RneJointVelocity, velocity_rad_s),
-                        std::mem::size_of::<f64>(),
+                        size_of::<f64>(),
                     ),
                 ],
             },
             CAbiStructLayout {
                 name: "RneJointObservationV3".to_string(),
-                size_bytes: std::mem::size_of::<RneJointObservationV3>(),
-                align_bytes: std::mem::align_of::<RneJointObservationV3>(),
+                size_bytes: size_of::<RneJointObservationV3>(),
+                align_bytes: align_of::<RneJointObservationV3>(),
                 fields: vec![
                     c_abi_field(
                         "robot_id",
@@ -2583,32 +2583,32 @@ fn current_controller_c_abi() -> ControllerCAbiFixture {
                         "position_rad",
                         "double",
                         std::mem::offset_of!(RneJointObservationV3, position_rad),
-                        std::mem::size_of::<f64>(),
+                        size_of::<f64>(),
                     ),
                     c_abi_field(
                         "velocity_rad_s",
                         "double",
                         std::mem::offset_of!(RneJointObservationV3, velocity_rad_s),
-                        std::mem::size_of::<f64>(),
+                        size_of::<f64>(),
                     ),
                     c_abi_field(
                         "has_velocity",
                         "uint8_t",
                         std::mem::offset_of!(RneJointObservationV3, has_velocity),
-                        std::mem::size_of::<u8>(),
+                        size_of::<u8>(),
                     ),
                     c_abi_field(
                         "reserved",
                         "uint8_t[7]",
                         std::mem::offset_of!(RneJointObservationV3, reserved),
-                        std::mem::size_of::<[u8; 7]>(),
+                        size_of::<[u8; 7]>(),
                     ),
                 ],
             },
             CAbiStructLayout {
                 name: "RneJointVelocityV3".to_string(),
-                size_bytes: std::mem::size_of::<RneJointVelocityV3>(),
-                align_bytes: std::mem::align_of::<RneJointVelocityV3>(),
+                size_bytes: size_of::<RneJointVelocityV3>(),
+                align_bytes: align_of::<RneJointVelocityV3>(),
                 fields: vec![
                     c_abi_field(
                         "robot_id",
@@ -2626,26 +2626,26 @@ fn current_controller_c_abi() -> ControllerCAbiFixture {
                         "velocity_rad_s",
                         "double",
                         std::mem::offset_of!(RneJointVelocityV3, velocity_rad_s),
-                        std::mem::size_of::<f64>(),
+                        size_of::<f64>(),
                     ),
                 ],
             },
             CAbiStructLayout {
                 name: "RneControllerStepResultV3".to_string(),
-                size_bytes: std::mem::size_of::<RneControllerStepResultV3>(),
-                align_bytes: std::mem::align_of::<RneControllerStepResultV3>(),
+                size_bytes: size_of::<RneControllerStepResultV3>(),
+                align_bytes: align_of::<RneControllerStepResultV3>(),
                 fields: vec![
                     c_abi_field(
                         "status",
                         "int32_t",
                         std::mem::offset_of!(RneControllerStepResultV3, status),
-                        std::mem::size_of::<i32>(),
+                        size_of::<i32>(),
                     ),
                     c_abi_field(
                         "output_count",
                         "size_t",
                         std::mem::offset_of!(RneControllerStepResultV3, output_count),
-                        std::mem::size_of::<usize>(),
+                        size_of::<usize>(),
                     ),
                 ],
             },

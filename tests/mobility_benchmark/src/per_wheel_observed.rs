@@ -652,6 +652,7 @@ pub fn run_per_wheel_observed_failure_capsule<B: PhysicsBackend>(
     }
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (336/150 lines); see PR body
 fn run_per_wheel_observed_outcome<B: PhysicsBackend>(
     mut backend: B,
     manifest: PhysicsBackendManifest,
@@ -1020,6 +1021,7 @@ pub fn compare_per_wheel_observed_traces(
     Ok(comparison)
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn build_failure_capsule(
     manifest: &PhysicsBackendManifest,

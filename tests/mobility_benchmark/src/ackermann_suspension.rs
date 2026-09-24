@@ -387,6 +387,7 @@ pub(crate) struct StationEntities {
 }
 
 /// Runs the same explicit suspension and tire force elements through one backend.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (357/150 lines); see PR body
 pub fn run_ackermann_suspension_trace<B: PhysicsBackend>(
     mut backend: B,
     manifest: PhysicsBackendManifest,
@@ -986,6 +987,7 @@ pub(crate) fn front_steering_targets(center_rad: f64) -> [f64; 2] {
     }
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn make_sample(
     step: u64,

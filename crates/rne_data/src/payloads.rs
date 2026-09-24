@@ -73,7 +73,7 @@ pub enum ImuFeedbackStatus {
     StuckValue,
 }
 
-/// LiDAR point cloud payload.
+/// `LiDAR` point cloud payload.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PointCloud {
     /// Points in the world frame, meters.
@@ -125,7 +125,7 @@ impl PointCloud {
         }
     }
 
-    /// Appends one LiDAR return while preserving parallel-array invariants.
+    /// Appends one `LiDAR` return while preserving parallel-array invariants.
     pub fn push_return(
         &mut self,
         point_m: Vec3,
@@ -143,7 +143,7 @@ impl PointCloud {
         self.timestamps_s.push(timestamp_s);
     }
 
-    /// Returns true when all optional LiDAR attributes are absent or aligned.
+    /// Returns true when all optional `LiDAR` attributes are absent or aligned.
     pub fn attributes_are_aligned(&self) -> bool {
         let len = self.points_m.len();
         [
@@ -188,7 +188,7 @@ impl Default for PointCloud {
 /// Localization pose estimate payload.
 ///
 /// Published by localization or ground-truth-with-latency sources so controllers can
-/// consume pose through the DataBus — and therefore through
+/// consume pose through the `DataBus` — and therefore through
 /// [`crate::Frame::available_time`] — instead of reading simulator state directly.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PoseSample {
@@ -305,7 +305,7 @@ impl MotorElectricalFeedback {
     pub const SCHEMA_VERSION: u32 = 1;
 }
 
-/// Articulated joint positions and velocities published on the DataBus.
+/// Articulated joint positions and velocities published on the `DataBus`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct JointState {
     /// Joint names matching `positions_rad` / `velocities_rad_s` order.

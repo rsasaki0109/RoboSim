@@ -62,7 +62,7 @@ pub struct SuspensionTimingErrorModel {
     pub kind: String,
     /// Currently 1, independent of affine and additive models.
     pub schema_version: u32,
-    /// Explicit WorldRandom root seed.
+    /// Explicit `WorldRandom` root seed.
     pub seed: u64,
     /// One to sixteen independent sources.
     pub factors: Vec<SuspensionTimingFactor>,

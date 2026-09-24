@@ -1,7 +1,7 @@
 //! Content-addressed recorded-playback and live-shadow session evidence.
 //!
 //! This module binds the existing fail-closed gateway and ordered shadow
-//! comparator to explicit clock, latency, drop, calibration, TaskSpec, and
+//! comparator to explicit clock, latency, drop, calibration, `TaskSpec`, and
 //! controller provenance. It remains transport-neutral and never reads a wall
 //! clock or grants actuator authority.
 
@@ -67,19 +67,19 @@ pub struct RecordedStreamContract {
     pub drop_policy: String,
     /// Maximum number of paired samples retained in the report.
     pub sample_capacity: usize,
-    /// TaskSpec tensor names and units in exact observation order.
+    /// `TaskSpec` tensor names and units in exact observation order.
     pub tensor_units: Vec<RecordedTensorUnit>,
     /// Content-addressed calibrations applied before values enter the session.
     pub calibrations: Vec<CalibrationBinding>,
 }
 
-/// One TaskSpec observation tensor and its declared SI unit.
+/// One `TaskSpec` observation tensor and its declared SI unit.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordedTensorUnit {
-    /// Tensor name in TaskSpec order.
+    /// Tensor name in `TaskSpec` order.
     pub tensor_name: String,
-    /// Unit declared by the TaskSpec.
+    /// Unit declared by the `TaskSpec`.
     pub unit: String,
 }
 
@@ -97,17 +97,17 @@ pub struct RecordedShadowFrame {
     pub available_at_ticks: u64,
     /// Deterministic simulation step paired with this source observation.
     pub simulation_step: u64,
-    /// Paired SimClock time in nanosecond ticks.
+    /// Paired `SimClock` time in nanosecond ticks.
     pub simulation_time_ticks: u64,
-    /// Calibrated source values in flattened TaskSpec order.
+    /// Calibrated source values in flattened `TaskSpec` order.
     pub recorded_values: Vec<f64>,
-    /// Simulation values in flattened TaskSpec order.
+    /// Simulation values in flattened `TaskSpec` order.
     pub simulation_values: Vec<f64>,
     /// Strictly increasing controller action sequence.
     pub action_sequence: u64,
     /// Timestamp when the controller action reached the gateway boundary.
     pub action_submitted_at_ticks: u64,
-    /// Controller action in flattened TaskSpec order.
+    /// Controller action in flattened `TaskSpec` order.
     pub action_values: Vec<f64>,
 }
 
@@ -123,9 +123,9 @@ pub struct RecordedShadowSession {
     pub experiment_id: String,
     /// SHA-256 of the exact predeclared requirements artifact.
     pub requirements_sha256: String,
-    /// Exact TaskSpec identifier.
+    /// Exact `TaskSpec` identifier.
     pub task_id: String,
-    /// Lowercase SHA-256 of the exact TaskSpec artifact.
+    /// Lowercase SHA-256 of the exact `TaskSpec` artifact.
     pub task_sha256: String,
     /// Exact controller identifier.
     pub controller_id: String,
@@ -137,7 +137,7 @@ pub struct RecordedShadowSession {
     pub bootstrap_action_count: u64,
     /// Explicit stream contract.
     pub stream: RecordedStreamContract,
-    /// One absolute tolerance per TaskSpec observation tensor.
+    /// One absolute tolerance per `TaskSpec` observation tensor.
     pub tolerances: Vec<ShadowTensorTolerance>,
     /// Ordered observation/action pairs.
     pub frames: Vec<RecordedShadowFrame>,
@@ -146,7 +146,7 @@ pub struct RecordedShadowSession {
 }
 
 impl RecordedShadowSession {
-    /// Rebinds an untrusted session envelope to the supplied portable TaskSpec.
+    /// Rebinds an untrusted session envelope to the supplied portable `TaskSpec`.
     pub fn validate_against(&self, task: &TaskSpec) -> Result<(), RecordedShadowError> {
         validate_session(task, self)
     }
@@ -188,9 +188,9 @@ pub struct RecordedShadowReport {
     pub experiment_id: String,
     /// SHA-256 of the exact predeclared requirements artifact.
     pub requirements_sha256: String,
-    /// Exact TaskSpec identifier.
+    /// Exact `TaskSpec` identifier.
     pub task_id: String,
-    /// SHA-256 of the exact TaskSpec artifact.
+    /// SHA-256 of the exact `TaskSpec` artifact.
     pub task_sha256: String,
     /// Exact controller identifier.
     pub controller_id: String,
@@ -213,6 +213,7 @@ pub struct RecordedShadowReport {
 }
 
 /// Evaluates one bounded session through playback or shadow authority.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (154/150 lines); see PR body
 pub fn evaluate_recorded_shadow_session(
     task: TaskSpec,
     session: RecordedShadowSession,
@@ -519,10 +520,10 @@ fn is_sha256(value: &str) -> bool {
 /// Failure validating or executing a recorded/shadow session.
 #[derive(Debug, thiserror::Error)]
 pub enum RecordedShadowError {
-    /// The portable TaskSpec is invalid.
+    /// The portable `TaskSpec` is invalid.
     #[error(transparent)]
     Task(#[from] TaskSpecValidationError),
-    /// The TaskSpec or gateway configuration is invalid.
+    /// The `TaskSpec` or gateway configuration is invalid.
     #[error(transparent)]
     GatewayBuild(#[from] GatewayBuildError),
     /// The gateway rejected a runtime operation.

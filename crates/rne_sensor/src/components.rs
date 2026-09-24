@@ -11,7 +11,7 @@ use rne_math::Vec3;
 use rne_world::Transform3;
 use serde::{Deserialize, Serialize};
 
-/// Non-visual optical properties used by physics-aware LiDAR sampling.
+/// Non-visual optical properties used by physics-aware `LiDAR` sampling.
 ///
 /// This component is deliberately independent of render and physics materials:
 /// importers or applications may attach it to any raycast-hit entity without
@@ -104,7 +104,7 @@ impl Default for LidarMaterial {
 pub enum SensorKind {
     /// Inertial measurement unit.
     Imu(ImuSpec),
-    /// Scanning LiDAR, single-plane or multi-channel.
+    /// Scanning `LiDAR`, single-plane or multi-channel.
     Lidar(LidarSpec),
     /// RGB camera.
     Camera(CameraSpec),
@@ -125,7 +125,7 @@ pub struct Sensor {
     pub frame_id: u32,
     /// Whether sampling is enabled.
     pub enabled: bool,
-    /// DataBus stream id.
+    /// `DataBus` stream id.
     pub stream_id: StreamId,
 }
 
@@ -242,7 +242,7 @@ pub struct ImuFeedbackSensor {
     pub latency_ticks: u64,
     /// Whether sampling is enabled.
     pub enabled: bool,
-    /// DataBus stream id.
+    /// `DataBus` stream id.
     pub stream_id: StreamId,
     /// Optional deterministic fault applied in the documented processing order.
     pub fault: ImuFeedbackFault,
@@ -413,7 +413,7 @@ pub struct IncrementalEncoderSensor {
     pub latency_ticks: u64,
     /// Whether sampling is enabled.
     pub enabled: bool,
-    /// DataBus stream id.
+    /// `DataBus` stream id.
     pub stream_id: StreamId,
     /// Optional deterministic dropout or stuck-value fault.
     pub fault: IncrementalEncoderFault,
@@ -561,7 +561,7 @@ pub struct MotorElectricalFeedbackSensor {
     pub latency_ticks: u64,
     /// Whether sampling is enabled.
     pub enabled: bool,
-    /// DataBus stream id.
+    /// `DataBus` stream id.
     pub stream_id: StreamId,
     /// Optional deterministic dropout or stuck-value fault.
     pub fault: MotorElectricalFeedbackFault,
@@ -642,7 +642,7 @@ pub struct JointFeedbackSensor {
     pub update_rate_hz: f64,
     /// Exact sampling period in simulation ticks, overriding `update_rate_hz`.
     ///
-    /// Use this when a TaskSpec declares an integer control period that cannot
+    /// Use this when a `TaskSpec` declares an integer control period that cannot
     /// be represented exactly by conversion from hertz.
     pub sample_period_ticks: Option<u64>,
     /// First scheduled capture time in simulation nanosecond ticks.
@@ -651,7 +651,7 @@ pub struct JointFeedbackSensor {
     pub latency_ticks: u64,
     /// Whether sampling is enabled.
     pub enabled: bool,
-    /// DataBus stream id.
+    /// `DataBus` stream id.
     pub stream_id: StreamId,
     /// Joint channels in externally visible contract order.
     pub channels: Vec<JointFeedbackChannelSpec>,

@@ -123,7 +123,7 @@ impl From<WristCameraMountSpawned> for WristCameraMount {
     }
 }
 
-/// Returns the DataBus stream id for a robot wrist camera.
+/// Returns the `DataBus` stream id for a robot wrist camera.
 pub fn wrist_camera_stream_for_index(index: usize) -> StreamId {
     StreamId::new(WRIST_CAMERA_STREAM_BASE as u64 + index as u64)
 }

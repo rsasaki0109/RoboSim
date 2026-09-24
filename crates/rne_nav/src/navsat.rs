@@ -1,4 +1,4 @@
-//! Geographic (NavSat) to local map projection.
+//! Geographic (`NavSat`) to local map projection.
 //!
 //! [`NavSatTransform`] is the RNE analogue of `robot_localization`'s
 //! `navsat_transform_node`: it fixes an ENU local frame at a datum and converts
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// Mean Earth radius in meters (WGS-84 authalic radius).
 pub const EARTH_RADIUS_M: f64 = 6_371_008.8;
 
-/// Errors raised by the NavSat transform.
+/// Errors raised by the `NavSat` transform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum NavSatError {
     /// A configuration value was non-finite or out of range.

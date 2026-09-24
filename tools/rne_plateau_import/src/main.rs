@@ -1,4 +1,4 @@
-//! Command-line entry point for deterministic PLATEAU CityGML conversion.
+//! Command-line entry point for deterministic PLATEAU `CityGML` conversion.
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
@@ -11,7 +11,7 @@ use std::path::PathBuf;
     about = "Convert PLATEAU CityGML buildings and LOD1/LOD2/LOD3 roads into RNE assets"
 )]
 struct Cli {
-    /// Input PLATEAU CityGML file.
+    /// Input PLATEAU `CityGML` file.
     input: PathBuf,
     /// Directory receiving scene, traffic, OBJ, and metadata assets.
     #[arg(short, long)]
@@ -19,7 +19,7 @@ struct Cli {
     /// Stable base name for generated tile assets.
     #[arg(long, default_value = "plateau_tile")]
     tile_name: String,
-    /// Coordinate interpretation; auto uses the CityGML CRS.
+    /// Coordinate interpretation; auto uses the `CityGML` CRS.
     #[arg(long, value_enum, default_value_t = CliCoordinateMode::Auto)]
     coordinate_mode: CliCoordinateMode,
     /// Optional source origin as first,second,height (lat,lon,m or east,north,m).

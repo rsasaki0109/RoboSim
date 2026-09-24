@@ -45,7 +45,7 @@ pub enum ExecutionReplayClaim {
 }
 
 /// Common envelope for execution-failure artifacts, distinct from legacy v1.
-/// Contract evidence must bind TaskSpec, backend and build; attempt evidence must
+/// Contract evidence must bind `TaskSpec`, backend and build; attempt evidence must
 /// distinguish requested operations, completed work, lane clocks and learner updates.
 /// Their domain-specific schemas are validated by adapters, not guessed here.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

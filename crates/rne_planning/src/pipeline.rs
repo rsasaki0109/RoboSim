@@ -12,7 +12,7 @@ use crate::scene::PlanningScene;
 
 /// A configured planning pipeline.
 ///
-/// This is the RNE analogue of MoveIt's `PlanningPipeline`: it owns a planner
+/// This is the RNE analogue of `MoveIt`'s `PlanningPipeline`: it owns a planner
 /// registry and an ordered adapter chain, exposes the registered planner names,
 /// and dispatches a validated request to the selected planner. Adapters run
 /// before planning and again after planning.

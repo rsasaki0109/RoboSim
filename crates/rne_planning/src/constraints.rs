@@ -1,6 +1,6 @@
 //! Goal and path constraints for a motion plan.
 //!
-//! Goal constraints mirror the MoveIt kinematic constraints that matter for a
+//! Goal constraints mirror the `MoveIt` kinematic constraints that matter for a
 //! single articulated chain: an exact joint-space goal and an end-link pose,
 //! position, or orientation goal resolved by inverse kinematics. Path
 //! constraints must hold at every configuration along a motion.

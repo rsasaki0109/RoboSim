@@ -1,4 +1,4 @@
-//! Typed DataBus and frame payloads for Robot Native Engine.
+//! Typed `DataBus` and frame payloads for Robot Native Engine.
 
 #![deny(missing_docs)]
 

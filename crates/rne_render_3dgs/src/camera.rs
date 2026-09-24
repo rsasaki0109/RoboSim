@@ -7,14 +7,14 @@ use wgpu_3dgs_viewer::CameraTrait;
 
 /// Bridges RNE world-space cameras to the splat viewer.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct RneSplatCamera {
+pub(crate) struct RneSplatCamera {
     view: Mat4,
     projection: Mat4,
 }
 
 impl RneSplatCamera {
     /// Builds a splat camera from RNE camera parameters and pose.
-    pub fn from_rne(camera: &Camera, view: &Transform3) -> Self {
+    pub(crate) fn from_rne(camera: &Camera, view: &Transform3) -> Self {
         let view_matrix = Camera::view_matrix(view).as_mat4();
         let projection = camera.projection_matrix().as_mat4();
         Self {
@@ -24,7 +24,12 @@ impl RneSplatCamera {
     }
 
     /// Updates the splat viewer camera buffers.
-    pub fn upload(&self, viewer: &mut wgpu_3dgs_viewer::Viewer, queue: &wgpu::Queue, size: UVec2) {
+    pub(crate) fn upload(
+        &self,
+        viewer: &mut wgpu_3dgs_viewer::Viewer,
+        queue: &wgpu::Queue,
+        size: UVec2,
+    ) {
         viewer.update_camera(queue, self, size);
     }
 }

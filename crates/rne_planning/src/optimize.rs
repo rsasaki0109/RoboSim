@@ -4,7 +4,7 @@
 //! smoothness term (squared accelerations) with an obstacle term (squared
 //! clearance violation against robot self-collision and world objects). It uses
 //! deterministic finite-difference gradients and a backtracking step, keeping
-//! the endpoints fixed. This is the RNE reference to MoveIt's CHOMP planner.
+//! the endpoints fixed. This is the RNE reference to `MoveIt`'s CHOMP planner.
 
 use crate::constraints::PathConstraint;
 use crate::error::PlanningError;

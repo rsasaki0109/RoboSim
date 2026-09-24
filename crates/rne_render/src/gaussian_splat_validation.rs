@@ -123,6 +123,7 @@ pub enum GaussianSplatValidationError {
 }
 
 /// Rehashes and semantically audits a real-capture 3DGS validation fixture.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (161/150 lines); see PR body
 pub fn audit_gaussian_splat_validation_fixture(
     path: &Path,
 ) -> Result<GaussianSplatValidationAudit, GaussianSplatValidationError> {
@@ -393,6 +394,7 @@ fn validate_source_to_world(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (264/150 lines); see PR body
 fn validate_metric_scale(
     value: &Map<String, Value>,
     parent: &Path,
@@ -817,6 +819,7 @@ fn validate_collision_alignment(
     Ok(inside)
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (156/150 lines); see PR body
 fn validate_observation_comparison(
     value: &Map<String, Value>,
     parent: &Path,
@@ -981,6 +984,7 @@ fn validate_observation_comparison(
     Ok(passed)
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (211/150 lines); see PR body
 fn validate_sparse_depth_alignment(
     value: &Map<String, Value>,
     parent: &Path,
@@ -1202,6 +1206,7 @@ fn validate_sparse_depth_alignment(
     Ok(passed)
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (342/150 lines); see PR body
 fn validate_multiview_depth_occlusion_alignment(
     value: &Map<String, Value>,
     parent: &Path,

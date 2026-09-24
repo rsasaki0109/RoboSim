@@ -135,7 +135,7 @@ pub struct HardwareObservation {
     pub sequence: u64,
     /// Monotonic host tick assigned by the gateway process.
     pub received_at_ms: u64,
-    /// Flattened values in TaskSpec tensor and row-major order.
+    /// Flattened values in `TaskSpec` tensor and row-major order.
     pub values: Vec<f64>,
 }
 
@@ -149,7 +149,7 @@ pub struct HardwareAction {
     pub observation_sequence: u64,
     /// Monotonic host tick when the gateway accepted the action.
     pub accepted_at_ms: u64,
-    /// Flattened values in TaskSpec tensor and row-major order.
+    /// Flattened values in `TaskSpec` tensor and row-major order.
     pub values: Vec<f64>,
 }
 
@@ -165,7 +165,7 @@ pub enum SafetyReason {
     CommandDeadlineMissed,
     /// A queued or active command exceeded its configured age.
     CommandStale,
-    /// At least one action value exceeded its TaskSpec limit.
+    /// At least one action value exceeded its `TaskSpec` limit.
     ActuatorLimit,
     /// The pending actuator queue could not accept another command.
     QueueOverrun,
@@ -289,7 +289,7 @@ pub enum GatewayEvent {
 pub struct GatewaySnapshot {
     /// Snapshot schema version.
     pub schema_version: u32,
-    /// Bound TaskSpec identity.
+    /// Bound `TaskSpec` identity.
     pub task_id: String,
     /// Session mode.
     pub mode: HardwareMode,
@@ -319,7 +319,7 @@ pub struct GatewayEvidence {
     pub kind: String,
     /// Evidence schema version.
     pub schema_version: u32,
-    /// Bound TaskSpec identity.
+    /// Bound `TaskSpec` identity.
     pub task_id: String,
     /// Session authority mode.
     pub mode: HardwareMode,
@@ -332,7 +332,7 @@ pub struct GatewayEvidence {
 /// Failure constructing a gateway from a portable task contract.
 #[derive(Debug, thiserror::Error)]
 pub enum GatewayBuildError {
-    /// The TaskSpec is invalid or unsupported.
+    /// The `TaskSpec` is invalid or unsupported.
     #[error(transparent)]
     Task(#[from] TaskSpecValidationError),
     /// A timing or queue bound is zero.
@@ -359,7 +359,7 @@ pub enum GatewayBuildError {
         /// Tensor name.
         tensor: String,
     },
-    /// Hardware actions must carry explicit finite TaskSpec limits.
+    /// Hardware actions must carry explicit finite `TaskSpec` limits.
     #[error("action tensor {tensor:?} must declare bounds for hardware execution")]
     MissingActionBounds {
         /// Tensor name.
@@ -406,7 +406,7 @@ pub enum GatewayError {
         /// Rejected sequence.
         actual: u64,
     },
-    /// A flat payload does not match the TaskSpec width.
+    /// A flat payload does not match the `TaskSpec` width.
     #[error("{space} value count must be {expected}, got {actual}")]
     ValueCount {
         /// Observation or action space.
@@ -424,20 +424,20 @@ pub enum GatewayError {
         /// Flattened value index.
         index: usize,
     },
-    /// A normalized observation value does not represent its declared TaskSpec dtype.
+    /// A normalized observation value does not represent its declared `TaskSpec` dtype.
     #[error("observation value {index} does not represent {dtype:?}")]
     ObservationDType {
         /// Flattened value index.
         index: usize,
-        /// Required TaskSpec dtype.
+        /// Required `TaskSpec` dtype.
         dtype: TensorDType,
     },
-    /// A normalized action value cannot be represented by its TaskSpec dtype.
+    /// A normalized action value cannot be represented by its `TaskSpec` dtype.
     #[error("action value {index} does not represent {dtype:?}")]
     ActionDType {
         /// Flattened value index.
         index: usize,
-        /// Required TaskSpec dtype.
+        /// Required `TaskSpec` dtype.
         dtype: TensorDType,
     },
     /// The action did not target the newest observation.
@@ -464,7 +464,7 @@ pub enum GatewayError {
         /// Configured deadline.
         limit_ms: u64,
     },
-    /// A command exceeded a TaskSpec actuator limit.
+    /// A command exceeded a `TaskSpec` actuator limit.
     #[error("action value {index}={value} is outside [{lower}, {upper}]")]
     ActuatorLimit {
         /// Flattened action index.
@@ -516,7 +516,7 @@ pub struct HardwareGateway {
 }
 
 impl HardwareGateway {
-    /// Binds a validated TaskSpec and derives strict actuator limits from it.
+    /// Binds a validated `TaskSpec` and derives strict actuator limits from it.
     pub fn new(task: TaskSpec, config: GatewayConfig) -> Result<Self, GatewayBuildError> {
         task.validate()?;
         config.validate()?;

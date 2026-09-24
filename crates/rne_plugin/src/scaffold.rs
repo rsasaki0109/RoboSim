@@ -418,6 +418,7 @@ crate-type = ["cdylib", "lib"]
     )
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (245/150 lines); see PR body
 fn lib_source(name: &str) -> String {
     format!(
         r#"//! RNE controller plugin `{name}`.
@@ -794,7 +795,7 @@ mod tests {
             .validate_directory(&crate_dir)
             .expect("validate scaffold directory");
         let manifest_text = fs::read_to_string(&manifest_path).expect("read manifest");
-        let manifest: crate::PluginManifest =
+        let manifest: PluginManifest =
             serde_json::from_str(&manifest_text).expect("parse manifest");
         assert_eq!(manifest.name, name);
 

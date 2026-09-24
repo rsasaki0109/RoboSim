@@ -1,4 +1,4 @@
-//! Source-time DataBus replay; configured delays are experiments, not measured latency.
+//! Source-time `DataBus` replay; configured delays are experiments, not measured latency.
 
 use super::{read_imu_samples, read_wheel_samples, NcltImuSample, NcltSeries, NcltWheelSample};
 use anyhow::{ensure, Context, Result};

@@ -2008,6 +2008,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // TODO(cleanup): split (188/150 lines); see PR body
     fn option_parsers_require_each_input_exactly_once() {
         let root = Path::new("workspace");
         assert!(parse_init_options(&mut Vec::<String>::new().into_iter(), root).is_err());

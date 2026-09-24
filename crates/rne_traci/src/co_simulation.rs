@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// entity UUIDs.
 const SUMO_NAMESPACE: u128 = 0x6e6f_0000_0000_0000_0000_0000_0000_0000;
 
-/// Network endpoint used to reconnect a live TraCI session.
+/// Network endpoint used to reconnect a live `TraCI` session.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TraciEndpoint {
     host: String,
@@ -141,6 +141,7 @@ struct MirrorDelta {
 /// Actor entities carry [`Name`] equal to the SUMO vehicle id and a stable
 /// [`EntityUuid`] derived from it, so replay and external iteration are
 /// deterministic. Vehicles that leave the SUMO simulation are despawned.
+#[derive(Debug)]
 pub struct CoSimulation {
     client: Option<TraciClient>,
     endpoint: Option<TraciEndpoint>,
@@ -161,7 +162,7 @@ impl CoSimulation {
         Ok(Self::from_parts(client, Some(endpoint)))
     }
 
-    /// Wraps an already-connected TraCI client.
+    /// Wraps an already-connected `TraCI` client.
     ///
     /// Useful when the caller performs connection retries or needs the raw
     /// client first.

@@ -22,7 +22,7 @@ pub struct SuspensionTimestampRequest {
     pub draws: usize,
     /// Executable nominal velocity procedure per training acquisition, in order.
     pub derivatives: Vec<SuspensionDerivativeBinding>,
-    /// Timebase-only bindings: nominal (factor_id None) per acquisition, followed
+    /// Timebase-only bindings: nominal (`factor_id` None) per acquisition, followed
     /// by each nonzero reported-time factor per acquisition, in model/run order.
     /// Nominal binds the installed clock and interpretation of unchanged labels.
     pub clocks: Vec<SuspensionAffineCalibrationBinding>,

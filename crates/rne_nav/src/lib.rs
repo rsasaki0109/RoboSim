@@ -7,7 +7,7 @@
 //! * [`Costmap`] — a planar cost surface derived from an occupancy grid with
 //!   lethal, inscribed, and inflated costs.
 //! * [`TfBuffer`] — a timestamped transform tree with shortest-path lookup and
-//!   linear/slerp time interpolation for map → odom → base_link → sensor chains.
+//!   linear/slerp time interpolation for map → odom → `base_link` → sensor chains.
 //! * [`LaserScan2d`] — a renderer/physics-independent 2D scan payload and its
 //!   occupancy integration.
 //!

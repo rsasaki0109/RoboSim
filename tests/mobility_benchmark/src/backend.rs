@@ -54,7 +54,7 @@ pub struct BackendMobilitySample {
     pub sim_time_ticks: u64,
     /// Task-provided actor observation, zero while settling and one while driving.
     pub command_phase: f64,
-    /// Bounded TaskSpec action in volts.
+    /// Bounded `TaskSpec` action in volts.
     pub command_voltage_v: f64,
     /// Privileged chassis position in world coordinates, in meters.
     pub privileged_position_world_m: [f64; 3],
@@ -535,6 +535,7 @@ pub fn run_backend_mobility_trace<B: PhysicsBackend>(
     Ok(trace)
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (242/150 lines); see PR body
 pub(crate) fn run_backend_mobility_trace_configured<B: PhysicsBackend>(
     mut backend: B,
     manifest: PhysicsBackendManifest,

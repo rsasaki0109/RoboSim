@@ -100,7 +100,7 @@ pub fn evaluate_office_desk_place(cargo_x_m: f64, cargo_z_m: f64, place: OfficeP
         && cargo_z_m <= place.max_z_m
 }
 
-/// Portable TaskSpec for office AGV desk place.
+/// Portable `TaskSpec` for office AGV desk place.
 #[must_use]
 pub fn office_agv_desk_place_task_spec(max_episode_steps: u64) -> TaskSpec {
     TaskSpec::new(
@@ -805,7 +805,7 @@ fn digest_scene_inputs(scene_path: &Path) -> Result<u64, AssetError> {
     Ok(stable_behavior_digest(&bytes))
 }
 
-/// Bundled TaskSpec path for the desk-place analog.
+/// Bundled `TaskSpec` path for the desk-place analog.
 #[must_use]
 pub fn office_agv_desk_place_task_path() -> PathBuf {
     crate::asset_path::bundled_asset_path(Path::new("tasks/office_agv_desk_place.task.json"))

@@ -670,6 +670,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // TODO(cleanup): split (156/150 lines); see PR body
     fn full_submission_binds_clean_git_release_task_and_every_capsule_member() {
         let directory = tempfile::tempdir().unwrap();
         let evidence_repo = directory.path().join("external-project");

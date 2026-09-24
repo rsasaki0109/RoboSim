@@ -93,6 +93,7 @@ pub struct DiffDriveSpawned {
 }
 
 /// Spawns a minimal differential drive robot into the ECS world.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (171/150 lines); see PR body
 pub fn spawn_diff_drive_robot(world: &mut World, config: &DiffDriveConfig) -> DiffDriveSpawned {
     let robot = spawn_named(world, &config.model_name);
     let base_link = spawn_named(world, "base_link");

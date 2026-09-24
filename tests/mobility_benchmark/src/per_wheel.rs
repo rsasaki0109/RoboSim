@@ -29,7 +29,7 @@ pub const PER_WHEEL_SKID_TRACE_KIND: &str = "rne_mobility_per_wheel_skid_trace";
 pub const PER_WHEEL_SKID_COMPARISON_KIND: &str = "rne_mobility_per_wheel_skid_comparison";
 /// Current per-wheel artifact schema version.
 pub const PER_WHEEL_SKID_SCHEMA_VERSION: u32 = 1;
-/// Stable TaskSpec identity shared by every backend run.
+/// Stable `TaskSpec` identity shared by every backend run.
 pub const PER_WHEEL_SKID_TASK_ID: &str = "mobility_per_wheel_skid_pivot_v1";
 /// Fixed physics and drive-path step in simulation nanosecond ticks.
 pub const PER_WHEEL_SKID_FIXED_DELTA_TICKS: u64 = 1_000_000;
@@ -55,7 +55,7 @@ pub struct PerWheelSkidSample {
     pub sim_time_ticks: u64,
     /// Task-provided actor observation, zero while settling and one while driving.
     pub command_phase: f64,
-    /// Left and right TaskSpec actions in volts.
+    /// Left and right `TaskSpec` actions in volts.
     pub command_voltage_v: [f64; 2],
     /// Privileged chassis position in world coordinates, in meters.
     pub privileged_position_world_m: [f64; 3],
@@ -315,6 +315,7 @@ pub fn per_wheel_skid_task_spec() -> TaskSpec {
 }
 
 /// Runs a four-station skid pivot with independent motor, wheel, and tire states.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (274/150 lines); see PR body
 pub fn run_per_wheel_skid_trace<B: PhysicsBackend>(
     mut backend: B,
     manifest: PhysicsBackendManifest,
@@ -681,6 +682,7 @@ pub(crate) fn wheel_station_specs() -> [WheelStationSpec; 4] {
     })
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn sample(
     step: u64,

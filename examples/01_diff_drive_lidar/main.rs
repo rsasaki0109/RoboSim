@@ -1,4 +1,4 @@
-//! Differential drive robot with IMU, wheel encoders, and LiDAR on a simple floor.
+//! Differential drive robot with IMU, wheel encoders, and `LiDAR` on a simple floor.
 
 use rne_core::{SimDuration, SimTime};
 use rne_data::{DataBus, InMemoryDataBus, StreamId};

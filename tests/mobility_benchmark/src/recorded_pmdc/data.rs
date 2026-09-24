@@ -172,6 +172,7 @@ fn parse_finite(values: &BTreeMap<String, String>, channel: &str, row: u32) -> R
     Ok(value)
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (156/150 lines); see PR body
 fn decode_with_contract(bytes: &[u8], contract: DecodeContract<'_>) -> Result<PmdcTrainingSet> {
     ensure!(
         !bytes.is_empty() && bytes.len() <= contract.maximum_bytes,

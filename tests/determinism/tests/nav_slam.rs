@@ -91,8 +91,8 @@ fn occupancy_mapping_is_deterministic() {
 fn planning_is_deterministic_and_stable() {
     let (grid, _) = build_room_map();
     let costmap = Costmap::from_occupancy(&grid, &CostmapConfig::default()).unwrap();
-    let start = rne_math::Vec3::new(-2.5, 0.0, 0.0);
-    let goal = rne_math::Vec3::new(2.5, 0.0, 0.0);
+    let start = Vec3::new(-2.5, 0.0, 0.0);
+    let goal = Vec3::new(2.5, 0.0, 0.0);
     let first = plan_path(
         &costmap,
         start,
@@ -155,10 +155,7 @@ fn slam_is_deterministic() {
 fn local_planner_and_follower_are_deterministic() {
     let (grid, _) = build_room_map();
     let costmap = Costmap::from_occupancy(&grid, &CostmapConfig::default()).unwrap();
-    let path = Path2d::from_points(&[
-        rne_math::Vec3::new(-2.5, 0.0, 0.0),
-        rne_math::Vec3::new(2.5, 0.0, 0.0),
-    ]);
+    let path = Path2d::from_points(&[Vec3::new(-2.5, 0.0, 0.0), Vec3::new(2.5, 0.0, 0.0)]);
     let planner = DwaPlanner::new(DwaConfig::default());
     let first = planner
         .compute_command(&costmap, &path, Pose2d::IDENTITY, Default::default())

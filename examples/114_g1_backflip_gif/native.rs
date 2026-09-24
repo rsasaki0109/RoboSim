@@ -39,6 +39,7 @@ fn ground_sole_contact(a: &str, b: &str, impulse_ns: f32) -> bool {
     impulse_ns > 0.0 && ((a == "environment" && sole(b)) || (b == "environment" && sole(a)))
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (847/150 lines); see PR body
 pub(super) fn run() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let summary: serde_json::Value = serde_json::from_slice(

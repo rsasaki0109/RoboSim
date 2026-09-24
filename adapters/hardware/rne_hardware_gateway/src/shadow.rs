@@ -17,11 +17,11 @@ pub const SHADOW_COMPARISON_SCHEMA_VERSION: u32 = 1;
 /// Stable discriminator for [`ShadowComparisonReport`].
 pub const SHADOW_COMPARISON_REPORT_KIND: &str = "rne_hardware_shadow_comparison";
 
-/// Absolute tolerance for one TaskSpec observation tensor.
+/// Absolute tolerance for one `TaskSpec` observation tensor.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShadowTensorTolerance {
-    /// Tensor name in TaskSpec observation order.
+    /// Tensor name in `TaskSpec` observation order.
     pub tensor_name: String,
     /// Inclusive absolute error tolerance in the tensor's declared unit.
     pub absolute_tolerance: f64,
@@ -33,7 +33,7 @@ pub struct ShadowTensorTolerance {
 pub struct ShadowComparisonConfig {
     /// Maximum retained comparison samples.
     pub sample_capacity: usize,
-    /// One tolerance per observation tensor in exact TaskSpec order.
+    /// One tolerance per observation tensor in exact `TaskSpec` order.
     pub tensors: Vec<ShadowTensorTolerance>,
 }
 
@@ -41,11 +41,11 @@ pub struct ShadowComparisonConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShadowViolation {
-    /// Tensor name from the TaskSpec.
+    /// Tensor name from the `TaskSpec`.
     pub tensor_name: String,
     /// Row-major element index within the tensor.
     pub tensor_element: usize,
-    /// Tensor unit from the TaskSpec.
+    /// Tensor unit from the `TaskSpec`.
     pub unit: String,
     /// Hardware observation value after dtype normalization.
     pub hardware_value: f64,
@@ -67,11 +67,11 @@ pub struct ShadowComparisonSample {
     pub hardware_received_at_ms: u64,
     /// Deterministic simulation step paired with the observation.
     pub simulation_step: u64,
-    /// Simulation timestamp in SimClock nanosecond ticks.
+    /// Simulation timestamp in `SimClock` nanosecond ticks.
     pub simulation_time_ticks: u64,
-    /// Normalized hardware values in TaskSpec flattened order.
+    /// Normalized hardware values in `TaskSpec` flattened order.
     pub hardware_values: Vec<f64>,
-    /// Normalized simulation values in TaskSpec flattened order.
+    /// Normalized simulation values in `TaskSpec` flattened order.
     pub simulation_values: Vec<f64>,
     /// Maximum elementwise absolute error.
     pub max_absolute_error: f64,
@@ -81,7 +81,7 @@ pub struct ShadowComparisonSample {
     pub mean_absolute_error: f64,
     /// Number of elements outside tolerance.
     pub violating_elements: usize,
-    /// First violating field in TaskSpec and row-major order.
+    /// First violating field in `TaskSpec` and row-major order.
     pub first_violation: Option<ShadowViolation>,
 }
 
@@ -113,7 +113,7 @@ pub struct ShadowComparisonReport {
     pub kind: String,
     /// Report schema version.
     pub schema_version: u32,
-    /// Bound TaskSpec identity.
+    /// Bound `TaskSpec` identity.
     pub task_id: String,
     /// Ordered tensor tolerance contract.
     pub tolerances: Vec<ShadowTensorTolerance>,
@@ -124,7 +124,7 @@ pub struct ShadowComparisonReport {
 }
 
 impl ShadowComparisonReport {
-    /// Rebinds an untrusted report to its TaskSpec and validates all structural
+    /// Rebinds an untrusted report to its `TaskSpec` and validates all structural
     /// metrics, ordering, first-violation, aggregate, and verdict invariants.
     pub fn validate_against(&self, task: &TaskSpec) -> Result<(), ShadowComparisonError> {
         task.validate()?;
@@ -203,7 +203,7 @@ pub struct ShadowComparator {
 }
 
 impl ShadowComparator {
-    /// Binds a validated TaskSpec to one complete ordered tolerance contract.
+    /// Binds a validated `TaskSpec` to one complete ordered tolerance contract.
     pub fn new(
         task: TaskSpec,
         config: ShadowComparisonConfig,
@@ -450,15 +450,15 @@ pub enum ShadowComparisonError {
     /// The report cannot retain any samples.
     #[error("shadow sample_capacity must be greater than zero")]
     ZeroCapacity,
-    /// The tolerance count differs from the TaskSpec tensor count.
+    /// The tolerance count differs from the `TaskSpec` tensor count.
     #[error("shadow tolerance count must be {expected}, got {actual}")]
     ToleranceCount {
-        /// TaskSpec tensor count.
+        /// `TaskSpec` tensor count.
         expected: usize,
         /// Supplied tolerance count.
         actual: usize,
     },
-    /// A tolerance entry is not in exact TaskSpec order.
+    /// A tolerance entry is not in exact `TaskSpec` order.
     #[error("shadow tolerance {index} must name {expected:?}, got {actual:?}")]
     ToleranceName {
         /// Tensor index.
@@ -518,7 +518,7 @@ pub enum ShadowComparisonError {
         /// Rejected simulation step.
         actual: u64,
     },
-    /// Paired SimClock timestamps must increase with simulation steps.
+    /// Paired `SimClock` timestamps must increase with simulation steps.
     #[error("shadow simulation time {actual} must be greater than {previous}")]
     NonMonotonicSimulationTime {
         /// Previous simulation time in ticks.
@@ -526,7 +526,7 @@ pub enum ShadowComparisonError {
         /// Rejected simulation time in ticks.
         actual: u64,
     },
-    /// A hardware or simulation observation violates TaskSpec shape or dtype.
+    /// A hardware or simulation observation violates `TaskSpec` shape or dtype.
     #[error(transparent)]
     Observation(#[from] GatewayError),
     /// Absolute-error accumulation overflowed.
@@ -547,10 +547,10 @@ pub enum ShadowComparisonError {
         /// First failed report invariant.
         reason: &'static str,
     },
-    /// An untrusted report names a different TaskSpec.
+    /// An untrusted report names a different `TaskSpec`.
     #[error("shadow report task mismatch: expected {expected:?}, got {actual:?}")]
     ReportTaskMismatch {
-        /// TaskSpec identity.
+        /// `TaskSpec` identity.
         expected: String,
         /// Report identity.
         actual: String,

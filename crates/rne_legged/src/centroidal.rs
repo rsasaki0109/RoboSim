@@ -303,6 +303,7 @@ fn push_row(
     rhs.push(target * scale);
 }
 
+// Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
 #[allow(clippy::needless_range_loop)]
 fn solve_least_squares(
     rows: &[Vec<f64>],

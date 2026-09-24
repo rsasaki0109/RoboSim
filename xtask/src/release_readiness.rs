@@ -1234,6 +1234,7 @@ fn verify_third_party_plugins(
     Ok(digests)
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (305/150 lines); see PR body
 fn verify_external_systems(
     evidence_root: &Path,
     manifest: &ReadinessManifest,
@@ -2602,6 +2603,7 @@ report = {{ path = "{report_name}", sha256 = "{}" }}
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // TODO(cleanup): split (189/150 lines); see PR body
     fn external_simulator_report_rebinds_task_runtime_and_every_artifact() {
         let root = workspace_root().unwrap();
         let temp = tempfile::tempdir().unwrap();

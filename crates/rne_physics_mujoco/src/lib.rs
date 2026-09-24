@@ -1,7 +1,7 @@
-//! Optional MuJoCo backend for Robot Native Engine.
+//! Optional `MuJoCo` backend for Robot Native Engine.
 //!
-//! The crate deliberately keeps MuJoCo behind the `mujoco` feature.  A normal
-//! workspace build therefore does not require a MuJoCo runtime or a native
+//! The crate deliberately keeps `MuJoCo` behind the `mujoco` feature.  A normal
+//! workspace build therefore does not require a `MuJoCo` runtime or a native
 //! library. The feature-gated backend compiles backend-neutral ECS rigid bodies
 //! into a backend-private MJCF model before step 0, then exposes simulation only
 //! through the [`rne_physics::PhysicsBackend`] trait. A caller-owned MJCF
@@ -14,10 +14,10 @@ use rne_physics::{PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCa
 #[cfg(any(feature = "mujoco", test))]
 mod compiler;
 
-/// The MuJoCo feature is enabled in this build.
+/// The `MuJoCo` feature is enabled in this build.
 pub const MUJOCO_FEATURE_ENABLED: bool = cfg!(feature = "mujoco");
 
-/// The MuJoCo ABI line expected by this crate.
+/// The `MuJoCo` ABI line expected by this crate.
 pub const EXPECTED_MUJOCO_VERSION_PREFIX: &str = "3.9.";
 
 /// Returns the versioned conformance manifest without loading the native runtime.

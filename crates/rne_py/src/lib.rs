@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 
 const CHECKPOINT_TEMP_CREATE_ATTEMPTS: u32 = 64;
 
-/// Validates a TaskSpec JSON document and returns its canonical compact JSON.
+/// Validates a `TaskSpec` JSON document and returns its canonical compact JSON.
 #[pyfunction]
 fn canonical_task_spec_json(task_spec_json: &str) -> PyResult<String> {
     let task_spec: TaskSpec = serde_json::from_str(task_spec_json).map_err(|error| {
@@ -424,7 +424,7 @@ impl PyUnitreeGo2GaitEpisode {
         Ok(Self { inner, task_spec })
     }
 
-    /// Returns the canonical portable TaskSpec JSON used by this episode.
+    /// Returns the canonical portable `TaskSpec` JSON used by this episode.
     fn task_spec_json(&self) -> PyResult<String> {
         serde_json::to_string(&self.task_spec).map_err(|error| {
             pyo3::exceptions::PyRuntimeError::new_err(format!(
@@ -583,7 +583,7 @@ impl PyUnitreeG1JointLocomotionEpisode {
         Ok(Self { inner, task_spec })
     }
 
-    /// Returns the canonical portable TaskSpec JSON used by this episode.
+    /// Returns the canonical portable `TaskSpec` JSON used by this episode.
     fn task_spec_json(&self) -> PyResult<String> {
         serde_json::to_string(&self.task_spec).map_err(|error| {
             pyo3::exceptions::PyRuntimeError::new_err(format!(
@@ -732,7 +732,7 @@ impl PyUnitreeG1JointBatch {
         Ok(Self { inner, task_spec })
     }
 
-    /// Returns the canonical portable TaskSpec JSON used by this batch.
+    /// Returns the canonical portable `TaskSpec` JSON used by this batch.
     fn task_spec_json(&self) -> PyResult<String> {
         serde_json::to_string(&self.task_spec).map_err(|error| {
             pyo3::exceptions::PyRuntimeError::new_err(format!(
@@ -847,7 +847,7 @@ impl PyPortableUnitreeGo2BatchStep {
         self.resets.clone()
     }
 
-    /// Flat 21-value observations in stable TaskSpec order.
+    /// Flat 21-value observations in stable `TaskSpec` order.
     #[getter]
     fn observations(&self) -> Vec<Vec<f64>> {
         self.observations.clone()
@@ -950,7 +950,7 @@ impl PyPortableUnitreeGo2Batch {
         self.inner.num_envs()
     }
 
-    /// Canonical TaskSpec JSON bound to this batch and its checkpoints.
+    /// Canonical `TaskSpec` JSON bound to this batch and its checkpoints.
     fn task_spec_json(&self) -> PyResult<String> {
         serde_json::to_string(
             self.inner
@@ -1222,6 +1222,7 @@ impl PyMmAction {
         wrist_roll_velocity_rad_s=0.0,
         so101_gripper_velocity_rad_s=0.0,
     ))]
+    // Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
     #[allow(clippy::too_many_arguments)]
     fn new(
         left_wheel_velocity_rad_s: f64,
@@ -1689,6 +1690,7 @@ impl PyMobileManipulatorSim {
         lift_velocity_m_s=0.0,
         gripper_velocity_m_s=0.0,
     ))]
+    // Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
     #[allow(clippy::too_many_arguments)]
     fn step(
         &mut self,
@@ -1813,6 +1815,7 @@ impl PyMobileManipulatorEpisode {
         lift_velocity_m_s=0.0,
         gripper_velocity_m_s=0.0,
     ))]
+    // Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
     #[allow(clippy::too_many_arguments)]
     fn step(
         &mut self,

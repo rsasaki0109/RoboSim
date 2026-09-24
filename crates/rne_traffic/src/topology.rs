@@ -201,6 +201,7 @@ struct CandidateConnection {
     movement: MovementKind,
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (180/150 lines); see PR body
 fn build_impl(
     output_network_id: TrafficId,
     networks: &[TrafficNetwork],

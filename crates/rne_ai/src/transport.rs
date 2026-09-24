@@ -96,9 +96,6 @@ mod tests {
             }
         }
 
-        panic!(
-            "expected finger contact and grasp_cube displacement >= {} m",
-            TRANSPORT_SUCCESS_M
-        );
+        panic!("expected finger contact and grasp_cube displacement >= {TRANSPORT_SUCCESS_M} m");
     }
 }

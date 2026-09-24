@@ -353,7 +353,7 @@ pub struct SuspensionErrorModel {
     pub kind: String,
     /// Current model and random-stream algorithm version, 1.
     pub schema_version: u32,
-    /// Explicit root seed used to create WorldRandom.
+    /// Explicit root seed used to create `WorldRandom`.
     pub seed: u64,
     /// Number of draws, 1 through 4096; failed draws are not replaced.
     pub draws: usize,

@@ -31,7 +31,7 @@ pub struct RunManifest {
     /// Sensor subscriptions requesting full typed payload capture.
     #[serde(default)]
     pub sensors: Vec<RunSensorSubscription>,
-    /// Optional OpenSCENARIO scenario that replaces the fixed-step physics run.
+    /// Optional `OpenSCENARIO` scenario that replaces the fixed-step physics run.
     #[serde(default)]
     pub scenario: Option<RunScenario>,
     /// Physics backend requirements verified before the run starts.
@@ -201,7 +201,7 @@ pub enum RunSensorKind {
     /// Inertial measurement unit.
     #[default]
     Imu,
-    /// Scanning LiDAR.
+    /// Scanning `LiDAR`.
     Lidar,
     /// RGB(-D) camera.
     Camera,
@@ -236,7 +236,7 @@ pub struct RunOutput {
     pub replay_path: Option<PathBuf>,
 }
 
-/// OpenSCENARIO scenario settings in a [`RunManifest`].
+/// `OpenSCENARIO` scenario settings in a [`RunManifest`].
 ///
 /// When present, the runner executes the scenario over the traffic runtime
 /// instead of the fixed-step physics simulation. The manifest `scene` is then
@@ -244,7 +244,7 @@ pub struct RunOutput {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunScenario {
-    /// OpenSCENARIO `.xosc` path, relative to this manifest unless absolute.
+    /// `OpenSCENARIO` `.xosc` path, relative to this manifest unless absolute.
     pub xosc: PathBuf,
 }
 
@@ -322,6 +322,7 @@ pub fn parse_run_manifest(path: &Path, text: &str) -> Result<RunManifest, AssetE
     validate_run_manifest(path, manifest)
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (203/150 lines); see PR body
 fn validate_run_manifest(path: &Path, manifest: RunManifest) -> Result<RunManifest, AssetError> {
     if manifest.version != RUN_MANIFEST_VERSION {
         return Err(AssetError::invalid(

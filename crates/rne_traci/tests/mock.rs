@@ -1,4 +1,4 @@
-//! Round-trip tests against an in-process mock TraCI server.
+//! Round-trip tests against an in-process mock `TraCI` server.
 
 use rne_traci::{TraciClient, TraciError};
 use std::io::{BufReader, Read, Write};
@@ -42,7 +42,7 @@ fn status_bytes(command_id: u8, result: u8, description: &str) -> Vec<u8> {
     command
 }
 
-/// Spawns a mock TraCI server that answers one connection, returning its port.
+/// Spawns a mock `TraCI` server that answers one connection, returning its port.
 fn start_mock(respond: impl Fn(&mut MockReply) + Send + 'static) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock listener");
     let port = listener.local_addr().expect("local address").port();
@@ -53,7 +53,7 @@ fn start_mock(respond: impl Fn(&mut MockReply) + Send + 'static) -> u16 {
     port
 }
 
-/// Spawns a mock server that validates the TraCI vehicle speed command payload.
+/// Spawns a mock server that validates the `TraCI` vehicle speed command payload.
 fn start_speed_mock(expected_vehicle_id: &str, expected_speed_m_s: f64) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind speed mock listener");
     let port = listener.local_addr().expect("local address").port();
@@ -84,7 +84,7 @@ fn start_speed_mock(expected_vehicle_id: &str, expected_speed_m_s: f64) -> u16 {
     port
 }
 
-/// Builds mock TraCI response commands.
+/// Builds mock `TraCI` response commands.
 struct MockReply {
     responses: Vec<Vec<u8>>,
 }

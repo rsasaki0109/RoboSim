@@ -8,6 +8,7 @@ use rne_dynamics::{forward_dynamics, ArticulatedModel};
 /// The state is `[q, qd]` and the control is the actuated-joint torque,
 /// excluding the floating-base rows. Each call evaluates the native forward
 /// dynamics and integrates one step.
+#[derive(Debug)]
 pub struct ArticulatedDynamics<'a> {
     /// Model to integrate.
     pub model: &'a ArticulatedModel,

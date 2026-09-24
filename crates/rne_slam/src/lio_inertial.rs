@@ -338,6 +338,7 @@ impl LioInertialEkf {
         })
     }
 
+    // Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
     #[allow(clippy::needless_range_loop)]
     fn iterated_update(&mut self, points: &[Vec3]) -> Result<(usize, f64), LioInertialError> {
         let index = VoxelPointIndex::new(&self.map_points, self.config.icp.target_voxel_size_m);
@@ -499,6 +500,7 @@ fn symmetrize(matrix: [[f64; STATE_DIM]; STATE_DIM]) -> [[f64; STATE_DIM]; STATE
     out
 }
 
+// Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
 #[allow(clippy::needless_range_loop)]
 fn ensure_positive_definite(
     matrix: [[f64; STATE_DIM]; STATE_DIM],
@@ -530,6 +532,7 @@ fn skew(vector: Vec3) -> [[f64; 3]; 3] {
     ]
 }
 
+// Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
 #[allow(clippy::needless_range_loop)]
 fn cholesky(matrix: &[[f64; STATE_DIM]; STATE_DIM]) -> Option<[[f64; STATE_DIM]; STATE_DIM]> {
     let mut lower = [[0.0; STATE_DIM]; STATE_DIM];
@@ -552,6 +555,7 @@ fn cholesky(matrix: &[[f64; STATE_DIM]; STATE_DIM]) -> Option<[[f64; STATE_DIM];
     Some(lower)
 }
 
+// Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
 #[allow(clippy::needless_range_loop)]
 fn regularize(
     matrix: &[[f64; STATE_DIM]; STATE_DIM],
@@ -575,6 +579,7 @@ fn diagonal_scale(matrix: &[[f64; STATE_DIM]; STATE_DIM]) -> f64 {
     }
 }
 
+// Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
 #[allow(clippy::needless_range_loop)]
 fn invert(matrix: &[[f64; STATE_DIM]; STATE_DIM]) -> Option<[[f64; STATE_DIM]; STATE_DIM]> {
     let scale = diagonal_scale(matrix);
@@ -605,6 +610,7 @@ fn invert(matrix: &[[f64; STATE_DIM]; STATE_DIM]) -> Option<[[f64; STATE_DIM]; S
     Some(inverse)
 }
 
+// Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
 #[allow(clippy::needless_range_loop)]
 fn solve(
     matrix: &[[f64; STATE_DIM]; STATE_DIM],

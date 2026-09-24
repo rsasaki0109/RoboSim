@@ -81,7 +81,7 @@ pub struct CasterObservedSample {
     pub privileged_caster_swivel_rad: f64,
 }
 
-/// A measured motor payload and its original DataBus timing/source header.
+/// A measured motor payload and its original `DataBus` timing/source header.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CasterMotorMeasurement {
@@ -120,6 +120,7 @@ impl CasterObservedRun {
     /// privileged truth. This verifies controller decisions, not the estimator's
     /// raw-sensor computation or the backend's physics trajectory. The digest
     /// detects accidental edits but is not a digital signature or source attestation.
+    #[allow(clippy::too_many_lines)] // TODO(cleanup): split (198/150 lines); see PR body
     pub fn validate(&self) -> Result<()> {
         ensure!(
             self.kind == "rne_diff_caster_sensor_trace" && self.schema_version == 2,
@@ -412,7 +413,8 @@ pub fn nominal_caster_feedforward_spec() -> DifferentialCasterControlSpec {
 /// Runs the same task and sensors with an explicitly supplied controller contract.
 ///
 /// The controller contract is recorded alongside results for PI/feedforward
-/// comparisons. All voltage limits must fit the unchanged TaskSpec action bounds.
+/// comparisons. All voltage limits must fit the unchanged `TaskSpec` action bounds.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (158/150 lines); see PR body
 pub fn run_caster_observed_with_control_spec<B: PhysicsBackend>(
     backend: B,
     manifest: PhysicsBackendManifest,

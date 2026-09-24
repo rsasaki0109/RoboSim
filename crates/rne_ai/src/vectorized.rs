@@ -8,7 +8,7 @@ use std::fmt::Debug;
 ///
 /// This is a distinct contract from [`crate::PORTABLE_BATCH_CHECKPOINT_VERSION`].
 /// Generic vectorized checkpoints retain the original action-replay format,
-/// while portable batch checkpoints additionally bind lane state and TaskSpec.
+/// while portable batch checkpoints additionally bind lane state and `TaskSpec`.
 pub const VECTORIZED_EPISODE_CHECKPOINT_VERSION: u32 = 1;
 const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x100000001b3;

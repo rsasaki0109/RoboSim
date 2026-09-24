@@ -51,7 +51,7 @@ pub struct FixedBatchReplay {
     pub task_spec: rne_ai::TaskSpec,
     /// Explicit root seed for lane/episode reset derivation.
     pub root_seed: u64,
-    /// Legacy v1 fixed WorldRandom seed. Must remain zero; in v2 the optional
+    /// Legacy v1 fixed `WorldRandom` seed. Must remain zero; in v2 the optional
     /// noise root below replaces this field's seed-selection behavior.
     pub world_noise_seed: u64,
     /// Independent lane/episode noise root in schema v2. Absent in legacy v1,
@@ -119,7 +119,7 @@ pub fn decode_fixed_batch_replay(bytes: &[u8]) -> Result<FixedBatchReplay> {
 
 /// Runs bounded operations on fresh persistent worlds and records evidence digests.
 /// Reset contracts are hashed from the actual environments, not inferred solely
-/// from the generic TaskSpec. Preflight/constructor errors abort; lane execution
+/// from the generic `TaskSpec`. Preflight/constructor errors abort; lane execution
 /// errors remain bound in the event and can be followed by an explicit reset.
 pub fn record_fixed_batch_replay<B, F>(
     factory: F,

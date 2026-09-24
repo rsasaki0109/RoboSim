@@ -255,6 +255,7 @@ fn run_evidence_producers(root: &Path, staging: &Path) -> Result<()> {
     Ok(())
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn validate_json_artifact(
     id: &str,

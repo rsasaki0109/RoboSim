@@ -44,7 +44,7 @@ pub enum TransportMessageKind {
     ImageRgb8 = 7,
     /// Little-endian linear-depth image in metres.
     ImageDepthF32 = 8,
-    /// LiDAR point cloud with optional aligned attributes.
+    /// `LiDAR` point cloud with optional aligned attributes.
     LidarPointCloud = 9,
     /// Notice that one or more latest-only messages were dropped.
     Gap = 10,
@@ -302,7 +302,7 @@ impl TransportCapabilities {
     pub const IMAGE_RGB8: Self = Self(1 << 2);
     /// Linear-depth f32 image messages.
     pub const IMAGE_DEPTH_F32: Self = Self(1 << 3);
-    /// LiDAR point-cloud messages.
+    /// `LiDAR` point-cloud messages.
     pub const LIDAR_POINT_CLOUD: Self = Self(1 << 4);
     /// Gap notices and latest-only reconnect semantics.
     pub const RESUME_LATEST: Self = Self(1 << 5);
@@ -661,7 +661,7 @@ impl ServerHello {
 /// Metadata common to every typed sensor payload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SensorFrameMetadata {
-    /// Stable DataBus stream id.
+    /// Stable `DataBus` stream id.
     pub stream_id: u64,
     /// Monotonic sequence within the sensor stream.
     pub sensor_sequence: u64,
@@ -671,7 +671,7 @@ pub struct SensorFrameMetadata {
     pub available_ticks: u64,
 }
 
-/// Encodes an RGBA8 image with its DataBus metadata.
+/// Encodes an RGBA8 image with its `DataBus` metadata.
 pub fn encode_image_rgb8(
     metadata: SensorFrameMetadata,
     image: &ImageRgb8,
@@ -696,7 +696,7 @@ pub fn encode_image_rgb8(
     Ok(bytes)
 }
 
-/// Decodes an RGBA8 image and DataBus metadata.
+/// Decodes an RGBA8 image and `DataBus` metadata.
 pub fn decode_image_rgb8(
     payload: &[u8],
 ) -> Result<(SensorFrameMetadata, ImageRgb8), TransportError> {
@@ -717,7 +717,7 @@ pub fn decode_image_rgb8(
     Ok((metadata, ImageRgb8::from_rgba8(width, height, rgba8)))
 }
 
-/// Encodes a linear-depth f32 image with its DataBus metadata.
+/// Encodes a linear-depth f32 image with its `DataBus` metadata.
 pub fn encode_image_depth(
     metadata: SensorFrameMetadata,
     image: &ImageDepth,
@@ -728,7 +728,7 @@ pub fn encode_image_depth(
         return Err(TransportError::InvalidField("depth_m"));
     }
     let data_bytes = element_count
-        .checked_mul(std::mem::size_of::<f32>())
+        .checked_mul(size_of::<f32>())
         .ok_or(TransportError::InvalidField("depth_len"))?;
     let payload_len = 44_usize
         .checked_add(data_bytes)
@@ -745,7 +745,7 @@ pub fn encode_image_depth(
     Ok(bytes)
 }
 
-/// Decodes a linear-depth f32 image and DataBus metadata.
+/// Decodes a linear-depth f32 image and `DataBus` metadata.
 pub fn decode_image_depth(
     payload: &[u8],
 ) -> Result<(SensorFrameMetadata, ImageDepth), TransportError> {
@@ -756,8 +756,7 @@ pub fn decode_image_depth(
     let height = decoder.u32()?;
     let declared_elements = decoder.u32()? as usize;
     let expected = checked_image_elements(width, height)?;
-    if declared_elements != expected || expected > decoder.remaining() / std::mem::size_of::<f32>()
-    {
+    if declared_elements != expected || expected > decoder.remaining() / size_of::<f32>() {
         return Err(TransportError::InvalidField("depth_len"));
     }
     let mut depth_m = Vec::with_capacity(expected);
@@ -779,7 +778,7 @@ const LIDAR_CHANNEL_INDEX: u32 = 1 << 3;
 const LIDAR_TIMESTAMP: u32 = 1 << 4;
 const LIDAR_KNOWN_ATTRIBUTES: u32 = (1 << 5) - 1;
 
-/// Encodes a LiDAR cloud with aligned optional attributes and DataBus metadata.
+/// Encodes a `LiDAR` cloud with aligned optional attributes and `DataBus` metadata.
 pub fn encode_lidar_point_cloud(
     metadata: SensorFrameMetadata,
     cloud: &PointCloud,
@@ -847,7 +846,7 @@ pub fn encode_lidar_point_cloud(
     Ok(bytes)
 }
 
-/// Decodes a LiDAR cloud and DataBus metadata.
+/// Decodes a `LiDAR` cloud and `DataBus` metadata.
 pub fn decode_lidar_point_cloud(
     payload: &[u8],
 ) -> Result<(SensorFrameMetadata, PointCloud), TransportError> {
@@ -1121,7 +1120,7 @@ pub enum EgressKey {
     Status,
     /// Latest payload for one stable sensor stream and wire kind.
     Sensor {
-        /// DataBus stream id.
+        /// `DataBus` stream id.
         stream_id: u64,
         /// Typed sensor payload kind.
         kind: TransportMessageKind,

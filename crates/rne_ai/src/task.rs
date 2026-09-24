@@ -55,7 +55,7 @@ pub enum TensorDType {
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum TensorLayout {
-    /// Last dimension is contiguous, matching NumPy C order and Rust row-major arrays.
+    /// Last dimension is contiguous, matching `NumPy` C order and Rust row-major arrays.
     RowMajor,
 }
 
@@ -274,7 +274,7 @@ impl TerminationSpec {
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum EpisodeSeedStrategy {
-    /// SplitMix64 derivation from root seed, stable lane ID, and lane-local episode index.
+    /// `SplitMix64` derivation from root seed, stable lane ID, and lane-local episode index.
     SplitMix64LaneEpisodeV1,
 }
 

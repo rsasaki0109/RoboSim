@@ -1,4 +1,4 @@
-//! Fail-closed action projection from the release flagship to LeKiwi.
+//! Fail-closed action projection from the release flagship to `LeKiwi`.
 //!
 //! This first physical-path slice deliberately implements only the action
 //! boundary. Observation fusion and 60-to-30 Hz scheduling remain separate
@@ -55,7 +55,7 @@ pub struct SuppressedFlagshipAction {
     pub tensor_name: String,
     /// Row-major element within the parent tensor.
     pub tensor_element: usize,
-    /// Unit declared by the parent TaskSpec.
+    /// Unit declared by the parent `TaskSpec`.
     pub unit: String,
     /// Exact controller value suppressed at this boundary.
     pub value: f64,
@@ -69,11 +69,11 @@ pub struct FlagshipLeKiwiActionProjection {
     pub kind: String,
     /// Projection schema version.
     pub schema_version: u32,
-    /// Parent release TaskSpec identity.
+    /// Parent release `TaskSpec` identity.
     pub parent_task_id: String,
     /// Parent release controller identity.
     pub parent_controller_id: String,
-    /// Physical adapter TaskSpec identity.
+    /// Physical adapter `TaskSpec` identity.
     pub physical_task_id: String,
     /// Exact physical reference profile identity.
     pub physical_profile_id: String,
@@ -81,7 +81,7 @@ pub struct FlagshipLeKiwiActionProjection {
     pub parent_action_sha256: String,
     /// Exact transform configuration.
     pub transform: FlagshipLeKiwiActionTransform,
-    /// LeKiwi action in TaskSpec order: body x, body y, and yaw rate.
+    /// `LeKiwi` action in `TaskSpec` order: body x, body y, and yaw rate.
     pub physical_action_values: [f64; 3],
     /// Parent elements intentionally denied physical authority.
     pub suppressed_actions: Vec<SuppressedFlagshipAction>,
@@ -89,7 +89,7 @@ pub struct FlagshipLeKiwiActionProjection {
     pub status: String,
 }
 
-/// Projects one complete flagship controller action into the bounded LeKiwi base action.
+/// Projects one complete flagship controller action into the bounded `LeKiwi` base action.
 pub fn project_flagship_action_to_lekiwi(
     parent_action: &[f64],
 ) -> Result<FlagshipLeKiwiActionProjection, FlagshipLeKiwiProjectionError> {
@@ -103,7 +103,7 @@ pub fn project_flagship_action_to_lekiwi(
     )
 }
 
-/// Projects one complete portable v2 controller action into bounded LeKiwi base action.
+/// Projects one complete portable v2 controller action into bounded `LeKiwi` base action.
 pub fn project_flagship_action_to_lekiwi_v2(
     parent_action: &[f64],
 ) -> Result<FlagshipLeKiwiActionProjection, FlagshipLeKiwiProjectionError> {
@@ -252,7 +252,7 @@ fn action_sha256(values: &[f64]) -> String {
 /// Failure validating or projecting one flagship controller action.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum FlagshipLeKiwiProjectionError {
-    /// A flattened action did not match its bound TaskSpec width.
+    /// A flattened action did not match its bound `TaskSpec` width.
     #[error("{boundary} action width must be {expected}, got {actual}")]
     ActionWidth {
         /// Parent or physical boundary.
@@ -262,7 +262,7 @@ pub enum FlagshipLeKiwiProjectionError {
         /// Supplied flattened width.
         actual: usize,
     },
-    /// A TaskSpec action tensor omitted mandatory hardware limits.
+    /// A `TaskSpec` action tensor omitted mandatory hardware limits.
     #[error("{boundary} action tensor {tensor:?} has no bounds")]
     MissingBounds {
         /// Parent or physical boundary.
@@ -280,7 +280,7 @@ pub enum FlagshipLeKiwiProjectionError {
         /// Row-major tensor element.
         element: usize,
     },
-    /// An action exceeded the exact TaskSpec envelope.
+    /// An action exceeded the exact `TaskSpec` envelope.
     #[error("{boundary} action {tensor}[{element}]={value} is outside [{lower}, {upper}]")]
     ActionLimit {
         /// Parent or physical boundary.

@@ -103,7 +103,7 @@ impl HardwareAdapterConformanceConfig {
     }
 }
 
-/// Content-addressed adapter implementation, launch contract, and TaskSpec.
+/// Content-addressed adapter implementation, launch contract, and `TaskSpec`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HardwareAdapterConformanceSubject {
@@ -119,9 +119,9 @@ pub struct HardwareAdapterConformanceSubject {
     pub arguments_sha256: String,
     /// Number of process arguments included in `arguments_sha256`.
     pub argument_count: usize,
-    /// TaskSpec file name without a machine-specific parent path.
+    /// `TaskSpec` file name without a machine-specific parent path.
     pub task_file: String,
-    /// SHA-256 digest of the exact TaskSpec bytes.
+    /// SHA-256 digest of the exact `TaskSpec` bytes.
     pub task_sha256: String,
 }
 
@@ -135,9 +135,9 @@ pub struct HardwareAdapterConformanceIdentity {
     pub task_id: String,
     /// Hardware process protocol schema exercised by the runner.
     pub wire_schema_version: u32,
-    /// Flattened TaskSpec observation width accepted by the adapter.
+    /// Flattened `TaskSpec` observation width accepted by the adapter.
     pub observation_width: usize,
-    /// Flattened TaskSpec action width accepted by the adapter.
+    /// Flattened `TaskSpec` action width accepted by the adapter.
     pub action_width: usize,
 }
 
@@ -313,7 +313,7 @@ pub enum HardwareAdapterConformanceError {
     /// The launch or HIL authorization configuration is invalid.
     #[error("invalid hardware adapter conformance config: {0}")]
     InvalidConfig(String),
-    /// The supplied TaskSpec cannot bind the hardware gateway contract.
+    /// The supplied `TaskSpec` cannot bind the hardware gateway contract.
     #[error("invalid hardware adapter TaskSpec: {0}")]
     InvalidTask(String),
     /// The runner produced or received an invalid report shape.
@@ -329,7 +329,7 @@ pub enum HardwareAdapterConformanceError {
 /// Each case starts a new child process. Process, protocol, timeout, and semantic
 /// failures become a valid failed report. Input and report-shape failures are
 /// returned as errors. `config.allow_hil` must be explicitly true because the
-/// bounded-actuation case sends one normal action derived from TaskSpec limits.
+/// bounded-actuation case sends one normal action derived from `TaskSpec` limits.
 pub fn run_hardware_adapter_conformance(
     task_path: &Path,
     config: &HardwareAdapterConformanceConfig,

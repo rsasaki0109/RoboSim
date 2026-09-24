@@ -7,7 +7,7 @@
 //! accumulate `H = sum J J^T` and `g = sum J r`, and solve
 //! `(P^-1 + H/sigma^2) delta = g/sigma^2`, updating `pose <- pose * Exp(delta)`
 //! and `P <- (P^-1 + H/sigma^2)^-1`. Everything is deterministic and needs no
-//! NxN matrix inversion.
+//! `NxN` matrix inversion.
 //!
 //! The state is pose-only (6-DoF). Velocity and IMU-bias estimation in the filter
 //! is a later increment.

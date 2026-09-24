@@ -842,6 +842,7 @@ fn main() {
     }
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (291/150 lines); see PR body
 fn run(started: Instant) -> Result<()> {
     let cli = parse_cli()?;
     let bundle_verification = cli
@@ -2026,7 +2027,7 @@ fn write_pretty_json(path: &Path, value: &impl Serialize) -> Result<()> {
 fn write_browser_inspector(
     path: &Path,
     success: &[FlagshipObservation],
-    failure: &rne_ai::BehaviorReplayArtifact,
+    failure: &BehaviorReplayArtifact,
 ) -> Result<()> {
     let data = serde_json::json!({
         "success": success,

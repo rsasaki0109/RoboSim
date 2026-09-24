@@ -20,6 +20,9 @@ pub const DEFAULT_HZ: f64 = 60.0;
 
 /// Bare Rapier world + ECS for analytic comparison tests.
 pub struct PhysicsHarness {
+    // `backend` prints only its world count (opaque Rapier internals) and
+    // `world` (`bevy_ecs::World`) does not implement `Debug`; both are
+    // omitted from the manual impl below.
     /// Rapier backend instance.
     pub backend: RapierBackend,
     /// Active physics world handle.
@@ -30,6 +33,16 @@ pub struct PhysicsHarness {
     pub gravity_m_s2: Vec3,
     /// Number of physics substeps executed so far.
     pub steps: u32,
+}
+
+impl std::fmt::Debug for PhysicsHarness {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PhysicsHarness")
+            .field("physics_world", &self.physics_world)
+            .field("gravity_m_s2", &self.gravity_m_s2)
+            .field("steps", &self.steps)
+            .finish_non_exhaustive()
+    }
 }
 
 impl PhysicsHarness {

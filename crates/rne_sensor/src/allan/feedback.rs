@@ -48,7 +48,7 @@ pub enum ImuAllanError {
 /// Require one entity/stream, a supported payload schema, positive contiguous
 /// sequences, finite six-axis data, nominal status and no saturation flags.
 /// Scheduled and actual captures must both advance by the specified period;
-/// scheduled+phase_error must equal capture. The Frame compatibility timestamp
+/// `scheduled+phase_error` must equal capture. The Frame compatibility timestamp
 /// must equal availability, which must lie between capture and `observed_until`.
 /// Availability may vary or reorder; it never replaces capture in the statistic.
 /// The first sequence need not be one, allowing explicitly chosen startup exclusion.

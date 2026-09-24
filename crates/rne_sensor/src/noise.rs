@@ -14,7 +14,7 @@ pub struct SensorNoiseKey {
     pub root_seed: u64,
     /// Sensor-local seed or salt.
     pub sensor_seed: u64,
-    /// Stable sensor identifier, such as a DataBus stream id.
+    /// Stable sensor identifier, such as a `DataBus` stream id.
     pub stable_sensor_id: u64,
     /// Deterministic sample counter for this sensor.
     pub sample_index: u64,

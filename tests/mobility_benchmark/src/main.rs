@@ -64,6 +64,7 @@ use std::path::PathBuf;
 
 mod fixed_cli;
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (1250/150 lines); see PR body
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let mut output = None;

@@ -622,6 +622,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // TODO(cleanup): split (512/150 lines); see PR body
     fn acquired_run_binding_rejects_reused_raw_capture_and_mixed_subjects() {
         use crate::suspension_runs::{
             SuspensionAcquiredRunRequest, SuspensionRunInput, SuspensionRunRequest,

@@ -350,6 +350,7 @@ pub fn validate_registered_splat_depth(
 
 /// Renders deterministic proxy depth at two registered real cameras and audits
 /// depth change plus false occlusion over shared real COLMAP tracks.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (192/150 lines); see PR body
 pub fn validate_registered_splat_multiview_depth(
     environment: &GaussianSplatEnvironment,
     track_fixture_path: &Path,

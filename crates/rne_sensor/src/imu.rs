@@ -535,6 +535,7 @@ struct AxisSlots {
     rate_walk: u64,
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn apply_axis_errors(
     truth: Vec3,

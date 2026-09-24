@@ -448,7 +448,7 @@ pub fn tsukuba_full_run_scene_path() -> PathBuf {
     bundled_asset_path(Path::new("scenes/tsukuba_full_run.rne.scene.toml"))
 }
 
-/// Portable TaskSpec for the shortened full-run analog.
+/// Portable `TaskSpec` for the shortened full-run analog.
 #[must_use]
 pub fn tsukuba_full_run_task_spec(max_episode_steps: u64) -> TaskSpec {
     TaskSpec::new(

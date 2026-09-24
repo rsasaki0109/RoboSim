@@ -96,12 +96,14 @@ pub struct Slam3dUpdate {
     pub odometry_corrected: bool,
 }
 
+#[derive(Debug)]
 struct Keyframe3d {
     pose: Pose2d,
     cloud_sensor: Vec<Vec3>,
 }
 
 /// A 3D SLAM back-end over the elevation map.
+#[derive(Debug)]
 pub struct Slam3d {
     config: Slam3dConfig,
     odometry: IcpOdometry,

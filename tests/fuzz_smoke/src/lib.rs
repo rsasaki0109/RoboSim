@@ -23,7 +23,7 @@ const MUTATIONS_PER_BOUNDARY: usize = 32;
 /// One untrusted input boundary covered by stable and sanitizer-backed fuzzing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FuzzBoundary {
-    /// OpenSCENARIO XML import.
+    /// `OpenSCENARIO` XML import.
     OpenScenarioXml,
     /// Scenario replay JSON import.
     ScenarioReplayJson,

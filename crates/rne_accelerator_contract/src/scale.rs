@@ -60,9 +60,9 @@ pub struct AcceleratorScaleReport {
     pub measurement_boundary: String,
     /// Bound task identifier.
     pub task_id: String,
-    /// Bound TaskSpec schema.
+    /// Bound `TaskSpec` schema.
     pub task_spec_schema: u32,
-    /// Lowercase SHA-256 of canonical TaskSpec JSON.
+    /// Lowercase SHA-256 of canonical `TaskSpec` JSON.
     pub task_spec_sha256: String,
     /// Lowercase SHA-256 of LF-normalized model text.
     pub model_sha256: String,
@@ -301,7 +301,7 @@ impl AcceleratorScaleReport {
         )
     }
 
-    /// Binds a valid report to its exact manifest, runtime contract, TaskSpec, and model bytes.
+    /// Binds a valid report to its exact manifest, runtime contract, `TaskSpec`, and model bytes.
     pub fn validate_against(
         &self,
         manifest: &AcceleratorManifest,

@@ -13,7 +13,7 @@ pub struct TrajectoryPoint {
 
 /// A timed sequence of joint configurations.
 ///
-/// This is the RNE analogue of MoveIt's `RobotTrajectory`: a validated,
+/// This is the RNE analogue of `MoveIt`'s `RobotTrajectory`: a validated,
 /// deterministic series of waypoints with monotonically non-decreasing
 /// timestamps. An empty trajectory is valid.
 #[derive(Clone, Debug, Default, PartialEq)]

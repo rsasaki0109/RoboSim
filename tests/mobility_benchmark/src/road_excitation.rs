@@ -35,7 +35,7 @@ pub const ROAD_EXCITATION_TRACE_KIND: &str = "rne_mobility_road_excitation_trace
 pub const ROAD_EXCITATION_COMPARISON_KIND: &str = "rne_mobility_road_excitation_comparison";
 /// Road-excitation artifact schema.
 pub const ROAD_EXCITATION_SCHEMA_VERSION: u32 = 1;
-/// Portable TaskSpec identity shared by Rapier and MuJoCo.
+/// Portable `TaskSpec` identity shared by Rapier and `MuJoCo`.
 pub const ROAD_EXCITATION_TASK_ID: &str = "mobility_ackermann_road_excitation_v1";
 /// One-millisecond physics and tire integration step, in simulation ticks.
 pub const ROAD_EXCITATION_FIXED_DELTA_TICKS: u64 = 1_000_000;
@@ -379,6 +379,7 @@ pub fn run_road_excitation_trace_with_suspension<B: PhysicsBackend>(
 /// baseline fixture. [`RoadExcitationTrace::validate`] only checks that the retained
 /// specs are individually valid; the wrapper evidence that supplies them is
 /// responsible for binding each spec to its identification chain.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (341/150 lines); see PR body
 pub fn run_road_excitation_trace_with_specs<B: PhysicsBackend>(
     mut backend: B,
     manifest: PhysicsBackendManifest,

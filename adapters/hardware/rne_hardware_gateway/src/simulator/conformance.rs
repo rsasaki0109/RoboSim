@@ -93,7 +93,7 @@ impl SimulatorAdapterConformanceConfig {
     }
 }
 
-/// Content-addressed adapter, launch arguments, TaskSpec, and simulator runtime.
+/// Content-addressed adapter, launch arguments, `TaskSpec`, and simulator runtime.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SimulatorAdapterConformanceSubject {
@@ -109,9 +109,9 @@ pub struct SimulatorAdapterConformanceSubject {
     pub arguments_sha256: String,
     /// Number of normalized adapter arguments.
     pub argument_count: usize,
-    /// TaskSpec file name.
+    /// `TaskSpec` file name.
     pub task_file: String,
-    /// SHA-256 of the exact TaskSpec bytes.
+    /// SHA-256 of the exact `TaskSpec` bytes.
     pub task_sha256: String,
     /// Runtime manifest file name.
     pub runtime_manifest_file: String,
@@ -133,13 +133,13 @@ pub struct SimulatorAdapterConformanceIdentity {
     pub simulator_version: String,
     /// Stable adapter identity.
     pub adapter_id: String,
-    /// Bound portable TaskSpec identity.
+    /// Bound portable `TaskSpec` identity.
     pub task_id: String,
     /// Simulator process protocol schema exercised by the runner.
     pub wire_schema_version: u32,
-    /// Flattened TaskSpec observation width.
+    /// Flattened `TaskSpec` observation width.
     pub observation_width: usize,
-    /// Flattened TaskSpec action width.
+    /// Flattened `TaskSpec` action width.
     pub action_width: usize,
     /// Exact simulation-time ticks advanced per action.
     pub fixed_delta_ticks: u64,
@@ -341,7 +341,7 @@ pub enum SimulatorAdapterConformanceError {
     /// Process launch or timeout configuration is invalid.
     #[error("invalid simulator adapter conformance config: {0}")]
     InvalidConfig(String),
-    /// TaskSpec cannot bind the fixed-step simulator contract.
+    /// `TaskSpec` cannot bind the fixed-step simulator contract.
     #[error("invalid simulator adapter TaskSpec: {0}")]
     InvalidTask(String),
     /// Runtime manifest or one bound file is invalid.
@@ -1140,9 +1140,9 @@ mod tests {
             runtime_manifest_sha256: "3".repeat(64),
             runtime_manifest_size_bytes: 1,
             runtime_artifacts: [
-                super::super::SimulatorArtifactRole::World,
-                super::super::SimulatorArtifactRole::RobotModel,
-                super::super::SimulatorArtifactRole::AdapterConfig,
+                SimulatorArtifactRole::World,
+                SimulatorArtifactRole::RobotModel,
+                SimulatorArtifactRole::AdapterConfig,
             ]
             .into_iter()
             .map(|role| SimulatorRuntimeArtifact {

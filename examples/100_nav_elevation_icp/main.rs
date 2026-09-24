@@ -1,4 +1,4 @@
-//! 3D LiDAR / point-cloud example: a 2.5D elevation map with traversability
+//! 3D `LiDAR` / point-cloud example: a 2.5D elevation map with traversability
 //! queries and deterministic 3D point-to-point ICP registration.
 //!
 //! Run with `cargo run -p nav_elevation_icp --example 100_nav_elevation_icp`.

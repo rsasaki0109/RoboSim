@@ -17,7 +17,7 @@ pub struct DiffDriveObservation {
     pub right_wheel_velocity_rad_s: f64,
     /// IMU linear acceleration Y in meters per second squared.
     pub imu_ay_m_s2: f64,
-    /// Latest LiDAR point count when available.
+    /// Latest `LiDAR` point count when available.
     pub lidar_points: usize,
     /// Goal X minus base X when a goal was provided during observation.
     pub goal_delta_x_m: Option<f64>,
@@ -83,13 +83,13 @@ pub struct MobileManipulatorObservation {
     pub is_grasping: bool,
     /// RGBA8 byte count in the latest wrist camera frame (zero when absent).
     pub wrist_camera_pixels: usize,
-    /// Number of joints in the latest DataBus joint-state frame.
+    /// Number of joints in the latest `DataBus` joint-state frame.
     pub joint_state_count: usize,
-    /// Goal-relative end-effector X offset (target_x - ee_x), zero when no goal.
+    /// Goal-relative end-effector X offset (`target_x` - `ee_x`), zero when no goal.
     pub target_dx_m: f64,
-    /// Goal-relative end-effector Y offset (target_y - ee_y), zero when no goal.
+    /// Goal-relative end-effector Y offset (`target_y` - `ee_y`), zero when no goal.
     pub target_dy_m: f64,
-    /// Goal-relative end-effector Z offset (target_z - ee_z), zero when no goal.
+    /// Goal-relative end-effector Z offset (`target_z` - `ee_z`), zero when no goal.
     pub target_dz_m: f64,
     /// Center-pixel wrist depth in meters (zero when absent).
     pub wrist_depth_center_m: f64,
@@ -113,11 +113,11 @@ pub struct MobileManipulatorObservation {
     pub pick_object_y_m: f64,
     /// World-frame pick object Z for Place tasks before grasp (zero otherwise).
     pub pick_object_z_m: f64,
-    /// Gripper-frame X offset to the pick object (object_x - gripper_x).
+    /// Gripper-frame X offset to the pick object (`object_x` - `gripper_x`).
     pub gripper_target_dx_m: f64,
-    /// Gripper-frame Y offset to the pick object (object_y - gripper_y).
+    /// Gripper-frame Y offset to the pick object (`object_y` - `gripper_y`).
     pub gripper_target_dy_m: f64,
-    /// Gripper-frame Z offset to the pick object (object_z - gripper_z).
+    /// Gripper-frame Z offset to the pick object (`object_z` - `gripper_z`).
     pub gripper_target_dz_m: f64,
     /// World-frame grasp pocket center X (the point the jaws bracket).
     pub gripper_pocket_x_m: f64,

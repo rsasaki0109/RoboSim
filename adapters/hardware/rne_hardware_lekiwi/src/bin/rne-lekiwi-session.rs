@@ -1,4 +1,4 @@
-//! Runs one bounded LeKiwi bridge session and writes correlated evidence.
+//! Runs one bounded `LeKiwi` bridge session and writes correlated evidence.
 
 use rne_hardware_gateway::wire::{
     DeviceWireFrame, HardwareWireCodec, HardwareWireTraceOutcome, HostWireFrame,
@@ -150,6 +150,7 @@ struct CliArgs {
 }
 
 impl CliArgs {
+    #[allow(clippy::too_many_lines)] // TODO(cleanup): split (164/150 lines); see PR body
     fn parse(arguments: impl Iterator<Item = OsString>) -> Result<Self, String> {
         let arguments = arguments.collect::<Vec<_>>();
         let mut index = 0;

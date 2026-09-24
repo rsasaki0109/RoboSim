@@ -11,7 +11,7 @@
 //! world transform.
 //!
 //! Run (needs a GPU and ffmpeg; set `RNE_SKIP_GPU=1` to skip):
-//!   cargo run -p lift_pick_place_hero --example 32_lift_pick_place_hero
+//!   cargo run -p `lift_pick_place_hero` --example `32_lift_pick_place_hero`
 
 use std::collections::HashSet;
 use std::env;
@@ -307,6 +307,7 @@ fn mm_mobile_hero_scene_path() -> PathBuf {
         .join("../../assets/scenes/mm_mobile_hero.rne.scene.toml")
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (173/150 lines); see PR body
 fn main() {
     if env::args().any(|arg| arg == "--trace") {
         run_hero_trace();
@@ -344,7 +345,7 @@ fn main() {
         return;
     }
 
-    if std::env::var("RNE_SKIP_GPU").is_ok() {
+    if env::var("RNE_SKIP_GPU").is_ok() {
         eprintln!("RNE_SKIP_GPU set; skipping 3D mobile manipulator hero render");
         return;
     }

@@ -1,7 +1,7 @@
 //! Captures a photoreal RGB-D stream from a camera mounted on Unitree G1's head.
 //!
 //! The camera uses the renderer-independent `rne_sensor` pipeline: deterministic
-//! lens response, exposure, vignetting, noise, DataBus timestamps, and output
+//! lens response, exposure, vignetting, noise, `DataBus` timestamps, and output
 //! latency. The GPU path renders the resolved official G1 scene and calibration
 //! room; `--smoke` uses the CPU headless renderer and checks the same RGB-D/DataBus
 //! contract without initializing a GPU.
@@ -1070,7 +1070,7 @@ fn write_gif(
     frames: &[Vec<u8>],
     width: u32,
     height: u32,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn Error>> {
     let file = File::create(path)?;
     let mut encoder = GifEncoder::new(file);
     encoder.set_repeat(Repeat::Infinite)?;

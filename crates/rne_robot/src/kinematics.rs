@@ -167,6 +167,7 @@ const FLOATING_BASE_DOF_NAMES: [&str; 6] = [
 
 impl KinematicModel {
     /// Builds a model for the given robot entity.
+    #[allow(clippy::too_many_lines)] // TODO(cleanup): split (217/150 lines); see PR body
     pub fn from_robot(world: &World, robot: Entity) -> Result<Self, KinematicsError> {
         let robot_component = world
             .get::<Robot>(robot)
@@ -726,7 +727,7 @@ impl KinematicModel {
 
     /// Manipulability of the chain to `end_link` at `q`.
     ///
-    /// This is the MoveIt kinematics-metric analogue `sqrt(det(J J^T))`. It is
+    /// This is the `MoveIt` kinematics-metric analogue `sqrt(det(J J^T))`. It is
     /// zero at a kinematic singularity and grows with the distance from one.
     pub fn manipulability(&self, q: &[f64], end_link: Entity) -> Result<f64, KinematicsError> {
         let jacobian = self.jacobian(q, end_link, Vec3::ZERO)?;
@@ -1231,7 +1232,7 @@ pub struct IkSolution {
 
 /// A full-pose inverse kinematics query for a single end link.
 ///
-/// This mirrors MoveIt's `KinematicsBase` request shape: an end link, the
+/// This mirrors `MoveIt`'s `KinematicsBase` request shape: an end link, the
 /// desired pose, a seed configuration, and solver options. The seed is always
 /// expressed in the model's degree-of-freedom order.
 #[derive(Clone, Debug, PartialEq)]
@@ -1240,7 +1241,7 @@ pub struct IkRequest {
     pub end_link: Entity,
     /// Desired pose of `end_link` in the model base frame.
     pub target: Pose3,
-    /// Initial joint positions used as the solver seed, in DoF order.
+    /// Initial joint positions used as the solver seed, in `DoF` order.
     pub seed: Vec<f64>,
     /// Solver options.
     pub options: IkOptions,
@@ -1288,7 +1289,7 @@ pub trait KinematicsSolver: Send + Sync + std::fmt::Debug {
 
     /// Solves inverse kinematics with seeded random restarts.
     ///
-    /// This is the MoveIt `searchPositionIK` analogue. The first attempt uses
+    /// This is the `MoveIt` `searchPositionIK` analogue. The first attempt uses
     /// the request seed; later attempts sample configurations within the model's
     /// joint limits from a deterministic generator keyed by `seed`. An active
     /// mask is preserved, so only active joints are randomized and inactive
@@ -1647,7 +1648,7 @@ impl KinematicsSolverRegistry {
     }
 }
 
-/// Named joint state for a robot, analogous to MoveIt's `RobotState`.
+/// Named joint state for a robot, analogous to `MoveIt`'s `RobotState`.
 ///
 /// The state owns a snapshot of the kinematic model plus the current joint
 /// positions and velocities in the model's degree-of-freedom order. Named
@@ -1821,7 +1822,7 @@ fn orientation_error(current: Quat, target: Quat) -> Vec3 {
     }
 }
 
-/// Deterministic SplitMix64 generator used for seeded IK restarts.
+/// Deterministic `SplitMix64` generator used for seeded IK restarts.
 #[derive(Clone, Debug)]
 pub(crate) struct SplitMix64 {
     state: u64,
@@ -1845,6 +1846,7 @@ impl SplitMix64 {
     }
 }
 
+// Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
 #[allow(clippy::needless_range_loop)]
 fn determinant6(matrix: &mut [[f64; 6]; 6]) -> f64 {
     let mut determinant = 1.0;

@@ -339,6 +339,7 @@ fn weighted_quadratic(error: &[f64; POSE3D_DIM], information: &[f64; POSE3D_DIM]
         .sum()
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn accumulate(
     h: &mut [f64],

@@ -1,4 +1,4 @@
-//! 3D LiDAR odometry from chained point-to-point ICP.
+//! 3D `LiDAR` odometry from chained point-to-point ICP.
 //!
 //! [`IcpOdometry`] keeps a downsampled map cloud and estimates the sensor pose
 //! by aligning each new scan to it, using the odometry delta as the motion

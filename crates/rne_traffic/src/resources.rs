@@ -484,7 +484,7 @@ impl TrafficConflictControls {
         self.controls
             .keys()
             .map(|(group_id, _)| group_id.clone())
-            .collect::<std::collections::BTreeSet<_>>()
+            .collect::<BTreeSet<_>>()
             .into_iter()
             .collect()
     }
