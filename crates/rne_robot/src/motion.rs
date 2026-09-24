@@ -197,19 +197,6 @@ impl BodyMotion {
         Ok(self.tracks.len() - 1)
     }
 
-    /// Index of the track for a joint entity.
-    pub fn track_index(&self, joint: Entity) -> Option<usize> {
-        self.tracks.iter().position(|track| track.joint == joint)
-    }
-
-    /// Track names in authoring order.
-    pub fn track_names(&self) -> Vec<&str> {
-        self.tracks
-            .iter()
-            .map(|track| track.joint_name.as_str())
-            .collect()
-    }
-
     /// Duration in seconds, or zero for an empty motion.
     pub fn duration_s(&self) -> f64 {
         self.tracks

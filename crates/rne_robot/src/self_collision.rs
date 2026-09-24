@@ -57,7 +57,7 @@ impl CollisionPrimitive {
     ///
     /// Infinite planes are not supported by the self-collision checker and
     /// return `None`.
-    pub fn from_shape(shape: &ColliderShape, transform: &Transform3) -> Option<Self> {
+    pub(crate) fn from_shape(shape: &ColliderShape, transform: &Transform3) -> Option<Self> {
         match shape {
             ColliderShape::Sphere { radius_m } => Some(Self::Sphere {
                 center_m: transform.translation,
@@ -247,7 +247,7 @@ impl AllowedCollisionMatrix {
     }
 
     /// Whether a link pair is allowed to skip.
-    pub fn is_allowed(&self, link_a: Entity, link_b: Entity) -> bool {
+    pub(crate) fn is_allowed(&self, link_a: Entity, link_b: Entity) -> bool {
         self.allowed.contains(&canonical_pair(link_a, link_b))
     }
 
@@ -769,11 +769,6 @@ impl CollisionWorld {
         self.voxels.iter().find(|grid| grid.name == name)
     }
 
-    /// Voxel grids in insertion order.
-    pub fn voxel_grids(&self) -> &[VoxelGridObject] {
-        &self.voxels
-    }
-
     /// Adds or replaces a named mesh object.
     pub fn add_mesh_object(
         &mut self,
@@ -810,7 +805,7 @@ impl CollisionWorld {
     }
 
     /// Appends an object and returns its index.
-    pub fn add_object(&mut self, object: CollisionWorldObject) -> usize {
+    pub(crate) fn add_object(&mut self, object: CollisionWorldObject) -> usize {
         self.objects.push(object);
         self.objects.len() - 1
     }
@@ -1130,26 +1125,10 @@ impl SelfCollisionChecker {
         Ok(false)
     }
 
-    /// Builds a checker that additionally skips every pair in `allowed`.
-    ///
-    /// Structural exclusion (same link and parent/child pairs) still applies.
-    pub fn from_robot_with_allowed_collision_matrix(
-        world: &World,
-        robot: Entity,
-        allowed: AllowedCollisionMatrix,
-    ) -> Result<Self, KinematicsError> {
-        Ok(Self::from_robot(world, robot)?.with_allowed_collision_matrix(allowed))
-    }
-
     /// Replaces the allowed collision matrix, consuming and returning the checker.
     pub fn with_allowed_collision_matrix(mut self, allowed: AllowedCollisionMatrix) -> Self {
         self.allowed = allowed;
         self
-    }
-
-    /// The allowed collision matrix used to skip explicit link pairs.
-    pub fn allowed_collision_matrix(&self) -> &AllowedCollisionMatrix {
-        &self.allowed
     }
 
     /// The underlying kinematic model.
@@ -1406,7 +1385,7 @@ fn link_distances(model: &KinematicModel) -> Vec<Vec<usize>> {
 }
 
 /// Contact tolerance in meters below which a pair is treated as non-penetrating.
-pub const CONTACT_EPSILON_M: f64 = 1.0e-9;
+pub(crate) const CONTACT_EPSILON_M: f64 = 1.0e-9;
 
 fn groups_interact(a: &CollisionGroups, b: &CollisionGroups) -> bool {
     (a.memberships & b.filter) != 0 && (b.memberships & a.filter) != 0

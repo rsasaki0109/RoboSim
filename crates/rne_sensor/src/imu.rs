@@ -130,7 +130,7 @@ impl ImuAxisErrors {
     /// M = |   mz    1 + sy    -mx  |
     ///     |  -my      mx    1 + sz |
     /// ```
-    pub fn apply_scale_misalignment(&self, value: Vec3) -> Vec3 {
+    pub(crate) fn apply_scale_misalignment(&self, value: Vec3) -> Vec3 {
         let s = self.scale_factor_error;
         let m = self.misalignment_rad;
         Vec3::new(

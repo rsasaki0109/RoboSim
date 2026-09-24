@@ -115,7 +115,7 @@ impl KeyedRandom {
     }
 
     /// Returns a deterministic 64-bit value for a stable sample coordinate.
-    pub fn sample_u64(&self, stable_id: u64, sample_index: u64, channel: u64) -> u64 {
+    pub(crate) fn sample_u64(&self, stable_id: u64, sample_index: u64, channel: u64) -> u64 {
         let mut value = mix64(self.root_seed ^ KEYED_RANDOM_DOMAIN_V1);
         value = mix64(value ^ self.domain);
         value = mix64(value ^ stable_id);

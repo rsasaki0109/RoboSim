@@ -31,12 +31,6 @@ impl LaserScan2d {
         self.ranges_m.len()
     }
 
-    /// Angle of the beam at `index` in radians, if the index is valid.
-    pub fn angle_at(&self, index: usize) -> Option<f64> {
-        (index < self.ranges_m.len())
-            .then_some(self.angle_min_rad + self.angle_increment_rad * index as f64)
-    }
-
     /// Whether the geometry fields are finite and consistent.
     pub fn is_valid(&self) -> bool {
         self.time_s.is_finite()

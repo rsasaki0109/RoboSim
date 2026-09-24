@@ -1,7 +1,7 @@
 //! Actuator command types and deferred command buffer.
 
 use bevy_ecs::prelude::Resource;
-use rne_core::{SimDuration, SimTime};
+use rne_core::SimTime;
 use rne_ecs::Entity;
 use rne_math::Vec3;
 use std::collections::VecDeque;
@@ -80,19 +80,12 @@ pub struct ActuatorCommandEntry {
 pub struct ActuatorCommandBuffer {
     commands: VecDeque<ActuatorCommandEntry>,
     next_sequence: u64,
-    max_age: Option<SimDuration>,
 }
 
 impl ActuatorCommandBuffer {
     /// Creates an empty command buffer.
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Sets the maximum age after which commands are ignored.
-    pub fn with_max_age(mut self, max_age: SimDuration) -> Self {
-        self.max_age = Some(max_age);
-        self
     }
 
     /// Queues a command for the next application step.
@@ -110,22 +103,6 @@ impl ActuatorCommandBuffer {
     /// Returns pending commands without removing them.
     pub fn pending(&self) -> impl DoubleEndedIterator<Item = &ActuatorCommandEntry> {
         self.commands.iter()
-    }
-
-    /// Removes stale commands relative to the current simulation time.
-    pub fn discard_stale(&mut self, current_time: SimTime) {
-        let Some(max_age) = self.max_age else {
-            return;
-        };
-
-        while let Some(entry) = self.commands.front() {
-            let age_ticks = current_time.ticks().saturating_sub(entry.sim_time.ticks());
-            if age_ticks > max_age.ticks() {
-                self.commands.pop_front();
-            } else {
-                break;
-            }
-        }
     }
 
     /// Drains all pending commands in FIFO order.

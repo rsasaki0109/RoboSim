@@ -80,7 +80,7 @@ pub struct CameraDistortion {
 
 impl CameraDistortion {
     /// Returns true when the model applies no distortion at all.
-    pub fn is_identity(&self) -> bool {
+    pub(crate) fn is_identity(&self) -> bool {
         self.k1 == 0.0 && self.k2 == 0.0 && self.k3 == 0.0 && self.p1 == 0.0 && self.p2 == 0.0
     }
 
@@ -203,7 +203,7 @@ impl Default for CameraSpec {
 
 impl CameraSpec {
     /// Returns the number of rolling-shutter bands, at least one.
-    pub fn effective_band_count(&self) -> u16 {
+    pub(crate) fn effective_band_count(&self) -> u16 {
         self.rolling_shutter_bands.max(1)
     }
 

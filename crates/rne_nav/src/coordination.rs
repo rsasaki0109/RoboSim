@@ -77,11 +77,6 @@ impl TrafficCoordinator {
         self.config
     }
 
-    /// Number of active claims.
-    pub fn claim_count(&self) -> usize {
-        self.claims.len()
-    }
-
     /// The robot currently holding a cell, if any (expire first with
     /// [`TrafficCoordinator::expire`] for current leases).
     pub fn owner(&self, coord: GridCoord) -> Option<u32> {

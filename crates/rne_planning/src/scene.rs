@@ -6,9 +6,8 @@ use bevy_ecs::prelude::World;
 use rne_ecs::Entity;
 use rne_math::Vec3;
 use rne_robot::{
-    ColliderShape, CollisionPrimitive, CollisionWorld, KinematicModel, KinematicsSolver,
-    KinematicsSolverRegistry, PathCollisionConfig, SelfCollisionChecker, Transform3,
-    VoxelGridObject,
+    ColliderShape, CollisionPrimitive, CollisionWorld, KinematicModel, KinematicsSolverRegistry,
+    PathCollisionConfig, SelfCollisionChecker, Transform3, VoxelGridObject,
 };
 
 /// The environment a planner reasons about.
@@ -78,18 +77,6 @@ impl PlanningScene {
         self.groups.iter().find(|group| group.name() == name)
     }
 
-    /// Builds and registers a chain planning group.
-    pub fn add_chain_group(
-        &mut self,
-        name: impl Into<String>,
-        base_link: Entity,
-        tip_link: Entity,
-    ) -> Result<&PlanningGroup, PlanningError> {
-        let group = PlanningGroup::chain(self.model(), name, base_link, tip_link)?;
-        self.add_group(group);
-        Ok(self.groups.last().expect("group was just inserted"))
-    }
-
     /// Replaces the collision world, consuming and returning the scene.
     pub fn with_collision_world(mut self, collision_world: CollisionWorld) -> Self {
         self.collision_world = collision_world;
@@ -136,11 +123,6 @@ impl PlanningScene {
     /// Static world collision objects.
     pub fn collision_world(&self) -> &CollisionWorld {
         &self.collision_world
-    }
-
-    /// Mutable access to the static world collision objects.
-    pub fn collision_world_mut(&mut self) -> &mut CollisionWorld {
-        &mut self.collision_world
     }
 
     /// Adds or replaces a named world collision object.
@@ -194,15 +176,6 @@ impl PlanningScene {
     /// Registered kinematics solvers.
     pub fn solvers(&self) -> &KinematicsSolverRegistry {
         &self.solvers
-    }
-
-    /// Registers an additional kinematics solver for pose goals.
-    pub fn register_solver(
-        &mut self,
-        solver: Box<dyn KinematicsSolver>,
-    ) -> Result<(), PlanningError> {
-        self.solvers.register(solver)?;
-        Ok(())
     }
 
     /// Whether the line of sight from `from` to `to` is clear of world and

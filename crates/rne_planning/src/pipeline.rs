@@ -65,19 +65,9 @@ impl PlanningPipeline {
         self.registry.names()
     }
 
-    /// Name of the currently selected planner.
-    pub fn planner_name(&self) -> &str {
-        &self.planner_name
-    }
-
     /// Adapter names in application order.
     pub fn adapter_names(&self) -> Vec<&str> {
         self.adapters.iter().map(|adapter| adapter.name()).collect()
-    }
-
-    /// Appends an adapter to the chain.
-    pub fn add_adapter(&mut self, adapter: Box<dyn PlanningRequestAdapter>) {
-        self.adapters.push(adapter);
     }
 
     /// Selects a registered planner by name.

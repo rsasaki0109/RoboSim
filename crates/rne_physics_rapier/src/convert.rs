@@ -28,7 +28,7 @@ pub fn quat_to_rapier(q: Quat) -> UnitQuaternion<f32> {
     ))
 }
 
-pub fn quat_from_rapier(q: UnitQuaternion<f32>) -> Quat {
+pub(crate) fn quat_from_rapier(q: UnitQuaternion<f32>) -> Quat {
     let coords = q.coords;
     Quat::from_xyzw(
         coords[0] as f64,

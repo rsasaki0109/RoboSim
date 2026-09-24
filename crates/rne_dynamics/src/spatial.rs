@@ -23,7 +23,7 @@ pub fn mat3_identity() -> Mat3 {
 }
 
 /// Zero `3x3` matrix.
-pub fn mat3_zero() -> Mat3 {
+pub(crate) fn mat3_zero() -> Mat3 {
     [[0.0; 3]; 3]
 }
 
@@ -104,15 +104,6 @@ pub fn mat3_add(a: &Mat3, b: &Mat3) -> Mat3 {
         for column in 0..3 {
             out[row][column] += b[row][column];
         }
-    }
-    out
-}
-
-/// Identity `6x6` matrix.
-pub fn mat6_identity() -> Mat6 {
-    let mut out = mat6_zero();
-    for (index, row) in out.iter_mut().enumerate() {
-        row[index] = 1.0;
     }
     out
 }

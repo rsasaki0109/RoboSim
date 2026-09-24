@@ -72,18 +72,6 @@ pub struct ControllerCommand {
     pub effort: Option<f64>,
 }
 
-impl ControllerCommand {
-    /// Creates a command with no targets set for the given joint.
-    pub fn for_joint(joint: Entity) -> Self {
-        Self {
-            joint,
-            position: None,
-            velocity: None,
-            effort: None,
-        }
-    }
-}
-
 /// Output written by a controller for one step.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ControllerOutput {

@@ -96,11 +96,6 @@ impl Path2d {
         self.waypoints.last().copied()
     }
 
-    /// Waypoint at an index.
-    pub fn position_at(&self, index: usize) -> Option<Pose2d> {
-        self.waypoints.get(index).copied()
-    }
-
     /// Finds the closest point on the path to a world position.
     pub fn closest_point(&self, position_m: Vec3) -> Option<ClosestPoint> {
         if self.waypoints.is_empty() {

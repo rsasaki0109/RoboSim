@@ -4,7 +4,7 @@
 //! costmap:
 //!
 //! * [`VoxelLayer`] accumulates 3D points into a sparse voxel set and projects
-//!   the occupied columns onto a planar [`Costmap`] or [`OccupancyGrid`]. This is
+//!   the occupied columns onto a planar [`Costmap`] or occupancy grid. This is
 //!   the depth-camera / 3D-LiDAR obstacle layer.
 //! * [`KeepoutZone`] marks a rectangular region lethal so the planner avoids it.
 //! * [`SpeedFilter`] caps the commanded speed inside slow zones.
@@ -13,7 +13,7 @@
 //! stream replays deterministically.
 
 use crate::costmap::{Costmap, COST_LETHAL};
-use crate::grid::{GridCoord, GridError, OccupancyGrid};
+use crate::grid::{GridCoord, GridError};
 use crate::pose2d::Pose2d;
 use rne_math::Vec3;
 use serde::{Deserialize, Serialize};
@@ -132,29 +132,6 @@ impl VoxelLayer {
         marked.len()
     }
 
-    /// Marks the [`OccupancyGrid`] cell under each occupied voxel.
-    pub fn to_occupancy(&self, grid: &mut OccupancyGrid, log_odds: f64) -> usize {
-        let mut marked = BTreeSet::new();
-        for key in &self.occupied {
-            let world = self.voxel_center(*key);
-            let Some(coord) = grid.world_to_grid(Vec3::new(world.x, world.z, 0.0)) else {
-                continue;
-            };
-            if grid.apply_occupied(coord, log_odds) {
-                marked.insert((coord.x, coord.y));
-            }
-        }
-        marked.len()
-    }
-
-    /// Iterates occupied voxel centers in world coordinates.
-    pub fn voxel_centers(&self) -> Vec<Vec3> {
-        self.occupied
-            .iter()
-            .map(|key| self.voxel_center(*key))
-            .collect()
-    }
-
     fn voxel_center(&self, key: [i32; 3]) -> Vec3 {
         let size = self.config.voxel_size_m;
         Vec3::new(
@@ -261,6 +238,7 @@ impl SpeedFilter {
 mod tests {
     use super::*;
     use crate::costmap::CostmapConfig;
+    use crate::grid::OccupancyGrid;
     use approx::assert_relative_eq;
 
     fn costmap() -> Costmap {

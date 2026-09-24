@@ -278,7 +278,7 @@ pub fn scene_dependency_paths(bundle: &SceneAssetBundle) -> Vec<PathBuf> {
 
 impl AssetRevision {
     /// Captures the current modification times for the given paths.
-    pub fn from_paths(paths: &[PathBuf]) -> Result<Self, AssetError> {
+    pub(crate) fn from_paths(paths: &[PathBuf]) -> Result<Self, AssetError> {
         let modified_at = paths
             .iter()
             .map(|path| read_modified_at(path))
@@ -290,7 +290,7 @@ impl AssetRevision {
     }
 
     /// Returns true when any tracked file changed or disappeared.
-    pub fn has_changed(&self) -> Result<bool, AssetError> {
+    pub(crate) fn has_changed(&self) -> Result<bool, AssetError> {
         if self.paths.len() != self.modified_at.len() {
             return Ok(true);
         }
