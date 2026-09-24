@@ -13,11 +13,14 @@ repository.workspace = true
 
 [dependencies]
 bevy_ecs = { workspace = true }
+glam = { workspace = true }
 rne_assets = { workspace = true }
 rne_core = { workspace = true }
 rne_data = { workspace = true }
 rne_deformable = { workspace = true }
+rne_dynamics = { workspace = true }
 rne_ecs = { workspace = true }
+rne_legged = { workspace = true }
 rne_log = { workspace = true }
 rne_math = { workspace = true }
 rne_physics = { workspace = true }
@@ -26,6 +29,7 @@ rne_robot = { workspace = true }
 rne_render = { workspace = true }
 rne_sensor = { workspace = true }
 rne_urdf_import = { workspace = true }
+rne_wbc = { workspace = true }
 rne_world = { workspace = true }
 serde = { workspace = true }
 serde_json = "1"

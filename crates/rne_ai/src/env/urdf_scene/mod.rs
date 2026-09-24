@@ -14,6 +14,7 @@ mod unitree_g1_gait_episode;
 mod unitree_g1_inspection;
 mod unitree_g1_inspection_episode;
 mod unitree_g1_joint_locomotion;
+mod unitree_g1_lipm_walk;
 mod unitree_g1_parts_episode;
 mod unitree_g1_workbench_mission;
 mod unitree_go2_episode;
@@ -75,6 +76,11 @@ pub use unitree_g1_joint_locomotion::{
     UnitreeG1JointLocomotionEpisode, UnitreeG1JointObservation,
     VectorizedUnitreeG1JointLocomotionConfig, VectorizedUnitreeG1JointLocomotionEnv,
     VectorizedUnitreeG1JointLocomotionStep, UNITREE_G1_LEG_JOINT_LINKS, UNITREE_G1_LEG_NOMINAL_RAD,
+};
+pub use unitree_g1_lipm_walk::{
+    g1_leg_ik, run_unitree_g1_lipm_walk, UnitreeG1LipmWalkConfig, UnitreeG1LipmWalkOutcome,
+    G1_HIP_LATERAL_M, G1_NEUTRAL_HIP_PITCH_RAD, G1_NEUTRAL_HIP_ROLL_RAD, G1_NEUTRAL_KNEE_RAD,
+    G1_SHANK_M, G1_THIGH_M,
 };
 pub use unitree_g1_parts_episode::{
     UnitreeG1PartsAction, UnitreeG1PartsEpisode, UnitreeG1PartsEpisodeConfig,

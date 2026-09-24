@@ -1,0 +1,14 @@
+[package]
+name = "g1_lipm_walk"
+version = "0.3.0"
+edition = "2021"
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rne_ai = { workspace = true }
+
+[[example]]
+name = "110_g1_lipm_walk"
+path = "main.rs"
