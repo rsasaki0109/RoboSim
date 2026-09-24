@@ -39,7 +39,7 @@ impl Default for UnitreeG1GaitCommand {
 /// call sites whose own gates were re-validated against it: the
 /// `92_g1_sustained_walk_gif` hero capture and the factory inspection
 /// episode/showcase (`unitree_g1_inspection.rs`, which the workbench
-/// mission and examples 39/41 also build on). See [`ARM_HANG_ELBOW_RAD`]
+/// mission and examples 39/41 also build on). See `ARM_HANG_ELBOW_RAD`
 /// for how that value was chosen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum UnitreeG1ArmPose {
@@ -69,7 +69,7 @@ impl UnitreeG1ArmPose {
         0.20
     }
 
-    /// Resting elbow bend. See [`ARM_HANG_ELBOW_RAD`] for how the
+    /// Resting elbow bend. See `ARM_HANG_ELBOW_RAD` for how the
     /// [`Self::Hanging`] value was chosen.
     #[must_use]
     pub const fn elbow_rad(self) -> f64 {
