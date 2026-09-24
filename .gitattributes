@@ -1,1 +1,7 @@
 * text=auto eol=lf
+
+# Historical R&D trace evidence (see docs/adr/034-external-large-evidence-retention.md).
+# New large traces must not land here directly; collapse them from PR diffs and
+# language stats regardless, since a `*.pointer.json` sidecar or a rare small file
+# is all that should ever be added under this path going forward.
+docs/evidence/** -diff linguist-generated=true
