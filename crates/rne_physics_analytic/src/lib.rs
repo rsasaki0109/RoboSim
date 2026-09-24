@@ -71,7 +71,7 @@ impl AnalyticWorld {
 /// The backend holds integrated body state between steps and writes transforms
 /// back to ECS on [`PhysicsBackend::sync_to_ecs`]. Contacts and raycasts always
 /// return empty, and the backend does not model articulation.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct AnalyticBackend {
     worlds: HashMap<PhysicsWorldId, AnalyticWorld>,
     next_world_id: u32,

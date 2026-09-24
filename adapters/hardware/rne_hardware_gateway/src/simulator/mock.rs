@@ -11,7 +11,7 @@ use super::wire::{
 use super::{is_sha256_hex, valid_identifier};
 use sha2::{Digest, Sha256};
 
-/// Fixed TaskSpec and simulator identity accepted by a mock adapter process.
+/// Fixed `TaskSpec` and simulator identity accepted by a mock adapter process.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MockSimulatorBinding {
     /// Stable simulator family.
@@ -20,13 +20,13 @@ pub struct MockSimulatorBinding {
     pub simulator_version: String,
     /// Stable adapter identity.
     pub adapter_id: String,
-    /// Accepted TaskSpec identity.
+    /// Accepted `TaskSpec` identity.
     pub task_id: String,
-    /// SHA-256 of the accepted TaskSpec bytes.
+    /// SHA-256 of the accepted `TaskSpec` bytes.
     pub task_sha256: String,
-    /// Flattened TaskSpec observation width.
+    /// Flattened `TaskSpec` observation width.
     pub observation_width: usize,
-    /// Flattened TaskSpec action width.
+    /// Flattened `TaskSpec` action width.
     pub action_width: usize,
     /// Simulation-time ticks per accepted action.
     pub fixed_delta_ticks: u64,
@@ -75,7 +75,7 @@ pub struct MockSimulatorAdapter {
 }
 
 impl MockSimulatorAdapter {
-    /// Creates a closed mock with one immutable TaskSpec binding.
+    /// Creates a closed mock with one immutable `TaskSpec` binding.
     pub fn new(binding: MockSimulatorBinding) -> Result<Self, MockSimulatorError> {
         binding.validate()?;
         let action_width = binding.action_width;

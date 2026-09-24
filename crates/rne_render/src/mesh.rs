@@ -295,7 +295,7 @@ pub fn load_gltf_scene(path: &Path) -> Result<GltfSceneAsset, MeshLoadError> {
                 .reader(|buffer| buffers.get(buffer.index()).map(|data| data.0.as_slice()))
                 .read_inverse_bind_matrices()
                 .map(|matrices| matrices.map(gltf_matrix_to_mat4).collect::<Vec<_>>())
-                .unwrap_or_else(|| vec![rne_math::Mat4::IDENTITY; joint_nodes.len()]);
+                .unwrap_or_else(|| vec![Mat4::IDENTITY; joint_nodes.len()]);
             if inverse_bind_matrices.len() != joint_nodes.len() {
                 return Err(invalid_mesh(
                     &path.display().to_string(),

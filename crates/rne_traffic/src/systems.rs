@@ -316,7 +316,9 @@ pub fn advance_reserved_kinematic_traffic(
     )
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (246/150 lines); see PR body
 fn advance_traffic(
     world: &mut World,
     routes: &TrafficRouteCatalog,

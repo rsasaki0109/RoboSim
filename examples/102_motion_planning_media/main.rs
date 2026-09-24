@@ -1,7 +1,7 @@
 //! Renders a real URDF robot arm following an `rne_planning` plan as the README
 //! motion-planning GIF.
 //!
-//! The arm is the RNE-converted OpenArm v2 left arm (7-DOF, GLB meshes). A
+//! The arm is the RNE-converted `OpenArm` v2 left arm (7-DOF, GLB meshes). A
 //! collision object blocks the straight joint interpolation; the capture runs
 //! the actual RRT-Connect planner and plays the resulting trajectory through
 //! the wgpu renderer.

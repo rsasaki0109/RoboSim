@@ -300,7 +300,9 @@ fn plan_com_acceleration(plan_com: &[Vec3], index: usize) -> Vec3 {
         / (STEP_TIME_S * STEP_TIME_S)
 }
 
+// Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
 #[allow(clippy::needless_range_loop)]
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (686/150 lines); see PR body
 fn main() {
     let model = build_model();
     let trace = std::env::args().any(|argument| argument == "--trace");
@@ -382,7 +384,7 @@ fn main() {
         })
         .collect();
 
-    let scene = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let scene = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../assets/scenes/unitree_go2_jump.rne.scene.toml");
     let mut sim = UrdfSceneSim::from_scene_path(&scene).expect("load jump Go2 scene");
     sim.configure_position_motors(POSITION_STIFFNESS, POSITION_DAMPING, TORQUE_LIMIT_NM);

@@ -639,7 +639,7 @@ impl HardwareSessionEvidence {
         Ok(())
     }
 
-    /// Rebinds the session to the exact TaskSpec identity and flattened widths.
+    /// Rebinds the session to the exact `TaskSpec` identity and flattened widths.
     pub fn validate_against(&self, task: &TaskSpec) -> Result<(), HardwareSessionEvidenceError> {
         self.validate()?;
         if self.task_id != task.task_id {
@@ -729,7 +729,7 @@ pub enum HardwareSessionEvidenceError {
         /// Gateway authority mode.
         gateway: HardwareMode,
     },
-    /// The supplied TaskSpec and evidence name different task contracts.
+    /// The supplied `TaskSpec` and evidence name different task contracts.
     #[error("hardware session TaskSpec mismatch: evidence {evidence:?}, task {task:?}")]
     BoundTaskMismatch {
         /// Task identity recorded by the evidence.
@@ -737,22 +737,22 @@ pub enum HardwareSessionEvidenceError {
         /// Task identity supplied for verification.
         task: String,
     },
-    /// The supplied TaskSpec cannot construct a hardware gateway.
+    /// The supplied `TaskSpec` cannot construct a hardware gateway.
     #[error("invalid hardware session TaskSpec: {reason}")]
     InvalidTaskContract {
         /// Gateway construction failure.
         reason: String,
     },
-    /// The opening process dimensions differ from the flattened TaskSpec.
+    /// The opening process dimensions differ from the flattened `TaskSpec`.
     #[error(
         "hardware session open dimensions mismatch: observations expected {expected_observation}, got {actual_observation}; actions expected {expected_action}, got {actual_action}"
     )]
     OpenDimensionsMismatch {
-        /// Flattened observation width derived from the TaskSpec.
+        /// Flattened observation width derived from the `TaskSpec`.
         expected_observation: usize,
         /// Observation width recorded by the opening frame.
         actual_observation: usize,
-        /// Flattened action width derived from the TaskSpec.
+        /// Flattened action width derived from the `TaskSpec`.
         expected_action: usize,
         /// Action width recorded by the opening frame.
         actual_action: usize,

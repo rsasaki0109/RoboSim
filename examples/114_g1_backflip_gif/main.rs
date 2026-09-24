@@ -1,7 +1,7 @@
 //! G1 backflip visualization and native motor-only transfer probe.
 //!
-//! `--recording DIR --gif` projects a hash-verified MuJoCo rollout into the
-//! RoboSim world and renderer; it does not advance Rapier. Omit `--gif` for a
+//! `--recording DIR --gif` projects a hash-verified `MuJoCo` rollout into the
+//! `RoboSim` world and renderer; it does not advance Rapier. Omit `--gif` for a
 //! headless validation of every recorded configuration and joint mapping.
 //! `--native-probe` runs a separate motor-only Rapier transfer experiment.
 //! `--smoke` / `--gif` without a recording retain the synthetic reference
@@ -34,7 +34,7 @@ const FRAME_COUNT: usize = 112;
 const FPS: f64 = 14.0;
 const CLEAR_COLOR: [f32; 4] = [0.04, 0.055, 0.08, 1.0];
 
-fn to_math(transform: rne_world::Transform3) -> MathTransform {
+fn to_math(transform: Transform3) -> MathTransform {
     MathTransform {
         translation: transform.translation,
         rotation: transform.rotation,

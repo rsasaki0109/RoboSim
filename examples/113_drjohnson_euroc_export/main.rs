@@ -1,4 +1,4 @@
-//! Exports a diff-drive episode in the Dr Johnson 3DGS lab as EuRoC stereo+IMU.
+//! Exports a diff-drive episode in the Dr Johnson 3DGS lab as `EuRoC` stereo+IMU.
 //!
 //! Rendering uses the photorealistic 3DGS house background
 //! (`assets/environments/house_3dgs`) composited with an empty mesh foreground
@@ -103,7 +103,7 @@ fn camera_pose(base: Transform3, lateral_m: f64) -> Transform3 {
     ))
 }
 
-/// RGBA8 -> 8-bit luma (EuRoC grayscale convention).
+/// RGBA8 -> 8-bit luma (`EuRoC` grayscale convention).
 fn rgba_to_luma(rgba: &[u8]) -> Vec<u8> {
     rgba.chunks_exact(4)
         .map(|p| {
@@ -257,6 +257,7 @@ fn fixed_test(output: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (223/150 lines); see PR body
 fn main() -> Result<(), Box<dyn Error>> {
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
     if raw_args.iter().any(|a| a == "--robot-preview") {

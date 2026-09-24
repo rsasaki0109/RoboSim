@@ -294,6 +294,7 @@ fn evidence_metadata(bytes: &[u8]) -> Result<(String, u32)> {
     Ok((kind.to_string(), schema_version))
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (279/150 lines); see PR body
 fn validate_hardware_evidence<'a>(
     evidence: impl Iterator<Item = (&'a str, &'a [u8])>,
 ) -> Result<()> {

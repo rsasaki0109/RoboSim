@@ -61,7 +61,7 @@ impl std::fmt::Debug for Simulation {
 }
 
 impl Simulation {
-    pub fn new(project: Project, asset_root: Option<&Path>) -> Result<Self> {
+    pub(crate) fn new(project: Project, asset_root: Option<&Path>) -> Result<Self> {
         project.validate()?;
         let document = project.robot.document()?;
         ensure!(
@@ -183,7 +183,7 @@ impl Simulation {
         })
     }
 
-    pub fn camera_fit(&self) -> (Vec3, f64) {
+    pub(crate) fn camera_fit(&self) -> (Vec3, f64) {
         let mut minimum = Vec3::splat(f64::INFINITY);
         let mut maximum = Vec3::splat(f64::NEG_INFINITY);
         for entity in &self.robot_links {
@@ -196,7 +196,7 @@ impl Simulation {
         (focus, distance_m)
     }
 
-    pub fn set_targets(&mut self, targets: BTreeMap<String, JointPosition>) -> Result<()> {
+    pub(crate) fn set_targets(&mut self, targets: BTreeMap<String, JointPosition>) -> Result<()> {
         let mut candidate = self.project.clone();
         candidate.targets = targets;
         candidate.validate()?;
@@ -204,7 +204,7 @@ impl Simulation {
         Ok(())
     }
 
-    pub fn step(&mut self, steps: u32) -> Result<()> {
+    pub(crate) fn step(&mut self, steps: u32) -> Result<()> {
         ensure!(
             (1..=240).contains(&steps),
             "step count must be between 1 and 240"
@@ -226,15 +226,15 @@ impl Simulation {
         Ok(())
     }
 
-    pub fn sim_time_ticks(&self) -> u64 {
+    pub(crate) fn sim_time_ticks(&self) -> u64 {
         self.clock.sim_time().ticks()
     }
 
-    pub fn state_hash(&self) -> u64 {
+    pub(crate) fn state_hash(&self) -> u64 {
         hash_physics_state(&self.world)
     }
 
-    pub fn readings(&self) -> Result<Vec<JointReading>> {
+    pub(crate) fn readings(&self) -> Result<Vec<JointReading>> {
         self.joints
             .iter()
             .map(|(info, entity)| {
@@ -256,7 +256,7 @@ impl Simulation {
             .collect()
     }
 
-    pub fn lidar(&self) -> Result<LidarReading> {
+    pub(crate) fn lidar(&self) -> Result<LidarReading> {
         let origin_m = [0.0, 0.5, 0.0];
         let max_range_m = 10.0;
         let mut ranges_m = Vec::with_capacity(180);
@@ -285,7 +285,7 @@ impl Simulation {
         })
     }
 
-    pub fn render_scene(&self) -> RenderScene {
+    pub(crate) fn render_scene(&self) -> RenderScene {
         let mut scene = RenderScene::new();
         let mut entities = self
             .world

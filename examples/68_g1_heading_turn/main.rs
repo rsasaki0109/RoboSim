@@ -334,10 +334,7 @@ fn main() {
         return;
     }
 
-    println!(
-        "v0.2 envelope ({} ticks, final yaw sign)",
-        UNITREE_G1_HEADING_ENVELOPE_STEPS_V02
-    );
+    println!("v0.2 envelope ({UNITREE_G1_HEADING_ENVELOPE_STEPS_V02} ticks, final yaw sign)");
     let v02 = evaluate_candidate(
         Candidate::validated_heading(),
         UNITREE_G1_HEADING_ENVELOPE_STEPS_V02,
@@ -369,8 +366,7 @@ fn main() {
     assert_eq!(v02[2], replay, "heading replay must be bit deterministic");
 
     println!(
-        "v0.2.1 envelope ({} ticks, mean yaw-rate sign)",
-        UNITREE_G1_HEADING_ENVELOPE_STEPS_V021
+        "v0.2.1 envelope ({UNITREE_G1_HEADING_ENVELOPE_STEPS_V021} ticks, mean yaw-rate sign)"
     );
     let v021 = evaluate_candidate(
         Candidate::validated_heading(),
@@ -388,8 +384,7 @@ fn main() {
     assert_v021_mean_rate(v021[2], v021[3]);
 
     println!(
-        "v0.3 sustained envelope ({} ticks, long-horizon stability)",
-        UNITREE_G1_HEADING_ENVELOPE_STEPS_V03
+        "v0.3 sustained envelope ({UNITREE_G1_HEADING_ENVELOPE_STEPS_V03} ticks, long-horizon stability)"
     );
     let v03 = evaluate_candidate(
         Candidate::validated_heading(),

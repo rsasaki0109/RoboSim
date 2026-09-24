@@ -173,6 +173,7 @@ impl MobilityBenchmarkReport {
 }
 
 /// Runs the deterministic longitudinal benchmark matrix.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (192/150 lines); see PR body
 pub fn run_mobility_benchmark() -> Result<MobilityBenchmarkReport> {
     let nominal = plant_spec(1.0, DcMotorFailureMode::Nominal);
     let first = evaluate_longitudinal_mobility_plant(

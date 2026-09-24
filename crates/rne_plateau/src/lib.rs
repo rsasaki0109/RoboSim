@@ -1,7 +1,7 @@
-//! Deterministic offline import of PLATEAU CityGML building and road data.
+//! Deterministic offline import of PLATEAU `CityGML` building and road data.
 //!
 //! The importer deliberately lives outside the simulation core. It converts a
-//! bounded CityGML tile into ordinary RNE scene, OBJ, and JSON assets so runtime
+//! bounded `CityGML` tile into ordinary RNE scene, OBJ, and JSON assets so runtime
 //! simulation remains independent of XML, geospatial, and PLATEAU-specific types.
 
 #![deny(missing_docs)]
@@ -26,7 +26,7 @@ use thiserror::Error;
 const EARTH_RADIUS_M: f64 = 6_378_137.0;
 const EPSILON: f64 = 1.0e-10;
 
-/// Coordinate interpretation used for CityGML `gml:posList` triples.
+/// Coordinate interpretation used for `CityGML` `gml:posList` triples.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CoordinateMode {
@@ -50,7 +50,7 @@ pub struct SourceOrigin {
     pub height_m: f64,
 }
 
-/// Options controlling deterministic CityGML conversion.
+/// Options controlling deterministic `CityGML` conversion.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImportOptions {
     /// Base name used for generated scene and metadata files.
@@ -89,13 +89,13 @@ pub struct ImportResult {
     pub metadata_path: PathBuf,
     /// Generated deterministic `.rne.traffic.json` path.
     pub traffic_path: PathBuf,
-    /// Number of imported CityGML buildings.
+    /// Number of imported `CityGML` buildings.
     pub building_count: usize,
     /// Number of buildings imported from semantic LOD2 boundary surfaces.
     pub lod2_building_count: usize,
     /// Number of building surfaces linked to Appearance textures.
     pub textured_surface_count: usize,
-    /// Number of imported CityGML roads.
+    /// Number of imported `CityGML` roads.
     pub road_count: usize,
     /// Number of imported semantic `tran:TrafficArea` objects.
     pub traffic_area_count: usize,
@@ -187,7 +187,7 @@ pub enum LaneTravelDirection {
 /// PLATEAU import failure.
 #[derive(Debug, Error)]
 pub enum ImportError {
-    /// The CityGML XML document is malformed.
+    /// The `CityGML` XML document is malformed.
     #[error("invalid CityGML XML: {0}")]
     Xml(String),
     /// The document contains no supported building or road geometry.
@@ -214,7 +214,7 @@ pub enum ImportError {
     /// A polygon uses geometry outside the Phase 1 subset.
     #[error("unsupported geometry in CityGML feature `{feature_id}`: {message}")]
     UnsupportedGeometry {
-        /// Stable CityGML feature identifier.
+        /// Stable `CityGML` feature identifier.
         feature_id: String,
         /// Description of the unsupported geometry.
         message: String,
@@ -222,7 +222,7 @@ pub enum ImportError {
     /// A coordinate list is invalid or non-finite.
     #[error("invalid coordinates in CityGML feature `{feature_id}`: {message}")]
     InvalidCoordinates {
-        /// Stable CityGML feature identifier.
+        /// Stable `CityGML` feature identifier.
         feature_id: String,
         /// Description of the invalid coordinate data.
         message: String,
@@ -400,7 +400,7 @@ struct LocalPolygon {
     interiors: Vec<Vec<[f64; 3]>>,
 }
 
-/// Imports a CityGML file and writes deterministic RNE assets into `output_dir`.
+/// Imports a `CityGML` file and writes deterministic RNE assets into `output_dir`.
 pub fn import_citygml_file(
     input_path: &Path,
     output_dir: &Path,
@@ -414,6 +414,7 @@ pub fn import_citygml_file(
     import_citygml_impl(&xml, source_name, input_path.parent(), output_dir, options)
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (174/150 lines); see PR body
 fn import_citygml_impl(
     xml: &str,
     source_name: &str,
@@ -1262,6 +1263,7 @@ fn copy_appearance_textures(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (164/150 lines); see PR body
 fn generate_building(
     building: &ParsedBuilding,
     index: usize,
@@ -1448,6 +1450,7 @@ fn semantic_surface_color(surface: BuildingSurface) -> [f32; 3] {
     }
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (161/150 lines); see PR body
 fn generate_road(
     road: &ParsedRoad,
     index: usize,
@@ -1655,6 +1658,7 @@ fn semantic_lane_spec(
     None
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn append_traffic_lanes(
     imported_lanes: &mut Vec<ImportedLane>,

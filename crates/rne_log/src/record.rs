@@ -331,7 +331,7 @@ pub enum LogRecord {
         /// Payload.
         payload: ImuSample,
     },
-    /// LiDAR frame metadata and payload.
+    /// `LiDAR` frame metadata and payload.
     LidarFrame {
         /// Frame header.
         header: FrameHeader,
@@ -408,7 +408,7 @@ impl SimulationLog {
             .push(LogRecord::ReplayRandomSnapshot { snapshot });
     }
 
-    /// Records a LiDAR frame.
+    /// Records a `LiDAR` frame.
     pub fn record_lidar(&mut self, header: FrameHeader, payload: PointCloud) {
         self.records.push(LogRecord::LidarFrame { header, payload });
     }

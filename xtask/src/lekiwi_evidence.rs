@@ -1,4 +1,4 @@
-//! Seal and verify complete physical LeKiwi reference-device evidence.
+//! Seal and verify complete physical `LeKiwi` reference-device evidence.
 
 use anyhow::{Context, Result};
 use rne_ai::{TaskSpec, TASK_SPEC_KIND, TASK_SPEC_SCHEMA_VERSION};
@@ -160,6 +160,7 @@ fn seal(draft_path: &Path, output_path: &Path) -> Result<()> {
 }
 
 /// Verifies one complete physical evidence directory through its manifest.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (186/150 lines); see PR body
 pub(crate) fn verify_manifest(manifest_path: &Path) -> Result<()> {
     let bytes = read_regular_file(manifest_path, "physical evidence manifest")?;
     let manifest: LeKiwiPhysicalEvidenceManifest =

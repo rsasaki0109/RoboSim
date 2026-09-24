@@ -1,10 +1,13 @@
 [package]
 name = "vectorized_episode"
-version = "0.3.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
+
+[lints]
+workspace = true
 
 [dependencies]
 rne_ai = { workspace = true }

@@ -163,7 +163,7 @@ impl KeyedRandom {
     }
 }
 
-/// Applies the SplitMix64 finalizer to a 64-bit value.
+/// Applies the `SplitMix64` finalizer to a 64-bit value.
 pub fn mix64(mut value: u64) -> u64 {
     value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);

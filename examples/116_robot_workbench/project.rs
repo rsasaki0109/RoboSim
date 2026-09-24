@@ -27,7 +27,7 @@ pub(crate) struct RobotSource {
 }
 
 impl RobotSource {
-    pub fn document(&self) -> Result<UrdfDocument> {
+    pub(crate) fn document(&self) -> Result<UrdfDocument> {
         ensure!(
             self.xml.len() <= MAX_PROJECT_BYTES / 2,
             "robot source too large"
@@ -39,7 +39,7 @@ impl RobotSource {
         parse_urdf_document(&xml).context("import URDF")
     }
 
-    pub fn digest(&self) -> String {
+    pub(crate) fn digest(&self) -> String {
         let mut hash = Sha256::new();
         hash.update(match self.format {
             RobotFormat::Urdf => b"urdf".as_slice(),
@@ -59,7 +59,7 @@ pub(crate) enum JointPosition {
 }
 
 impl JointPosition {
-    pub fn value(self) -> f64 {
+    pub(crate) fn value(self) -> f64 {
         match self {
             Self::Revolute { position_rad } => position_rad,
             Self::Prismatic { position_m } => position_m,
@@ -113,7 +113,7 @@ pub(crate) struct Project {
 }
 
 impl Project {
-    pub fn new(robot: RobotSource) -> Result<Self> {
+    pub(crate) fn new(robot: RobotSource) -> Result<Self> {
         let mut project = Self {
             schema_version: 1,
             robot,
@@ -143,7 +143,7 @@ impl Project {
         Ok(project)
     }
 
-    pub fn save_pose(&mut self, name: &str) -> Result<()> {
+    pub(crate) fn save_pose(&mut self, name: &str) -> Result<()> {
         validate_name(name)?;
         let mut candidate = self.clone();
         candidate.poses.insert(
@@ -158,7 +158,7 @@ impl Project {
         Ok(())
     }
 
-    pub fn apply_pose(&mut self, pose: &SavedPose) -> Result<()> {
+    pub(crate) fn apply_pose(&mut self, pose: &SavedPose) -> Result<()> {
         ensure!(
             pose.robot_digest == self.robot.digest(),
             "pose belongs to another robot"
@@ -170,14 +170,14 @@ impl Project {
         Ok(())
     }
 
-    pub fn from_json(bytes: &[u8]) -> Result<Self> {
+    pub(crate) fn from_json(bytes: &[u8]) -> Result<Self> {
         ensure!(bytes.len() <= MAX_PROJECT_BYTES, "project exceeds 4 MiB");
         let project: Self = serde_json::from_slice(bytes).context("read project JSON")?;
         project.validate()?;
         Ok(project)
     }
 
-    pub fn joint_catalog(&self) -> Result<Vec<JointInfo>> {
+    pub(crate) fn joint_catalog(&self) -> Result<Vec<JointInfo>> {
         let document = self.robot.document()?;
         let mut names = BTreeSet::new();
         let mut catalog = Vec::new();
@@ -234,7 +234,7 @@ impl Project {
         Ok(catalog)
     }
 
-    pub fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         ensure!(self.schema_version == 1, "unsupported project schema");
         ensure!(
             self.robot_rotation_rpy_rad

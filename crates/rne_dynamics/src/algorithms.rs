@@ -1058,6 +1058,7 @@ mod tests {
     }
 
     #[test]
+    // Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
     #[allow(clippy::needless_range_loop)]
     fn impulse_velocity_stops_incoming_contacts() {
         let (world, robot) = floating_body_world(3.0, Vec3::ZERO, [0.1, 0.1, 0.1]);
@@ -1095,6 +1096,7 @@ mod tests {
     }
 
     #[test]
+    // Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
     #[allow(clippy::needless_range_loop)]
     fn constrained_dynamics_keeps_contacts_stationary() {
         let (world, robot) = floating_body_world(3.0, Vec3::ZERO, [0.1, 0.1, 0.1]);

@@ -1,7 +1,7 @@
 //! Sensor-only planar odometry for Ackermann vehicles.
 //!
 //! The estimator consumes four wheel encoders, two front steering encoders, and a
-//! mounted IMU exclusively through availability-time-aware DataBus reads. It does
+//! mounted IMU exclusively through availability-time-aware `DataBus` reads. It does
 //! not accept commands, ECS state, physics handles, or privileged vehicle truth.
 
 use rne_core::SimTime;
@@ -219,7 +219,7 @@ pub struct AckermannImuOdometryEstimate {
     pub yaw_innovation_rad: f64,
     /// Current estimator health.
     pub health: AckermannImuOdometryHealth,
-    /// Exact DataBus input provenance.
+    /// Exact `DataBus` input provenance.
     pub provenance: AckermannImuOdometryProvenance,
     /// Planar `[x, y, yaw]` covariance.
     pub pose_covariance: [[f64; 3]; 3],
@@ -343,7 +343,7 @@ impl AckermannImuOdometry {
     ///
     /// No command, ECS world, rigid-body state, physics backend, or truth value is
     /// accepted by this API. Calibration, quantization, faults, and transport timing
-    /// must already be represented by the supplied DataBus frames.
+    /// must already be represented by the supplied `DataBus` frames.
     pub fn update(
         &mut self,
         bus: &impl DataBus,
@@ -549,6 +549,7 @@ impl AckermannImuOdometry {
         ))
     }
 
+    // Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
     #[allow(clippy::too_many_arguments)]
     fn estimate(
         &self,
@@ -809,6 +810,7 @@ mod tests {
         );
     }
 
+    // Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
     #[allow(clippy::too_many_arguments)]
     fn publish_encoder(
         bus: &mut InMemoryDataBus,

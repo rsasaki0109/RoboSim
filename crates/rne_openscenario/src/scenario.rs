@@ -1,4 +1,4 @@
-//! Versioned scenario documents imported from OpenSCENARIO.
+//! Versioned scenario documents imported from `OpenSCENARIO`.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -9,7 +9,7 @@ use thiserror::Error;
 /// Current `.rne.scenario.json` schema version.
 pub const SCENARIO_DOCUMENT_VERSION: u32 = 1;
 
-/// Maximum accepted OpenSCENARIO, scenario-document, or replay input size.
+/// Maximum accepted `OpenSCENARIO`, scenario-document, or replay input size.
 pub const SCENARIO_MAX_INPUT_BYTES: usize = 64 * 1024 * 1024;
 
 pub(crate) fn ensure_scenario_input_len(actual: usize) -> Result<(), ScenarioError> {
@@ -44,7 +44,7 @@ pub(crate) fn read_bounded_utf8_with_limit(path: &Path, limit: usize) -> io::Res
 pub enum ScenarioError {
     /// The scenario file or document could not be read or written.
     #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
     /// The scenario document could not be serialized or deserialized.
     #[error(transparent)]
     Json(#[from] serde_json::Error),
@@ -56,7 +56,7 @@ pub enum ScenarioError {
         /// Schema version found in the document.
         actual: u32,
     },
-    /// The OpenSCENARIO file uses a revision unsupported by this importer.
+    /// The `OpenSCENARIO` file uses a revision unsupported by this importer.
     #[error("unsupported OpenSCENARIO revision: expected {expected}.{minor}, got {actual}.{actual_minor}")]
     UnsupportedRevision {
         /// Supported major revision.
@@ -149,7 +149,7 @@ pub struct ScenarioTimedAction {
     pub action: ScenarioAction,
 }
 
-/// A self-contained scenario imported from one OpenSCENARIO file.
+/// A self-contained scenario imported from one `OpenSCENARIO` file.
 ///
 /// The document keeps the source path, the road-network reference from
 /// `RoadNetwork/LogicFile@filepath`, the declared entities, and the storyboard
@@ -329,7 +329,7 @@ impl ScenarioDocument {
     }
 }
 
-/// Validates the OpenSCENARIO `FileHeader` revision fields.
+/// Validates the `OpenSCENARIO` `FileHeader` revision fields.
 pub(crate) fn check_revision(rev_major: u32, rev_minor: u32) -> Result<(), ScenarioError> {
     if (rev_major, rev_minor) != (1, 0) {
         return Err(ScenarioError::UnsupportedRevision {

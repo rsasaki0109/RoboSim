@@ -1667,7 +1667,7 @@ fn hot_lap_drive(speed_m_s: f64, steering_rad: f64) -> AckermannDrive {
 }
 
 fn step_seconds(world: &mut World, seconds: f64) {
-    let dt = SimDuration::from_seconds(rne_math::Seconds::new(1.0 / 240.0));
+    let dt = SimDuration::from_seconds(Seconds::new(1.0 / 240.0));
     for _ in 0..(seconds * 240.0) as usize {
         vehicle_dynamics(world, dt);
     }
@@ -1694,7 +1694,7 @@ fn dynamic_model_matches_kinematics_at_low_speed() {
         Transform3::IDENTITY,
         RigidBody::default(),
     ));
-    let dt = SimDuration::from_seconds(rne_math::Seconds::new(1.0 / 240.0));
+    let dt = SimDuration::from_seconds(Seconds::new(1.0 / 240.0));
     for _ in 0..480 {
         ackermann_kinematics(&mut kinematic_world, dt);
     }

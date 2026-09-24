@@ -34,7 +34,7 @@ pub struct ScenarioRunOptions {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioActorResult {
-    /// Stable OpenSCENARIO entity name.
+    /// Stable `OpenSCENARIO` entity name.
     pub name: String,
     /// Stable UUID derived from canonical entity-name order.
     pub stable_uuid: String,
@@ -309,7 +309,7 @@ pub fn execute_scenario(
 /// Executes a scenario with optional pause, step, reset, quit, and live-status control.
 ///
 /// When control is None, this has the same deterministic fixed-step behavior
-/// as execute_scenario. When present, the control state machine is consulted
+/// as `execute_scenario`. When present, the control state machine is consulted
 /// before every step. Reset rebuilds the episode from its initial conditions,
 /// quit returns the current partial episode, and completed steps report a
 /// compact JSON snapshot containing actor positions and traffic metrics.
@@ -548,8 +548,7 @@ fn derive_route(
     allowed_lanes.sort_by(|left, right| left.as_str().cmp(right.as_str()));
     if allowed_lanes.is_empty() {
         return Err(ScenarioError::Invalid(format!(
-            "network has no lanes that allow {:?}",
-            kind
+            "network has no lanes that allow {kind:?}"
         )));
     }
 
@@ -591,8 +590,7 @@ fn derive_route(
         }
     }
     Err(ScenarioError::Invalid(format!(
-        "no route between any source and sink lane for {:?}",
-        kind
+        "no route between any source and sink lane for {kind:?}"
     )))
 }
 

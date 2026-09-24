@@ -2,7 +2,7 @@
 //!
 //! Every earlier closed-loop example let the controller read the vehicle pose straight
 //! out of the simulator — data a real controller could never have. Here the pose
-//! travels through the DataBus: a localization source publishes `PoseSample` frames
+//! travels through the `DataBus`: a localization source publishes `PoseSample` frames
 //! stamped with transport latency, and the pure-pursuit controller may only read what
 //! [`DataBus::latest_available`] says has arrived. The controller steers the present
 //! vehicle from a pose of the past.

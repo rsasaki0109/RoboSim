@@ -239,7 +239,7 @@ pub fn tsukuba_confirmation_scene_path() -> PathBuf {
     bundled_asset_path(Path::new("scenes/tsukuba_confirmation.rne.scene.toml"))
 }
 
-/// Portable TaskSpec for the confirmation-run analog.
+/// Portable `TaskSpec` for the confirmation-run analog.
 #[must_use]
 pub fn tsukuba_confirmation_task_spec(max_episode_steps: u64) -> TaskSpec {
     TaskSpec::new(
@@ -319,7 +319,7 @@ pub struct TsukubaConfirmationObservation {
     pub left_wheel_velocity_rad_s: f64,
     /// Right wheel command in radians per second.
     pub right_wheel_velocity_rad_s: f64,
-    /// Latest LiDAR point count.
+    /// Latest `LiDAR` point count.
     pub lidar_points: usize,
     /// True when the body is outside the sidewalk.
     pub in_roadway: bool,

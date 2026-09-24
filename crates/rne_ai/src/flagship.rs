@@ -12,16 +12,16 @@ use crate::{
     MobileManipulatorAction, MobileManipulatorObservation,
 };
 
-/// Stable TaskSpec identity used by the installed mobile-lift flagship.
+/// Stable `TaskSpec` identity used by the installed mobile-lift flagship.
 pub const FLAGSHIP_MOBILE_LIFT_TASK_ID: &str = "rne.flagship.mobile_lift_shared_aisle.v1";
 
 /// Stable controller identity used by the installed mobile-lift flagship.
 pub const FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID: &str = "rne.ai.ik_mobile_lift_pick_place_policy.v1";
 
-/// Complete portable TaskSpec identity used by controller-driven execution paths.
+/// Complete portable `TaskSpec` identity used by controller-driven execution paths.
 pub const FLAGSHIP_MOBILE_LIFT_TASK_ID_V2: &str = "rne.flagship.mobile_lift_shared_aisle.v2";
 
-/// Controller identity whose only runtime input is the v2 flattened TaskSpec observation.
+/// Controller identity whose only runtime input is the v2 flattened `TaskSpec` observation.
 pub const FLAGSHIP_MOBILE_LIFT_CONTROLLER_ID_V2: &str =
     "rne.ai.portable_ik_mobile_lift_pick_place_controller.v2";
 
@@ -83,7 +83,7 @@ pub const FLAGSHIP_TRAFFIC_DEPARTURE_DIMENSION: &str = "traffic_departure_delay_
 /// Domain-randomization identity for traffic speed delta.
 pub const FLAGSHIP_TRAFFIC_SPEED_DIMENSION: &str = "traffic_speed_delta_m_s";
 
-/// Builds the exact portable TaskSpec used by installed flagship proofs.
+/// Builds the exact portable `TaskSpec` used by installed flagship proofs.
 ///
 /// `fixed_delta_ticks` is the integer number of nanoseconds in one controller
 /// decision. Keeping that integer at the API boundary prevents a hardware,
@@ -158,7 +158,7 @@ pub fn flagship_mobile_lift_task_spec(fixed_delta_ticks: u64) -> TaskSpec {
     ]))
 }
 
-/// Builds the complete portable v2 TaskSpec consumed directly by the v2 controller.
+/// Builds the complete portable v2 `TaskSpec` consumed directly by the v2 controller.
 ///
 /// Unlike v1, this contract includes full base pose and the place target. Those
 /// fields are dynamic controller inputs and cannot be reconstructed honestly
@@ -281,11 +281,11 @@ pub struct FlagshipMobileLiftControllerContract {
     pub schema_version: u32,
     /// Exact controller implementation and configuration identity.
     pub controller_id: String,
-    /// Exact TaskSpec identity accepted by the controller.
+    /// Exact `TaskSpec` identity accepted by the controller.
     pub task_id: String,
-    /// Tensor names in exact TaskSpec observation order.
+    /// Tensor names in exact `TaskSpec` observation order.
     pub observation_order: Vec<String>,
-    /// Tensor names in exact TaskSpec action order.
+    /// Tensor names in exact `TaskSpec` action order.
     pub action_order: Vec<String>,
     /// Proportional twist scaling begins above this linear-speed limit.
     pub max_base_speed_m_s: f64,
@@ -320,7 +320,7 @@ impl FlagshipMobileLiftControllerContract {
     }
 }
 
-/// Stateful built-in controller whose runtime boundary is exactly the v2 TaskSpec.
+/// Stateful built-in controller whose runtime boundary is exactly the v2 `TaskSpec`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FlagshipMobileLiftControllerV2 {
     policy: IkMobileLiftPickPlacePolicy,
@@ -541,7 +541,7 @@ pub enum FlagshipMobileLiftControllerError {
     /// A serialized built-in contract no longer matches the implementation.
     #[error("flagship v2 controller contract differs from the built-in implementation")]
     ControllerContractDrift,
-    /// A controller output violated the exact TaskSpec bounds.
+    /// A controller output violated the exact `TaskSpec` bounds.
     #[error("flagship v2 action element {index} has invalid value {value}")]
     ActionValue {
         /// Flattened action index.
@@ -549,7 +549,7 @@ pub enum FlagshipMobileLiftControllerError {
         /// Rejected value.
         value: f64,
     },
-    /// Flattened observation width does not match the TaskSpec.
+    /// Flattened observation width does not match the `TaskSpec`.
     #[error("flagship v2 observation width must be {expected}, got {actual}")]
     ObservationWidth {
         /// Required width.

@@ -8,7 +8,7 @@
 //!
 //! The decomposition is intentionally simple and dependency-free so it stays
 //! bit-for-bit reproducible. A higher-quality convex-hull backend (for example
-//! CoACD) can be added behind a feature without changing the artifact format.
+//! `CoACD`) can be added behind a feature without changing the artifact format.
 
 #![deny(missing_docs)]
 
@@ -128,6 +128,7 @@ pub enum CollisionBakeError {
 ///
 /// Vertices are in the mesh's local frame. The output shape uses the same frame,
 /// so callers apply their own placement separately.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (181/150 lines); see PR body
 pub fn bake_voxel_decomposition(
     positions: &[[f32; 3]],
     indices: &[u32],
@@ -339,6 +340,7 @@ fn row_free(
     })
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn slab_free(
     occupied: &[bool],

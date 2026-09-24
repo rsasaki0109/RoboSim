@@ -1,6 +1,6 @@
 //! Built-in motion planners.
 //!
-//! `JointInterpolationPlanner` is the MoveIt `JointInterpolation` analogue: it
+//! `JointInterpolationPlanner` is the `MoveIt` `JointInterpolation` analogue: it
 //! interpolates directly to a resolved goal and rejects the plan if the straight
 //! line collides. `RrtConnectPlanner` grows a deterministic, seeded tree from
 //! the start and connects a goal tree to it.
@@ -23,7 +23,7 @@ pub const JOINT_INTERPOLATION_PLANNER: &str = "joint_interpolation";
 /// Name of the built-in bidirectional RRT-Connect planner.
 pub const RRT_CONNECT_PLANNER: &str = "rrt_connect";
 
-/// MoveIt `JointInterpolation` style planner.
+/// `MoveIt` `JointInterpolation` style planner.
 ///
 /// Resolves the goal, verifies that the straight joint-space line is
 /// collision-free, and returns a uniformly timed trajectory. There is no
@@ -903,7 +903,7 @@ pub const HYBRID_PLANNER: &str = "hybrid";
 
 /// Hybrid planner: a global RRT-Connect plan refined by CHOMP optimization.
 ///
-/// This mirrors MoveIt's hybrid planning, where a sampling planner finds a
+/// This mirrors `MoveIt`'s hybrid planning, where a sampling planner finds a
 /// feasible path and a trajectory optimizer smooths it. The result is
 /// deterministic because both stages are.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -947,7 +947,7 @@ pub const STOMP_PLANNER: &str = "stomp";
 
 /// Stochastic trajectory optimization planner.
 ///
-/// This is the RNE reference to MoveIt's STOMP: each iteration draws noisy
+/// This is the RNE reference to `MoveIt`'s STOMP: each iteration draws noisy
 /// rollouts around the current trajectory, evaluates the smoothness plus
 /// obstacle cost, and moves to the cost-weighted average while keeping the
 /// endpoints fixed. The best trajectory seen is returned. Sampling uses the
@@ -1138,7 +1138,7 @@ pub const PRM_PLANNER: &str = "prm";
 /// Deterministic probabilistic roadmap planner.
 ///
 /// Samples collision-free configurations, connects each node to its nearest
-/// neighbours with collision-checked straight-line edges (MoveIt's local
+/// neighbours with collision-checked straight-line edges (`MoveIt`'s local
 /// planner), then searches the roadmap with Dijkstra. Sampling uses the
 /// explicit [`PlanningOptions::seed`]; `max_iterations` bounds the number of
 /// samples and [`PlanningOptions::roadmap_neighbors`] the edges per node.
@@ -1501,6 +1501,7 @@ fn extend_tree(
     Ok(Some(tree.add(new_config, nearest)))
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn connect_tree(
     scene: &PlanningScene,

@@ -617,7 +617,7 @@ fn write_rejection(
     .context("write frontend rejection")
 }
 
-/// Converts a typed DataBus frame into protocol metadata.
+/// Converts a typed `DataBus` frame into protocol metadata.
 pub(crate) fn sensor_metadata<T: rne_data::FramePayload>(frame: &Frame<T>) -> SensorFrameMetadata {
     SensorFrameMetadata {
         stream_id: frame.stream_id.0,
@@ -627,7 +627,7 @@ pub(crate) fn sensor_metadata<T: rne_data::FramePayload>(frame: &Frame<T>) -> Se
     }
 }
 
-/// Publishes the latest camera pair and LiDAR cloud for selected stream ids.
+/// Publishes the latest camera pair and `LiDAR` cloud for selected stream ids.
 pub(crate) fn publish_bulk_sensors<'a>(
     publisher: &BinaryFrontendPublisher,
     bus: &InMemoryDataBus,

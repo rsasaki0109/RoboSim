@@ -197,6 +197,7 @@ impl WholeBodyController {
     /// are optional; at least one task plus the dynamics and contact rows make
     /// the problem well-posed.
     #[allow(clippy::too_many_arguments)]
+    // Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
     #[allow(clippy::needless_range_loop)]
     pub fn solve(
         &self,
@@ -223,7 +224,9 @@ impl WholeBodyController {
     /// [`Self::solve`] with an optional per-joint feed-forward torque
     /// reference, such as a trajectory-plan torque.
     #[allow(clippy::too_many_arguments)]
+    // Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
     #[allow(clippy::needless_range_loop)]
+    #[allow(clippy::too_many_lines)] // TODO(cleanup): split (289/150 lines); see PR body
     pub fn solve_with_torque_reference(
         &self,
         model: &ArticulatedModel,
@@ -829,7 +832,7 @@ mod tests {
         assert_relative_eq!(released[1], 10.0, epsilon = 1.0e-6);
     }
 
-    fn floating_body() -> (World, rne_dynamics::ArticulatedModel, Entity) {
+    fn floating_body() -> (World, ArticulatedModel, Entity) {
         let mut world = World::new();
         let robot = spawn_named(&mut world, "body");
         let base = spawn_named(&mut world, "base");

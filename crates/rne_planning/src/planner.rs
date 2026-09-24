@@ -10,7 +10,7 @@ use crate::scene::PlanningScene;
 
 /// Boundary implemented by swappable motion planners.
 ///
-/// This is the RNE analogue of MoveIt's `PlannerInterface`: a planner receives a
+/// This is the RNE analogue of `MoveIt`'s `PlannerInterface`: a planner receives a
 /// scene and a request and returns a validated trajectory or a structured error.
 /// Implementations must be deterministic for a given scene and request.
 pub trait MotionPlanner: Send + Sync + std::fmt::Debug {

@@ -214,7 +214,7 @@ impl MobilityRandomizationSpec {
         apply_to(values, base_plant, base_suspension)
     }
 
-    /// Converts the exact ordered v1 ranges into the portable TaskSpec contract.
+    /// Converts the exact ordered v1 ranges into the portable `TaskSpec` contract.
     pub fn task_randomization(self) -> RandomizationSpec {
         RandomizationSpec::new(vec![
             parameter("vehicle_mass_scale", "1", self.vehicle_mass_scale),

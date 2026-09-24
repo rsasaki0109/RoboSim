@@ -80,6 +80,7 @@ struct CaptureSummary {
     truncated: bool,
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (250/150 lines); see PR body
 fn main() -> Result<(), Box<dyn Error>> {
     let mut arguments = std::env::args_os().skip(1);
     let output = arguments.next().map(PathBuf::from).ok_or_else(|| {
@@ -233,7 +234,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             sequence,
             completed_time,
             PoseSample {
-                position_m: rne_math::Vec3::new(
+                position_m: Vec3::new(
                     step.observation.base_x_m,
                     step.observation.base_y_m,
                     step.observation.base_z_m,
@@ -469,6 +470,7 @@ fn ground_truth_camera_spec() -> CameraSpec {
     }
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (165/150 lines); see PR body
 fn stream_specs(imu: &Sensor, lidar: &Sensor) -> Result<Vec<DatasetStreamSpec>, Box<dyn Error>> {
     let SensorKind::Imu(imu_spec) = &imu.kind else {
         return Err(io::Error::other("stream 100 is not an IMU").into());
@@ -732,7 +734,7 @@ fn dataset_asset(role: &str, path: &str, source: &Path) -> Result<DatasetAsset, 
     })
 }
 
-fn stream_samples(manifest: &rne_data::DatasetManifest, stream_id: StreamId) -> u64 {
+fn stream_samples(manifest: &DatasetManifest, stream_id: StreamId) -> u64 {
     manifest.shards[0]
         .streams
         .iter()

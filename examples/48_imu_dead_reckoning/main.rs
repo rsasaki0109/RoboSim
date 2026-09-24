@@ -15,7 +15,7 @@
 use png::{BitDepth, ColorType, Encoder};
 use rne_core::{SimDuration, SimTime};
 use rne_ecs::{spawn_named, Entity, World};
-use rne_math::{Quat, Seconds, Transform3 as MathTransform3, Vec3};
+use rne_math::{Quat, Seconds, Vec3};
 use rne_physics::RigidBody;
 use rne_render::{Camera, RenderBackend, RenderScene, RenderSceneItem, VisualShape};
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
@@ -489,10 +489,6 @@ fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
         .then_some(())
         .ok_or_else(|| std::io::Error::other("ffmpeg IMU GIF encode failed"))
 }
-
-/// Keeps the unused-import warning away when the renderer feature set changes.
-#[allow(dead_code)]
-fn unused_math_marker(_: MathTransform3) {}
 
 #[cfg(test)]
 mod tests {

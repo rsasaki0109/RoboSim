@@ -1,6 +1,6 @@
-//! Fail-closed, parent-order observation fusion for the flagship LeKiwi path.
+//! Fail-closed, parent-order observation fusion for the flagship `LeKiwi` path.
 //!
-//! LeKiwi cannot directly observe the complete flagship task. This module
+//! `LeKiwi` cannot directly observe the complete flagship task. This module
 //! therefore requires explicit, tick-stamped physical, localization,
 //! perception, traffic, and task-state sources. Missing values are never
 //! synthesized or zero-filled. Source freshness and sequence continuity are
@@ -49,7 +49,7 @@ pub struct FlagshipTimedObservation<T> {
     pub value: T,
 }
 
-/// TaskSpec-ordered normalized LeKiwi numeric observation.
+/// TaskSpec-ordered normalized `LeKiwi` numeric observation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FlagshipLeKiwiPhysicalObservation {
@@ -131,7 +131,7 @@ pub struct FlagshipTaskStateObservationV2 {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FlagshipLeKiwiObservationInputs {
-    /// Physical LeKiwi observation source.
+    /// Physical `LeKiwi` observation source.
     pub physical: FlagshipTimedObservation<FlagshipLeKiwiPhysicalObservation>,
     /// Metric localization source.
     pub localization: FlagshipTimedObservation<FlagshipLocalizationObservation>,
@@ -147,7 +147,7 @@ pub struct FlagshipLeKiwiObservationInputs {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FlagshipLeKiwiObservationInputsV2 {
-    /// Physical LeKiwi observation source.
+    /// Physical `LeKiwi` observation source.
     pub physical: FlagshipTimedObservation<FlagshipLeKiwiPhysicalObservation>,
     /// Full metric localization source.
     pub localization: FlagshipTimedObservation<FlagshipLocalizationObservationV2>,
@@ -159,11 +159,11 @@ pub struct FlagshipLeKiwiObservationInputsV2 {
     pub task_state: FlagshipTimedObservation<FlagshipTaskStateObservationV2>,
 }
 
-/// Affine projection from one LeKiwi arm-position element to one flagship joint.
+/// Affine projection from one `LeKiwi` arm-position element to one flagship joint.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FlagshipArmChannelCalibration {
-    /// Zero-based source element in LeKiwi `arm_joint_position_rad[5]`.
+    /// Zero-based source element in `LeKiwi` `arm_joint_position_rad[5]`.
     pub physical_element: usize,
     /// Multiplicative `rad/rad` calibration scale.
     pub scale: f64,
@@ -218,7 +218,7 @@ pub struct FlagshipObservationSourceEvidence {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UnusedLeKiwiObservation {
-    /// LeKiwi TaskSpec tensor name.
+    /// `LeKiwi` `TaskSpec` tensor name.
     pub tensor_name: String,
     /// Row-major tensor element.
     pub tensor_element: usize,
@@ -236,7 +236,7 @@ pub struct FlagshipLeKiwiObservationFusion {
     pub kind: String,
     /// Observation-fusion schema version.
     pub schema_version: u32,
-    /// Exact parent TaskSpec identity.
+    /// Exact parent `TaskSpec` identity.
     pub parent_task_id: String,
     /// Exact zero-based parent controller sequence.
     pub parent_sequence: u64,
@@ -246,7 +246,7 @@ pub struct FlagshipLeKiwiObservationFusion {
     pub arm_calibration_sha256: String,
     /// Ordered source and freshness evidence.
     pub sources: Vec<FlagshipObservationSourceEvidence>,
-    /// Exact flattened observation in flagship TaskSpec tensor order.
+    /// Exact flattened observation in flagship `TaskSpec` tensor order.
     pub observation_values: Vec<f64>,
     /// SHA-256 of length-prefixed little-endian observation values.
     pub observation_sha256: String,
@@ -264,7 +264,7 @@ pub struct FlagshipLeKiwiObservationFusionV2 {
     pub kind: String,
     /// Observation-fusion schema version; exactly two.
     pub schema_version: u32,
-    /// Exact v2 parent TaskSpec identity.
+    /// Exact v2 parent `TaskSpec` identity.
     pub parent_task_id: String,
     /// Exact zero-based parent controller sequence.
     pub parent_sequence: u64,
@@ -433,7 +433,7 @@ impl FlagshipLeKiwiObservationFuserV2 {
         self.expected_parent_sequence
     }
 
-    /// Fuses one complete source set into exact v2 TaskSpec order.
+    /// Fuses one complete source set into exact v2 `TaskSpec` order.
     ///
     /// Any error leaves sequence, continuity, and calibration state unchanged.
     pub fn fuse(
@@ -1042,13 +1042,13 @@ pub enum FlagshipLeKiwiObservationError {
     ArmSourceElement {
         /// Flagship arm element.
         output_element: usize,
-        /// Invalid LeKiwi arm element.
+        /// Invalid `LeKiwi` arm element.
         physical_element: usize,
     },
     /// Two flagship joints attempted to consume one physical joint observation.
     #[error("LeKiwi arm element {physical_element} is mapped more than once")]
     DuplicateArmSourceElement {
-        /// Duplicated LeKiwi arm element.
+        /// Duplicated `LeKiwi` arm element.
         physical_element: usize,
     },
     /// Arm scale or offset was zero/nonfinite where prohibited.
@@ -1142,13 +1142,13 @@ pub enum FlagshipLeKiwiObservationError {
         /// Rejected sample tick.
         actual: u64,
     },
-    /// Physical observation width did not match LeKiwi TaskSpec order.
+    /// Physical observation width did not match `LeKiwi` `TaskSpec` order.
     #[error("LeKiwi physical observation width must be 9, got {actual}")]
     PhysicalWidth {
         /// Supplied width.
         actual: usize,
     },
-    /// Compiled LeKiwi observation order no longer matches this v1 fusion.
+    /// Compiled `LeKiwi` observation order no longer matches this v1 fusion.
     #[error("compiled LeKiwi observation contract drifted from fusion schema v1")]
     PhysicalContractDrift,
     /// One physical observation was NaN or infinite.
@@ -1157,7 +1157,7 @@ pub enum FlagshipLeKiwiObservationError {
         /// Invalid flattened element.
         element: usize,
     },
-    /// Physical gripper percentage violated its TaskSpec bound.
+    /// Physical gripper percentage violated its `TaskSpec` bound.
     #[error("LeKiwi physical gripper percentage {value} is outside 0..=100")]
     PhysicalGripperPercent {
         /// Rejected percentage.

@@ -72,7 +72,7 @@ const MOTOR_STREAM: StreamId = StreamId::new(1_004);
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SensorObservedContract {
-    /// Independent WorldRandom seed for sampled frontend noise, not reset parameters.
+    /// Independent `WorldRandom` seed for sampled frontend noise, not reset parameters.
     /// Zero preserves previously recorded nominal evidence.
     #[serde(default, skip_serializing_if = "zero_noise_seed")]
     pub sensor_noise_seed: u64,
@@ -725,7 +725,7 @@ impl SensorFixedObservation {
 /// Fixed-period actor/action/reward/horizon contract, distinct from event-driven
 /// voltage replay. All actor tensors are F64; validity and freshness are 0/1 masks.
 /// Joint reset distributions remain specified by `SensorObservedContract`, not
-/// duplicated as an incomplete generic TaskSpec randomization distribution.
+/// duplicated as an incomplete generic `TaskSpec` randomization distribution.
 pub fn sensor_fixed_task_spec() -> TaskSpec {
     let tensors = [
         ("estimate_valid", vec![], "1"),
@@ -791,7 +791,7 @@ pub struct SensorFixedStep {
 ///
 /// Unlike the event-driven reference trace, voltage decisions occur every 10 ms.
 /// Backend, sensor queues, drive state and estimator persist between calls. Reset
-/// reconstructs them all. Rewards are evaluator-only values under the fixed TaskSpec.
+/// reconstructs them all. Rewards are evaluator-only values under the fixed `TaskSpec`.
 pub struct SensorFixedEnvironment<B: PhysicsBackend> {
     runtime: SensorObservedRuntime<B>,
     latest: Option<SensorTickDecision>,
@@ -1242,6 +1242,7 @@ impl<B: PhysicsBackend> SensorObservedRuntime<B> {
     }
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (217/150 lines); see PR body
 fn run_sensor_observed_execution<B: PhysicsBackend>(
     backend: B,
     manifest: PhysicsBackendManifest,

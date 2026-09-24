@@ -28,7 +28,7 @@ pub struct PlanningOptions {
     pub waypoint_duration_s: f64,
     /// Velocity scaling factor in `(0, 1]` applied by time parameterization.
     pub velocity_scaling_factor: f64,
-    /// Per-joint acceleration limits in rad/s^2 or m/s^2, in DoF order.
+    /// Per-joint acceleration limits in rad/s^2 or m/s^2, in `DoF` order.
     ///
     /// An empty vector leaves acceleration unconstrained and yields
     /// piecewise-constant velocity timing. A non-empty vector must match the

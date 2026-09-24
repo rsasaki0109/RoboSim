@@ -256,7 +256,7 @@ pub fn validate_accelerator_scaffold_name(name: &str) -> Result<(), AcceleratorS
 /// Creates an offline accelerator protocol-v1 authoring scaffold.
 ///
 /// The new directory is `parent_dir/name` and contains a dependency-free
-/// Python JSONL adapter, a passing transport fixture, TaskSpec, manifest,
+/// Python JSONL adapter, a passing transport fixture, `TaskSpec`, manifest,
 /// runtime pins, model placeholder, requirements, selection record, and
 /// authoring guide. The fixture is a test double, not independent evidence;
 /// authors must replace its dispatch function with their own runtime backend.

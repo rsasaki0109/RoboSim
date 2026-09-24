@@ -1,4 +1,4 @@
-//! Controller-visible mobility observations assembled only from DataBus frames.
+//! Controller-visible mobility observations assembled only from `DataBus` frames.
 
 use crate::DiffDriveObservation;
 use rne_core::SimTime;
@@ -7,7 +7,7 @@ use rne_data::{
 };
 use thiserror::Error;
 
-/// DataBus streams required to build one differential-drive actor observation.
+/// `DataBus` streams required to build one differential-drive actor observation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DiffDriveActorStreams {
     /// Localization or estimator pose stream.
@@ -18,14 +18,14 @@ pub struct DiffDriveActorStreams {
     pub right_wheel_encoder: StreamId,
     /// IMU stream.
     pub imu: StreamId,
-    /// LiDAR point-cloud stream.
+    /// `LiDAR` point-cloud stream.
     pub lidar: StreamId,
 }
 
 /// Timing and sequence metadata retained beside one actor-visible payload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ActorFrameMetadata {
-    /// DataBus stream identifier.
+    /// `DataBus` stream identifier.
     pub stream_id: StreamId,
     /// Source sequence number.
     pub sequence: u64,
@@ -56,7 +56,7 @@ pub struct DiffDriveActorObservationFrame {
     pub right_wheel_encoder: ActorFrameMetadata,
     /// IMU input metadata.
     pub imu: ActorFrameMetadata,
-    /// LiDAR input metadata.
+    /// `LiDAR` input metadata.
     pub lidar: ActorFrameMetadata,
 }
 
@@ -101,7 +101,7 @@ pub enum DiffDriveActorObservationError {
     },
 }
 
-/// Builds a differential-drive policy input exclusively from available DataBus frames.
+/// Builds a differential-drive policy input exclusively from available `DataBus` frames.
 ///
 /// `goal_x_m` is task data rather than simulator state. Frames captured in the
 /// future or still inside their declared latency window are invisible because

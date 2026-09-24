@@ -7,6 +7,7 @@ use rne_mobility_benchmark::suspension_runs::{SuspensionRunInput, SuspensionRunR
 use std::{fs, process::Command};
 
 #[test]
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (684/150 lines); see PR body
 fn whole_run_cli_generates_and_reverifies_all_diagnostic_envelopes() {
     let root = std::env::temp_dir().join(format!("rne-suspension-cli-{}", std::process::id()));
     // Exclusive creation: never overwrite or remove another run's directory.

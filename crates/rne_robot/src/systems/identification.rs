@@ -1860,6 +1860,7 @@ pub(crate) enum TireFitAxis {
 /// frozen and evaluated on combined-slip holdout samples, both pooled and by
 /// declared condition. Load sensitivity, road scale, low-speed regularization,
 /// and relaxation lengths come from `template` and are never tuned on holdout.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (152/150 lines); see PR body
 pub fn identify_combined_slip_tire_steady(
     identification: TireIdentificationSpec,
     template: CombinedSlipTireSpec,

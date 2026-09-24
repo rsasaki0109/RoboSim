@@ -2,7 +2,7 @@
 //!
 //! Mounts the camera on the official G1 `head_link`, draws the Gaussian splat
 //! environment behind the robot meshes, and writes a small capture report.
-//! Contest scoring and the full RGB-D DataBus path stay in examples 75 / 71.
+//! Contest scoring and the full RGB-D `DataBus` path stay in examples 75 / 71.
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{

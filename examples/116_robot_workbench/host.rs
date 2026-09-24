@@ -63,7 +63,7 @@ impl std::fmt::Debug for Host {
 }
 
 impl Host {
-    pub fn new(project: Project, asset_root: PathBuf) -> Result<Self> {
+    pub(crate) fn new(project: Project, asset_root: PathBuf) -> Result<Self> {
         let simulation = Simulation::new(project, Some(&asset_root))?;
         let (focus, distance_m) = simulation.camera_fit();
         let mut meshes = MeshRenderCache::new();
@@ -82,7 +82,7 @@ impl Host {
         })
     }
 
-    pub fn command(&mut self, command: Command) -> Result<()> {
+    pub(crate) fn command(&mut self, command: Command) -> Result<()> {
         match command {
             Command::Step { steps } => self.simulation.step(steps)?,
             Command::Targets { targets } => self.simulation.set_targets(targets)?,
@@ -142,7 +142,7 @@ impl Host {
         Ok(())
     }
 
-    pub fn snapshot(&mut self) -> Result<Value> {
+    pub(crate) fn snapshot(&mut self) -> Result<Value> {
         let mut scene = self.simulation.render_scene();
         self.meshes.resolve_scene(&mut scene, &[&self.asset_root])?;
         let mut camera = Camera::new(640, 400, 0.9);

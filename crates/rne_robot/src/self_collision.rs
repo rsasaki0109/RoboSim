@@ -160,7 +160,7 @@ pub struct SelfCollisionPair {
 
 /// A collision body rigidly attached to a robot link.
 ///
-/// This is the RNE analogue of MoveIt's `AttachedBody`: a grasped or mounted
+/// This is the RNE analogue of `MoveIt`'s `AttachedBody`: a grasped or mounted
 /// object whose geometry moves with the link. It is tested against other links
 /// and world objects, except for the links in `touch_links` (for example the
 /// gripper that holds it).
@@ -221,7 +221,7 @@ impl SelfCollisionReport {
 
 /// Set of link pairs whose collision checks are explicitly skipped.
 ///
-/// This is the RNE analogue of MoveIt's allowed collision matrix (ACM). The
+/// This is the RNE analogue of `MoveIt`'s allowed collision matrix (ACM). The
 /// checker tests every otherwise-eligible pair unless the pair is present here.
 /// Pairs are stored in canonical entity order, so `allow(a, b)` and
 /// `allow(b, a)` describe the same entry.
@@ -364,7 +364,7 @@ impl PathCollisionReport {
 
 /// A static collision object in world space.
 ///
-/// This is the RNE analogue of MoveIt's `CollisionObject`: a named primitive in
+/// This is the RNE analogue of `MoveIt`'s `CollisionObject`: a named primitive in
 /// the world that planners can add, look up, and remove.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CollisionWorldObject {
@@ -407,7 +407,7 @@ impl CollisionWorldObject {
 
 /// A triangle-mesh collision object in world space.
 ///
-/// This is the RNE approximation of MoveIt's mesh collision geometry. Meshes are
+/// This is the RNE approximation of `MoveIt`'s mesh collision geometry. Meshes are
 /// tested against robot spheres and capsules (exact point/segment-to-triangle
 /// distance) and against line-of-sight segments (ray/triangle intersection);
 /// cuboid-vs-mesh uses the mesh AABB, which is conservative.
@@ -723,7 +723,7 @@ impl WorldCollisionDistanceReport {
 
 /// Backend-neutral container of world collision objects.
 ///
-/// This is the MoveIt `CollisionWorld` analogue: objects live in world space and
+/// This is the `MoveIt` `CollisionWorld` analogue: objects live in world space and
 /// are tested against a robot's link colliders evaluated through
 /// [`SelfCollisionChecker`]. It is deliberately independent of any physics
 /// backend.
@@ -1247,7 +1247,7 @@ impl SelfCollisionChecker {
 
     /// Finds the closest checked link pair and its signed distance.
     ///
-    /// This is the MoveIt `distanceRobot` analogue: the reported value is
+    /// This is the `MoveIt` `distanceRobot` analogue: the reported value is
     /// negative when the closest pair penetrates and positive when separated.
     pub fn distance(&self, q: &[f64]) -> Result<SelfCollisionDistanceReport, KinematicsError> {
         let state = self.model.forward_kinematics(q)?;
@@ -1281,7 +1281,7 @@ impl SelfCollisionChecker {
 
     /// Tests a joint-space path by sampling uniformly between two endpoints.
     ///
-    /// This is the MoveIt `isPathValid` analogue. Sampling is deterministic and
+    /// This is the `MoveIt` `isPathValid` analogue. Sampling is deterministic and
     /// stops at the first colliding configuration. `steps` is clamped to at
     /// least one segment, so both endpoints are always tested.
     pub fn check_path(
@@ -1937,7 +1937,7 @@ mod tests {
                 name: "base".into(),
             },
             Transform3::IDENTITY,
-            rne_physics::Collider::sphere(0.1),
+            Collider::sphere(0.1),
         ));
         world.entity_mut(link1).insert((
             Link {
@@ -1948,7 +1948,7 @@ mod tests {
                 Vec3::new(0.3, 0.0, 0.0),
                 rne_math::Quat::IDENTITY,
             ),
-            rne_physics::Collider::sphere(0.2),
+            Collider::sphere(0.2),
         ));
         world.entity_mut(link2).insert((
             Link {
@@ -1959,7 +1959,7 @@ mod tests {
                 Vec3::new(0.3, 0.0, 0.0),
                 rne_math::Quat::IDENTITY,
             ),
-            rne_physics::Collider::sphere(0.2),
+            Collider::sphere(0.2),
         ));
         world.entity_mut(robot).insert(Robot {
             robot_id: Default::default(),

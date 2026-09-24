@@ -48,6 +48,19 @@ pub struct SensorSampleContext<'a, B: PhysicsBackend> {
     pub scene: Option<&'a RenderScene>,
 }
 
+impl<B: PhysicsBackend> std::fmt::Debug for SensorSampleContext<'_, B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `world` (`bevy_ecs::World`) and `render` (`dyn RenderBackend`) do
+        // not implement `Debug`.
+        f.debug_struct("SensorSampleContext")
+            .field("sim_time", &self.sim_time)
+            .field("physics_world", &self.physics_world)
+            .field("render_present", &self.render.is_some())
+            .field("scene_present", &self.scene.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 /// Stream-id offset for paired depth frames published beside RGB camera streams.
 pub const CAMERA_DEPTH_STREAM_OFFSET: u64 = 50;
 
@@ -80,14 +93,15 @@ fn sampling_jitter_delay_ticks(
     ((unit * (maximum as f64 + 1.0)) as u64).min(maximum)
 }
 
-/// Samples all enabled sensors and publishes frames to the DataBus.
+/// Samples all enabled sensors and publishes frames to the `DataBus`.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (176/150 lines); see PR body
 pub fn sample_sensors<B: PhysicsBackend>(
     ctx: &mut SensorSampleContext<'_, B>,
     bus: &mut impl DataBus,
 ) -> usize {
     let mut published = 0_usize;
-    let mut updates: Vec<(rne_ecs::Entity, SensorState)> = Vec::new();
-    let mut imu_updates: Vec<(rne_ecs::Entity, ImuState, ImuKinematicState)> = Vec::new();
+    let mut updates: Vec<(Entity, SensorState)> = Vec::new();
+    let mut imu_updates: Vec<(Entity, ImuState, ImuKinematicState)> = Vec::new();
     let mut headless_render = HeadlessRenderBackend::new();
     let empty_scene = RenderScene::new();
     let world_seed = ctx
@@ -888,6 +902,7 @@ pub enum MotorElectricalFeedbackError {
 /// deterministic white noise, measurement-range saturation, quantization, stuck
 /// substitution, frame dropout, then output latency. Command targets are never read.
 /// Every due sensor is validated before any state or frame is published.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (173/150 lines); see PR body
 pub fn sample_motor_electrical_feedback_sensors(
     world: &mut World,
     sim_time: SimTime,
@@ -1538,21 +1553,13 @@ mod tests {
         fn create_world(&mut self, _: PhysicsWorldDesc) -> Result<PhysicsWorldId, PhysicsError> {
             Ok(PhysicsWorldId::DEFAULT)
         }
-        fn sync_from_ecs(
-            &mut self,
-            _: &mut rne_ecs::World,
-            _: PhysicsWorldId,
-        ) -> Result<(), PhysicsError> {
+        fn sync_from_ecs(&mut self, _: &mut World, _: PhysicsWorldId) -> Result<(), PhysicsError> {
             Ok(())
         }
         fn step(&mut self, _: PhysicsWorldId, _: SimDuration) -> Result<(), PhysicsError> {
             Ok(())
         }
-        fn sync_to_ecs(
-            &mut self,
-            _: &mut rne_ecs::World,
-            _: PhysicsWorldId,
-        ) -> Result<(), PhysicsError> {
+        fn sync_to_ecs(&mut self, _: &mut World, _: PhysicsWorldId) -> Result<(), PhysicsError> {
             Ok(())
         }
         fn raycast(
@@ -1571,7 +1578,7 @@ mod tests {
     }
 
     struct LidarHitPhysics {
-        target: rne_ecs::Entity,
+        target: Entity,
     }
 
     impl PhysicsBackend for LidarHitPhysics {
@@ -1581,21 +1588,13 @@ mod tests {
         fn create_world(&mut self, _: PhysicsWorldDesc) -> Result<PhysicsWorldId, PhysicsError> {
             Ok(PhysicsWorldId::DEFAULT)
         }
-        fn sync_from_ecs(
-            &mut self,
-            _: &mut rne_ecs::World,
-            _: PhysicsWorldId,
-        ) -> Result<(), PhysicsError> {
+        fn sync_from_ecs(&mut self, _: &mut World, _: PhysicsWorldId) -> Result<(), PhysicsError> {
             Ok(())
         }
         fn step(&mut self, _: PhysicsWorldId, _: SimDuration) -> Result<(), PhysicsError> {
             Ok(())
         }
-        fn sync_to_ecs(
-            &mut self,
-            _: &mut rne_ecs::World,
-            _: PhysicsWorldId,
-        ) -> Result<(), PhysicsError> {
+        fn sync_to_ecs(&mut self, _: &mut World, _: PhysicsWorldId) -> Result<(), PhysicsError> {
             Ok(())
         }
         fn raycast(
@@ -1769,7 +1768,7 @@ mod tests {
                     noise: NoiseModel {
                         angular_stddev_rad_s: 0.1,
                         linear_stddev_m_s2: 0.2,
-                        linear_bias_m_s2: rne_math::Vec3::ZERO,
+                        linear_bias_m_s2: Vec3::ZERO,
                     },
                     seed: 9,
                     ..ImuSpec::default()

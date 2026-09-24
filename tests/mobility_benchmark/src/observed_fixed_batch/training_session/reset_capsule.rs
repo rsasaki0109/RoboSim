@@ -37,6 +37,7 @@ impl CapturedResetAttempt {
     /// Writes a failed reset into a new directory, with metadata written last.
     /// References bind exact bytes, not producer authenticity or physical replay.
     /// Existing directories are never overwritten; partial files remain on error.
+    #[allow(clippy::too_many_lines)] // TODO(cleanup): split (167/150 lines); see PR body
     pub fn write_new(
         &self,
         directory: &std::path::Path,

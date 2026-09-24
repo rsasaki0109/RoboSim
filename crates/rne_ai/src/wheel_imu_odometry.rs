@@ -17,7 +17,7 @@ pub const WHEEL_IMU_SENSOR_ONLY_TASK_ID: &str = "rne.mobility.wheel_imu_sensor_o
 /// Signed counter width used by four-wheel derived side streams.
 pub const FOUR_WHEEL_SIDE_FUSED_COUNTER_BITS: u8 = 63;
 
-/// DataBus streams consumed by [`WheelImuOdometry`].
+/// `DataBus` streams consumed by [`WheelImuOdometry`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WheelImuOdometryStreams {
     /// Left incremental-encoder stream.
@@ -737,7 +737,7 @@ struct AcceptedInputs {
     oldest_capture_ticks: u64,
 }
 
-/// Deterministic planar estimator whose public update boundary accepts only DataBus frames.
+/// Deterministic planar estimator whose public update boundary accepts only `DataBus` frames.
 #[derive(Clone, Debug)]
 pub struct WheelImuOdometry {
     config: WheelImuOdometryConfig,
@@ -945,6 +945,7 @@ impl WheelImuOdometry {
         ))
     }
 
+    // Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
     #[allow(clippy::too_many_arguments)]
     fn estimate(
         &self,

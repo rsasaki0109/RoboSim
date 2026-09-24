@@ -1,4 +1,4 @@
-//! Verified MuJoCo state playback through RoboSim's world and wgpu renderer.
+//! Verified `MuJoCo` state playback through `RoboSim`'s world and wgpu renderer.
 //! This path never advances the native physics world.
 
 use super::*;

@@ -260,6 +260,7 @@ fn validate_controller_trace(backend: &str, trace: &[FlagshipRecordedStep]) -> R
     Ok(())
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn run_case(
     output: &Path,

@@ -130,7 +130,7 @@ where
     entity.insert(AttachedPolicy);
 }
 
-/// Refreshes an agent observation from controller-visible DataBus frames.
+/// Refreshes an agent observation from controller-visible `DataBus` frames.
 pub fn observe_shared_diff_drive_agent(
     sim: &mut DiffDriveSim,
     agent: Entity,

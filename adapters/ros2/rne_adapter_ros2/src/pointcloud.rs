@@ -1,4 +1,4 @@
-//! LiDAR point cloud mapping helpers.
+//! `LiDAR` point cloud mapping helpers.
 
 use crate::messages::{RosHeader, RosPointCloud2, RosPointField};
 use rne_core::SimTime;

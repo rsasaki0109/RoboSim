@@ -442,6 +442,8 @@ fn register_services(node: &rclrs::Node, bridge: Arc<BridgeLoop>) -> Result<Brid
     })
 }
 
+// Tuple of optional per-topic subscription handles; a named struct would add
+// indirection without clarifying the 1:1 mapping to the topics below.
 #[allow(clippy::type_complexity)]
 fn register_manipulator_subscribers(
     node: &rclrs::Node,

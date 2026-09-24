@@ -1,4 +1,4 @@
-//! Prints the built-in LeKiwi reference profile or its TaskSpec.
+//! Prints the built-in `LeKiwi` reference profile or its `TaskSpec`.
 
 use rne_hardware_lekiwi::{lekiwi_base_task_spec, lekiwi_reference_profile_v1};
 

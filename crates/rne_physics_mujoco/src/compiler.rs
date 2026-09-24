@@ -1,4 +1,4 @@
-//! Deterministic ECS-to-MJCF compilation kept private to the MuJoCo adapter.
+//! Deterministic ECS-to-MJCF compilation kept private to the `MuJoCo` adapter.
 
 use rne_ecs::{Entity, Parent, World};
 use rne_math::{Quat, Vec3};
@@ -500,6 +500,7 @@ fn validate_actuation(world: &World, entity: Entity, joint: JointSpec) -> Result
     }
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn write_body(
     output: &mut String,

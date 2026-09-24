@@ -33,6 +33,7 @@ fn native_pose(frame: &Value) -> MathTransform {
     MathTransform::from_translation_rotation(Vec3::from_array(position), rotation)
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (161/150 lines); see PR body
 pub(super) fn run() {
     let args: Vec<_> = std::env::args().collect();
     let index = args

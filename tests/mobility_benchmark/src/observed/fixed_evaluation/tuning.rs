@@ -84,7 +84,7 @@ pub struct PiSelectionReport {
 /// increasing. The factory constructs independent backends with a stable manifest.
 /// Any candidate with an execution error is ineligible; failed speed gates remain
 /// eligible and scored. Selection minimizes mean integral error, equivalently
-/// maximizes this fixed-horizon TaskSpec's summed reward. Ties use caller order.
+/// maximizes this fixed-horizon `TaskSpec`'s summed reward. Ties use caller order.
 /// This function never retunes based on held-out results. Panics are not caught.
 pub fn select_fixed_pi_policy<B: PhysicsBackend>(
     factory: impl Fn() -> Result<(B, PhysicsBackendManifest)>,

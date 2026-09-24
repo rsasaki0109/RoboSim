@@ -8,7 +8,7 @@ use std::collections::{HashMap, VecDeque};
 use std::num::NonZeroUsize;
 use thiserror::Error;
 
-/// DataBus publish/subscribe error.
+/// `DataBus` publish/subscribe error.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum DataBusError {
     /// Stream does not exist.
@@ -37,7 +37,7 @@ impl SubscriptionCursor {
     }
 }
 
-/// Backend-agnostic DataBus interface.
+/// Backend-agnostic `DataBus` interface.
 pub trait DataBus {
     /// Publishes a typed frame.
     fn publish<T: FramePayload>(&mut self, frame: Frame<T>);
@@ -71,11 +71,22 @@ struct TypedStream {
     dropped_frames: u64,
 }
 
-/// In-memory typed DataBus for simulation and tests.
+/// In-memory typed `DataBus` for simulation and tests.
 #[derive(Default)]
 pub struct InMemoryDataBus {
     streams: HashMap<StreamId, TypedStream>,
     capacity_per_stream: Option<NonZeroUsize>,
+}
+
+impl std::fmt::Debug for InMemoryDataBus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Stream frames are type-erased (`Box<dyn Any + Send + Sync>`), so
+        // only the stream count is reported.
+        f.debug_struct("InMemoryDataBus")
+            .field("stream_count", &self.streams.len())
+            .field("capacity_per_stream", &self.capacity_per_stream)
+            .finish_non_exhaustive()
+    }
 }
 
 impl InMemoryDataBus {

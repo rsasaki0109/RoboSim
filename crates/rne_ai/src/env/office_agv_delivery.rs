@@ -220,7 +220,7 @@ pub fn office_agv_delivery_scene_path() -> PathBuf {
     bundled_asset_path(Path::new("scenes/office_agv_delivery.rne.scene.toml"))
 }
 
-/// Portable TaskSpec for the office AGV delivery analog.
+/// Portable `TaskSpec` for the office AGV delivery analog.
 #[must_use]
 pub fn office_agv_delivery_task_spec(max_episode_steps: u64) -> TaskSpec {
     TaskSpec::new(
@@ -300,7 +300,7 @@ pub struct OfficeAgvDeliveryObservation {
     pub left_wheel_velocity_rad_s: f64,
     /// Right wheel command in radians per second.
     pub right_wheel_velocity_rad_s: f64,
-    /// Latest LiDAR point count.
+    /// Latest `LiDAR` point count.
     pub lidar_points: usize,
     /// True when the body leaves the corridor half-width.
     pub out_of_corridor: bool,

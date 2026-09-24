@@ -7,6 +7,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 libloading = { workspace = true }
 rne_plugin_sdk = { workspace = true }

@@ -1,4 +1,4 @@
-//! Headless RoboCup SSL Division B 2v2 analog.
+//! Headless `RoboCup` SSL Division B 2v2 analog.
 //!
 //! Scores official field geometry (goal mouth, out-of-bounds, 6.5 m/s ball
 //! cap). This is not grSim and does not bind the SSL protobuf ports.

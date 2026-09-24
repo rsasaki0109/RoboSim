@@ -27,7 +27,7 @@ pub(crate) const ARCHIVE_INSTALL_REHEARSAL_REPORT_SCHEMA_VERSION: u32 = 2;
 pub(crate) const PYTHON_API_CONTRACT_SCHEMA_VERSION: u32 = 1;
 /// Installed Python public-API verification report schema.
 pub(crate) const PYTHON_API_REPORT_SCHEMA_VERSION: u32 = 1;
-/// Bundled MuJoCo runtime provenance manifest schema.
+/// Bundled `MuJoCo` runtime provenance manifest schema.
 pub(crate) const MUJOCO_RUNTIME_MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// Independently produced installed flagship reproduction report schema.
 pub(crate) const EXTERNAL_FLAGSHIP_REPRODUCTION_REPORT_SCHEMA_VERSION: u32 = 2;
@@ -1239,6 +1239,7 @@ pub(crate) fn release_install_smoke(args: &mut impl Iterator<Item = String>) -> 
 }
 
 /// Verifies a third-party installed flagship run against the exact release archive.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (178/150 lines); see PR body
 pub(crate) fn external_flagship_check(
     args: &mut impl Iterator<Item = String>,
 ) -> anyhow::Result<()> {
@@ -1909,6 +1910,7 @@ fn validate_timing_platform(report: &TimeToProofReport, target: &str) -> anyhow:
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (189/150 lines); see PR body
 fn validate_external_cross_backend_report(path: &Path) -> anyhow::Result<(u64, u64)> {
     let report: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
     anyhow::ensure!(
@@ -2635,6 +2637,7 @@ fn release_evidence_dir(metadata: &serde_json::Value, target: &str) -> anyhow::R
     Ok(target_dir.join("release-evidence").join(target))
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (383/150 lines); see PR body
 fn run_install_rehearsal(
     bundle_dir: &Path,
     output_dir: &Path,
@@ -3926,7 +3929,7 @@ fn files_with_extension(directory: &Path, extension: &str) -> anyhow::Result<Vec
 fn collect_files(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
     fn visit(directory: &Path, files: &mut Vec<PathBuf>) -> anyhow::Result<()> {
         let mut entries = fs::read_dir(directory)?.collect::<Result<Vec<_>, _>>()?;
-        entries.sort_by_key(std::fs::DirEntry::file_name);
+        entries.sort_by_key(fs::DirEntry::file_name);
         for entry in entries {
             let path = entry.path();
             let file_type = entry.file_type()?;
@@ -4344,6 +4347,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // TODO(cleanup): split (208/150 lines); see PR body
     fn installed_flagship_proof_rehashes_every_declared_artifact() {
         let directory = tempfile::tempdir().expect("temporary proof");
         let bundle_root = directory.path().join("rne-0.3.0-test-target");

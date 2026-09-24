@@ -1,7 +1,7 @@
 //! Backend-neutral joint-space motion planning for Robot Native Engine.
 //!
 //! `rne_planning` provides a native, MoveIt-inspired planning stack without any
-//! MoveIt, ROS, physics-backend, or renderer dependency:
+//! `MoveIt`, ROS, physics-backend, or renderer dependency:
 //!
 //! - [`PlanningScene`] combines the robot's [`rne_robot::KinematicModel`], its
 //!   self-collision checker, static world collision objects, and the kinematics
@@ -21,7 +21,7 @@
 //!   (orientation, position, or visibility), and [`ConstraintSampler`] draws
 //!   configurations satisfying a goal constraint.
 //! - [`parse_srdf`] and [`PlanningScene::apply_srdf`] load planning groups from
-//!   a MoveIt SRDF document.
+//!   a `MoveIt` SRDF document.
 //! - [`CartesianPathPlanner`] follows end-link waypoints with inverse
 //!   kinematics and reports the completed fraction; [`circular_waypoints`]
 //!   builds a circular arc (Pilz `CIRC`) for it.

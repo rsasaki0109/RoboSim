@@ -1299,6 +1299,7 @@ fn validate_blocker_registry(registry: &toml::Value) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (586/150 lines); see PR body
 fn validate_contract_registry(registry: &toml::Value) -> anyhow::Result<()> {
     anyhow::ensure!(
         registry
@@ -2128,6 +2129,7 @@ fn scenario_scale(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()>
     )
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (200/150 lines); see PR body
 fn behavior_ci(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let root = workspace_root()?;
     let behavior_artifacts = artifacts_dir(&root)?.join("behavior-ci");
@@ -2362,6 +2364,7 @@ fn behavior_replay(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()
 }
 
 /// Reproduces the release flagship success, minimized failure, and capsule.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (251/150 lines); see PR body
 fn flagship(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> {
     let mut cross_backend = false;
     for argument in args {
@@ -2742,7 +2745,7 @@ fn ci() -> anyhow::Result<()> {
     ci_lint()?;
     ci_test()?;
     ci_smoke(None)?;
-    if std::env::var("RNE_SKIP_RL_SMOKES").is_ok() {
+    if env::var("RNE_SKIP_RL_SMOKES").is_ok() {
         eprintln!("skipping mobile_manipulator_rl_smokes (RNE_SKIP_RL_SMOKES is set)");
     } else {
         ci_rl()?;
@@ -3141,10 +3144,7 @@ fn validate_showcase_media_sha256(digest: &str, media_id: &str, field: &str) -> 
         digest.strip_prefix("sha256:").is_some_and(|hex| {
             hex.len() == 64 && hex.chars().all(|character| character.is_ascii_hexdigit())
         }),
-        "showcase media entry {} {} must be sha256:<64 hex digits>: {:?}",
-        media_id,
-        field,
-        digest
+        "showcase media entry {media_id} {field} must be sha256:<64 hex digits>: {digest:?}"
     );
     Ok(())
 }
@@ -3156,25 +3156,17 @@ fn validate_showcase_media_reference(
 ) -> anyhow::Result<()> {
     anyhow::ensure!(
         !reference.trim().is_empty(),
-        "showcase media entry {} has an empty {} reference",
-        media_id,
-        field
+        "showcase media entry {media_id} has an empty {field} reference"
     );
     anyhow::ensure!(
         !reference.contains('\\'),
-        "showcase media entry {} {} reference must use forward slashes: {:?}",
-        media_id,
-        field,
-        reference
+        "showcase media entry {media_id} {field} reference must use forward slashes: {reference:?}"
     );
     let path = Path::new(reference);
     anyhow::ensure!(
         path.components()
             .all(|component| matches!(component, Component::Normal(_))),
-        "showcase media entry {} {} reference must be a workspace-relative path without . or ..: {:?}",
-        media_id,
-        field,
-        reference
+        "showcase media entry {media_id} {field} reference must be a workspace-relative path without . or ..: {reference:?}"
     );
     Ok(())
 }
@@ -3215,8 +3207,7 @@ fn showcase_media_check() -> anyhow::Result<()> {
     for expected_id in expected_ids {
         anyhow::ensure!(
             manifest.media.iter().any(|media| media.id == expected_id),
-            "showcase media manifest is missing required {} entry",
-            expected_id
+            "showcase media manifest is missing required {expected_id} entry"
         );
     }
 
@@ -3356,6 +3347,7 @@ fn showcase_media_check() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (166/150 lines); see PR body
 fn validate_showcase_metadata(
     root: &Path,
     media: &ShowcaseMediaEntry,
@@ -3727,7 +3719,7 @@ fn capture_u64(
     capture
         .get(field)
         .and_then(serde_json::Value::as_u64)
-        .ok_or_else(|| anyhow::anyhow!("showcase {} metadata capture missing {}", media_id, field))
+        .ok_or_else(|| anyhow::anyhow!("showcase {media_id} metadata capture missing {field}"))
 }
 
 fn normalize_showcase_metadata_sha(
@@ -3738,9 +3730,7 @@ fn normalize_showcase_metadata_sha(
     let digest = capture
         .get(field)
         .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            anyhow::anyhow!("showcase {} metadata capture missing {}", media_id, field)
-        })?;
+        .ok_or_else(|| anyhow::anyhow!("showcase {media_id} metadata capture missing {field}"))?;
     normalize_showcase_sha(digest, media_id, field)
 }
 
@@ -3752,7 +3742,7 @@ fn validate_showcase_metadata_sha_field(
     let digest = metadata
         .get(field)
         .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| anyhow::anyhow!("showcase {} metadata missing {}", media_id, field))?;
+        .ok_or_else(|| anyhow::anyhow!("showcase {media_id} metadata missing {field}"))?;
     normalize_showcase_sha(digest, media_id, field).map(|_| ())
 }
 
@@ -3760,9 +3750,7 @@ fn normalize_showcase_sha(value: &str, media_id: &str, field: &str) -> anyhow::R
     let hex = value.strip_prefix("sha256:").unwrap_or(value);
     anyhow::ensure!(
         hex.len() == 64 && hex.chars().all(|character| character.is_ascii_hexdigit()),
-        "showcase {} {} must be a 64-digit SHA-256",
-        media_id,
-        field
+        "showcase {media_id} {field} must be a 64-digit SHA-256"
     );
     Ok(format!("sha256:{}", hex.to_ascii_lowercase()))
 }
@@ -3776,10 +3764,7 @@ fn ensure_showcase_file_exists(
     let path = ensure_showcase_reference_exists(root, reference, media_id, field)?;
     anyhow::ensure!(
         path.is_file(),
-        "showcase {} {} reference is not a file: {}",
-        media_id,
-        field,
-        reference
+        "showcase {media_id} {field} reference is not a file: {reference}"
     );
     Ok(path)
 }
@@ -3793,10 +3778,7 @@ fn ensure_showcase_reference_exists(
     let path = resolve_showcase_media_path(root, reference, media_id, field)?;
     anyhow::ensure!(
         path.exists(),
-        "showcase {} {} reference does not exist: {}",
-        media_id,
-        field,
-        reference
+        "showcase {media_id} {field} reference does not exist: {reference}"
     );
     Ok(path)
 }
@@ -3882,11 +3864,7 @@ fn inspect_gif_frame_progression(
         } else {
             anyhow::ensure!(
                 frame_width == width && frame_height == height,
-                "README hero GIF frame dimensions changed at frame {frame_count}: expected {}x{}, got {}x{}",
-                width,
-                height,
-                frame_width,
-                frame_height
+                "README hero GIF frame dimensions changed at frame {frame_count}: expected {width}x{height}, got {frame_width}x{frame_height}"
             );
         }
 
@@ -3896,9 +3874,7 @@ fn inspect_gif_frame_progression(
     anyhow::ensure!(frame_count > 0, "README hero GIF has no decoded frames");
     anyhow::ensure!(
         expected_frame_count == frame_count,
-        "showcase GIF frame count mismatch: expected {}, got {}",
-        expected_frame_count,
-        frame_count
+        "showcase GIF frame count mismatch: expected {expected_frame_count}, got {frame_count}"
     );
 
     Ok(GifFrameProgression {
@@ -4173,7 +4149,7 @@ fn lint_boundaries() -> anyhow::Result<()> {
     let forbidden = ["rcl", "rclrs", "rclcpp", "ros2", "adapters/", "../adapters"];
 
     for manifest in find_cargo_tomls(&workspace_root.join("crates"))? {
-        let content = std::fs::read_to_string(&manifest)?;
+        let content = fs::read_to_string(&manifest)?;
         for line in content.lines() {
             let trimmed = line.trim();
             if !trimmed.starts_with('"') && !trimmed.contains(" = ") {
@@ -4192,7 +4168,7 @@ fn lint_boundaries() -> anyhow::Result<()> {
     }
 
     let traffic_manifest = workspace_root.join("crates/rne_traffic/Cargo.toml");
-    let traffic_content = std::fs::read_to_string(&traffic_manifest)?;
+    let traffic_content = fs::read_to_string(&traffic_manifest)?;
     let traffic_forbidden = [
         "rne_ai",
         "rne_physics",
@@ -4231,11 +4207,11 @@ fn lint_boundaries() -> anyhow::Result<()> {
 /// Set `RNE_SKIP_PINOCCHIO_GOLDEN=1` to skip. Set `RNE_PINOCCHIO_REGEN=1` to enable
 /// regeneration (default: skip regen, rely on committed JSON + `cargo test`).
 fn pinocchio_golden_optional() -> anyhow::Result<()> {
-    if std::env::var("RNE_SKIP_PINOCCHIO_GOLDEN").is_ok() {
+    if env::var("RNE_SKIP_PINOCCHIO_GOLDEN").is_ok() {
         eprintln!("skipping pinocchio golden check (RNE_SKIP_PINOCCHIO_GOLDEN is set)");
         return Ok(());
     }
-    if std::env::var("RNE_PINOCCHIO_REGEN").is_err() {
+    if env::var("RNE_PINOCCHIO_REGEN").is_err() {
         return Ok(());
     }
     if !cfg!(target_os = "linux") {
@@ -4327,13 +4303,13 @@ fn workspace_root() -> anyhow::Result<PathBuf> {
     Ok(PathBuf::from(root))
 }
 
-fn find_cargo_tomls(dir: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
+fn find_cargo_tomls(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let mut manifests = Vec::new();
     if !dir.exists() {
         return Ok(manifests);
     }
 
-    for entry in std::fs::read_dir(dir)? {
+    for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {

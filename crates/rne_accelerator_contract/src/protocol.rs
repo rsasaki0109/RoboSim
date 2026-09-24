@@ -56,9 +56,9 @@ pub struct AcceleratorProtocolTranscript {
     pub adapter_id: String,
     /// Bound task identifier.
     pub task_id: String,
-    /// Bound TaskSpec schema.
+    /// Bound `TaskSpec` schema.
     pub task_spec_schema: u32,
-    /// Lowercase SHA-256 of canonical TaskSpec JSON.
+    /// Lowercase SHA-256 of canonical `TaskSpec` JSON.
     pub task_spec_sha256: String,
     /// Root seed used by the transcript session.
     pub root_seed: u64,
@@ -125,7 +125,7 @@ impl AcceleratorProtocolTranscript {
         Ok(())
     }
 
-    /// Binds the transcript to its manifest, runtime contract, and exact TaskSpec.
+    /// Binds the transcript to its manifest, runtime contract, and exact `TaskSpec`.
     pub fn validate_against(
         &self,
         manifest: &AcceleratorManifest,

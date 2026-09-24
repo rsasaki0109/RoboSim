@@ -8,6 +8,9 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "rne-accelerator-conformance"
 path = "src/bin/rne-accelerator-conformance.rs"

@@ -6,7 +6,7 @@ use rne_data::JointState;
 use crate::clock::to_ros_time;
 use crate::messages::{RosHeader, RosJointState};
 
-/// Maps a DataBus [`JointState`] payload to `sensor_msgs/JointState`.
+/// Maps a `DataBus` [`JointState`] payload to `sensor_msgs/JointState`.
 pub fn to_ros_joint_state(state: &JointState, sim_time: SimTime, frame_id: &str) -> RosJointState {
     RosJointState {
         header: RosHeader {

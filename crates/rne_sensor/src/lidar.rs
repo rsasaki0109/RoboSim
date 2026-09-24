@@ -1,4 +1,4 @@
-//! Physics-aware LiDAR sensor specification and sampling.
+//! Physics-aware `LiDAR` sensor specification and sampling.
 //!
 //! The model is renderer-independent and deterministic. Every stochastic effect is
 //! drawn from an explicit [`SensorNoiseKey`] slot, so a given key always reproduces
@@ -6,7 +6,7 @@
 //!
 //! # Radiometry
 //!
-//! Returned energy follows the standard single-scattering LiDAR equation reduced to
+//! Returned energy follows the standard single-scattering `LiDAR` equation reduced to
 //! the terms a simulator can evaluate from geometry and material properties:
 //!
 //! ```text
@@ -89,7 +89,7 @@ const SNOW_OCCLUSION_PER_MM_H_M: f64 = 0.000_65;
 /// Golden angle used to spread beam footprint samples.
 const GOLDEN_ANGLE_RAD: f64 = PI * (3.0 - 2.236_067_977_499_79);
 
-/// Behavior when the physics backend cannot evaluate a LiDAR ray.
+/// Behavior when the physics backend cannot evaluate a `LiDAR` ray.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LidarFailureBehavior {
@@ -100,7 +100,7 @@ pub enum LidarFailureBehavior {
     DropScan,
 }
 
-/// Atmospheric conditions that attenuate LiDAR energy along the beam path.
+/// Atmospheric conditions that attenuate `LiDAR` energy along the beam path.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LidarAtmosphere {
     /// Fog extinction coefficient in inverse meters.
@@ -138,7 +138,7 @@ impl LidarAtmosphere {
     }
 }
 
-/// Per-scan deterministic ranges used for LiDAR domain randomization.
+/// Per-scan deterministic ranges used for `LiDAR` domain randomization.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LidarDomainRandomization {
     /// Inclusive fog-extinction range in inverse meters.
@@ -169,7 +169,7 @@ impl LidarDomainRandomization {
 
 /// Sensor pose at the start and end of one scan revolution.
 ///
-/// A spinning LiDAR does not capture a scan instantaneously. Casting every azimuth
+/// A spinning `LiDAR` does not capture a scan instantaneously. Casting every azimuth
 /// column from the sensor pose interpolated across the sweep reproduces the motion
 /// distortion that real point clouds exhibit while the platform moves.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -213,7 +213,7 @@ impl LidarSweep {
     }
 }
 
-/// Scanning LiDAR parameters.
+/// Scanning `LiDAR` parameters.
 ///
 /// Defaults describe a single-plane 360-degree scanner with no noise, which keeps
 /// legacy 2D configurations behaving as before. Set [`Self::channel_count`] and the
@@ -362,7 +362,7 @@ impl LidarSpec {
     }
 }
 
-/// Samples a horizontal LiDAR scan using default materials and no keyed variation.
+/// Samples a horizontal `LiDAR` scan using default materials and no keyed variation.
 ///
 /// This compatibility entry point does not have ECS access, so every surface uses
 /// [`LidarMaterial::default`]. Use [`sample_lidar_keyed`] for material-aware scans.
@@ -564,6 +564,7 @@ enum RayFailure {
     Scan,
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn evaluate_ray<B: PhysicsBackend>(
     backend: &B,
@@ -781,6 +782,7 @@ fn beam_basis(axis: Vec3) -> (Vec3, Vec3) {
     (right, axis.cross(right).normalize_or_zero())
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn surface_returns(
     world: Option<&World>,

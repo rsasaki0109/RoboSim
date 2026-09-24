@@ -120,7 +120,7 @@ pub fn evaluate_office_shared_aisle_block(
     other_occupies_shared && ego_max_x_m >= shared_min_x_m
 }
 
-/// Portable TaskSpec for shared-aisle office delivery.
+/// Portable `TaskSpec` for shared-aisle office delivery.
 #[must_use]
 pub fn office_agv_shared_aisle_task_spec(max_episode_steps: u64) -> TaskSpec {
     TaskSpec::new(
@@ -727,7 +727,7 @@ fn digest_scene_inputs(scene_path: &Path) -> Result<u64, AssetError> {
     Ok(stable_behavior_digest(&bytes))
 }
 
-/// Bundled TaskSpec path for the shared-aisle analog.
+/// Bundled `TaskSpec` path for the shared-aisle analog.
 #[must_use]
 pub fn office_agv_shared_aisle_task_path() -> PathBuf {
     bundled_asset_path(Path::new("tasks/office_agv_shared_aisle.task.json"))

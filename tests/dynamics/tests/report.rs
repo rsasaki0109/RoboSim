@@ -11,6 +11,7 @@ use rne_physics::{PhysicsMaterial, PhysicsWorldDesc, RigidBody};
 use rne_world::Transform3;
 
 #[test]
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (233/150 lines); see PR body
 fn report_measured_errors() {
     let g = -G;
     let y0 = 50.0;

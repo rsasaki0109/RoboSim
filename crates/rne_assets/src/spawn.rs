@@ -53,12 +53,12 @@ impl Default for SpawnSceneOptions {
 const LIDAR_STREAM_BASE: u32 = 200;
 const WRIST_CAMERA_STREAM_BASE: u32 = 400;
 
-/// LiDAR mount spawned with a robot or scene.
+/// `LiDAR` mount spawned with a robot or scene.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LidarMountSpawned {
-    /// Robot base link the LiDAR follows.
+    /// Robot base link the `LiDAR` follows.
     pub base_link: Entity,
-    /// LiDAR sensor entity.
+    /// `LiDAR` sensor entity.
     pub lidar: Entity,
     /// Mount offset from the base link origin in meters.
     pub mount_offset_m: Vec3,
@@ -78,7 +78,7 @@ pub struct WristCameraMountSpawned {
 /// Optional sensors spawned alongside a robot asset.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RobotSensorMounts {
-    /// LiDAR mount when configured.
+    /// `LiDAR` mount when configured.
     pub lidar: Option<LidarMountSpawned>,
     /// Wrist camera mount when configured.
     pub wrist_camera: Option<WristCameraMountSpawned>,
@@ -100,7 +100,7 @@ pub struct SpawnedScene {
     pub world: Entity,
     /// Spawned robots keyed by model name.
     pub robots: Vec<(String, SpawnedRobot)>,
-    /// LiDAR mounts spawned from robot assets.
+    /// `LiDAR` mounts spawned from robot assets.
     pub lidar_mounts: Vec<LidarMountSpawned>,
     /// Wrist camera mounts spawned from robot assets.
     pub wrist_camera_mounts: Vec<WristCameraMountSpawned>,

@@ -1,19 +1,19 @@
-//! LiDAR hit visualization helpers.
+//! `LiDAR` hit visualization helpers.
 
 use crate::scene::{RenderScene, RenderSceneItem};
 use crate::visual::VisualShape;
 use rne_math::{Quat, Transform3 as MathTransform3, Vec3};
 
-/// Default marker radius for LiDAR hit spheres in meters.
+/// Default marker radius for `LiDAR` hit spheres in meters.
 pub const DEFAULT_LIDAR_POINT_RADIUS_M: f64 = 0.04;
 
 impl RenderScene {
-    /// Appends one sphere marker per LiDAR hit using [`DEFAULT_LIDAR_POINT_RADIUS_M`].
+    /// Appends one sphere marker per `LiDAR` hit using [`DEFAULT_LIDAR_POINT_RADIUS_M`].
     pub fn append_lidar_points(&mut self, points_m: &[Vec3], color_rgba: [f32; 4]) {
         self.append_lidar_points_sized(points_m, DEFAULT_LIDAR_POINT_RADIUS_M, color_rgba);
     }
 
-    /// Appends one sphere marker per LiDAR hit with the given radius.
+    /// Appends one sphere marker per `LiDAR` hit with the given radius.
     pub fn append_lidar_points_sized(
         &mut self,
         points_m: &[Vec3],

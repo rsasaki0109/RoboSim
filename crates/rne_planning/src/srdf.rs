@@ -1,9 +1,9 @@
 //! Minimal SRDF import for planning groups.
 //!
 //! This parses the `<group>` elements of an SRDF document, the same source
-//! MoveIt uses for planning groups, and applies them to a [`PlanningScene`].
+//! `MoveIt` uses for planning groups, and applies them to a [`PlanningScene`].
 //! Only chain and explicit-joint groups are read; other SRDF elements are
-//! ignored so a full MoveIt SRDF can be passed unchanged.
+//! ignored so a full `MoveIt` SRDF can be passed unchanged.
 
 use crate::error::PlanningError;
 use crate::group::PlanningGroup;

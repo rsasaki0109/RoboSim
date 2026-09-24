@@ -1,4 +1,4 @@
-//! Deterministic simulation-tick scheduling for the flagship LeKiwi boundary.
+//! Deterministic simulation-tick scheduling for the flagship `LeKiwi` boundary.
 //!
 //! The scheduler owns no wall clock. It accepts one exact, zero-based flagship
 //! sequence at a time and emits only phase-zero even sequences to the 30 Hz
@@ -16,10 +16,10 @@ use serde::{Deserialize, Serialize};
 /// Flagship controller period in integer nanosecond simulation ticks.
 pub const FLAGSHIP_CONTROLLER_PERIOD_TICKS: u64 = FLAGSHIP_MOBILE_LIFT_CONTROL_PERIOD_TICKS;
 
-/// LeKiwi write period derived from exactly two flagship controller ticks.
+/// `LeKiwi` write period derived from exactly two flagship controller ticks.
 pub const FLAGSHIP_LEKIWI_WRITE_PERIOD_TICKS: u64 = 33_333_334;
 
-/// Number of flagship controller decisions per LeKiwi write slot.
+/// Number of flagship controller decisions per `LeKiwi` write slot.
 pub const FLAGSHIP_LEKIWI_DECIMATION: u64 = 2;
 
 const _: () = assert!(FLAGSHIP_LEKIWI_WRITE_PERIOD_TICKS >= 1_000_000_000 / 30);
@@ -67,7 +67,7 @@ pub struct FlagshipLeKiwiRateDecision {
     pub projection: FlagshipLeKiwiActionProjection,
 }
 
-/// Stateful exact-sequence scheduler for the flagship LeKiwi rate boundary.
+/// Stateful exact-sequence scheduler for the flagship `LeKiwi` rate boundary.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FlagshipLeKiwiRateScheduler {
     expected_parent_sequence: u64,

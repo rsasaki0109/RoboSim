@@ -166,6 +166,7 @@ trait MobileManipulatorPhysics: Send + Sync {
         entity: Entity,
         delta_velocity_m_s: Vec3,
     ) -> bool;
+    // Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
     #[allow(clippy::too_many_arguments)]
     fn sample_sensors(
         &self,
@@ -268,6 +269,7 @@ fn step_backend<B: PhysicsBackend>(
     backend.sync_to_ecs(world, physics_world)
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn sample_mobile_sensors<B: PhysicsBackend>(
     backend: &B,
@@ -402,7 +404,7 @@ pub struct MobileManipulatorSensorStateSnapshot {
     pub frame_count: u64,
 }
 
-/// Latest typed DataBus frame snapshot for one stream.
+/// Latest typed `DataBus` frame snapshot for one stream.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MobileManipulatorFrameSnapshot<T> {
     /// Stream identifier.
@@ -451,7 +453,7 @@ impl<T: FramePayload> MobileManipulatorFrameSnapshot<T> {
 ///
 /// This is intended for restoring a simulation with the same scene topology and
 /// stable entity indices. It captures ECS motion state, joint motor targets,
-/// grasp welds, latest DataBus frames, world random state, simulation time, and
+/// grasp welds, latest `DataBus` frames, world random state, simulation time, and
 /// stream sequence state. It does not capture arbitrary user-added resources.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -480,11 +482,11 @@ pub struct MobileManipulatorSimSnapshot {
     pub fixed_joints: Vec<MobileManipulatorFixedJointSnapshot>,
     /// Sensor runtime sequence state.
     pub sensor_states: Vec<MobileManipulatorSensorStateSnapshot>,
-    /// Latest joint-state DataBus frame.
+    /// Latest joint-state `DataBus` frame.
     pub joint_state_frame: Option<MobileManipulatorFrameSnapshot<JointState>>,
-    /// Latest wrist camera DataBus frame.
+    /// Latest wrist camera `DataBus` frame.
     pub wrist_camera_frame: Option<MobileManipulatorFrameSnapshot<ImageRgb8>>,
-    /// Latest wrist depth DataBus frame (schema v2+).
+    /// Latest wrist depth `DataBus` frame (schema v2+).
     #[serde(default)]
     pub wrist_depth_frame: Option<MobileManipulatorFrameSnapshot<ImageDepth>>,
     /// In-progress grasp weld-anchor retarget and finger pinch limits (schema v3+).
@@ -503,7 +505,7 @@ pub fn mm_mobile_scene_path() -> PathBuf {
 }
 
 /// Default scene asset for the diff-drive `mm_mobile_so101` robot
-/// (mm_mobile chassis with an SO101 6-DoF arm).
+/// (`mm_mobile` chassis with an SO101 6-DoF arm).
 pub fn mm_mobile_so101_scene_path() -> PathBuf {
     crate::asset_path::bundled_asset_path("scenes/mm_mobile_so101.rne.scene.toml")
 }
@@ -1440,7 +1442,7 @@ impl MobileManipulatorSim {
         }
     }
 
-    /// Provides read access to the simulation DataBus.
+    /// Provides read access to the simulation `DataBus`.
     pub fn data_bus(&self) -> &InMemoryDataBus {
         &self.data_bus
     }
@@ -1475,7 +1477,7 @@ impl MobileManipulatorSim {
         self.step_count
     }
 
-    /// Returns the latest joint state published on the DataBus.
+    /// Returns the latest joint state published on the `DataBus`.
     pub fn latest_joint_state(&self) -> JointState {
         self.data_bus()
             .latest::<JointState>(self.joint_stream)
@@ -1810,6 +1812,7 @@ impl MobileManipulatorSim {
         Ok(())
     }
 
+    // Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
     #[allow(clippy::too_many_arguments)]
     fn from_spawned(
         world: World,
@@ -4431,7 +4434,7 @@ mod tests {
         );
     }
 
-    /// Guards the fix for mm_mobile's finger colliders: without collision geometry the
+    /// Guards the fix for `mm_mobile`'s finger colliders: without collision geometry the
     /// finger joints never articulate and the contact-weld grasp can never fire.
     #[test]
     fn mm_mobile_gripper_fingers_articulate() {
@@ -4453,7 +4456,7 @@ mod tests {
         );
     }
 
-    /// Guards the fix for mm_mobile's arm actuation: interpenetrating chassis/arm
+    /// Guards the fix for `mm_mobile`'s arm actuation: interpenetrating chassis/arm
     /// collision boxes used to lock the shoulder and elbow joints solid.
     #[test]
     fn mm_mobile_arm_tracks_joint_commands() {

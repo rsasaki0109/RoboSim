@@ -1,4 +1,4 @@
-//! Machine-verifiable exit evidence for the LeKiwi physical reference run.
+//! Machine-verifiable exit evidence for the `LeKiwi` physical reference run.
 //!
 //! The schema is filesystem-neutral. It records bounded identifiers,
 //! attestations, and content-addressed relative file references; `xtask`
@@ -104,7 +104,7 @@ pub struct PhysicalOperator {
 pub struct LeKiwiPhysicalInventory {
     /// Device ID returned by the physical bridge Ready response.
     pub device_id: String,
-    /// Calibration identity supplied to the upstream LeRobot configuration.
+    /// Calibration identity supplied to the upstream `LeRobot` configuration.
     pub robot_id: String,
     /// Stable Raspberry Pi or base-computer serial.
     pub base_controller_id: String,
@@ -286,13 +286,13 @@ impl HostTerminationDiagnostic {
     }
 }
 
-/// Required artifacts for every LeKiwi v1 physical exit claim.
+/// Required artifacts for every `LeKiwi` v1 physical exit claim.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LeKiwiPhysicalEvidenceArtifacts {
-    /// Exact portable TaskSpec used by every run.
+    /// Exact portable `TaskSpec` used by every run.
     pub task_spec: EvidenceFileRef,
-    /// Exact LeKiwi reference profile.
+    /// Exact `LeKiwi` reference profile.
     pub reference_profile: EvidenceFileRef,
     /// Complete 1,800-sample-or-longer elevated shadow session.
     pub elevated_shadow_session: EvidenceFileRef,
@@ -393,7 +393,7 @@ impl LeKiwiPhysicalEvidenceArtifacts {
     }
 }
 
-/// Self-contained index for the complete LeKiwi physical reference run.
+/// Self-contained index for the complete `LeKiwi` physical reference run.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LeKiwiPhysicalEvidenceManifest {
@@ -405,7 +405,7 @@ pub struct LeKiwiPhysicalEvidenceManifest {
     pub run_id: String,
     /// Full source commit used to build the RNE host.
     pub rne_commit: String,
-    /// Exact pinned LeRobot source revision.
+    /// Exact pinned `LeRobot` source revision.
     pub upstream_revision: String,
     /// Exact physical device inventory.
     pub inventory: LeKiwiPhysicalInventory,
@@ -605,7 +605,7 @@ impl LeKiwiPhysicalEvidenceManifest {
     }
 }
 
-/// Failure validating a LeKiwi physical evidence manifest.
+/// Failure validating a `LeKiwi` physical evidence manifest.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LeKiwiPhysicalEvidenceError {
     /// One field violates its bounded portable contract.

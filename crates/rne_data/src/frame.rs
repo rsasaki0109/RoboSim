@@ -5,7 +5,7 @@ use rne_core::{SimDuration, SimTime};
 use rne_ecs::Entity;
 use serde::{Deserialize, Serialize};
 
-/// Marker trait for frame payload types published on the DataBus.
+/// Marker trait for frame payload types published on the `DataBus`.
 pub trait FramePayload: Clone + Send + Sync + 'static {}
 
 impl FramePayload for crate::payloads::ImuSample {}
@@ -23,7 +23,7 @@ impl FramePayload for crate::dataset_payload::DatasetActionSample {}
 impl FramePayload for crate::dataset_payload::DatasetTaskOutcomeSample {}
 impl FramePayload for crate::dataset_payload::DatasetGroundTruthAnnotation {}
 
-/// Timestamped typed frame published on the DataBus.
+/// Timestamped typed frame published on the `DataBus`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame<T: FramePayload> {
     /// Stream identifier.

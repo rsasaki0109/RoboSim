@@ -703,7 +703,7 @@ pub fn step_deformable_world(
                 attachment.target
             )));
         }
-        let target = math_transform(rne_world::world_transform_of(world, attachment.target));
+        let target = math_transform(world_transform_of(world, attachment.target));
         let mut pins = attachment
             .points
             .iter()
@@ -1824,9 +1824,9 @@ mod tests {
             .id();
         let contact = |x| DeformableCollider {
             shape: ColliderShape::Sphere { radius_m: 0.02 },
-            world_transform: rne_math::Transform3::from_translation_rotation(
+            world_transform: Transform3::from_translation_rotation(
                 Vec3::new(x, 0.0, 0.0),
-                rne_math::Quat::IDENTITY,
+                Quat::IDENTITY,
             ),
             friction: 0.5,
         };

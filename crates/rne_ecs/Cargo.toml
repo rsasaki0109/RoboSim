@@ -7,10 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 bevy_ecs = { workspace = true }
-rne_core = { workspace = true }
-rne_math = { workspace = true }
 serde = { workspace = true }
 smallvec = { workspace = true }
 uuid = { workspace = true }

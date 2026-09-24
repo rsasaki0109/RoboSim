@@ -143,7 +143,7 @@ pub struct DiffDriveSensorStateSnapshot {
     pub frame_count: u64,
 }
 
-/// Latest typed DataBus frame snapshot for one stream.
+/// Latest typed `DataBus` frame snapshot for one stream.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DiffDriveFrameSnapshot<T> {
     /// Stream identifier.
@@ -192,7 +192,7 @@ impl<T: FramePayload> DiffDriveFrameSnapshot<T> {
 ///
 /// This is intended for restoring a simulation with the same scene topology and
 /// stable entity indices. It captures ECS motion state, actuator and motor
-/// targets, sensor sequence state, latest DataBus sensor frames, world random
+/// targets, sensor sequence state, latest `DataBus` sensor frames, world random
 /// state, simulation time, and command sequence. It does not capture arbitrary
 /// user-added resources.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -221,7 +221,7 @@ pub struct DiffDriveSimSnapshot {
     pub imu_states: Vec<DiffDriveImuStateSnapshot>,
     /// Latest IMU frames by stream.
     pub imu_frames: Vec<DiffDriveFrameSnapshot<ImuSample>>,
-    /// Latest LiDAR frames by stream.
+    /// Latest `LiDAR` frames by stream.
     pub lidar_frames: Vec<DiffDriveFrameSnapshot<PointCloud>>,
     /// Latest wheel encoder frames by stream.
     pub wheel_encoder_frames: Vec<DiffDriveFrameSnapshot<WheelEncoderSample>>,
@@ -598,7 +598,7 @@ impl DiffDriveSim {
         &self.mesh_package_roots
     }
 
-    /// Provides read access to the simulation DataBus (sensor frames).
+    /// Provides read access to the simulation `DataBus` (sensor frames).
     pub fn data_bus(&self) -> &InMemoryDataBus {
         &self.data_bus
     }
@@ -611,10 +611,10 @@ impl DiffDriveSim {
             .and_then(|index| self.actor_streams.get(index).copied())
     }
 
-    /// Builds a strict controller observation from available DataBus frames only.
+    /// Builds a strict controller observation from available `DataBus` frames only.
     ///
     /// The returned frame retains input timestamps and cannot access ECS transforms,
-    /// actuator targets, or physics state. The optional goal is TaskSpec data.
+    /// actuator targets, or physics state. The optional goal is `TaskSpec` data.
     pub fn observe_actor_with_goal(
         &self,
         robot: Entity,
@@ -629,12 +629,12 @@ impl DiffDriveSim {
         diff_drive_actor_observation(&self.data_bus, streams, self.sim_time, goal_x_m)
     }
 
-    /// Returns tracked LiDAR mounts loaded from scene robot assets.
+    /// Returns tracked `LiDAR` mounts loaded from scene robot assets.
     pub fn lidar_mounts(&self) -> &[LidarMount] {
         &self.lidar_mounts
     }
 
-    /// Returns the latest point cloud from the primary robot's LiDAR sensor.
+    /// Returns the latest point cloud from the primary robot's `LiDAR` sensor.
     pub fn latest_lidar_cloud(&self) -> Option<PointCloud> {
         let mount = self.lidar_mounts.first()?;
         let sensor = self.world.get::<Sensor>(mount.lidar)?;
@@ -643,13 +643,13 @@ impl DiffDriveSim {
             .map(|frame| frame.payload.clone())
     }
 
-    /// Returns the world-space transform of the primary LiDAR mount.
+    /// Returns the world-space transform of the primary `LiDAR` mount.
     pub fn primary_lidar_world_transform(&self) -> Option<Transform3> {
         let mount = self.lidar_mounts.first()?;
         Some(world_transform_of(&self.world, mount.lidar))
     }
 
-    /// Returns the LiDAR specification for the primary robot sensor.
+    /// Returns the `LiDAR` specification for the primary robot sensor.
     pub fn primary_lidar_spec(&self) -> Option<LidarSpec> {
         let mount = self.lidar_mounts.first()?;
         let sensor = self.world.get::<Sensor>(mount.lidar)?;
@@ -1275,7 +1275,7 @@ fn build_diff_drive_spawned(
         .get::<DiffDriveComponent>(robot)
         .ok_or_else(|| AssetError::Invalid {
             path: scene_path.display().to_string(),
-            message: format!("robot {:?} is not a diff drive", robot),
+            message: format!("robot {robot:?} is not a diff drive"),
         })?
         .0;
     let left_wheel =

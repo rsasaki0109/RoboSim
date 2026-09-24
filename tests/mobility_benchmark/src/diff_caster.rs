@@ -315,6 +315,7 @@ pub fn differential_caster_task_spec() -> TaskSpec {
 }
 
 /// Runs one explicit two-drive-wheel plus passive-caster multibody fixture.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (192/150 lines); see PR body
 pub fn run_differential_caster_trace<B: PhysicsBackend>(
     backend: B,
     manifest: PhysicsBackendManifest,
@@ -625,6 +626,7 @@ impl<B: PhysicsBackend> CasterPlant<B> {
         })
     }
 
+    #[allow(clippy::too_many_lines)] // TODO(cleanup): split (156/150 lines); see PR body
     pub(crate) fn step(&mut self, commands: [f64; 2]) -> Result<CasterPlantStep> {
         ensure!(
             commands.iter().all(|v| v.is_finite()),
@@ -1049,6 +1051,7 @@ fn command_for_step(step: u64) -> [f64; 2] {
     }
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn make_sample(
     step: u64,

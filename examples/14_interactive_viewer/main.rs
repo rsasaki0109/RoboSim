@@ -14,10 +14,10 @@
 //! Shared:
 //! - Left / Right: orbit camera
 //! - Up / Down: zoom camera
-//! - L: toggle LiDAR hit overlay (diff-drive scenes only)
+//! - L: toggle `LiDAR` hit overlay (diff-drive scenes only)
 //! - M: toggle semantic task-marker rings
-//! - P: toggle camera PiP (remote camera or manipulator profiles)
-//! - D: toggle remote GPU depth PiP (`--control-camera-full-resolution`)
+//! - P: toggle camera `PiP` (remote camera or manipulator profiles)
+//! - D: toggle remote GPU depth `PiP` (`--control-camera-full-resolution`)
 //! - Escape: quit
 //!
 //! Remote runner frontend (diff-drive and URDF profiles):
@@ -27,23 +27,23 @@
 //! - R: reset the remote episode
 //!
 //! Usage:
-//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- \
-//!     --connect 127.0.0.1:9000 assets/scenes/mesh_diff_drive.rne.scene.toml
-//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- \
-//!     --frontend-connect 127.0.0.1:9001 assets/scenes/mesh_diff_drive.rne.scene.toml
+//!   cargo run -p `interactive_viewer` --example `14_interactive_viewer` -- \
+//!     --connect 127.0.0.1:9000 `assets/scenes/mesh_diff_drive.rne.scene.toml`
+//!   cargo run -p `interactive_viewer` --example `14_interactive_viewer` -- \
+//!     --frontend-connect 127.0.0.1:9001 `assets/scenes/mesh_diff_drive.rne.scene.toml`
 //!
 //! Usage:
-//!   cargo run -p interactive_viewer --example 14_interactive_viewer
-//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- assets/scenes/mesh_diff_drive.rne.scene.toml
-//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --manipulator
-//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --manipulator-mobile
-//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --manipulator-lift
-//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --so101
-//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --cart
-//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --lekiwi
-//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --lekiwi-so101
-//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --urdf assets/scenes/unitree_g1_factory.rne.scene.toml
-//!   cargo run -p interactive_viewer --example 14_interactive_viewer -- --smoke
+//!   cargo run -p `interactive_viewer` --example `14_interactive_viewer`
+//!   cargo run -p `interactive_viewer` --example `14_interactive_viewer` -- `assets/scenes/mesh_diff_drive.rne.scene.toml`
+//!   cargo run -p `interactive_viewer` --example `14_interactive_viewer` -- --manipulator
+//!   cargo run -p `interactive_viewer` --example `14_interactive_viewer` -- --manipulator-mobile
+//!   cargo run -p `interactive_viewer` --example `14_interactive_viewer` -- --manipulator-lift
+//!   cargo run -p `interactive_viewer` --example `14_interactive_viewer` -- --so101
+//!   cargo run -p `interactive_viewer` --example `14_interactive_viewer` -- --cart
+//!   cargo run -p `interactive_viewer` --example `14_interactive_viewer` -- --lekiwi
+//!   cargo run -p `interactive_viewer` --example `14_interactive_viewer` -- --lekiwi-so101
+//!   cargo run -p `interactive_viewer` --example `14_interactive_viewer` -- --urdf `assets/scenes/unitree_g1_factory.rne.scene.toml`
+//!   cargo run -p `interactive_viewer` --example `14_interactive_viewer` -- --smoke
 
 use rne_ai::{
     append_lidar_overlay, append_task_marker_overlay, build_diff_drive_render_scene,
@@ -91,6 +91,10 @@ const REMOTE_BINARY_EVENT_QUEUE_FRAMES: usize = 32;
 const REMOTE_BINARY_SENSOR_STREAM_LIMIT: usize = 8;
 const REMOTE_BINARY_IO_TIMEOUT: Duration = Duration::from_secs(2);
 
+// The Remote* structs below mirror the viewer's JSON status wire schema in
+// full. Several fields are intentionally unread by this client (kept for
+// schema fidelity, forward-compatibility, and the round-trip fixtures in the
+// tests at the bottom of this file), hence the scoped `dead_code` allows.
 #[derive(Clone, Debug, Deserialize)]
 struct RemoteSnapshot {
     #[serde(default)]
@@ -126,7 +130,7 @@ struct RemoteSensorStream {
     /// Bounded RGB-D camera preview.
     #[serde(default)]
     camera: Option<RemoteCameraPreview>,
-    /// Bounded world-frame LiDAR preview.
+    /// Bounded world-frame `LiDAR` preview.
     #[serde(default)]
     lidar: Option<RemoteLidarPreview>,
     /// Latest IMU sample, if present.
@@ -220,7 +224,7 @@ impl RemoteSnapshot {
                 let height = camera.depth_height?;
                 let expected_len = (width as usize).checked_mul(height as usize)?;
                 let bytes = base64::decode(camera.depth_f32_le_base64.as_ref()?).ok()?;
-                let expected_byte_len = expected_len.checked_mul(std::mem::size_of::<f32>())?;
+                let expected_byte_len = expected_len.checked_mul(size_of::<f32>())?;
                 if width == 0 || height == 0 || bytes.len() != expected_byte_len {
                     return None;
                 }
@@ -674,7 +678,7 @@ impl BinarySensorCache {
             .stream_id
             .checked_sub(rne_sensor::CAMERA_DEPTH_STREAM_OFFSET)
             .ok_or_else(|| "binary depth stream id is below the camera offset".to_string())?;
-        let mut bytes = Vec::with_capacity(image.depth_m.len() * std::mem::size_of::<f32>());
+        let mut bytes = Vec::with_capacity(image.depth_m.len() * size_of::<f32>());
         for depth in &image.depth_m {
             bytes.extend_from_slice(&depth.to_le_bytes());
         }
@@ -1244,6 +1248,7 @@ fn profile_scene_path(profile: &ViewerProfile) -> &Path {
     }
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (203/150 lines); see PR body
 fn run_smoke(explicit: bool, profile: &ViewerProfile) {
     if env::var("RNE_SKIP_GPU").is_ok() {
         println!("RNE_SKIP_GPU set; skipping interactive viewer smoke");

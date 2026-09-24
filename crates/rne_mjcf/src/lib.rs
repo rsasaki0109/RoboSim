@@ -1,4 +1,4 @@
-//! Minimal MuJoCo MJCF model import for Robot Native Engine.
+//! Minimal `MuJoCo` MJCF model import for Robot Native Engine.
 //!
 //! The importer converts a strict subset of the [MuJoCo MJCF] format into a
 //! URDF document that the existing `rne_urdf_import` pipeline consumes, so MJCF

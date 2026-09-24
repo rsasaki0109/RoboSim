@@ -94,7 +94,7 @@ struct ScheduledSystem {
 }
 
 /// Ordered collection of systems grouped by phase.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Schedule {
     systems: Vec<(SchedulePhase, ScheduledSystem)>,
 }

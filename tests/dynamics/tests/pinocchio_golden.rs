@@ -9,10 +9,10 @@ use rne_physics::PhysicsWorldDesc;
 use serde::Deserialize;
 use std::path::PathBuf;
 
-/// Maximum |tip_sim − tip_ref| for single pendulum (m).
+/// Maximum |`tip_sim` − `tip_ref`| for single pendulum (m).
 const PINOCCHIO_SINGLE_TIP_EPS_M: f64 = 0.12;
 
-/// Maximum |tip_sim − tip_ref| for multi-link planar chains (m).
+/// Maximum |`tip_sim` − `tip_ref`| for multi-link planar chains (m).
 const PINOCCHIO_MULTI_TIP_EPS_M: f64 = 0.18;
 
 /// Relative tolerance on tip distance from origin (guards scale drift).
@@ -24,6 +24,8 @@ const PINOCCHIO_TIP_REL_EPS: f64 = 0.08;
 /// (~8.6°) is loose but still rejects gross integrator or axis sign errors.
 const PINOCCHIO_JOINT_ANGLE_EPS_RAD: f64 = 0.15;
 
+// `duration_s` and `t_s` are recorded in the golden fixtures for schema
+// fidelity / debugging but are not asserted against here.
 #[derive(Debug, Deserialize)]
 struct GoldenTrajectory {
     hz: f64,

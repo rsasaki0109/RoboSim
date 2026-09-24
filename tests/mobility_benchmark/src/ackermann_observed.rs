@@ -52,7 +52,7 @@ pub const ACKERMANN_OBSERVED_TRACE_KIND: &str = "rne_mobility_ackermann_observed
 pub const ACKERMANN_OBSERVED_COMPARISON_KIND: &str = "rne_mobility_ackermann_observed_comparison";
 /// Trace and comparison schema version.
 pub const ACKERMANN_OBSERVED_SCHEMA_VERSION: u32 = 2;
-/// Stable TaskSpec identity shared by both rigid-body backends.
+/// Stable `TaskSpec` identity shared by both rigid-body backends.
 pub const ACKERMANN_OBSERVED_TASK_ID: &str = "mobility_ackermann_sensor_closed_loop_v2";
 /// One-millisecond rigid-body and tire integration step, in simulation ticks.
 pub const ACKERMANN_OBSERVED_FIXED_DELTA_TICKS: u64 = 1_000_000;
@@ -826,6 +826,7 @@ pub fn run_ackermann_observed_failure_capsule<B: PhysicsBackend>(
     }
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (396/150 lines); see PR body
 fn run_ackermann_observed_outcome<B: PhysicsBackend>(
     mut backend: B,
     manifest: PhysicsBackendManifest,
@@ -1255,6 +1256,7 @@ pub fn compare_ackermann_observed_traces(
     Ok(comparison)
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn build_failure_capsule(
     manifest: &PhysicsBackendManifest,
@@ -1505,6 +1507,7 @@ fn spawn_virtual_wheel_encoder(
     joint
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn spawn_encoder_sensor(
     world: &mut World,

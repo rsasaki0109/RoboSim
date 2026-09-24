@@ -132,7 +132,7 @@ pub struct RendererDatasetCaptureReport {
     pub renderer: String,
     /// SHA-256 identity of the verified dataset manifest.
     pub dataset_manifest_sha256: String,
-    /// SHA-256 identity of the TaskSpec retained by the bundle.
+    /// SHA-256 identity of the `TaskSpec` retained by the bundle.
     pub task_spec_sha256: String,
     /// Number of dataset streams; RGB-D schema v1 requires two.
     pub stream_count: u64,
@@ -234,7 +234,7 @@ pub enum DatasetStreamKind {
     Rgb8,
     /// Linear-depth f32 camera frames in metres.
     DepthF32,
-    /// LiDAR point clouds.
+    /// `LiDAR` point clouds.
     LidarPointCloud,
     /// Inertial measurements.
     Imu,
@@ -285,7 +285,7 @@ pub enum DatasetRecordKind {
     Rgb8 = 1,
     /// Linear-depth f32 image encoded by the RNE transport codec.
     DepthF32 = 2,
-    /// LiDAR point cloud encoded by the RNE transport codec.
+    /// `LiDAR` point cloud encoded by the RNE transport codec.
     LidarPointCloud = 3,
     /// Versioned inertial payload bytes.
     Imu = 4,
@@ -400,7 +400,7 @@ pub struct DatasetTimingSpec {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DatasetStreamSpec {
-    /// Stable DataBus stream id.
+    /// Stable `DataBus` stream id.
     pub stream_id: StreamId,
     /// Stable human-readable stream name.
     pub name: String,
@@ -520,7 +520,7 @@ pub struct DatasetManifest {
     pub schema_version: u32,
     /// Stable dataset identifier.
     pub dataset_id: String,
-    /// TaskSpec content digest used to produce the run.
+    /// `TaskSpec` content digest used to produce the run.
     pub task_spec_sha256: String,
     /// Simulation fixed step in nanosecond ticks.
     pub fixed_step_ticks: u64,
@@ -727,14 +727,14 @@ impl DatasetBundleWriter {
         })
     }
 
-    /// Encodes and appends one lossless RGBA8 DataBus frame.
+    /// Encodes and appends one lossless RGBA8 `DataBus` frame.
     pub fn write_image_rgb8(&mut self, frame: &Frame<ImageRgb8>) -> Result<(), DatasetError> {
         let metadata = sensor_metadata(frame);
         let payload = encode_image_rgb8(metadata, &frame.payload)?;
         self.write_record(&record_from_frame(DatasetRecordKind::Rgb8, frame, payload))
     }
 
-    /// Encodes and appends one linear-depth DataBus frame.
+    /// Encodes and appends one linear-depth `DataBus` frame.
     pub fn write_image_depth(&mut self, frame: &Frame<ImageDepth>) -> Result<(), DatasetError> {
         let metadata = sensor_metadata(frame);
         let payload = encode_image_depth(metadata, &frame.payload)?;
@@ -745,7 +745,7 @@ impl DatasetBundleWriter {
         ))
     }
 
-    /// Encodes and appends one LiDAR DataBus frame.
+    /// Encodes and appends one `LiDAR` `DataBus` frame.
     pub fn write_lidar_point_cloud(
         &mut self,
         frame: &Frame<PointCloud>,
@@ -759,13 +759,13 @@ impl DatasetBundleWriter {
         ))
     }
 
-    /// Encodes and appends one IMU DataBus frame.
+    /// Encodes and appends one IMU `DataBus` frame.
     pub fn write_imu(&mut self, frame: &Frame<ImuSample>) -> Result<(), DatasetError> {
         let payload = encode_dataset_imu(sensor_metadata(frame), &frame.payload)?;
         self.write_record(&record_from_frame(DatasetRecordKind::Imu, frame, payload))
     }
 
-    /// Encodes and appends one planar pose/transform DataBus frame.
+    /// Encodes and appends one planar pose/transform `DataBus` frame.
     pub fn write_transform(&mut self, frame: &Frame<PoseSample>) -> Result<(), DatasetError> {
         let payload = encode_dataset_transform(sensor_metadata(frame), &frame.payload)?;
         self.write_record(&record_from_frame(

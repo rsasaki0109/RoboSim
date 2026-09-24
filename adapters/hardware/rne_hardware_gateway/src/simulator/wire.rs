@@ -23,11 +23,11 @@ pub const MAX_SIMULATOR_WIRE_FRAME_BYTES: usize = 64 * 1024 * 1024;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SimulatorHostPayload {
-    /// Binds one TaskSpec and fixed-step execution session.
+    /// Binds one `TaskSpec` and fixed-step execution session.
     Open {
-        /// Stable TaskSpec identity.
+        /// Stable `TaskSpec` identity.
         task_id: String,
-        /// SHA-256 of the exact TaskSpec bytes.
+        /// SHA-256 of the exact `TaskSpec` bytes.
         task_sha256: String,
         /// Flattened observation width.
         observation_width: usize,
@@ -45,7 +45,7 @@ pub enum SimulatorHostPayload {
     Step {
         /// Strictly increasing action sequence within the reset episode.
         action_sequence: u64,
-        /// Flattened action values in TaskSpec order.
+        /// Flattened action values in `TaskSpec` order.
         values: Vec<f64>,
     },
     /// Closes the current session and releases simulator resources.
@@ -126,7 +126,7 @@ impl SimulatorHostFrame {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SimulatorRejectionCode {
-    /// Command requires an open TaskSpec session.
+    /// Command requires an open `TaskSpec` session.
     NotOpen,
     /// Open was requested twice without closing.
     AlreadyOpen,
@@ -134,9 +134,9 @@ pub enum SimulatorRejectionCode {
     NonMonotonicSequence,
     /// Request targeted a different session.
     SessionMismatch,
-    /// TaskSpec identity or digest differs from adapter configuration.
+    /// `TaskSpec` identity or digest differs from adapter configuration.
     TaskMismatch,
-    /// Observation or action width differs from the TaskSpec mapping.
+    /// Observation or action width differs from the `TaskSpec` mapping.
     WidthMismatch,
     /// Fixed simulation delta differs from the adapter configuration.
     FixedDeltaMismatch,
@@ -154,7 +154,7 @@ pub enum SimulatorRejectionCode {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SimulatorAdapterPayload {
-    /// Confirms the exact TaskSpec and runtime identity accepted by the adapter.
+    /// Confirms the exact `TaskSpec` and runtime identity accepted by the adapter.
     Ready {
         /// Stable simulator family.
         simulator_id: String,
@@ -162,9 +162,9 @@ pub enum SimulatorAdapterPayload {
         simulator_version: String,
         /// Stable adapter implementation identity.
         adapter_id: String,
-        /// Accepted TaskSpec identity.
+        /// Accepted `TaskSpec` identity.
         task_id: String,
-        /// Accepted TaskSpec digest.
+        /// Accepted `TaskSpec` digest.
         task_sha256: String,
         /// Accepted flattened observation width.
         observation_width: usize,
@@ -177,7 +177,7 @@ pub enum SimulatorAdapterPayload {
     ResetComplete {
         /// Seed applied to the reset world.
         seed: u64,
-        /// Initial observation values in TaskSpec order.
+        /// Initial observation values in `TaskSpec` order.
         values: Vec<f64>,
         /// Backend-specific stable digest for same-runtime determinism checks.
         state_digest: u64,
@@ -190,7 +190,7 @@ pub enum SimulatorAdapterPayload {
         step: u64,
         /// Exact accumulated simulation-time ticks.
         sim_time_ticks: u64,
-        /// Observation values in TaskSpec order.
+        /// Observation values in `TaskSpec` order.
         values: Vec<f64>,
         /// Task-owned terminal flag.
         terminated: bool,
@@ -428,7 +428,7 @@ pub enum SimulatorWireError {
     /// A stable identity field is malformed.
     #[error("invalid external simulator identifier {0}")]
     InvalidIdentifier(&'static str),
-    /// TaskSpec digest is not lowercase SHA-256 hex.
+    /// `TaskSpec` digest is not lowercase SHA-256 hex.
     #[error("invalid external simulator TaskSpec digest")]
     InvalidDigest,
     /// Tensor width is zero or exceeds the protocol bound.

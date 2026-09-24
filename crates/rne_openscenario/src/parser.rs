@@ -1,4 +1,4 @@
-//! Minimal OpenSCENARIO 1.0 XML parser.
+//! Minimal `OpenSCENARIO` 1.0 XML parser.
 
 use crate::scenario::{
     check_revision, ensure_scenario_input_len, read_bounded_utf8, read_bounded_utf8_with_limit,
@@ -22,7 +22,7 @@ struct CatalogBudget {
     bytes: usize,
 }
 
-/// Parses a minimal OpenSCENARIO 1.0 XML file into a validated scenario document.
+/// Parses a minimal `OpenSCENARIO` 1.0 XML file into a validated scenario document.
 ///
 /// The document's [`ScenarioDocument::source`] is set to `imported.xosc`; use
 /// [`parse_openscenario_xml_with_source`] or [`parse_openscenario_xml_file`] to
@@ -31,7 +31,7 @@ pub fn parse_openscenario_xml(text: &str) -> Result<ScenarioDocument, ScenarioEr
     parse_openscenario_xml_with_source("imported.xosc", text)
 }
 
-/// Parses a minimal OpenSCENARIO 1.0 XML file with an explicit source path.
+/// Parses a minimal `OpenSCENARIO` 1.0 XML file with an explicit source path.
 ///
 /// Vehicle `CatalogReference` entities are only resolvable when a base
 /// directory is provided (see [`parse_openscenario_xml_file`]); without one, a
@@ -43,7 +43,7 @@ pub fn parse_openscenario_xml_with_source(
     parse_inner(source, text, None)
 }
 
-/// Parses a minimal OpenSCENARIO 1.0 XML file with an explicit source path and
+/// Parses a minimal `OpenSCENARIO` 1.0 XML file with an explicit source path and
 /// base directory used to resolve `CatalogLocations`.
 pub fn parse_openscenario_xml_with_source_at(
     source: &str,
@@ -99,7 +99,7 @@ fn parse_inner(
     Ok(document)
 }
 
-/// Reads an OpenSCENARIO file from disk and parses it with its path recorded.
+/// Reads an `OpenSCENARIO` file from disk and parses it with its path recorded.
 ///
 /// Vehicle catalog directories in `CatalogLocations` are resolved relative to
 /// the file's directory.
@@ -210,7 +210,7 @@ fn validate_catalog_relative_path(path: &Path) -> Result<(), ScenarioError> {
 fn resolve_catalog_entity(
     catalog_name: &str,
     entry_name: &str,
-    catalog_dirs: &[std::path::PathBuf],
+    catalog_dirs: &[PathBuf],
     base_dir: Option<&Path>,
     budget: &mut CatalogBudget,
 ) -> Result<ScenarioEntityKind, ScenarioError> {

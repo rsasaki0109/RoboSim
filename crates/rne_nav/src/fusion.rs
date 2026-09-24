@@ -370,7 +370,7 @@ impl EkfFusion {
         Ok(())
     }
 
-    /// Fuses a geographic fix by projecting it through a NavSat transform.
+    /// Fuses a geographic fix by projecting it through a `NavSat` transform.
     pub fn update_navsat(
         &mut self,
         navsat: &NavSatTransform,

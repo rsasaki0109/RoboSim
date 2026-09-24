@@ -107,6 +107,7 @@ impl CapturedLearningAttempt {
     /// This binds exact bytes but does not verify execution or attest supplied build
     /// provenance. Partial files remain on write failure. No post-failure physical
     /// hash is fabricated, and replay is explicitly not attempted by this method.
+    #[allow(clippy::too_many_lines)] // TODO(cleanup): split (151/150 lines); see PR body
     pub fn write_new(
         &self,
         directory: &std::path::Path,

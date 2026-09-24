@@ -1,4 +1,4 @@
-//! Imports official PLATEAU data and renders physics-aware LiDAR in Sanjo traffic.
+//! Imports official PLATEAU data and renders physics-aware `LiDAR` in Sanjo traffic.
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_assets::{
@@ -595,6 +595,7 @@ const SHOWCASE_BUILDINGS: [ShowcaseBuilding; 10] = [
     },
 ];
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (574/150 lines); see PR body
 fn main() {
     if std::env::args().any(|argument| argument == "--smoke") {
         run_uav_smoke();
@@ -1842,7 +1843,7 @@ const DYNAMIC_PRIMARY_DEVIATION_LIMIT_M: f64 = 2.0;
 /// swap happens here in the example layer. The tracked actor's kinematic trajectory
 /// becomes a *ghost* that a [`VehicleDynamics`] vehicle chases with pure pursuit, so
 /// its pose gains tire slip, understeer in tight turns, and steering-actuator sway.
-/// The LiDAR and camera then ride a chassis that answers through forces, not the
+/// The `LiDAR` and camera then ride a chassis that answers through forces, not the
 /// ghost that ignores them.
 fn apply_dynamic_primary(
     traffic_frames: &[Vec<VehicleFrame>],
@@ -2707,7 +2708,7 @@ fn turbo_colormap(t: f64) -> [f32; 4] {
     ]
 }
 
-/// Draws the point cloud the way a real LiDAR viewer would.
+/// Draws the point cloud the way a real `LiDAR` viewer would.
 ///
 /// Continuous turbo colormap over intensity instead of discrete bands, no drawn
 /// beams (viewers show returns, not rays), and small markers that grow slightly
@@ -4530,7 +4531,7 @@ fn build_gif_with(
     Ok(())
 }
 
-/// Colorizes a linear depth buffer with the same near-to-far ramp as the LiDAR bands.
+/// Colorizes a linear depth buffer with the same near-to-far ramp as the `LiDAR` bands.
 ///
 /// Yellow is near, green is mid-range, and blue is far, so the depth inset reads
 /// against the intensity-colored point cloud without a second legend.

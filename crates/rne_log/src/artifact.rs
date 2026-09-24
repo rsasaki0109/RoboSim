@@ -282,7 +282,7 @@ pub struct ReplayJointState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplaySensorStream {
-    /// DataBus stream identifier.
+    /// `DataBus` stream identifier.
     pub stream_id: u64,
     /// Stable sensor kind label.
     pub kind: String,
@@ -300,7 +300,7 @@ pub struct ReplaySensorStream {
 pub enum ReplaySensorPayloadData {
     /// Inertial measurement unit sample.
     Imu(rne_data::ImuSample),
-    /// LiDAR point cloud.
+    /// `LiDAR` point cloud.
     Lidar(rne_data::PointCloud),
     /// RGB camera frame with its paired depth image.
     Camera {
@@ -321,7 +321,7 @@ pub enum ReplaySensorPayloadData {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplaySensorPayload {
-    /// DataBus stream identifier.
+    /// `DataBus` stream identifier.
     pub stream_id: u64,
     /// Stable sensor kind label.
     pub kind: String,
@@ -352,7 +352,7 @@ pub struct ReplayObservation {
     /// Named joint state when the scene contains articulated joints.
     #[serde(default)]
     pub joint_state: Option<ReplayJointState>,
-    /// Per-sensor DataBus stream summaries captured after this step.
+    /// Per-sensor `DataBus` stream summaries captured after this step.
     #[serde(default)]
     pub sensor_streams: Vec<ReplaySensorStream>,
     /// Full typed payloads for manifest-subscribed sensor streams.
@@ -713,8 +713,7 @@ fn validate_action(
     };
     if !valid_for_controller {
         return Err(ReplayArtifactError::Invalid(format!(
-            "frame {step} action kind {:?} does not match controller {:?}",
-            action_kind, controller
+            "frame {step} action kind {action_kind:?} does not match controller {controller:?}"
         )));
     }
 

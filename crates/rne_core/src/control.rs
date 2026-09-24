@@ -86,6 +86,16 @@ pub struct RunControl<'a> {
     recorded_commands: Vec<ControlCommand>,
 }
 
+impl std::fmt::Debug for RunControl<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunControl")
+            .field("state", &self.state)
+            .field("step_remaining", &self.step_remaining)
+            .field("recorded_commands", &self.recorded_commands)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<'a> RunControl<'a> {
     /// Wraps a control transport, initially running freely.
     pub fn new(transport: &'a mut dyn RunnerControl) -> Self {

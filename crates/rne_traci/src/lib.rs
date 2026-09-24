@@ -1,6 +1,6 @@
-//! Minimal TraCI client for live SUMO co-simulation.
+//! Minimal `TraCI` client for live SUMO co-simulation.
 //!
-//! TraCI (Traffic Control Interface) is SUMO's TCP protocol for live
+//! `TraCI` (Traffic Control Interface) is SUMO's TCP protocol for live
 //! co-simulation. This crate implements the small subset a co-simulation
 //! adapter needs to drive and observe a running SUMO process:
 //!
@@ -47,7 +47,7 @@ const TYPE_STRING_LIST: u8 = 0x0e;
 const TYPE_POSITION_2D: u8 = 0x01;
 const TYPE_DOUBLE: u8 = 0x0b;
 
-/// TraCI protocol or connection failure.
+/// `TraCI` protocol or connection failure.
 #[derive(Debug, thiserror::Error)]
 pub enum TraciError {
     /// The connection could not be established or was closed.
@@ -98,7 +98,8 @@ impl TraciError {
     }
 }
 
-/// A connected TraCI client bound to one SUMO process.
+/// A connected `TraCI` client bound to one SUMO process.
+#[derive(Debug)]
 pub struct TraciClient {
     reader: BufReader<TcpStream>,
     stream: TcpStream,
@@ -113,7 +114,7 @@ impl TraciClient {
         Ok(Self { reader, stream })
     }
 
-    /// Reads the TraCI API version and a human-readable SUMO version string.
+    /// Reads the `TraCI` API version and a human-readable SUMO version string.
     pub fn get_version(&mut self) -> Result<(u32, String), TraciError> {
         self.send_command(CMD_GET_VERSION, &[])?;
         let mut message = self.read_response()?;
@@ -184,7 +185,7 @@ impl TraciClient {
     /// motion authority and applies its configured safety and speed-mode rules;
     /// RNE's traffic runtime does not integrate the mirrored actor. Passing
     /// `-1.0` restores SUMO's original vehicle-type speed behavior, as defined
-    /// by the TraCI vehicle state API.
+    /// by the `TraCI` vehicle state API.
     pub fn set_vehicle_speed_m_s(
         &mut self,
         vehicle_id: &str,
@@ -291,7 +292,7 @@ impl TraciClient {
     }
 }
 
-/// A received TraCI message being decoded.
+/// A received `TraCI` message being decoded.
 struct TraciMessage {
     body: Vec<u8>,
     position: usize,

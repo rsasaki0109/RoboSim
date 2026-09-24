@@ -184,6 +184,7 @@ impl DwaPlanner {
         }
     }
 
+    // Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
     #[allow(clippy::too_many_arguments)]
     fn score_candidate(
         &self,

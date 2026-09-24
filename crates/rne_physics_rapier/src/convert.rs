@@ -6,23 +6,23 @@ use rne_math::{Quat, Vec3};
 use rne_physics::{ColliderShape, PhysicsError, RigidBodyType};
 use rne_world::Transform3;
 
-pub fn vec3_to_rapier(v: Vec3) -> Vector3<f32> {
+pub(crate) fn vec3_to_rapier(v: Vec3) -> Vector3<f32> {
     Vector3::new(v.x as f32, v.y as f32, v.z as f32)
 }
 
-pub fn vec3_from_rapier(v: Vector3<f32>) -> Vec3 {
+pub(crate) fn vec3_from_rapier(v: Vector3<f32>) -> Vec3 {
     Vec3::new(v.x as f64, v.y as f64, v.z as f64)
 }
 
-pub fn vec3_to_point(v: Vec3) -> Point3<f32> {
+pub(crate) fn vec3_to_point(v: Vec3) -> Point3<f32> {
     Point3::new(v.x as f32, v.y as f32, v.z as f32)
 }
 
-pub fn vec3_from_point(v: Point3<f32>) -> Vec3 {
+pub(crate) fn vec3_from_point(v: Point3<f32>) -> Vec3 {
     Vec3::new(v.x as f64, v.y as f64, v.z as f64)
 }
 
-pub fn quat_to_rapier(q: Quat) -> UnitQuaternion<f32> {
+pub(crate) fn quat_to_rapier(q: Quat) -> UnitQuaternion<f32> {
     UnitQuaternion::from_quaternion(rapier3d::na::Quaternion::new(
         q.w as f32, q.x as f32, q.y as f32, q.z as f32,
     ))
@@ -42,14 +42,14 @@ pub(crate) fn quat_from_rapier(q: UnitQuaternion<f32>) -> Quat {
     .normalize()
 }
 
-pub fn transform_to_isometry(transform: &Transform3) -> Isometry<f32> {
+pub(crate) fn transform_to_isometry(transform: &Transform3) -> Isometry<f32> {
     Isometry::from_parts(
         vec3_to_rapier(transform.translation).into(),
         quat_to_rapier(transform.rotation),
     )
 }
 
-pub fn isometry_to_transform(isometry: &Isometry<f32>) -> Transform3 {
+pub(crate) fn isometry_to_transform(isometry: &Isometry<f32>) -> Transform3 {
     Transform3 {
         translation: vec3_from_rapier(isometry.translation.vector),
         rotation: quat_from_rapier(isometry.rotation),
@@ -57,7 +57,7 @@ pub fn isometry_to_transform(isometry: &Isometry<f32>) -> Transform3 {
     }
 }
 
-pub fn shape_to_shared(shape: &ColliderShape) -> Result<SharedShape, PhysicsError> {
+pub(crate) fn shape_to_shared(shape: &ColliderShape) -> Result<SharedShape, PhysicsError> {
     Ok(match shape {
         ColliderShape::Sphere { radius_m } => SharedShape::ball(*radius_m as f32),
         ColliderShape::Cuboid { half_extents_m } => SharedShape::cuboid(
@@ -141,7 +141,7 @@ pub fn shape_to_shared(shape: &ColliderShape) -> Result<SharedShape, PhysicsErro
     })
 }
 
-pub fn body_type_to_rapier(body_type: RigidBodyType) -> rapier3d::prelude::RigidBodyType {
+pub(crate) fn body_type_to_rapier(body_type: RigidBodyType) -> rapier3d::prelude::RigidBodyType {
     match body_type {
         RigidBodyType::Dynamic => rapier3d::prelude::RigidBodyType::Dynamic,
         RigidBodyType::Fixed => rapier3d::prelude::RigidBodyType::Fixed,

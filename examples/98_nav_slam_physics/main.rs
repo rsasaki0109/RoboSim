@@ -1,7 +1,7 @@
-//! End-to-end navigation SLAM on real simulated LiDAR.
+//! End-to-end navigation SLAM on real simulated `LiDAR`.
 //!
 //! A Rapier world with a walled room and asymmetric pillars, a kinematic
-//! differential-drive base, and a range LiDAR sampled through `rne_sensor`.
+//! differential-drive base, and a range `LiDAR` sampled through `rne_sensor`.
 //! Each point cloud is converted to a 2D scan and fed to `rne_slam`, which
 //! corrects drifting odometry and closes a loop on the return trip.
 //!
@@ -296,7 +296,7 @@ fn base_transform(pose: Pose2d) -> Transform3 {
 
 /// Bins a world-frame point cloud into a planar scan in the base frame.
 ///
-/// The LiDAR horizontal plane is sensor X-Z, so the beam angle is
+/// The `LiDAR` horizontal plane is sensor X-Z, so the beam angle is
 /// `atan2(local.z, local.x)`. The SLAM plane maps `x -> x`, `y -> z`, with
 /// `sensor_from_base` = identity and the base yaw carried by the pose.
 fn cloud_to_scan(

@@ -1,4 +1,4 @@
-//! Co-simulation bridge tests against a stateful mock TraCI server.
+//! Co-simulation bridge tests against a stateful mock `TraCI` server.
 
 use rne_ecs::World;
 use rne_traci::{CoSimulation, CoSimulationSessionState, ReconnectPolicy};

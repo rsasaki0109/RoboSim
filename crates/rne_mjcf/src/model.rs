@@ -1,4 +1,4 @@
-//! Minimal MuJoCo MJCF model to URDF conversion.
+//! Minimal `MuJoCo` MJCF model to URDF conversion.
 
 use crate::MjcfError;
 use roxmltree::{Document, Node};

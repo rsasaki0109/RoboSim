@@ -406,6 +406,7 @@ fn clamp_control(control: &[f64], config: &DdpConfig) -> Vec<f64> {
 }
 
 /// Solves the shooting problem with differential dynamic programming.
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (176/150 lines); see PR body
 pub fn solve(
     dynamics: &dyn ShootingDynamics,
     cost: &dyn CostModel,
@@ -663,6 +664,7 @@ mod tests {
     }
 
     #[test]
+    // Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
     #[allow(clippy::needless_range_loop)]
     fn fddp_converges_from_an_infeasible_initial_trajectory() {
         let dynamics = DoubleIntegrator { dt: 0.1 };

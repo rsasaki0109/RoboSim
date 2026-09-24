@@ -2,7 +2,7 @@
 //!
 //! Vendor runtimes stay outside core crates. These serializable types let an
 //! installed verifier check accelerator identity, pinned runtime requirements,
-//! and capability evidence without importing CUDA, JAX, MuJoCo, or Python.
+//! and capability evidence without importing CUDA, JAX, `MuJoCo`, or Python.
 
 #![deny(missing_docs)]
 
@@ -87,7 +87,7 @@ pub struct AcceleratorManifest {
     pub core_dependency: bool,
     /// Whether the runtime requires an NVIDIA GPU.
     pub requires_nvidia_gpu: bool,
-    /// Supported TaskSpec schema.
+    /// Supported `TaskSpec` schema.
     pub task_spec_schema: u32,
     /// Supported portable batch checkpoint schema.
     pub batch_checkpoint_schema: u32,
@@ -101,7 +101,7 @@ pub struct AcceleratorManifest {
     pub scale_report_schema: u32,
     /// Ordered supported batch widths.
     pub supported_batch_widths: Vec<usize>,
-    /// Repository-relative bound TaskSpec path.
+    /// Repository-relative bound `TaskSpec` path.
     pub binding_task_spec: String,
     /// Repository-relative bound model path.
     pub binding_model: String,
@@ -181,13 +181,13 @@ impl AcceleratorManifest {
 pub struct AcceleratorRuntimePackages {
     /// JAX package version.
     pub jax: String,
-    /// JAXlib package version.
+    /// `JAXlib` package version.
     pub jaxlib: String,
     /// JAX CUDA plugin package version.
     pub jax_cuda_plugin: String,
-    /// MuJoCo package version.
+    /// `MuJoCo` package version.
     pub mujoco: String,
-    /// MuJoCo MJX package version.
+    /// `MuJoCo` MJX package version.
     pub mujoco_mjx: String,
     /// Warp package version.
     pub warp_lang: String,
@@ -263,13 +263,13 @@ pub struct AcceleratorRuntimeProbe {
     pub machine: String,
     /// Observed JAX version.
     pub jax_version: Option<String>,
-    /// Observed JAXlib version.
+    /// Observed `JAXlib` version.
     pub jaxlib_version: Option<String>,
     /// Observed JAX CUDA plugin version.
     pub jax_cuda_plugin_version: Option<String>,
-    /// Observed MuJoCo version.
+    /// Observed `MuJoCo` version.
     pub mujoco_version: Option<String>,
-    /// Observed MuJoCo MJX version.
+    /// Observed `MuJoCo` MJX version.
     pub mujoco_mjx_version: Option<String>,
     /// Observed Warp version.
     pub warp_version: Option<String>,
@@ -303,7 +303,7 @@ pub struct AcceleratorCapabilityReport {
     pub precision: String,
     /// Supported wire protocol schema.
     pub protocol_schema: u32,
-    /// Supported TaskSpec schema.
+    /// Supported `TaskSpec` schema.
     pub task_spec_schema: u32,
     /// Supported portable batch checkpoint schema.
     pub batch_checkpoint_schema: u32,

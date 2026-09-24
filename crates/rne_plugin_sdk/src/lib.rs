@@ -76,14 +76,14 @@ mod tests {
         if usize::BITS != 64 {
             return;
         }
-        assert_eq!(std::mem::size_of::<RneJointPosition>(), 16);
-        assert_eq!(std::mem::align_of::<RneJointPosition>(), 8);
+        assert_eq!(size_of::<RneJointPosition>(), 16);
+        assert_eq!(align_of::<RneJointPosition>(), 8);
         assert_eq!(std::mem::offset_of!(RneJointPosition, name), 0);
         assert_eq!(std::mem::offset_of!(RneJointPosition, position_rad), 8);
-        assert_eq!(std::mem::size_of::<RneJointVelocity>(), 16);
+        assert_eq!(size_of::<RneJointVelocity>(), 16);
         assert_eq!(std::mem::offset_of!(RneJointVelocity, velocity_rad_s), 8);
-        assert_eq!(std::mem::size_of::<RneJointObservationV3>(), 40);
-        assert_eq!(std::mem::align_of::<RneJointObservationV3>(), 8);
+        assert_eq!(size_of::<RneJointObservationV3>(), 40);
+        assert_eq!(align_of::<RneJointObservationV3>(), 8);
         assert_eq!(std::mem::offset_of!(RneJointObservationV3, robot_id), 0);
         assert_eq!(std::mem::offset_of!(RneJointObservationV3, name), 8);
         assert_eq!(
@@ -99,10 +99,10 @@ mod tests {
             32
         );
         assert_eq!(std::mem::offset_of!(RneJointObservationV3, reserved), 33);
-        assert_eq!(std::mem::size_of::<RneJointVelocityV3>(), 24);
+        assert_eq!(size_of::<RneJointVelocityV3>(), 24);
         assert_eq!(std::mem::offset_of!(RneJointVelocityV3, velocity_rad_s), 16);
-        assert_eq!(std::mem::size_of::<RneControllerStepResultV3>(), 16);
-        assert_eq!(std::mem::align_of::<RneControllerStepResultV3>(), 8);
+        assert_eq!(size_of::<RneControllerStepResultV3>(), 16);
+        assert_eq!(align_of::<RneControllerStepResultV3>(), 8);
         assert_eq!(std::mem::offset_of!(RneControllerStepResultV3, status), 0);
         assert_eq!(
             std::mem::offset_of!(RneControllerStepResultV3, output_count),

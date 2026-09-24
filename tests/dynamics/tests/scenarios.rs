@@ -16,7 +16,7 @@ use rne_world::Transform3;
 // Free fall
 // ---------------------------------------------------------------------------
 
-/// Maximum |y_sim − y_continuous| after 1 s of free fall at 60 Hz.
+/// Maximum |`y_sim` − `y_continuous`| after 1 s of free fall at 60 Hz.
 ///
 /// Rapier's unconstrained integrator tracks the continuous parabola `y₀ + ½gt²`
 /// more closely than the textbook symplectic-Euler discrete sum `gΔt²n(n+1)/2`

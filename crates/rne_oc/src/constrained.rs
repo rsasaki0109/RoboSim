@@ -35,6 +35,7 @@ fn integrate(
 ///
 /// The active contact set is constant across the horizon, so the points neither
 /// accelerate nor separate.
+#[derive(Debug)]
 pub struct ConstrainedArticulatedDynamics<'a> {
     /// Model to integrate.
     pub model: &'a ArticulatedModel,
@@ -83,6 +84,7 @@ pub struct ContactPhase {
 /// Each node uses the active contacts of its phase. Impact reset maps at phase
 /// boundaries are not applied yet, so a sequence must be initialized with a
 /// configuration whose velocities are consistent with the new contact set.
+#[derive(Debug)]
 pub struct ContactSequenceDynamics<'a> {
     /// Model to integrate.
     pub model: &'a ArticulatedModel,
@@ -225,6 +227,7 @@ mod tests {
     }
 
     #[test]
+    // Index feeds multiple parallel arrays/matrix slots keyed by the same position; an iterator adapter would obscure the indexing.
     #[allow(clippy::needless_range_loop)]
     fn contact_sequence_applies_an_impact_reset() {
         let (_world, model, base) = floating_body();

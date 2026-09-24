@@ -1,4 +1,4 @@
-//! OpenSCENARIO import integration tests.
+//! `OpenSCENARIO` import integration tests.
 
 use rne_openscenario::{
     parse_openscenario_xml_with_source, ScenarioAction, ScenarioDocument, ScenarioEntityKind,
@@ -145,7 +145,7 @@ fn resolves_vehicle_catalog_reference() {
     assert_eq!(document.entities[0].kind, ScenarioEntityKind::MotorVehicle);
     assert!(matches!(
         document.actions[0].action,
-        rne_openscenario::ScenarioAction::AbsoluteSpeed { target_m_s: 5.0 }
+        ScenarioAction::AbsoluteSpeed { target_m_s: 5.0 }
     ));
 
     // Without a base directory the reference cannot be resolved.

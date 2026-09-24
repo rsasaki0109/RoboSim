@@ -1,4 +1,4 @@
-//! Versioned binary payloads used by dataset streams beyond image and LiDAR codecs.
+//! Versioned binary payloads used by dataset streams beyond image and `LiDAR` codecs.
 
 use crate::transport::{SensorFrameMetadata, TransportError, TRANSPORT_MAX_PAYLOAD_BYTES};
 use crate::{ImuSample, PoseSample};
@@ -20,11 +20,11 @@ pub const DATASET_ANNOTATION_ENCODING: &str = "rne.dataset.ground_truth_f64.v1";
 const METADATA_BYTES: usize = 32;
 const MAX_VALUES: usize = (TRANSPORT_MAX_PAYLOAD_BYTES - METADATA_BYTES - 16) / 8;
 
-/// Flat action sample in the order declared by the run's ActionSpec.
+/// Flat action sample in the order declared by the run's `ActionSpec`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DatasetActionSample {
-    /// Finite action values in semantic ActionSpec row-major order.
+    /// Finite action values in semantic `ActionSpec` row-major order.
     pub values: Vec<f64>,
 }
 

@@ -47,6 +47,16 @@ pub struct Sequence {
     current: usize,
 }
 
+impl std::fmt::Debug for Sequence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Children are `dyn BtNode` trait objects, which do not implement `Debug`.
+        f.debug_struct("Sequence")
+            .field("child_count", &self.children.len())
+            .field("current", &self.current)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Sequence {
     /// Creates a sequence from child nodes.
     pub fn new(children: Vec<Box<dyn BtNode>>) -> Self {
@@ -88,6 +98,16 @@ impl BtNode for Sequence {
 pub struct Selector {
     children: Vec<Box<dyn BtNode>>,
     current: usize,
+}
+
+impl std::fmt::Debug for Selector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Children are `dyn BtNode` trait objects, which do not implement `Debug`.
+        f.debug_struct("Selector")
+            .field("child_count", &self.children.len())
+            .field("current", &self.current)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Selector {
@@ -132,6 +152,13 @@ pub struct Condition<F: FnMut(&BtContext) -> bool> {
     predicate: F,
 }
 
+impl<F: FnMut(&BtContext) -> bool> std::fmt::Debug for Condition<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The predicate is an opaque closure and cannot implement `Debug`.
+        f.debug_struct("Condition").finish_non_exhaustive()
+    }
+}
+
 impl<F: FnMut(&BtContext) -> bool> Condition<F> {
     /// Creates a condition leaf.
     pub fn new(predicate: F) -> Self {
@@ -152,6 +179,13 @@ impl<F: FnMut(&BtContext) -> bool> BtNode for Condition<F> {
 /// A leaf that runs a user action.
 pub struct Action<F: FnMut(&mut BtContext) -> BtStatus> {
     action: F,
+}
+
+impl<F: FnMut(&mut BtContext) -> BtStatus> std::fmt::Debug for Action<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The action is an opaque closure and cannot implement `Debug`.
+        f.debug_struct("Action").finish_non_exhaustive()
+    }
 }
 
 impl<F: FnMut(&mut BtContext) -> BtStatus> Action<F> {

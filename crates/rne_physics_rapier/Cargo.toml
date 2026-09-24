@@ -7,6 +7,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [features]
 # Requires the repository's Rapier patch; default builds also compile against
 # unmodified crates.io Rapier. See ADR 030 before enabling in another workspace.
@@ -19,7 +22,6 @@ rne_ecs = { workspace = true }
 rne_math = { workspace = true }
 rne_physics = { workspace = true }
 rne_world = { workspace = true }
-thiserror = { workspace = true }
 
 [dev-dependencies]
 approx = "0.5"

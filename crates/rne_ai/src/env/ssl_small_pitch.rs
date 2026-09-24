@@ -1,4 +1,4 @@
-//! RoboCup SSL Division B 2v2 analog scored by official field geometry.
+//! `RoboCup` SSL Division B 2v2 analog scored by official field geometry.
 //!
 //! This is not a grSim clone and does not speak the SSL simulation protobuf
 //! ports. The first slice is a headless 9 m × 6 m pitch with four 180 mm
@@ -151,7 +151,7 @@ pub fn ssl_small_pitch_scene_path() -> PathBuf {
     bundled_asset_path(Path::new("scenes/ssl_small_pitch_2v2.rne.scene.toml"))
 }
 
-/// Portable TaskSpec for the SSL 2v2 analog.
+/// Portable `TaskSpec` for the SSL 2v2 analog.
 #[must_use]
 pub fn ssl_small_pitch_task_spec(max_episode_steps: u64) -> TaskSpec {
     TaskSpec::new(

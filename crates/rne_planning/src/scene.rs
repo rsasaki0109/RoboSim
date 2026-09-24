@@ -12,7 +12,7 @@ use rne_robot::{
 
 /// The environment a planner reasons about.
 ///
-/// `PlanningScene` is the MoveIt `PlanningScene` analogue: it owns the robot's
+/// `PlanningScene` is the `MoveIt` `PlanningScene` analogue: it owns the robot's
 /// kinematic model, its self-collision checker, a world of static collision
 /// objects, and the kinematics solvers used to resolve pose goals. It is
 /// backend-neutral and never requires a physics engine.
@@ -95,7 +95,7 @@ impl PlanningScene {
 
     /// Attaches a grasped or mounted collision body to a link.
     ///
-    /// This is the MoveIt `AttachedBody` analogue; the body is checked against
+    /// This is the `MoveIt` `AttachedBody` analogue; the body is checked against
     /// other links (except `touch_links`) and world objects.
     pub fn attach_body(
         &mut self,

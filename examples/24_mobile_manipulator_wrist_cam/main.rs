@@ -1,4 +1,4 @@
-//! Wrist camera DataBus smoke for `mm_minimal`.
+//! Wrist camera `DataBus` smoke for `mm_minimal`.
 
 use rne_ai::{
     mm_minimal_scene_path, wrist_camera_image_valid, MobileManipulatorAction, MobileManipulatorSim,

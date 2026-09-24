@@ -1,8 +1,8 @@
-//! LeKiwi + SO-101 reference-hardware contract for Robot Native Engine.
+//! `LeKiwi` + SO-101 reference-hardware contract for Robot Native Engine.
 //!
 //! This brand-specific crate remains outside RNE core. It pins the upstream
-//! LeRobot interface used by the reference device, defines a conservative
-//! base-only TaskSpec, maps vendor units into that contract, and preserves
+//! `LeRobot` interface used by the reference device, defines a conservative
+//! base-only `TaskSpec`, maps vendor units into that contract, and preserves
 //! fail-closed base-stop behavior. The SO-101 arm is observed and held at its
 //! latest measured position; v1 deliberately does not grant it live actuation.
 
@@ -24,7 +24,7 @@ use rne_hardware_gateway::{ActuationFrame, HardwareMode, SafetyReason};
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
-/// Schema version for the built-in LeKiwi reference profile.
+/// Schema version for the built-in `LeKiwi` reference profile.
 pub const LEKIWI_REFERENCE_PROFILE_SCHEMA_VERSION: u32 = 1;
 
 /// Schema version implemented by the companion Python device bridge.
@@ -36,22 +36,22 @@ pub const LEKIWI_MOCK_DEVICE_ID: &str = "rne.lekiwi_so101.mock.v1";
 /// Required prefix for a companion bridge connected to physical hardware.
 pub const LEKIWI_PHYSICAL_DEVICE_ID_PREFIX: &str = "rne.lekiwi_so101.physical.v1:";
 
-/// Stable discriminator for LeKiwiReferenceProfile.
+/// Stable discriminator for `LeKiwiReferenceProfile`.
 pub const LEKIWI_REFERENCE_PROFILE_KIND: &str = "rne_hardware_reference_profile";
 
-/// Stable identity of the conservative LeKiwi + SO-101 reference profile.
+/// Stable identity of the conservative `LeKiwi` + SO-101 reference profile.
 pub const LEKIWI_REFERENCE_PROFILE_ID: &str = "rne.lekiwi_so101.base.v1";
 
 /// Task identity shared by simulation, shadow, HIL, and live base control.
 pub const LEKIWI_BASE_TASK_ID: &str = "rne.lekiwi_so101.base_shadow.v1";
 
-/// Upstream LeRobot repository used by this profile.
+/// Upstream `LeRobot` repository used by this profile.
 pub const LEKIWI_UPSTREAM_REPOSITORY: &str = "https://github.com/huggingface/lerobot";
 
-/// Upstream LeRobot release used by this profile.
+/// Upstream `LeRobot` release used by this profile.
 pub const LEKIWI_UPSTREAM_VERSION: &str = "v0.6.0";
 
-/// Content-addressed upstream revision for the selected LeRobot release.
+/// Content-addressed upstream revision for the selected `LeRobot` release.
 pub const LEKIWI_UPSTREAM_REVISION: &str = "30da8e687a6dfc617fcd94afc367ac7071c376ce";
 
 /// Upstream device watchdog interval.
@@ -89,35 +89,35 @@ pub struct UpstreamReference {
     pub revision: String,
 }
 
-/// Mapping from one upstream scalar to a TaskSpec observation element.
+/// Mapping from one upstream scalar to a `TaskSpec` observation element.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObservationChannelBinding {
-    /// LeRobot observation dictionary key.
+    /// `LeRobot` observation dictionary key.
     pub vendor_key: String,
     /// Unit produced by the pinned upstream interface.
     pub vendor_unit: String,
-    /// TaskSpec observation tensor name.
+    /// `TaskSpec` observation tensor name.
     pub tensor_name: String,
-    /// Row-major element within the TaskSpec tensor.
+    /// Row-major element within the `TaskSpec` tensor.
     pub tensor_element: usize,
-    /// Unit declared by the TaskSpec tensor.
+    /// Unit declared by the `TaskSpec` tensor.
     pub task_unit: String,
     /// Multiplier in task = vendor * scale.
     pub vendor_to_task_scale: f64,
 }
 
-/// Mapping from one TaskSpec action element to an upstream scalar.
+/// Mapping from one `TaskSpec` action element to an upstream scalar.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ActionChannelBinding {
-    /// TaskSpec action tensor name.
+    /// `TaskSpec` action tensor name.
     pub tensor_name: String,
-    /// Row-major element within the TaskSpec tensor.
+    /// Row-major element within the `TaskSpec` tensor.
     pub tensor_element: usize,
-    /// Unit declared by the TaskSpec tensor.
+    /// Unit declared by the `TaskSpec` tensor.
     pub task_unit: String,
-    /// LeRobot action dictionary key.
+    /// `LeRobot` action dictionary key.
     pub vendor_key: String,
     /// Unit accepted by the pinned upstream interface.
     pub vendor_unit: String,
@@ -125,13 +125,13 @@ pub struct ActionChannelBinding {
     pub task_to_vendor_scale: f64,
 }
 
-/// One camera configured by the pinned LeRobot reference implementation.
+/// One camera configured by the pinned `LeRobot` reference implementation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReferenceCameraStream {
     /// Stable RNE stream name.
     pub stream_name: String,
-    /// LeRobot observation dictionary key.
+    /// `LeRobot` observation dictionary key.
     pub vendor_key: String,
     /// Configured sensor width before any declared rotation.
     pub configured_width_px: u32,
@@ -185,9 +185,9 @@ pub struct LeKiwiReferenceProfile {
     pub supported_modes: Vec<HardwareMode>,
     /// Complete portable task contract.
     pub task: TaskSpec,
-    /// Vendor-to-TaskSpec observation mapping in flattened TaskSpec order.
+    /// Vendor-to-TaskSpec observation mapping in flattened `TaskSpec` order.
     pub observation_bindings: Vec<ObservationChannelBinding>,
-    /// TaskSpec-to-vendor action mapping in flattened TaskSpec order.
+    /// TaskSpec-to-vendor action mapping in flattened `TaskSpec` order.
     pub action_bindings: Vec<ActionChannelBinding>,
     /// Camera streams intentionally kept outside the numeric process wire.
     pub camera_streams: Vec<ReferenceCameraStream>,
@@ -245,7 +245,7 @@ impl LeKiwiReferenceProfile {
 /// Failure validating a selected reference profile.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LeKiwiProfileError {
-    /// Embedded TaskSpec validation failed.
+    /// Embedded `TaskSpec` validation failed.
     #[error("invalid reference TaskSpec: {0}")]
     Task(String),
     /// A field differs from the exact versioned built-in contract.
@@ -253,7 +253,7 @@ pub enum LeKiwiProfileError {
     Mismatch(&'static str),
 }
 
-/// Raw numeric state returned by LeRobot v0.6.0 with use_degrees enabled.
+/// Raw numeric state returned by `LeRobot` v0.6.0 with `use_degrees` enabled.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LeKiwiVendorObservation {
     /// Five revolute arm joint positions in upstream degrees.
@@ -308,7 +308,7 @@ pub enum LeKiwiDeviceCommand {
     },
 }
 
-/// Stateful defense-in-depth mapper used by a LeKiwi device process.
+/// Stateful defense-in-depth mapper used by a `LeKiwi` device process.
 #[derive(Clone, Debug, Default)]
 pub struct LeKiwiAdapter {
     last_arm_position_vendor: Option<[f64; 6]>,
@@ -320,7 +320,7 @@ impl LeKiwiAdapter {
         Self::default()
     }
 
-    /// Converts a vendor observation into flattened TaskSpec order.
+    /// Converts a vendor observation into flattened `TaskSpec` order.
     ///
     /// A successful conversion also captures the six arm/gripper values used
     /// to hold the physical arm during later base commands.
@@ -346,7 +346,7 @@ impl LeKiwiAdapter {
 
     /// Converts one gateway-validated action into a vendor-side command.
     ///
-    /// Safety frames are checked again and become a direct stop_base request.
+    /// Safety frames are checked again and become a direct `stop_base` request.
     /// A normal base action is rejected until a fresh arm pose has been observed.
     pub fn command(
         &self,
@@ -419,7 +419,7 @@ pub enum LeKiwiAdapterError {
     /// A normal frame had inconsistent action sequence or stop-reason fields.
     #[error("invalid LeKiwi actuation envelope")]
     InvalidActuationEnvelope,
-    /// The action width differed from the base-only TaskSpec.
+    /// The action width differed from the base-only `TaskSpec`.
     #[error("LeKiwi base action must contain 3 values, got {actual}")]
     ActionWidth {
         /// Rejected width.
@@ -450,7 +450,7 @@ pub enum LeKiwiAdapterError {
     NoArmHoldObservation,
 }
 
-/// Returns the portable base-only TaskSpec used by the reference profile.
+/// Returns the portable base-only `TaskSpec` used by the reference profile.
 pub fn lekiwi_base_task_spec() -> TaskSpec {
     TaskSpec::new(
         LEKIWI_BASE_TASK_ID,
@@ -500,7 +500,7 @@ pub fn lekiwi_base_task_spec() -> TaskSpec {
     )
 }
 
-/// Returns the exact LeKiwi + SO-101 v1 reference profile.
+/// Returns the exact `LeKiwi` + SO-101 v1 reference profile.
 pub fn lekiwi_reference_profile_v1() -> LeKiwiReferenceProfile {
     let mut observation_bindings = Vec::with_capacity(9);
     for (tensor_element, vendor_key) in ARM_KEYS[..5].iter().enumerate() {

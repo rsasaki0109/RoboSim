@@ -1,4 +1,4 @@
-//! Seal and verify full-content flagship LeKiwi shadow evidence.
+//! Seal and verify full-content flagship `LeKiwi` shadow evidence.
 
 use anyhow::{Context, Result};
 use rne_ai::{
@@ -819,6 +819,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // TODO(cleanup): split (314/150 lines); see PR body
     fn complete_v2_mock_shadow_seals_verifies_and_rejects_tampering() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();

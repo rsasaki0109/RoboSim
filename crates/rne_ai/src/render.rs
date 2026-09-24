@@ -75,7 +75,7 @@ pub fn append_task_marker_overlay(
     }
 }
 
-/// Summary of LiDAR markers appended to a render scene.
+/// Summary of `LiDAR` markers appended to a render scene.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LidarOverlayStats {
     /// Number of ray hit markers drawn.
@@ -91,7 +91,7 @@ impl LidarOverlayStats {
     }
 }
 
-/// Appends LiDAR hit and mount markers from the latest DataBus frames.
+/// Appends `LiDAR` hit and mount markers from the latest `DataBus` frames.
 pub fn append_lidar_overlay(
     scene: &mut RenderScene,
     world: &World,

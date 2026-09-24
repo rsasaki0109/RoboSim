@@ -32,16 +32,16 @@ pub struct RobotAsset {
     pub urdf: Option<UrdfRobotAsset>,
     /// Optional URDF visuals for diff-drive robots.
     pub visuals: Option<VisualsRobotAsset>,
-    /// Optional horizontal LiDAR sensor mounted on the base link.
+    /// Optional horizontal `LiDAR` sensor mounted on the base link.
     pub lidar: Option<LidarRobotAsset>,
     /// Optional RGB camera mounted on an arm link.
     pub wrist_camera: Option<WristCameraRobotAsset>,
 }
 
-/// LiDAR section of a robot asset file.
+/// `LiDAR` section of a robot asset file.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LidarRobotAsset {
-    /// When false, no LiDAR entity is spawned even if this section is present.
+    /// When false, no `LiDAR` entity is spawned even if this section is present.
     #[serde(default = "default_lidar_enabled")]
     pub enabled: bool,
     /// Number of rays per scan.

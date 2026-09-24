@@ -456,11 +456,7 @@ fn validate_attestation_policy(policy: &ArtifactAttestationPolicy) -> anyhow::Re
     anyhow::ensure!(
         policy.verify_command
             == format!(
-                "gh attestation verify ARTIFACT -R {repository} --bundle ATTESTATION_BUNDLE --cert-identity https://github.com/{repository}/{workflow}@refs/tags/TAG --source-ref refs/tags/TAG --source-digest REVISION --signer-digest REVISION --cert-oidc-issuer {issuer} --predicate-type {predicate} --deny-self-hosted-runners --format json",
-                repository = EXPECTED_ATTESTATION_REPOSITORY,
-                workflow = EXPECTED_ATTESTATION_WORKFLOW,
-                issuer = EXPECTED_ATTESTATION_ISSUER,
-                predicate = EXPECTED_ATTESTATION_PREDICATE,
+                "gh attestation verify ARTIFACT -R {EXPECTED_ATTESTATION_REPOSITORY} --bundle ATTESTATION_BUNDLE --cert-identity https://github.com/{EXPECTED_ATTESTATION_REPOSITORY}/{EXPECTED_ATTESTATION_WORKFLOW}@refs/tags/TAG --source-ref refs/tags/TAG --source-digest REVISION --signer-digest REVISION --cert-oidc-issuer {EXPECTED_ATTESTATION_ISSUER} --predicate-type {EXPECTED_ATTESTATION_PREDICATE} --deny-self-hosted-runners --format json",
             ),
         "artifact attestation verifier drifted"
     );

@@ -173,7 +173,7 @@ pub struct IdentifiedTireBackendTrace {
 }
 
 impl IdentifiedTireBackendTrace {
-    /// Verifies the fit chain, TaskSpec, applied plant, execution trace, and digest.
+    /// Verifies the fit chain, `TaskSpec`, applied plant, execution trace, and digest.
     pub fn validate(&self) -> Result<()> {
         ensure!(
             self.kind == IDENTIFIED_TIRE_BACKEND_TRACE_KIND
@@ -213,7 +213,7 @@ pub struct IdentifiedTireBackendComparison {
 }
 
 impl IdentifiedTireBackendComparison {
-    /// Verifies both executions use the exact profile and shared TaskSpec.
+    /// Verifies both executions use the exact profile and shared `TaskSpec`.
     pub fn validate(&self) -> Result<()> {
         ensure!(
             self.kind == IDENTIFIED_TIRE_BACKEND_COMPARISON_KIND

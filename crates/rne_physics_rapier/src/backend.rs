@@ -42,6 +42,17 @@ pub struct RapierBackend {
     next_world_id: u32,
 }
 
+impl std::fmt::Debug for RapierBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `RapierWorldState` holds opaque Rapier pipeline/solver state that
+        // does not implement `Debug`, so only the world count is reported.
+        f.debug_struct("RapierBackend")
+            .field("world_count", &self.worlds.len())
+            .field("next_world_id", &self.next_world_id)
+            .finish_non_exhaustive()
+    }
+}
+
 struct RapierWorldState {
     gravity: Vector3<f32>,
     integration_parameters: IntegrationParameters,
@@ -1660,7 +1671,7 @@ mod tests {
                 if filtered {
                     world
                         .entity_mut(entity)
-                        .insert(rne_physics::CollisionGroups::without_self_collision(1));
+                        .insert(CollisionGroups::without_self_collision(1));
                 }
             }
             backend.sync_from_ecs(&mut world, id).unwrap();
@@ -1689,7 +1700,7 @@ mod tests {
             for entity in [a, b] {
                 world
                     .entity_mut(entity)
-                    .insert(rne_physics::CollisionGroups::without_self_collision(1));
+                    .insert(CollisionGroups::without_self_collision(1));
             }
             backend.sync_from_ecs(&mut world, id).unwrap();
             backend.step(id, fixed_step()).unwrap();
@@ -2452,7 +2463,7 @@ mod tests {
                 ..RigidBody::default()
             },
             Collider {
-                shape: rne_physics::ColliderShape::Cuboid {
+                shape: ColliderShape::Cuboid {
                     half_extents_m: Vec3::splat(0.05),
                 },
                 local_offset: Transform3::from_translation_rotation(

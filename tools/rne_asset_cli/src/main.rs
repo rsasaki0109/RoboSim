@@ -204,7 +204,7 @@ enum Commands {
         )]
         control_port: Option<u16>,
         /// Serve the negotiated framed binary production protocol. Bulk RGB-D
-        /// and LiDAR payloads are typed binary frames; queues and socket writes
+        /// and `LiDAR` payloads are typed binary frames; queues and socket writes
         /// are bounded and disconnected clients may reconnect to the same run.
         #[arg(
             long,
@@ -536,7 +536,7 @@ struct SimulationReport {
     contact_pairs_max: u64,
     contact_impulse_max_ns: f32,
     min_base_height_m: Option<f64>,
-    failure: Option<rne_log::ReplayFailureKind>,
+    failure: Option<ReplayFailureKind>,
 }
 
 #[derive(Clone, Debug)]
@@ -656,6 +656,7 @@ fn simulate_command(
     )
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (182/150 lines); see PR body
 fn run_manifest_command(
     path: &Path,
     control_stdin: bool,
@@ -1058,7 +1059,7 @@ fn replay_input_digest(path: &Path, input_kind: &str) -> Result<u64> {
     Ok(stable_replay_input_digest(&bytes))
 }
 
-/// Loads an OpenSCENARIO document and its referenced traffic network.
+/// Loads an `OpenSCENARIO` document and its referenced traffic network.
 ///
 /// `network_override` is used by replay verification so the artifact records
 /// the exact network input rather than re-deriving it from a changed XOSC.
@@ -1266,7 +1267,7 @@ impl RunnerControl for StdinRunnerControl {
 /// observe the run. An acknowledgement means the command was accepted by the
 /// runner-control queue; the subsequent status is the applied-state boundary.
 /// The snapshot contains bounded RGB camera previews,
-/// deterministic LiDAR point samples, and latest IMU/wheel values when those
+/// deterministic `LiDAR` point samples, and latest IMU/wheel values when those
 /// typed sensor streams are present. The `run` command can opt into source-
 /// resolution RGB plus little-endian f32 depth payloads for TCP control, with
 /// absolute per-image and per-status safety limits.
@@ -1484,7 +1485,7 @@ fn runner_status_line_with_limit(
 /// Compact per-step observation streamed to a live frontend.
 ///
 /// Camera images are deterministic, nearest-neighbour previews capped by
-/// [`LIVE_CAMERA_MAX_WIDTH`] and [`LIVE_CAMERA_MAX_HEIGHT`]. LiDAR points are
+/// [`LIVE_CAMERA_MAX_WIDTH`] and [`LIVE_CAMERA_MAX_HEIGHT`]. `LiDAR` points are
 /// capped by [`LIVE_LIDAR_MAX_POINTS`]; replay artifacts remain the path for
 /// full sensor payloads.
 #[derive(serde::Serialize)]
@@ -1511,7 +1512,7 @@ struct LiveJointState<'a> {
 /// Sensor stream summary in a [`LiveSnapshot`].
 #[derive(serde::Serialize)]
 struct LiveSensorStream {
-    /// DataBus stream identifier.
+    /// `DataBus` stream identifier.
     stream_id: u64,
     /// Stable sensor kind label.
     kind: String,
@@ -1522,7 +1523,7 @@ struct LiveSensorStream {
     /// Camera preview, when this is a camera stream.
     #[serde(skip_serializing_if = "Option::is_none")]
     camera: Option<LiveCameraPreview>,
-    /// Bounded world-frame LiDAR preview, when this is a LiDAR stream.
+    /// Bounded world-frame `LiDAR` preview, when this is a `LiDAR` stream.
     #[serde(skip_serializing_if = "Option::is_none")]
     lidar: Option<LiveLidarPreview>,
     /// Latest IMU sample, when this is an IMU stream.
@@ -1569,7 +1570,7 @@ struct LiveCameraPreview {
     depth_f32_le_base64: Option<String>,
 }
 
-/// Bounded world-frame LiDAR preview in the runner status protocol.
+/// Bounded world-frame `LiDAR` preview in the runner status protocol.
 #[derive(serde::Serialize)]
 struct LiveLidarPreview {
     /// Number of points in the full latest cloud.
@@ -1631,7 +1632,7 @@ fn build_live_sensor_stream(
     let camera = if options.include_bulk_previews && summary.kind == "camera" {
         let rgb = bus.latest::<ImageRgb8>(rne_data::StreamId::new(summary.stream_id));
         let depth = bus.latest::<ImageDepth>(rne_data::StreamId::new(
-            summary.stream_id + rne_sensor::CAMERA_DEPTH_STREAM_OFFSET,
+            summary.stream_id + CAMERA_DEPTH_STREAM_OFFSET,
         ));
         rgb.as_ref().and_then(|rgb| {
             build_live_camera_preview(
@@ -1735,7 +1736,7 @@ fn encode_bounded_depth(
     }
     let (width, height) = bounded_image_dimensions(depth.width, depth.height, options)?;
     let output_len = (width as usize).checked_mul(height as usize)?;
-    let byte_len = output_len.checked_mul(std::mem::size_of::<f32>())?;
+    let byte_len = output_len.checked_mul(size_of::<f32>())?;
     let mut bytes = Vec::with_capacity(byte_len);
     for y in 0..height {
         let source_y = ((u64::from(y) * u64::from(depth.height)) / u64::from(height)) as usize;
@@ -1985,6 +1986,7 @@ fn canonicalize_controller_robots(
     Ok(controller_robots)
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
 fn simulate_scene_with_action_schedule(
     path: &Path,
@@ -2016,7 +2018,9 @@ fn simulate_scene_with_action_schedule(
     )
 }
 
+// Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (234/150 lines); see PR body
 fn simulate_scene_with_snapshot_options(
     path: &Path,
     steps: u64,
@@ -2491,7 +2495,7 @@ fn capture_controller_observation(
 fn apply_replay_action(
     world: &World,
     command_buffer: &mut ActuatorCommandBuffer,
-    drives: &[rne_robot::DifferentialDrive],
+    drives: &[DifferentialDrive],
     action: &ReplayAction,
     sim_time: SimTime,
 ) -> Result<()> {
@@ -2717,7 +2721,7 @@ fn capture_sensor_streams(world: &World, bus: &InMemoryDataBus) -> Vec<ReplaySen
                         latest_payload_hash::<ImageDepth>(
                             bus,
                             rne_data::StreamId::new(
-                                sensor.stream_id.0 + rne_sensor::CAMERA_DEPTH_STREAM_OFFSET,
+                                sensor.stream_id.0 + CAMERA_DEPTH_STREAM_OFFSET,
                             ),
                         ),
                     ),
@@ -2984,7 +2988,7 @@ fn stable_co_sim_hash(step_states: &[Vec<(String, [f64; 3])>]) -> u64 {
     hash
 }
 
-/// Spawns SUMO with a net and route file and connects a TraCI client.
+/// Spawns SUMO with a net and route file and connects a `TraCI` client.
 fn spawn_sumo_and_connect(net: &Path, routes: &Path) -> Result<(std::process::Child, TraciClient)> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .map_err(|error| anyhow::anyhow!("bind co-sim port probe: {error}"))?;
@@ -3019,7 +3023,7 @@ fn spawn_sumo_and_connect(net: &Path, routes: &Path) -> Result<(std::process::Ch
                 client = Some(connected);
                 break;
             }
-            Err(_) => std::thread::sleep(Duration::from_millis(100)),
+            Err(_) => thread::sleep(Duration::from_millis(100)),
         }
     }
     if let Some(client) = client {
@@ -3036,7 +3040,7 @@ fn spawn_sumo_and_connect(net: &Path, routes: &Path) -> Result<(std::process::Ch
 fn run_co_simulation(net: &Path, routes: &Path, steps: u64) -> Result<CoSimReport> {
     let (mut child, client) = spawn_sumo_and_connect(net, routes)?;
     let mut co_sim = CoSimulation::from_client(client);
-    let mut world = rne_ecs::World::new();
+    let mut world = World::new();
     let mut step_states: Vec<Vec<(String, [f64; 3])>> = Vec::new();
     for _ in 0..steps {
         co_sim
@@ -3296,7 +3300,7 @@ fn replay_command(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Re-executes and verifies a deterministic OpenSCENARIO replay artifact.
+/// Re-executes and verifies a deterministic `OpenSCENARIO` replay artifact.
 fn replay_scenario_command(path: &Path, artifact: &ScenarioReplayArtifact) -> Result<()> {
     anyhow::ensure!(
         artifact.replayable,

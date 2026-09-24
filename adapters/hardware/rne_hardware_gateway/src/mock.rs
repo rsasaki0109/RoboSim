@@ -30,7 +30,7 @@ pub enum MockConformanceCase {
     Reconnect,
     /// A queued command expires before device delivery.
     CommandStale,
-    /// A controller action exceeds a TaskSpec actuator bound.
+    /// A controller action exceeds a `TaskSpec` actuator bound.
     ActuatorLimit,
     /// The device process independently asserts emergency stop.
     EmergencyStop,
@@ -221,7 +221,7 @@ pub struct MockDeviceConfig {
     pub fault: Option<MockDeviceFault>,
 }
 
-/// Fixed TaskSpec identity and flattened widths enforced by a mock process.
+/// Fixed `TaskSpec` identity and flattened widths enforced by a mock process.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MockDeviceBinding {
     /// Portable task identity accepted by the mock.
@@ -232,10 +232,10 @@ pub struct MockDeviceBinding {
     pub action_width: usize,
 }
 
-/// Invalid fixed TaskSpec binding supplied to a mock device.
+/// Invalid fixed `TaskSpec` binding supplied to a mock device.
 #[derive(Debug, thiserror::Error)]
 pub enum MockDeviceBindingError {
-    /// A fixed TaskSpec binding is empty or zero-width.
+    /// A fixed `TaskSpec` binding is empty or zero-width.
     #[error("mock TaskSpec binding must have a task id and non-zero widths")]
     Invalid,
 }
@@ -307,7 +307,7 @@ impl MockHardwareDevice {
         })
     }
 
-    /// Creates a mock that enforces one fixed TaskSpec binding during open.
+    /// Creates a mock that enforces one fixed `TaskSpec` binding during open.
     pub fn with_binding(
         config: MockDeviceConfig,
         binding: MockDeviceBinding,

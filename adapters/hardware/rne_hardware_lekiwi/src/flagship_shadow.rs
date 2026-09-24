@@ -1,4 +1,4 @@
-//! Replayable full-content shadow-run contracts for the flagship LeKiwi path.
+//! Replayable full-content shadow-run contracts for the flagship `LeKiwi` path.
 //!
 //! Filesystem hashing and path confinement are performed by `xtask`. This
 //! module owns the portable manifest, typed stream artifacts, and deterministic
@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
-/// Schema version for the complete flagship LeKiwi shadow manifest.
+/// Schema version for the complete flagship `LeKiwi` shadow manifest.
 pub const FLAGSHIP_LEKIWI_SHADOW_MANIFEST_SCHEMA_VERSION: u32 = 1;
 
 /// Current shadow-manifest schema version for portable v2 controller evidence.
@@ -251,7 +251,7 @@ pub struct FlagshipActionProjectionStream {
     pub kind: String,
     /// Stream schema version.
     pub schema_version: u32,
-    /// Exact parent TaskSpec identity.
+    /// Exact parent `TaskSpec` identity.
     pub task_id: String,
     /// Exact parent controller identity.
     pub controller_id: String,
@@ -309,7 +309,7 @@ pub struct FlagshipRateDecisionStream {
     pub kind: String,
     /// Stream schema version.
     pub schema_version: u32,
-    /// Exact parent TaskSpec identity.
+    /// Exact parent `TaskSpec` identity.
     pub task_id: String,
     /// Exact parent controller identity.
     pub controller_id: String,
@@ -380,7 +380,7 @@ pub struct FlagshipObservationFusionStream {
     pub kind: String,
     /// Stream schema version.
     pub schema_version: u32,
-    /// Exact parent TaskSpec identity.
+    /// Exact parent `TaskSpec` identity.
     pub task_id: String,
     /// Exact parent controller identity.
     pub controller_id: String,
@@ -446,7 +446,7 @@ pub struct FlagshipObservationFusionStreamV2 {
     pub kind: String,
     /// Stream schema version; exactly two.
     pub schema_version: u32,
-    /// Exact portable v2 TaskSpec identity.
+    /// Exact portable v2 `TaskSpec` identity.
     pub task_id: String,
     /// Exact portable v2 controller identity.
     pub controller_id: String,
@@ -514,11 +514,11 @@ pub enum FlagshipLeKiwiShadowExecutionClass {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FlagshipLeKiwiShadowArtifacts {
-    /// Exact release TaskSpec file.
+    /// Exact release `TaskSpec` file.
     pub task_spec: EvidenceFileRef,
     /// Exact built-in controller contract file.
     pub controller_contract: EvidenceFileRef,
-    /// Exact LeKiwi reference profile file.
+    /// Exact `LeKiwi` reference profile file.
     pub reference_profile: EvidenceFileRef,
     /// Exact morphology-calibration file.
     pub arm_calibration: EvidenceFileRef,
@@ -530,7 +530,7 @@ pub struct FlagshipLeKiwiShadowArtifacts {
     pub traffic_source: EvidenceFileRef,
     /// Lift/gripper/policy task-state source contract.
     pub task_state_source: EvidenceFileRef,
-    /// Underlying non-actuating LeKiwi reference session.
+    /// Underlying non-actuating `LeKiwi` reference session.
     pub physical_shadow_session: EvidenceFileRef,
     /// Replayable action-projection stream.
     pub action_projection_stream: EvidenceFileRef,
@@ -600,7 +600,7 @@ pub struct FlagshipLeKiwiShadowManifest {
     pub execution_class: FlagshipLeKiwiShadowExecutionClass,
     /// Exact Ready-handshake device identity.
     pub device_id: String,
-    /// Exact parent TaskSpec identity.
+    /// Exact parent `TaskSpec` identity.
     pub task_id: String,
     /// Exact parent controller identity.
     pub controller_id: String,
@@ -868,7 +868,7 @@ fn invalid(field: &'static str, reason: &'static str) -> FlagshipLeKiwiShadowErr
     }
 }
 
-/// Failure validating or replaying a flagship LeKiwi shadow contract.
+/// Failure validating or replaying a flagship `LeKiwi` shadow contract.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum FlagshipLeKiwiShadowError {
     /// A portable field violated its schema or role invariant.
@@ -905,7 +905,7 @@ pub enum FlagshipLeKiwiShadowError {
     /// Observation fusion failed closed during replay.
     #[error(transparent)]
     Observation(#[from] FlagshipLeKiwiObservationError),
-    /// Portable v2 controller rejected a fused TaskSpec observation.
+    /// Portable v2 controller rejected a fused `TaskSpec` observation.
     #[error(transparent)]
     Controller(#[from] rne_ai::FlagshipMobileLiftControllerError),
 }

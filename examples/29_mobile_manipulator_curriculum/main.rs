@@ -20,7 +20,7 @@ fn policy(obs: &MobileManipulatorObservation) -> MobileManipulatorAction {
     }
 }
 
-/// Runs episodes until the curriculum reaches its final stage; returns (final_stage, solved).
+/// Runs episodes until the curriculum reaches its final stage; returns (`final_stage`, solved).
 fn run_curriculum(episode: &mut MobileManipulatorEpisode, final_stage: usize) -> (usize, usize) {
     let mut solved = 0;
     let mut step = episode.reset();

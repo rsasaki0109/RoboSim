@@ -72,6 +72,7 @@ const SCENARIO_V3_MISSING_REQUIRED_FIELDS: &[&str] = &[
     "result.ownership",
 ];
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (288/150 lines); see PR body
 fn main() -> anyhow::Result<()> {
     let mut args = env::args_os().skip(1);
     let output = args.next().context(

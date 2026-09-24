@@ -59,6 +59,7 @@ fn lane(lane_id: &str, source_id: &str, points: [[f64; 3]; 2]) -> Lane {
     }
 }
 
+#[allow(clippy::too_many_lines)] // TODO(cleanup): split (153/150 lines); see PR body
 fn fixture(scrambled: bool) -> TrafficAsset {
     let junction_id = id("plateau:53394525/junction-main");
     let eastbound_id = id("plateau:53394525/connection-eastbound");

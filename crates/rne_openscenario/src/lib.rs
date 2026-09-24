@@ -1,4 +1,4 @@
-//! OpenSCENARIO 1.0 scenario import for Robot Native Engine.
+//! `OpenSCENARIO` 1.0 scenario import for Robot Native Engine.
 //!
 //! RNE's scenario workflow takes a fixed-step run (see `rne_asset_cli`) and,
 //! when needed, a traffic network (see `rne_traffic`). This crate bridges the
@@ -6,7 +6,7 @@
 //! scenario document so a scenario file can drive the same deterministic
 //! runtime as native manifests.
 //!
-//! The importer intentionally supports a strict subset of OpenSCENARIO 1.0 and
+//! The importer intentionally supports a strict subset of `OpenSCENARIO` 1.0 and
 //! rejects everything else with a clear error instead of silently dropping it:
 //!
 //! - `FileHeader` with `revMajor`/`revMinor` exactly `1.0`

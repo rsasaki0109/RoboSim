@@ -1,4 +1,4 @@
-//! Versioned artifacts for deterministic OpenSCENARIO runs.
+//! Versioned artifacts for deterministic `OpenSCENARIO` runs.
 
 use crate::scenario::{read_bounded_utf8, SCENARIO_MAX_INPUT_BYTES};
 use crate::{ScenarioRunOptions, ScenarioRunResult};
@@ -19,7 +19,7 @@ const FNV_PRIME: u64 = 0x100000001b3;
 
 /// Computes a stable FNV-1a digest for a replay input file.
 ///
-/// Scenario replay artifacts store this digest for both the OpenSCENARIO XML
+/// Scenario replay artifacts store this digest for both the `OpenSCENARIO` XML
 /// and resolved traffic-network source so replay fails clearly when either
 /// input changed after the artifact was recorded.
 pub fn stable_replay_input_digest(bytes: &[u8]) -> u64 {
@@ -56,9 +56,9 @@ pub enum ScenarioReplayArtifactError {
 /// Exact files used to execute and later verify a scenario replay.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScenarioReplayInputs {
-    /// OpenSCENARIO XML path used for the run.
+    /// `OpenSCENARIO` XML path used for the run.
     pub scenario_path: String,
-    /// Stable digest of the OpenSCENARIO XML bytes used for the run.
+    /// Stable digest of the `OpenSCENARIO` XML bytes used for the run.
     pub scenario_digest: u64,
     /// Traffic network path used for the run.
     pub network_path: String,
@@ -97,9 +97,9 @@ pub struct ScenarioReplayArtifact {
     pub kind: String,
     /// Artifact schema version.
     pub schema_version: u32,
-    /// OpenSCENARIO XML path used for the run.
+    /// `OpenSCENARIO` XML path used for the run.
     pub scenario_path: String,
-    /// Stable digest of the OpenSCENARIO XML bytes used for the run.
+    /// Stable digest of the `OpenSCENARIO` XML bytes used for the run.
     pub scenario_digest: u64,
     /// Traffic network path used for the run.
     pub network_path: String,
@@ -149,6 +149,7 @@ impl ScenarioReplayArtifact {
     }
 
     /// Validates the discriminator, schema, paths, and fixed-step metadata.
+    #[allow(clippy::too_many_lines)] // TODO(cleanup): split (185/150 lines); see PR body
     pub fn validate(&self) -> Result<(), ScenarioReplayArtifactError> {
         if self.kind != SCENARIO_REPLAY_KIND {
             return Err(ScenarioReplayArtifactError::Invalid(format!(
