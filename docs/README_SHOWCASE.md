@@ -28,12 +28,12 @@ observation state.
 | Showcase | GIF / poster | GIF bytes | poster bytes | poster size |
 | --- | --- | ---: | ---: | ---: |
 | Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 414,735 | 749,240 | 960 x 540 |
-| OpenArm v2 bimanual control | `showcase-openarm.gif` / `.png` | 2,369,682 | 29,014 | 960 x 540 |
+| OpenArm v2 bimanual control | `showcase-openarm.gif` / `.png` | 2,341,410 | 53,829 | 960 x 540 |
 | Factory inspection | `showcase-factory.gif` / `.png` | 1,830,619 | 52,228 | 960 x 540 |
 | Office AGV delivery | `showcase-office.gif` / `.png` | 1,812,046 | 47,795 | 960 x 540 |
 | PLATEAU UAV RGB-D flight | `showcase-uav.gif` / `.png` | 4,329,461 | 439,474 | 960 x 540 |
 
-The current GIF total is **10,756,543 bytes**, below the 12,000,000-byte
+The current GIF total is **10,728,271 bytes**, below the 12,000,000-byte
 combined ceiling. `showcase-media-check` verifies the exact total; regeneration
 must update the manifest's sizes and hashes in the same change.
 
@@ -42,7 +42,7 @@ must update the manifest's sizes and hashes in the same change.
 | Showcase | Required simulation evidence |
 | --- | --- |
 | Real indoor 3DGS mobile manipulation | Real floor-level friction grasp; terminated without truncation; lift clearance at least 0.20 m; payload transport at least 1.5 m; placement error at most 0.10 m; all ten authored PBR links synchronized with zero recorded transform error; no synthetic room furniture is rendered; rendered wrist RGB-D performs known-robot self masking, payload segmentation, depth back-projection, and analytic-IK correction without payload-truth controller inputs; all 45 post-physics samples show the detected reticle; task telemetry and the 2D trace use the same samples. |
-| OpenArm v2 bimanual control | Both official seven-axis arms and two-finger grippers expose 18 force-limited actuators and declared URDF inertias; a typed 18-axis sensor publishes every control step with exactly one-period latency; delayed state feedback drives explicit PD effort targets over 19 physics substeps; each end effector travels at least 0.16 m; each gripper changes aperture by at least 0.015 m; proximal final tracking error is at most 0.13 rad; at least 45 official visual mesh parts resolve; headless and capture replay digests match. |
+| OpenArm v2 bimanual control | Both official seven-axis arms and two-finger grippers expose 18 force-limited actuators and declared URDF inertias; a typed 18-axis sensor publishes every control step with exactly one-period latency; delayed state feedback drives explicit PD effort targets over 19 physics substeps; every commanded keypose is an inverse-kinematics solution against the real URDF chain; the right gripper closes on a real dynamic block only once two distinct fingertip contacts gate the grasp, then the left gripper receives the same contact-gated handoff and places the block on a marked pad, releasing it back to ordinary dynamics; each end effector travels at least 0.16 m; each gripper changes aperture by at least 0.015 m; proximal final tracking error is at most 0.13 rad; at least 45 official visual mesh parts resolve; headless and capture replay digests match. |
 | Factory inspection | Official G1 articulation completes all three markers upright; at least 20 mesh items are rendered; replay digest matches. |
 | Office AGV delivery | Yield, dock pickup, desk delivery, and desk placement complete; no contact, corridor exit, or early drop; replay digest matches. |
 | PLATEAU UAV RGB-D flight | Visible `MultirotorFlight` entity travels at least 60 m; RMS position error at most 1.0 m; altitude error at most 0.6 m; building clearance at least 2.0 m; zero collisions; onboard RGB-D and replay hashes are deterministic. |
@@ -69,7 +69,15 @@ v2.0 description and a pinned Apache-2.0 model derivative, split into two
 reduced-coordinate articulations and reassembled at the original pedestal mount
 transforms. Its visible control panel is synchronized from the same post-step
 typed-feedback age, tracking error, effort utilization, and saturation state
-used by the controller. Factory uses Unitree G1 meshes under its bundled
+used by the controller. Every commanded keypose is solved offline against the
+real URDF chain, so the trajectory actually reaches the block and the pad
+instead of an arbitrary joint-space sweep. The carried block is a real
+dynamic Rapier body: it switches to a kinematic pose-follower only once two
+distinct fingertip sensors report contact, rides parented to whichever
+gripper is holding it, and is handed back to ordinary dynamics on release so
+it drops and settles under gravity. The workbench frame, floor, partitions,
+and props are render-only lab dressing rebuilt each frame from fixed world
+constants. Factory uses Unitree G1 meshes under its bundled
 BSD-3-Clause notice. Office uses a repository-authored scene and synchronized
 render overlays. Exact source, conversion, hashes, and licenses are recorded in
 the manifest and metadata.

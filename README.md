@@ -39,10 +39,10 @@ The quantitative gates and exact regeneration commands are in
     <td width="50%" align="center">
       <picture>
         <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-openarm.png">
-        <img src="docs/media/showcase-openarm.gif" alt="Official OpenArm v2 bimanual robot executing delayed joint-feedback control with live telemetry" width="460">
+        <img src="docs/media/showcase-openarm.gif" alt="Official OpenArm v2 bimanual robot picking a block off a workbench, handing it mid-air to the other gripper, and placing it on a target pad under delayed joint-feedback control with live telemetry" width="460">
       </picture>
       <br><b>OpenArm v2 · bimanual control</b><br>
-      <sub>18-axis typed feedback with one-cycle latency, explicit PD effort limits, synchronized pinch grippers, live error/effort telemetry, and exact Rapier replay over 1,400 fixed steps. <a href="docs/media/showcase-openarm.json">metadata</a> · <a href="examples/90_showcase_captures/openarm.rs">source</a></sub>
+      <sub>18-axis typed feedback with one-cycle latency, explicit PD effort limits, an inverse-kinematics-solved pick / handoff / place cycle on a real dynamic block gated on real fingertip contact, live error/effort telemetry, and exact Rapier replay over 1,400 fixed steps. <a href="docs/media/showcase-openarm.json">metadata</a> · <a href="examples/90_showcase_captures/openarm.rs">source</a></sub>
     </td>
     <td width="50%" align="center">
       <picture>
