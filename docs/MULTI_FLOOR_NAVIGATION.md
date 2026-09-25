@@ -126,12 +126,33 @@ lifts, 2 crossings, and an identical replan.
 ## Open
 
 - **Pressing the button with an arm.** Example 120 uses a driven fingertip, not
-  a manipulator. The SO-101 arm is currently unusable for this: at the default
-  solver iteration count its articulation diverges (gripper drift up to 1.30 m
-  while holding a fixed target), and at 32 iterations it is stable
-  (0.0013 m drift) but the position motors do not move it — all six joints read
-  0.000 rad against non-zero targets. That is an arm-control defect, separate
-  from the button.
+  a manipulator. The standalone SO-101 scene cannot hold a commanded pose, for
+  reasons traced below; that is an arm-control problem, separate from the
+  button.
+
+  An earlier revision of this section reported that "all six joints read
+  0.000 rad against non-zero targets". **That reading was an artifact.**
+  `assets/robots/so101.rne.robot.toml` sets `articulation = true` but not
+  `multibody = true`, so its six joints are impulse joints rather than
+  reduced-coordinate ones, and impulse joints carry no `JointState` — which is
+  what `named_joint_position` reports. The joints were moving; the accessor had
+  nothing to read.
+
+  Setting `multibody = true` alone makes the scene produce NaN on the first
+  step, because SO-101 joints carry a non-identity origin `rpy` and the joint
+  frames must include it (`use_joint_origin_rpy = true`, as
+  `mm_mobile_so101.rne.robot.toml` does and documents). With both flags the
+  scene is stable and reports real joint angles.
+
+  What remains unexplained is tracking: with the asset corrected, a shoulder
+  commanded to 0.5 rad settles near 0.147 rad, and that residual does not
+  respond to stiffness (200-4000), to solver iterations (16, 32, 64, 128, 256 —
+  it plateaus), or to disabling self-collisions. So it is not a convergence
+  problem. The corrected asset is **not** committed: enabling the multibody path
+  also changes realized effort from an exact 1.0 N·m to 0.9723 N·m, which
+  `direct_effort_actuation_retains_ceiling_and_clamps_command` pins exactly, and
+  a change that weakens a pinned assertion without delivering a working arm is
+  not worth making.
 - **Floor transitions in scene assets.** Buildings are constructed in code;
   there is no `.rne.scene.toml` representation of floors or transitions yet.
 - **Localization across floors.** A robot in a moving lift is in a featureless
