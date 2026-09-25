@@ -1651,6 +1651,138 @@ mod tests {
         (backend, physics_world, world, ground, cube)
     }
 
+    /// Drives a motorised foot into a ground surface and reports its rest height.
+    ///
+    /// The foot is a 22 mm sphere on a prismatic multibody joint whose position
+    /// motor commands it 0.40 m below the hip — well past the ground — which is
+    /// the regime a stiff legged stance puts its feet in.
+    fn motorised_foot_rest_height_m(solid_ground: bool, hz: f64) -> (f64, f64) {
+        let mut backend = RapierBackend::new();
+        let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+        let mut world = World::new();
+
+        let ground = spawn_named(&mut world, "ground");
+        let (shape, pose) = if solid_ground {
+            (
+                ColliderShape::Cuboid {
+                    half_extents_m: Vec3::new(10.0, 0.5, 10.0),
+                },
+                Transform3::from_translation_rotation(Vec3::new(0.0, -0.5, 0.0), Quat::IDENTITY),
+            )
+        } else {
+            let (nrows, ncols) = (2u32, 33u32);
+            let heights: Vec<f64> = vec![0.0; (nrows * ncols) as usize];
+            (
+                ColliderShape::HeightField {
+                    nrows,
+                    ncols,
+                    heights_m: heights.into(),
+                    scale: Vec3::new(20.0, 1.0, 20.0),
+                },
+                Transform3::IDENTITY,
+            )
+        };
+        world.entity_mut(ground).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider {
+                shape,
+                ..Collider::default()
+            },
+            pose,
+        ));
+
+        let hip = spawn_named(&mut world, "hip");
+        world.entity_mut(hip).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider::cuboid(Vec3::splat(0.02)),
+            Transform3::from_translation_rotation(Vec3::new(0.0, 0.35, 0.0), Quat::IDENTITY),
+            MultibodyLink,
+        ));
+        let foot = spawn_named(&mut world, "foot");
+        world.entity_mut(foot).insert((
+            RigidBody {
+                mass_kg: 1.5,
+                ..RigidBody::default()
+            },
+            Collider {
+                shape: ColliderShape::Sphere { radius_m: 0.022 },
+                ..Collider::default()
+            },
+            Transform3::from_translation_rotation(Vec3::new(0.0, 0.10, 0.0), Quat::IDENTITY),
+            MultibodyLink,
+            PrismaticJointDesc {
+                parent: hip,
+                axis: Vec3::new(0.0, 1.0, 0.0),
+                anchor_parent_m: Vec3::ZERO,
+                anchor_child_m: Vec3::ZERO,
+                relative_rotation: Quat::IDENTITY,
+                lower_m: None,
+                upper_m: None,
+            },
+            JointMotor {
+                target_position: -0.40,
+                stiffness: 4000.0,
+                gain: 100.0,
+                max_force: 200.0,
+                ..JointMotor::default()
+            },
+        ));
+
+        let dt = SimDuration::from_hertz(rne_math::Hertz::new(hz));
+        let mut min_height_m = f64::INFINITY;
+        for _ in 0..((7.0 * hz) as usize) {
+            step_physics(&mut backend, &mut world, id, dt).unwrap();
+            let height_m = world.get::<Transform3>(foot).unwrap().translation.y;
+            min_height_m = min_height_m.min(height_m);
+        }
+        let rest_m = world.get::<Transform3>(foot).unwrap().translation.y;
+        (rest_m, min_height_m)
+    }
+
+    /// A height field is an open surface, so a penetration it suffers is final.
+    ///
+    /// This characterizes a hazard rather than asserting desired behaviour: a
+    /// stiff position motor out-muscles the contact within one step at 60 Hz on
+    /// *either* ground, but a solid volume pushes the foot back out while a
+    /// height field cannot, and the foot is lost. Raising the rate keeps the
+    /// per-step penetration small enough that it never happens.
+    #[test]
+    fn a_stiff_motor_is_lost_through_an_open_height_field_but_not_through_a_solid_volume() {
+        const RADIUS_M: f64 = 0.022;
+
+        // At 60 Hz both grounds are penetrated, and only the solid one recovers.
+        let (solid_rest_m, solid_min_m) = motorised_foot_rest_height_m(true, 60.0);
+        let (field_rest_m, field_min_m) = motorised_foot_rest_height_m(false, 60.0);
+        assert!(
+            solid_min_m < 0.0,
+            "the solid ground was expected to be penetrated too: {solid_min_m}"
+        );
+        assert!(
+            solid_rest_m > 0.0,
+            "a solid volume must push the foot back out, rested at {solid_rest_m}"
+        );
+        assert!(
+            field_rest_m < -RADIUS_M,
+            "the open surface was expected to lose the foot, rested at {field_rest_m}"
+        );
+        assert!(field_min_m < field_rest_m + 1.0e-9);
+
+        // A finer step keeps the penetration inside what contact can resolve.
+        for hz in [240.0, 960.0] {
+            let (rest_m, min_m) = motorised_foot_rest_height_m(false, hz);
+            assert!(
+                rest_m > 0.0 && min_m > 0.0,
+                "{hz} Hz should hold the foot on the surface: rest {rest_m}, min {min_m}"
+            );
+        }
+    }
+
     #[test]
     fn signed_contact_separations_include_zero_impulse_and_respect_filters() {
         for (gap, filtered) in [(0.0, false), (0.001, false), (-0.1, false), (-0.1, true)] {
