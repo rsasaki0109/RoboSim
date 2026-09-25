@@ -35,6 +35,45 @@ Two deliberate choices:
 Expansion is in cost order with ties broken by node index, so the same building
 and endpoints always replan identically.
 
+### Buildings are data
+
+A building built in code cannot be shared, reviewed, or swapped without a
+recompile. `BuildingDescription` gives it a versioned `.rne.building` file:
+which floors exist, where their maps live, and how a robot crosses between
+them.
+
+```json
+{
+  "format": "rne.building",
+  "version": 1,
+  "name": "office three floor",
+  "floors": [
+    { "id": 0, "name": "1F", "elevation_m": 0.0, "map": "1f.rne.map", "inflation_radius_m": 0.2 }
+  ],
+  "transitions": [
+    { "name": "far lift", "kind": "Elevator", "from": 0, "to": 1,
+      "from_point_m": [10.0, 10.0, 0.0], "to_point_m": [10.0, 10.0, 0.0],
+      "cost_s": 20.0, "bidirectional": true }
+  ]
+}
+```
+
+Three decisions worth naming:
+
+- **Floors reference their maps by path rather than embedding them**, so a
+  building file stays readable and the maps remain ordinary `.rne.map` files
+  that the SLAM and navigation tools already produce. Paths resolve against the
+  building file's own directory, so a site directory can be copied whole.
+- **Inflation is part of the description, not a caller default.** Two robots
+  with different footprints need different inflation over the same map, and a
+  building that silently picked one would plan routes the other cannot drive.
+- **Load-time validation is the same validation planning uses.** A transition
+  whose endpoint falls outside its floor fails when the file is loaded, naming
+  the floor, rather than surfacing later as an unexplained routing failure.
+
+`assets/buildings/office_three_floor/` is a committed example; example 120
+loads it, and `--emit-site` regenerates it.
+
 ### A freshly created grid is unknown, not free
 
 An `OccupancyGrid` that has never been observed is entirely *unknown*, and the

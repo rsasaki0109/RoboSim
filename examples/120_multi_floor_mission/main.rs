@@ -18,10 +18,11 @@
 
 use rne_math::Vec3;
 use rne_nav::{
-    plan_building_route, BuildingMap, Costmap, CostmapConfig, Elevator, ElevatorSpec, Floor,
-    FloorId, FloorPosition, FloorTransition, GlobalPlannerConfig, GridCoord, OccupancyGrid, Pose2d,
-    RouteCosts, RouteLeg, TransitionKind,
+    plan_building_route, save_map, BuildingDescription, BuildingMap, Elevator, ElevatorSpec,
+    FloorEntry, FloorId, FloorPosition, GlobalPlannerConfig, GridCoord, OccupancyGrid, Pose2d,
+    RouteCosts, RouteLeg, TransitionEntry, TransitionKind,
 };
+use std::path::{Path, PathBuf};
 
 /// Floor extent in cells and meters per cell.
 const CELLS: usize = 48;
@@ -29,11 +30,16 @@ const RESOLUTION_M: f64 = 0.25;
 /// Physics-free control step used to run the elevator, in seconds.
 const DT_S: f64 = 1.0 / 60.0;
 
-/// Builds a floor whose free space is fully known, with optional wall segments.
+/// Site directory holding the building description and its floor maps.
+const SITE_DIR: &str = "assets/buildings/office_three_floor";
+/// Costmap inflation each floor declares, in meters.
+const INFLATION_RADIUS_M: f64 = 0.2;
+
+/// Writes one floor's occupancy map, with optional wall segments.
 ///
 /// A freshly created grid is entirely unknown and the planner refuses unknown
 /// space, so the open floor has to be declared free rather than merely empty.
-fn floor(id: usize, name: &str, elevation_m: f64, walls: &[(usize, usize, usize, usize)]) -> Floor {
+fn write_floor_map(path: &Path, walls: &[(usize, usize, usize, usize)]) {
     let mut grid = OccupancyGrid::new(CELLS, CELLS, RESOLUTION_M, Pose2d::new(0.0, 0.0, 0.0))
         .expect("floor grid");
     for y in 0..CELLS {
@@ -58,12 +64,67 @@ fn floor(id: usize, name: &str, elevation_m: f64, walls: &[(usize, usize, usize,
             }
         }
     }
-    Floor {
-        id: FloorId(id),
-        name: name.to_string(),
-        elevation_m,
-        costmap: Costmap::from_occupancy(&grid, &CostmapConfig::default()).expect("costmap"),
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("site directory");
     }
+    save_map(path, &grid).expect("write floor map");
+}
+
+fn lift(name: &str, from: usize, to: usize, point_m: [f64; 3]) -> TransitionEntry {
+    TransitionEntry {
+        name: name.to_string(),
+        kind: TransitionKind::Elevator,
+        from,
+        to,
+        from_point_m: point_m,
+        to_point_m: point_m,
+        cost_s: 20.0,
+        bidirectional: true,
+    }
+}
+
+/// Regenerates the committed site: three floor maps and the building file.
+///
+/// 2F carries a wall across the middle that seals off the near lift's landing,
+/// so a route that lands there cannot continue.
+fn emit_site(site_dir: &Path) {
+    write_floor_map(&site_dir.join("1f.rne.map"), &[]);
+    write_floor_map(&site_dir.join("2f.rne.map"), &[(0, 20, 30, 22)]);
+    write_floor_map(&site_dir.join("3f.rne.map"), &[]);
+    let description = BuildingDescription {
+        name: "office three floor".to_string(),
+        floors: vec![
+            FloorEntry {
+                id: 0,
+                name: "1F".to_string(),
+                elevation_m: 0.0,
+                map: PathBuf::from("1f.rne.map"),
+                inflation_radius_m: INFLATION_RADIUS_M,
+            },
+            FloorEntry {
+                id: 1,
+                name: "2F".to_string(),
+                elevation_m: 3.5,
+                map: PathBuf::from("2f.rne.map"),
+                inflation_radius_m: INFLATION_RADIUS_M,
+            },
+            FloorEntry {
+                id: 2,
+                name: "3F".to_string(),
+                elevation_m: 7.0,
+                map: PathBuf::from("3f.rne.map"),
+                inflation_radius_m: INFLATION_RADIUS_M,
+            },
+        ],
+        transitions: vec![
+            lift("near lift", 0, 1, [2.0, 2.0, 0.0]),
+            lift("far lift", 0, 1, [10.0, 10.0, 0.0]),
+            lift("upper lift", 1, 2, [10.0, 10.0, 0.0]),
+        ],
+    };
+    description
+        .save(&site_dir.join("office.rne.building"))
+        .expect("write building description");
 }
 
 fn elevator_spec() -> ElevatorSpec {
@@ -92,49 +153,25 @@ fn summon(elevator: &mut Elevator, floor: usize) -> f64 {
 }
 
 fn main() {
-    // 2F has a wall across the middle that seals off the near lift's landing,
-    // so a route that lands there cannot continue.
-    let blocking_wall = [(0usize, 20usize, 30usize, 22usize)];
-    let map = BuildingMap::new(
-        vec![
-            floor(0, "1F", 0.0, &[]),
-            floor(1, "2F", 3.5, &blocking_wall),
-            floor(2, "3F", 7.0, &[]),
-        ],
-        vec![
-            FloorTransition {
-                name: "near lift".to_string(),
-                kind: TransitionKind::Elevator,
-                from: FloorId(0),
-                to: FloorId(1),
-                from_point_m: Vec3::new(2.0, 2.0, 0.0),
-                to_point_m: Vec3::new(2.0, 2.0, 0.0),
-                cost_s: 20.0,
-                bidirectional: true,
-            },
-            FloorTransition {
-                name: "far lift".to_string(),
-                kind: TransitionKind::Elevator,
-                from: FloorId(0),
-                to: FloorId(1),
-                from_point_m: Vec3::new(10.0, 10.0, 0.0),
-                to_point_m: Vec3::new(10.0, 10.0, 0.0),
-                cost_s: 20.0,
-                bidirectional: true,
-            },
-            FloorTransition {
-                name: "upper lift".to_string(),
-                kind: TransitionKind::Elevator,
-                from: FloorId(1),
-                to: FloorId(2),
-                from_point_m: Vec3::new(10.0, 10.0, 0.0),
-                to_point_m: Vec3::new(10.0, 10.0, 0.0),
-                cost_s: 20.0,
-                bidirectional: true,
-            },
-        ],
-    )
-    .expect("building map");
+    // The building is data, not code: a caller edits the site directory rather
+    // than this file. `--emit-site` regenerates the committed copy.
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root");
+    let site_dir = repo_root.join(SITE_DIR);
+    if std::env::args().any(|argument| argument == "--emit-site") {
+        emit_site(&site_dir);
+        println!("wrote the site to {}", site_dir.display());
+    }
+    let map: BuildingMap = BuildingDescription::load_from(&site_dir.join("office.rne.building"))
+        .expect("load the committed building description");
+    println!(
+        "loaded {} floors and {} crossings from {}",
+        map.floors().len(),
+        map.transitions().len(),
+        SITE_DIR
+    );
 
     let dock = FloorPosition::new(FloorId(0), Vec3::new(1.0, 1.0, 0.0));
     let desk = FloorPosition::new(FloorId(2), Vec3::new(9.0, 3.0, 0.0));

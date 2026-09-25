@@ -1,0 +1,84 @@
+{
+  "format": "rne.building",
+  "version": 1,
+  "name": "office three floor",
+  "floors": [
+    {
+      "id": 0,
+      "name": "1F",
+      "elevation_m": 0.0,
+      "map": "1f.rne.map",
+      "inflation_radius_m": 0.2
+    },
+    {
+      "id": 1,
+      "name": "2F",
+      "elevation_m": 3.5,
+      "map": "2f.rne.map",
+      "inflation_radius_m": 0.2
+    },
+    {
+      "id": 2,
+      "name": "3F",
+      "elevation_m": 7.0,
+      "map": "3f.rne.map",
+      "inflation_radius_m": 0.2
+    }
+  ],
+  "transitions": [
+    {
+      "name": "near lift",
+      "kind": "Elevator",
+      "from": 0,
+      "to": 1,
+      "from_point_m": [
+        2.0,
+        2.0,
+        0.0
+      ],
+      "to_point_m": [
+        2.0,
+        2.0,
+        0.0
+      ],
+      "cost_s": 20.0,
+      "bidirectional": true
+    },
+    {
+      "name": "far lift",
+      "kind": "Elevator",
+      "from": 0,
+      "to": 1,
+      "from_point_m": [
+        10.0,
+        10.0,
+        0.0
+      ],
+      "to_point_m": [
+        10.0,
+        10.0,
+        0.0
+      ],
+      "cost_s": 20.0,
+      "bidirectional": true
+    },
+    {
+      "name": "upper lift",
+      "kind": "Elevator",
+      "from": 1,
+      "to": 2,
+      "from_point_m": [
+        10.0,
+        10.0,
+        0.0
+      ],
+      "to_point_m": [
+        10.0,
+        10.0,
+        0.0
+      ],
+      "cost_s": 20.0,
+      "bidirectional": true
+    }
+  ]
+}
