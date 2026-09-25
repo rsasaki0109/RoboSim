@@ -19,6 +19,8 @@
 
 pub mod avoidance;
 pub mod behavior_tree;
+pub mod building;
+pub mod call_button;
 pub mod components;
 pub mod control;
 pub mod coordination;
@@ -27,6 +29,7 @@ pub mod drive;
 pub mod dwa;
 pub mod dynamic;
 pub mod elevation;
+pub mod elevator;
 pub mod fusion;
 pub mod grid;
 pub mod layers;
@@ -47,6 +50,13 @@ pub mod tile;
 
 pub use avoidance::{avoid_velocities, rollout_collides, AvoidanceConfig, CircularObstacle};
 pub use behavior_tree::{Action, BtContext, BtNode, BtStatus, Condition, Selector, Sequence};
+pub use building::{
+    plan_building_route, BuildingError, BuildingMap, BuildingRoute, Floor, FloorId, FloorPosition,
+    FloorTransition, RouteCosts, RouteLeg, TransitionKind,
+};
+pub use call_button::{
+    ButtonContact, CallButton, CallButtonError, CallButtonSpec, CallButtonState,
+};
 pub use components::NavGoal;
 pub use control::{pure_pursuit_follow, FollowResult, PurePursuitConfig, VelocityCommand2d};
 pub use coordination::{TrafficConfig, TrafficCoordinator, TrafficError};
@@ -63,6 +73,7 @@ pub use dynamic::{
     ObstacleTrackerConfig, PredictiveConfig, Track,
 };
 pub use elevation::{ElevationCell, ElevationConfig, ElevationMap, ElevationReport};
+pub use elevator::{Elevator, ElevatorError, ElevatorSpec, ElevatorState};
 pub use fusion::{
     map_from_odom, wrap_angle, EkfConfig, EkfFusion, FusionError, PoseWithCovariance2d,
 };
