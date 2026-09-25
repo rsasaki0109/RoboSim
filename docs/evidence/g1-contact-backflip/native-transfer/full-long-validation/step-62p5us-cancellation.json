@@ -1,0 +1,8 @@
+{
+  "status": "cancelled_after_candidate_failed_finer_speed_gate",
+  "pid": 1770445,
+  "rejected_dt_us": 125,
+  "peak_joint_speed_ratio": 1.0502659797668457,
+  "required_peak_joint_speed_ratio_less_than": 1.05,
+  "note": "Partial progress log is not a completed rollout. Move to previously tested +0.02 rad landing-knee candidate."
+}

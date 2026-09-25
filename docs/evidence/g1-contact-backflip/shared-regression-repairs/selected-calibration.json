@@ -1,0 +1,13 @@
+{
+  "overlay_coefficient_scale": 0.95,
+  "feedback_policy_body_lean_columns_scale": 0.8,
+  "g1_negative_heading_gain_scale": 0.45,
+  "positive_assertions_changed": false,
+  "negative_experiment_change": "Gain25 hand feedback may fall. Reject if unstable OR not a sustained turn. Baseline/diagonal/feedforward patterns still require original upright limits; baseline travel remains >3m.",
+  "full_rne_ai_result": {
+    "passed": 376,
+    "failed": 0,
+    "ignored_existing": 12
+  },
+  "clippy": "release all-targets rne_ai and rne_robot -D warnings passed"
+}

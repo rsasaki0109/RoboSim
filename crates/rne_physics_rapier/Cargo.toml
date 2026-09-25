@@ -7,6 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# Requires the repository's Rapier patch; default builds also compile against
+# unmodified crates.io Rapier. See ADR 030 before enabling in another workspace.
+experimental-armature = []
+
 [dependencies]
 rapier3d = { workspace = true }
 rne_core = { workspace = true }

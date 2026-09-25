@@ -1,0 +1,35 @@
+{
+  "source_commit": "8180a9a9d20693ae09465f43d2fb0d5ae714073e",
+  "source_sha256": {
+    "examples/114_g1_backflip_gif/native.rs": "734b5e2e9bc255db4a6349334b9e32467905fa31db9cfe82a5c130e4fb568331",
+    "scripts/g1_native_model.py": "3fe952e1e0a27ea0740ddff00ba63d0eab9179d76ab5d802bfbf90bb6cc61af7",
+    "crates/rne_physics_rapier/src/backend.rs": "ad8c41fc7b7fa8f1e0ed0ac7d3e8f84d67410ba1424d16aa7cbc3bf71e9fc815",
+    "scripts/g1_backflip_plant.py": "9239596bb973e40cfea5b3136595a866721dc6b967fb74ee32cc7fa152628512"
+  },
+  "binary_sha256": "8d1c4a349ad4bb14efa1bd7cd58b219da8e080a38457c625a3fb5e1f4de5fab0",
+  "candidate": "../compound-soles/candidate.json",
+  "candidate_sha256": "c18245611a8cc8bc4b51a2366a35f07a583a3ba0002692489470754bd71fdd63",
+  "baseline_comparison": {
+    "reference": "../compound-soles/stand.json",
+    "excluded_fields": [
+      "scene"
+    ],
+    "all_other_previous_fields_equal": true
+  },
+  "validation": {
+    "example_tests": 5,
+    "python_tests": 9,
+    "targeted_release_clippy": "passed",
+    "ruff": "passed",
+    "workspace_format": "passed",
+    "full_workspace_ci": "not rerun to preserve 30 GiB disk reserve"
+  },
+  "artifact_sha256": {
+    "flip-loss-125us.json": "f80ac88c47e73c43142d8f0c50a00c2557d48bcca9762712f0c610ad32a83af9",
+    "flip-loss-16.json": "66b92d03411741cd48d38b3acbb7111ea65418e77f53460c5f321dd4f16071af",
+    "passive-model-audit.json": "f9fb0341a8ce005321e00f4b290ba106385455aefeafb105c7b41f713ac249c5",
+    "stand-16.json": "53d45534bf2702ef9498f93de8e77b9e7afe8a95395b6bb6819a174878f3f070",
+    "stand-64.json": "79d5b4d6536f885739bf6fa074053bf9b8f08cc81d6e823456b25d554a4258eb",
+    "stand-loss-16.json": "57b639d8687e3b92f4702459d1ad425d37659267b39509d393978bf9e0fa3b64"
+  }
+}

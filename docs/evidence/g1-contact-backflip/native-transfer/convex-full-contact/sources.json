@@ -1,0 +1,23 @@
+{
+  "source_commit": "92e659dae443d45de14c3430e331d957a2c43a61",
+  "binary_sha256": "fef33622df8375b354bc0b95f9f6c51f96bd728a2a2330ab6de36324a66df0b1",
+  "model_files_sha256": {
+    "robot.rne.robot.toml": "115cd53ad67041726f723f17a06209bc330e3ab4400d70d93d1dc8334fb6c6a4",
+    "robot.urdf": "6c17434ee6c2b15aa28127a4a15fb45772917462dbf73293c08b4f2ccb35c213",
+    "scene.rne.scene.toml": "a0165e5bdb0bb9de83fd0187e87747edaecddc355c7b1260ddc82ff2e03b9fc5",
+    "audit.json": "ddecf513dd2a8dd2a43c4e2533ee9abfba1db4694f1d34a4b4c62545b898bb0a"
+  },
+  "dt_us": 500,
+  "duration_s": 5,
+  "qualification": "Both full-contact probes fail; structural adjacency is not filtered in this experiment.",
+  "artifact_sha256": {
+    "README.md": "97b77e3632ad22a83ec465145ff3ac062f80f79bfe5ff43b0cb3ab563f544185",
+    "candidate.json": "ad7e6d15521c58f49ee39564fdd439176f9af7708dd269f79c62e8deba4e53e4",
+    "flip.json.gz": "8c04519cd1ad97b067cfb2ea38f672adf68d0ff56ec28f7b1b67a97ee4a12f4b",
+    "model-audit.json": "ddecf513dd2a8dd2a43c4e2533ee9abfba1db4694f1d34a4b4c62545b898bb0a",
+    "observer-regression.json.gz": "f0bb815be701f631abf4755546e316d494f7d44f23a1ff3fad5613163a96e165",
+    "regression.json": "76a4de55fcfd13a6e4fccbcbcd6056d61dd026c6c28a4a90544a98b203536617",
+    "standing.json.gz": "6226a261039a293d96dcd99d595e8903974b944eeb3e432f48e5f75296f74404",
+    "summary.json": "5ba6e4c936954be63c0cff7dcde54cbaf3deeab4edc9cc733586e664622a3098"
+  }
+}

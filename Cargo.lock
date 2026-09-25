@@ -1059,6 +1059,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
+name = "elevator_call_button"
+version = "0.3.0"
+dependencies = [
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "rne_nav",
+ "rne_physics",
+ "rne_physics_rapier",
+ "rne_world",
+]
+
+[[package]]
+name = "elevator_ride"
+version = "0.3.0"
+dependencies = [
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "rne_nav",
+ "rne_physics",
+ "rne_physics_rapier",
+ "rne_world",
+]
+
+[[package]]
 name = "ena"
 version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1336,6 +1362,9 @@ dependencies = [
  "rne_oc",
  "rne_robot",
  "rne_urdf_import",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -1357,12 +1386,17 @@ dependencies = [
  "image",
  "png",
  "rne_ai",
+ "rne_core",
  "rne_dynamics",
  "rne_math",
+ "rne_physics",
+ "rne_physics_rapier",
  "rne_render",
  "rne_render_wgpu",
  "rne_robot",
  "rne_world",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -1748,6 +1782,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "go2_push_recovery"
+version = "0.3.0"
+dependencies = [
+ "rne_ai",
+ "rne_legged",
+ "rne_math",
+]
+
+[[package]]
 name = "go2_steered_turn"
 version = "0.3.0"
 dependencies = [
@@ -1765,6 +1808,17 @@ dependencies = [
  "rne_math",
  "rne_render",
  "rne_render_wgpu",
+]
+
+[[package]]
+name = "go2_terrain_stance"
+version = "0.3.0"
+dependencies = [
+ "rne_ai",
+ "rne_core",
+ "rne_legged",
+ "rne_math",
+ "rne_physics",
 ]
 
 [[package]]
@@ -2645,6 +2699,14 @@ dependencies = [
  "bytemuck",
  "paste",
  "pkg-config",
+]
+
+[[package]]
+name = "multi_floor_mission"
+version = "0.3.0"
+dependencies = [
+ "rne_math",
+ "rne_nav",
 ]
 
 [[package]]
@@ -3671,8 +3733,6 @@ checksum = "ca45419789ae5a7899559e9512e58ca889e41f04f1f2445e9f4b290ceccd1d08"
 [[package]]
 name = "rapier3d"
 version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87360935d1a54802efe0ddf908489436bb49c84865c36c930131843c7b1dc97d"
 dependencies = [
  "approx",
  "arrayvec",
@@ -5108,6 +5168,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "terrain_heightfield"
+version = "0.3.0"
+dependencies = [
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "rne_physics",
+ "rne_physics_rapier",
+ "rne_world",
 ]
 
 [[package]]

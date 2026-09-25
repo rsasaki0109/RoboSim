@@ -1,0 +1,28 @@
+[
+  {
+    "standing_only": true,
+    "standing_passed": false,
+    "failure": null,
+    "completed_maneuver_time_s": 5.0,
+    "signed_rotation_rad": 0.21957325530805694,
+    "peak_joint_speed_ratio": 0.407663631439209,
+    "max_joint_position_excess_rad": 0.0,
+    "final_second_min_upright": 0.9759586167356957,
+    "final_second_max_base_speed_m_s": 0.0017392017427210558,
+    "final_second_continuous_foot_contact": true,
+    "convex_collider_count": 21
+  },
+  {
+    "standing_only": false,
+    "standing_passed": false,
+    "failure": "Landing collapsed at maneuver time 1.365500 s",
+    "completed_maneuver_time_s": 1.3659999999999999,
+    "signed_rotation_rad": 1.935608846378377,
+    "peak_joint_speed_ratio": 0.6706482569376627,
+    "max_joint_position_excess_rad": 3.5711776010804996e-06,
+    "final_second_min_upright": null,
+    "final_second_max_base_speed_m_s": null,
+    "final_second_continuous_foot_contact": null,
+    "convex_collider_count": 21
+  }
+]

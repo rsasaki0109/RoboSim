@@ -1,0 +1,8 @@
+{
+  "name": "g1-partial-spec-screen",
+  "mass_policy": "declared",
+  "self_collision": true,
+  "knee_limit_nm": 90,
+  "control_period_s": 0.002,
+  "command_delay_s": 0.002
+}

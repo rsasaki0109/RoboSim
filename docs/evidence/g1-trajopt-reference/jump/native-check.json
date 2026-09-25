@@ -1,0 +1,12 @@
+{
+  "base_force_residual_n": 5.567052374644277e-11,
+  "base_torque_residual_nm": 4.213518423057394e-12,
+  "joint_torque_difference_nm": 1.9539925233402755e-13,
+  "mass_difference_kg": 1.4210854715202004e-14,
+  "native_mass_kg": 38.133857279999994,
+  "nodes": 41,
+  "passed": true,
+  "plant_validated": false,
+  "schema": "rne.g1.external_dynamics_check.v1",
+  "tolerance": 0.0001
+}

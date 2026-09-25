@@ -1,0 +1,135 @@
+[
+  {
+    "force_nm": 0.1,
+    "tests": {
+      "lift": {
+        "exit_code": 0,
+        "summary": [
+          "test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 365 filtered out; finished in 22.82s"
+        ],
+        "log": "target/research/lift-observation-force-0.1-lift.log"
+      },
+      "place_observation_points_at_object_then_target": {
+        "exit_code": 0,
+        "summary": [
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 387 filtered out; finished in 0.09s"
+        ],
+        "log": "target/research/lift-observation-force-0.1-place_observation_points_at_object_then_target.log"
+      }
+    }
+  },
+  {
+    "force_nm": 0.15,
+    "tests": {
+      "lift": {
+        "exit_code": 0,
+        "summary": [
+          "test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 365 filtered out; finished in 22.42s"
+        ],
+        "log": "target/research/lift-observation-force-0.15-lift.log"
+      },
+      "place_observation_points_at_object_then_target": {
+        "exit_code": 0,
+        "summary": [
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 387 filtered out; finished in 0.12s"
+        ],
+        "log": "target/research/lift-observation-force-0.15-place_observation_points_at_object_then_target.log"
+      }
+    }
+  },
+  {
+    "force_nm": 0.2,
+    "tests": {
+      "lift": {
+        "exit_code": 101,
+        "summary": [
+          "test result: FAILED. 17 passed; 6 failed; 0 ignored; 0 measured; 365 filtered out; finished in 16.60s"
+        ],
+        "log": "target/research/lift-observation-force-0.2-lift.log"
+      },
+      "place_observation_points_at_object_then_target": {
+        "exit_code": 0,
+        "summary": [
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 387 filtered out; finished in 0.10s"
+        ],
+        "log": "target/research/lift-observation-force-0.2-place_observation_points_at_object_then_target.log"
+      }
+    }
+  },
+  {
+    "force_nm": 0.25,
+    "tests": {
+      "lift": {
+        "exit_code": 0,
+        "summary": [
+          "test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 365 filtered out; finished in 16.50s"
+        ],
+        "log": "target/research/lift-observation-force-0.25-lift.log"
+      },
+      "place_observation_points_at_object_then_target": {
+        "exit_code": 101,
+        "summary": [
+          "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 387 filtered out; finished in 0.16s"
+        ],
+        "log": "target/research/lift-observation-force-0.25-place_observation_points_at_object_then_target.log"
+      }
+    }
+  },
+  {
+    "force_nm": 0.3,
+    "tests": {
+      "lift": {
+        "exit_code": 0,
+        "summary": [
+          "test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 365 filtered out; finished in 15.89s"
+        ],
+        "log": "target/research/lift-observation-force-0.3-lift.log"
+      },
+      "place_observation_points_at_object_then_target": {
+        "exit_code": 101,
+        "summary": [
+          "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 387 filtered out; finished in 0.17s"
+        ],
+        "log": "target/research/lift-observation-force-0.3-place_observation_points_at_object_then_target.log"
+      }
+    }
+  },
+  {
+    "force_nm": 0.4,
+    "tests": {
+      "lift": {
+        "exit_code": 101,
+        "summary": [
+          "test result: FAILED. 17 passed; 6 failed; 0 ignored; 0 measured; 365 filtered out; finished in 16.35s"
+        ],
+        "log": "target/research/lift-observation-force-0.4-lift.log"
+      },
+      "place_observation_points_at_object_then_target": {
+        "exit_code": 0,
+        "summary": [
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 387 filtered out; finished in 0.10s"
+        ],
+        "log": "target/research/lift-observation-force-0.4-place_observation_points_at_object_then_target.log"
+      }
+    }
+  },
+  {
+    "force_nm": 0.5,
+    "tests": {
+      "lift": {
+        "exit_code": 101,
+        "summary": [
+          "test result: FAILED. 17 passed; 6 failed; 0 ignored; 0 measured; 365 filtered out; finished in 15.10s"
+        ],
+        "log": "target/research/lift-observation-force-0.5-lift.log"
+      },
+      "place_observation_points_at_object_then_target": {
+        "exit_code": 101,
+        "summary": [
+          "test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 387 filtered out; finished in 0.14s"
+        ],
+        "log": "target/research/lift-observation-force-0.5-place_observation_points_at_object_then_target.log"
+      }
+    }
+  }
+]

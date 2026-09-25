@@ -1,15 +1,17 @@
-//! Render-only kinematic backflip for the Unitree G1.
+//! G1 backflip visualization and native motor-only transfer probe.
 //!
-//! This is a *reference animation*, not a physics simulation: the base and the
-//! joints are set from forward kinematics each frame (a ballistic arc plus a
-//! full `-2*pi` rotation about the world lateral axis, with a tuck pose in the
-//! air). The native Euler floating-base chart is singular for a sagittal
-//! 360-degree rotation, and the engine has no flight-phase controller, so a
-//! physically simulated backflip is not reachable yet — see example 113 and
-//! `docs/PLAN_LEGGED_LOCOMOTION_FRONTIER.md`.
-//!
-//! Run with `cargo run --release -p g1_backflip_gif --example 114_g1_backflip_gif`
-//! (`--smoke` runs headless, `--gif` writes `docs/media/unitree-g1-backflip.gif`).
+//! `--recording DIR --gif` projects a hash-verified MuJoCo rollout into the
+//! RoboSim world and renderer; it does not advance Rapier. Omit `--gif` for a
+//! headless validation of every recorded configuration and joint mapping.
+//! `--native-probe` runs a separate motor-only Rapier transfer experiment.
+//! `--smoke` / `--gif` without a recording retain the synthetic reference
+//! animation. Neither reference animation nor state playback proves a native
+//! physics backflip. See `docs/G1_CONTACT_BACKFLIP.md`.
+
+mod native;
+mod native_recording;
+mod recording;
+mod structural_contact;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -147,6 +149,18 @@ fn pose_at(joint_names: &[String], tau: f64) -> (f64, f64, Vec<f64>) {
 }
 
 fn main() {
+    if std::env::args().any(|arg| arg == "--native-probe") {
+        native::run();
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--native-recording") {
+        native_recording::run();
+        return;
+    }
+    if std::env::args().any(|arg| arg == "--recording") {
+        recording::run();
+        return;
+    }
     if std::env::args().any(|argument| argument == "--smoke") {
         run_smoke();
         return;
@@ -248,6 +262,19 @@ fn build_chain(sim: &mut UrdfSceneSim) -> (ArticulatedModel, Vec<String>) {
 
 fn apply_pose(sim: &mut UrdfSceneSim, model: &ArticulatedModel, joint_names: &[String], tau: f64) {
     let (base_y, flip, joints) = pose_at(joint_names, tau);
+    let base = MathTransform::from_translation_rotation(
+        Vec3::new(0.0, base_y, 0.0),
+        Quat::from_rotation_z(flip) * Quat::from_rotation_x(BASE_ROTATION_X_RAD),
+    );
+    apply_joint_pose(sim, model, &joints, base);
+}
+
+fn apply_joint_pose(
+    sim: &mut UrdfSceneSim,
+    model: &ArticulatedModel,
+    joints: &[f64],
+    base_anim: MathTransform,
+) {
     let world = sim.world_mut();
 
     // Tucked joint chain at the base identity, then the animated base transform.
@@ -264,11 +291,6 @@ fn apply_pose(sim: &mut UrdfSceneSim, model: &ArticulatedModel, joint_names: &[S
         .map(|w| base_inverse.mul_transform(w))
         .collect();
 
-    // A backflip is a rotation about the world lateral (Z) axis.
-    let base_anim = MathTransform::from_translation_rotation(
-        Vec3::new(0.0, base_y, 0.0),
-        Quat::from_rotation_z(flip) * Quat::from_rotation_x(BASE_ROTATION_X_RAD),
-    );
     let world_math: Vec<MathTransform> = chain
         .iter()
         .map(|local| base_anim.mul_transform(local))
@@ -311,10 +333,10 @@ fn render_panel(
         .expect("resolve official G1 meshes");
     // Side view so the sagittal flip is fully visible.
     let orbit = CameraOrbit {
-        focus: Vec3::new(0.0, 0.95, 0.0),
-        yaw_rad: std::f64::consts::FRAC_PI_2,
+        focus: Vec3::new(-0.55, 0.7, 0.0),
+        yaw_rad: 0.10,
         pitch_rad: 1.45,
-        distance_m: 4.2,
+        distance_m: 3.0,
     };
     let output = backend
         .render_scene_camera(camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)

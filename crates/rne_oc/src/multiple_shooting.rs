@@ -86,18 +86,37 @@ fn derivatives_at(
 }
 
 /// Largest single-state defect across the horizon for a trajectory.
+///
+/// Returns infinity if the trajectory dimensions are inconsistent, any input or
+/// prediction is non-finite, or a dynamics step fails. An unevaluable interval
+/// must never make an infeasible trajectory appear converged.
 pub fn max_defect(
     dynamics: &dyn ShootingDynamics,
     states: &[Vec<f64>],
     controls: &[Vec<f64>],
 ) -> f64 {
     let horizon = controls.len();
+    let nx = dynamics.state_dim();
+    if states.len() != horizon + 1
+        || states
+            .iter()
+            .any(|x| x.len() != nx || x.iter().any(|v| !v.is_finite()))
+        || controls
+            .iter()
+            .any(|u| u.len() != dynamics.control_dim() || u.iter().any(|v| !v.is_finite()))
+    {
+        return f64::INFINITY;
+    }
     let mut maximum = 0.0_f64;
     for k in 0..horizon {
-        if let Ok(predicted) = dynamics.step_at(k, &states[k], &controls[k]) {
-            for (a, b) in states[k + 1].iter().zip(&predicted) {
-                maximum = maximum.max((a - b).abs());
+        let predicted = match dynamics.step_at(k, &states[k], &controls[k]) {
+            Ok(predicted) if predicted.len() == nx && predicted.iter().all(|v| v.is_finite()) => {
+                predicted
             }
+            _ => return f64::INFINITY,
+        };
+        for (a, b) in states[k + 1].iter().zip(&predicted) {
+            maximum = maximum.max((a - b).abs());
         }
     }
     maximum
@@ -420,6 +439,71 @@ pub fn solve_multiple_shooting(
 mod tests {
     use super::*;
     use crate::ddp::{DiscreteDynamics, QuadraticCost};
+
+    struct InvalidDynamics(Result<Vec<f64>, OcError>);
+
+    impl DiscreteDynamics for InvalidDynamics {
+        fn state_dim(&self) -> usize {
+            2
+        }
+
+        fn control_dim(&self) -> usize {
+            1
+        }
+
+        fn step(&self, _state: &[f64], _control: &[f64]) -> Result<Vec<f64>, OcError> {
+            self.0.clone()
+        }
+    }
+
+    #[test]
+    fn unevaluable_intervals_cannot_report_convergence() {
+        let states = vec![vec![0.0; 2]; 2];
+        let controls = vec![vec![0.0]];
+        let cost = QuadraticCost::new(vec![1.0; 2], vec![1.0], vec![1.0; 2]);
+        let config = MultipleShootingConfig {
+            max_iterations: 2,
+            ..Default::default()
+        };
+        for result in [
+            Err(OcError::Dynamics),
+            Ok(vec![f64::NAN, 0.0]),
+            Ok(vec![0.0, f64::INFINITY]),
+        ] {
+            let dynamics = InvalidDynamics(result);
+            assert_eq!(max_defect(&dynamics, &states, &controls), f64::INFINITY);
+            let solution = solve_multiple_shooting(&dynamics, &cost, &states, &controls, &config)
+                .expect("an unsuccessful solve still returns its trajectory");
+            assert!(!solution.converged);
+        }
+    }
+
+    #[test]
+    fn defect_rejects_incomplete_predictions_and_invalid_trajectories() {
+        let states = vec![vec![0.0; 2]; 2];
+        let controls = vec![vec![0.0]];
+        let dynamics = InvalidDynamics(Ok(vec![]));
+        assert_eq!(max_defect(&dynamics, &states, &controls), f64::INFINITY);
+        let dynamics = InvalidDynamics(Ok(vec![0.0; 2]));
+        assert_eq!(max_defect(&dynamics, &states, &controls), 0.0);
+        assert_eq!(
+            max_defect(&dynamics, &states[..1], &controls),
+            f64::INFINITY
+        );
+        assert_eq!(max_defect(&dynamics, &states, &[vec![]]), f64::INFINITY);
+        assert_eq!(
+            max_defect(&dynamics, &states, &[vec![f64::NAN]]),
+            f64::INFINITY
+        );
+        assert_eq!(
+            max_defect(&dynamics, &[vec![0.0; 2], vec![f64::NAN; 2]], &controls),
+            f64::INFINITY
+        );
+        assert_eq!(
+            max_defect(&dynamics, &[vec![0.0; 2], vec![1.0, -2.0]], &controls),
+            2.0
+        );
+    }
 
     struct DoubleIntegrator {
         dt: f64,

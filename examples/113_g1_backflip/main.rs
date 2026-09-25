@@ -17,6 +17,8 @@
 //!
 //! Run with `cargo run --release -p g1_backflip --example 113_g1_backflip`.
 
+mod external_reference;
+
 use rne_dynamics::{centroidal_momentum, ArticulatedModel, ContactSpec};
 use rne_ecs::World;
 use rne_math::{Quat, Vec3};
@@ -229,6 +231,16 @@ fn main() {
     let control_dim = nv - model.base_dof();
     let joint_names = dof_joint_names(&model);
     assert_eq!(control_dim, 23, "expected 23 actuated G1 joints");
+
+    let arguments: Vec<String> = std::env::args().collect();
+    if let Some(index) = arguments.iter().position(|arg| arg == "--check-reference") {
+        let path = arguments
+            .get(index + 1)
+            .expect("--check-reference needs an output directory");
+        external_reference::check(&model, &spawned, G1_URDF, std::path::Path::new(path))
+            .expect("external reference dynamics check");
+        return;
+    }
 
     let mut initial = vec![0.0; 2 * nv];
     initial[1] = BASE_START_Y_M;
@@ -509,7 +521,13 @@ fn main() {
         let mut worst_component = 0_usize;
         for node in 0..horizon {
             match dynamics.step_at(node, &solution.states[node], &solution.controls[node]) {
-                Ok(predicted) => {
+                Ok(predicted)
+                    if predicted.len() == 2 * nv
+                        && predicted.iter().all(|value| value.is_finite())
+                        && solution.states[node + 1]
+                            .iter()
+                            .all(|value| value.is_finite()) =>
+                {
                     for (a, b) in solution.states[node + 1].iter().zip(&predicted) {
                         max_gap = max_gap.max((a - b).abs());
                     }
@@ -529,7 +547,7 @@ fn main() {
                         worst_component = node_gap_index;
                     }
                 }
-                Err(_) => failed_nodes += 1,
+                _ => failed_nodes += 1,
             }
         }
         let worst_label = if worst_component < nv {

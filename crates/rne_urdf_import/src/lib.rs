@@ -21,6 +21,7 @@ pub use schema::{
     UrdfJointLimit, UrdfJointMimic, UrdfJointType, UrdfLink, UrdfRobot,
 };
 pub use spawn::{
-    attach_urdf_visuals, spawn_urdf_document, spawn_urdf_document_with_config, spawn_urdf_robot,
+    attach_urdf_collision_parts, attach_urdf_convex_colliders, attach_urdf_visuals,
+    spawn_urdf_document, spawn_urdf_document_with_config, spawn_urdf_robot,
     spawn_urdf_robot_with_config, SpawnedUrdfRobot, UrdfSpawnConfig, UrdfSpawnError,
 };

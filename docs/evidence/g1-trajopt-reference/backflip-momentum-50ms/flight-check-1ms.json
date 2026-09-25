@@ -1,0 +1,19 @@
+{
+  "schema": "rne.g1.free_flight_check.v1",
+  "trajectory_sha256": "90bceed38499c4303835e1e3da66aa10182720c55e1ce34b3bf57648fa7e0154",
+  "max_step_s": 0.001,
+  "substeps": 608,
+  "flight_duration_s": 0.6000000000000001,
+  "torque_interpolation": "hold left node; zero external contacts",
+  "final_root_position_error_m": 0.05269948719090089,
+  "final_root_rotation_error_rad": 0.26379739365516275,
+  "final_joint_position_error_rad": 2.071799056275933,
+  "final_joint_velocity_error_rad_s": 29.74062083103662,
+  "max_joint_limit_violation_rad": 0.5645650163112861,
+  "final_com_reference_error_m": 6.897953872900817e-05,
+  "ballistic_com_error_m": 6.897953892414185e-05,
+  "linear_momentum_error_ns": 0.00815456087689712,
+  "angular_momentum_error_nms": 0.00012370038100565427,
+  "plant_validated": false,
+  "contact_landing_validated": false
+}

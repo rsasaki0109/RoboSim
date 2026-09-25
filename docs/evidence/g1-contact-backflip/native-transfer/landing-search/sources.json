@@ -1,0 +1,32 @@
+{
+  "source_commit": "31dcdeaecaa859303c745a5e608ad491b4fa4616",
+  "binary_sha256": "fc1ed23b937723138da8e4c1ab8d77f1a6200334d72f3f3d9cbddd7d40728dd8",
+  "scene_audit": "../contact-diagnostics/passive-model-audit.json",
+  "validation": {
+    "example_tests": 7,
+    "native_python_tests": 11,
+    "targeted_clippy": "passed with -D warnings",
+    "full_workspace_ci": "not rerun to preserve 30 GiB reserve"
+  },
+  "artifact_sha256": {
+    "README.md": "7d02e8dd15c215abd07ceed857825a3f3d5dda6cdda387c83c345cb56180e67d",
+    "gain-1000-40-candidate.json": "bfc233e421ca30a79b2381b1e82b627c6e18f8027a81b64e17759b8e3a8a9816",
+    "gain-1000-40.json": "74ec3778290d492f66292025ae2da3d386d854f4b9e06d9ff4be627578bd4ffe",
+    "gain-300-30-candidate.json": "976408336dd89d562f82a8479e5cb4eb24ba268f38e2efe58a9aef651ec2c592",
+    "gain-300-30.json": "ab10cab23cd101f31d0d9318fef1331fa509dcf4051fc9a2e9aef83ca5ecf960",
+    "gain-500-40-candidate.json": "f1aeec17d609dd2cc1ae644697b0bb9d322a953e2603e3bf12c4b2335c657389",
+    "gain-500-40.json": "9f47d7360a050aa1117e260c36a7ba22f861ff7077ae6a745041a7b13f951025",
+    "hip--0p1-candidate.json": "b52571e54eabc277db5d514b93065bef981e9cfa4537aee2f39a932c6a964abc",
+    "hip--0p1.json": "f6855b6487020a6c596e0acddea465b292eb5f2fe3575515402aed3a11e77b6b",
+    "hip--0p25-candidate.json": "b95228c522253e51847f00b3b9d37af78278e34852fa2a60d0a2be04f7314f74",
+    "hip--0p25.json": "08e26ec6fa24ca71d06615ff98747bf46c6e8bb26c2595fc8940f2bf9d0f54ce",
+    "hip-0p09202427761939469-candidate.json": "f1aeec17d609dd2cc1ae644697b0bb9d322a953e2603e3bf12c4b2335c657389",
+    "hip-0p09202427761939469.json": "2aac9827729c7f7c2454bebeb3a6726c3644cd0c77cc018978789f3adc646d1c",
+    "hip-0p3-candidate.json": "8f26ffa5125e271f5100b3a3d99f141e9339822bc0a218ec620317b2cbc38f4f",
+    "hip-0p3.json": "1f7b0a0ced4bba317e563e215b055408c6c2fac107c749292cfae74a5c932b4e",
+    "hip-0p5-candidate.json": "d2130e862dd3eb6e93f91cfe6c5408f6de789d618cd779721f8fd30e802b66a6",
+    "hip-0p5.json": "5e28a42e34b47f92fcc72057349bf1c6a74728d4bf99cea756dac027a11155a7",
+    "hip-0p7-candidate.json": "46247e7e4473507afae807aaaea64b49daa5b4ac5d35641dccbd9dd8967691db",
+    "hip-0p7.json": "df889446402b8140e95fdf488a143610f056538b2bb267b369f2fe0f4c0f258e"
+  }
+}

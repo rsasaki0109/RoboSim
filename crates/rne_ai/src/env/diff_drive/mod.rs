@@ -574,7 +574,11 @@ mod tests {
             done = step.is_done();
         }
 
-        assert!(step.terminated, "expected success termination");
+        assert!(
+            step.terminated,
+            "expected success termination: {:?}",
+            step.observation
+        );
         assert!(step.observation.base_x_m >= 1.5);
         assert!(env.total_reward() > 0.0);
     }

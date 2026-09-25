@@ -158,6 +158,12 @@ members = [
   "examples/115_g1_backflip_compliant",
   "examples/114_g1_backflip_gif",
   "examples/111_g1_walk",
+  "examples/116_terrain_heightfield",
+  "examples/117_go2_terrain_stance",
+  "examples/118_go2_push_recovery",
+  "examples/119_elevator_ride",
+  "examples/120_elevator_call_button",
+  "examples/121_multi_floor_mission",
   "tests/determinism",
   "tests/dynamics",
   "tests/mobility_benchmark",
@@ -170,6 +176,7 @@ members = [
   "xtask",
 ]
 exclude = [
+  "third_party/rapier3d",
   "adapters/ros2/rne_ros2_node",
   # Standalone wasm crate with its own [workspace]: joining the root workspace
   # would unify native-only features into the wasm32 build.
@@ -270,3 +277,6 @@ opt-level = 1
 # while retaining the test profile's debug assertions and symbols.
 [profile.test]
 opt-level = 3
+
+[patch.crates-io]
+rapier3d = { path = "third_party/rapier3d" }

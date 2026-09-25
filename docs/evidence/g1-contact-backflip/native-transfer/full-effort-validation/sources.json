@@ -1,0 +1,15 @@
+{
+  "source_commit": "eed9b4152b12326b52831dba175fff1ea8f1d43e",
+  "binary": "/home/sasaki/workspace/RoboSim/target/research/g1-backflip-pr/target/research/native-producers/eed9b4152b12326b52831dba175fff1ea8f1d43e/114_g1_backflip_gif",
+  "binary_sha256": "aaabb8970eca63cc9db128e2ae5c69ce9e4f17e2beb0d4ab6df8757e4a4b66c6",
+  "artifact_sha256": {
+    "README.md": "91010012d3bec172ae252b3eef9eb4ce4f804df005956dd9b53b9c1b60c91e65",
+    "candidate.json": "7d86fbb96ef0277bd8453ece3ac7c77ce329362da34557d80d68c2941398d4bf",
+    "step-125us-cancellation.json": "b4e9913d8e6adc1bdc86b1e6d16a145461a98ac55cb631ce25f6d3b9f7bccfa7",
+    "step-125us-partial.log": "bc5a9b8170818483009a48b6ccffe4626285f6dedb05eefeaa053de2c81287b7",
+    "step-500us-search.json": "6b39794f368114280307069c704165448fe8fccb28eb1dfeea79445b8cee68cb",
+    "step-500us.json.gz": "f919e043726bcbae5f6e683b83884b50fd060e072bf6a2d906fe312b95a391a2",
+    "step-62p5us-cancellation.json": "96d6f0a03e06bf9e77b3d60b1f5e94e4d4542a199e8cc87883997133334b7e10",
+    "step-62p5us-partial.log": "70bdce0466a09fae154b218fc13fd99a5c02b701e06c3606f626a27ea27c66b0"
+  }
+}

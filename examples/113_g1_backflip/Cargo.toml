@@ -13,6 +13,9 @@ rne_math = { workspace = true }
 rne_oc = { workspace = true }
 rne_robot = { workspace = true }
 rne_urdf_import = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 
 [[example]]
 name = "113_g1_backflip"

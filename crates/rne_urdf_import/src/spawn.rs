@@ -1,10 +1,12 @@
 //! Spawn RNE entities from parsed URDF.
 
-use crate::geometry::{collider_from_link_with_meshes, visual_from_element};
+use crate::geometry::{collider_from_element, collider_from_link_with_meshes, visual_from_element};
 use crate::parse::rpy_to_quat;
 use crate::schema::{UrdfDocument, UrdfInertial, UrdfJoint, UrdfJointType, UrdfLink, UrdfRobot};
 use rne_ecs::{spawn_named, Entity, World};
-use rne_physics::{CollisionGroups, RigidBody, RigidBodyInertia, RigidBodyType};
+use rne_physics::{
+    ColliderPart, CollisionGroups, CompoundCollider, RigidBody, RigidBodyInertia, RigidBodyType,
+};
 use rne_render::{LinkVisuals, Visual};
 use rne_robot::{Joint, JointKind, JointLimits, Link, MimicJoint, Robot, RobotId};
 use rne_world::Transform3;
@@ -100,6 +102,145 @@ pub fn spawn_urdf_document(
     document: &UrdfDocument,
 ) -> Result<SpawnedUrdfRobot, UrdfSpawnError> {
     spawn_urdf_document_with_config(world, document, UrdfSpawnConfig::default())
+}
+
+/// Preserves multiple collision primitives on already spawned URDF links.
+///
+/// Call before the first physics synchronization. The companion bounding
+/// collider supplies material/sensor settings; Rapier consumes compound parts.
+/// Mesh parts retain their existing AABB approximation. Returns the number of
+/// links receiving compounds. Existing public spawn configuration is unchanged.
+pub fn attach_urdf_collision_parts(
+    world: &mut World,
+    urdf: &UrdfRobot,
+    spawned: &SpawnedUrdfRobot,
+    config: &UrdfSpawnConfig,
+) -> usize {
+    if !config.attach_colliders {
+        return 0;
+    }
+    let mut count = 0;
+    for link in &urdf.links {
+        let Some(&entity) = spawned.links.get(&link.name) else {
+            continue;
+        };
+        if world.get::<rne_physics::Collider>(entity).is_none() {
+            continue;
+        }
+        let parts: Vec<_> = link
+            .collisions
+            .iter()
+            .filter(|element| {
+                config.attach_mesh_colliders
+                    || !matches!(element.geometry, crate::schema::UrdfGeometry::Mesh { .. })
+            })
+            .filter_map(|element| {
+                collider_from_element(element, config.mesh_assets_root.as_deref())
+            })
+            .map(|part| ColliderPart {
+                shape: part.shape,
+                local_offset: part.local_offset,
+            })
+            .collect();
+        if parts.len() > 1 {
+            world.entity_mut(entity).insert(CompoundCollider { parts });
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Attaches convex point clouds for single-mesh collision links before physics sync.
+///
+/// Mesh scale and collision origin are baked into entity-local vertices. Primitive
+/// links remain unchanged. Mixed or multiple mesh collision elements are rejected
+/// rather than filling their gaps with one hull. All inputs are loaded before
+/// components are inserted. Rapier validates nonzero hull volume at synchronization.
+/// Requires mesh collider import; existing public spawn configuration is unchanged.
+pub fn attach_urdf_convex_colliders(
+    world: &mut World,
+    urdf: &UrdfRobot,
+    spawned: &SpawnedUrdfRobot,
+    config: &UrdfSpawnConfig,
+) -> Result<usize, UrdfSpawnError> {
+    use crate::schema::UrdfGeometry;
+    use rne_math::Vec3;
+    use rne_physics::{Collider, ConvexCollider};
+    use rne_render::{load_stl, resolve_package_uri};
+    let error = |message: String| UrdfSpawnError::InvalidGraph(message);
+    if !config.attach_colliders || !config.attach_mesh_colliders {
+        return Err(error(
+            "convex import requires enabled mesh colliders".into(),
+        ));
+    }
+    let root = config
+        .mesh_assets_root
+        .as_deref()
+        .ok_or_else(|| error("convex import requires mesh assets root".into()))?;
+    let mut pending = Vec::new();
+    for link in &urdf.links {
+        if !link
+            .collisions
+            .iter()
+            .any(|c| matches!(c.geometry, UrdfGeometry::Mesh { .. }))
+        {
+            continue;
+        }
+        if link.collisions.len() != 1 {
+            return Err(error(format!(
+                "convex import requires a single mesh on {}",
+                link.name
+            )));
+        }
+        let element = &link.collisions[0];
+        let UrdfGeometry::Mesh { path, scale } = &element.geometry else {
+            unreachable!()
+        };
+        let entity = *spawned
+            .links
+            .get(&link.name)
+            .ok_or_else(|| error(format!("missing convex link {}", link.name)))?;
+        if world.get::<Collider>(entity).is_none()
+            || world.get::<CompoundCollider>(entity).is_some()
+        {
+            return Err(error(format!(
+                "missing or conflicting collider on {}",
+                link.name
+            )));
+        }
+        let mesh = load_stl(&resolve_package_uri(path, root))
+            .map_err(|e| error(format!("convex mesh {}: {e}", link.name)))?;
+        let rotation = rpy_to_quat(element.origin_rpy);
+        let mut vertices_m: Vec<_> = mesh
+            .positions
+            .iter()
+            .map(|p| {
+                element.origin_xyz
+                    + rotation * (Vec3::new(p[0] as f64, p[1] as f64, p[2] as f64) * *scale)
+            })
+            .collect();
+        if vertices_m.iter().any(|p| !p.is_finite()) {
+            return Err(error(format!("nonfinite convex vertices on {}", link.name)));
+        }
+        vertices_m.sort_by(|a, b| {
+            a.x.total_cmp(&b.x)
+                .then(a.y.total_cmp(&b.y))
+                .then(a.z.total_cmp(&b.z))
+        });
+        vertices_m.dedup();
+        if vertices_m.len() < 4 {
+            return Err(error(format!(
+                "insufficient convex vertices on {}",
+                link.name
+            )));
+        }
+        pending.push((entity, ConvexCollider { vertices_m }));
+    }
+    let count = pending.len();
+    for (entity, geometry) in pending {
+        world.entity_mut(entity).insert(geometry);
+    }
+    Ok(count)
 }
 
 /// Attaches URDF visual components to existing link entities keyed by link name.
@@ -498,6 +639,85 @@ mod tests {
         assert_eq!(mimic.multiplier, -1.0);
         assert_eq!(mimic.offset, 0.05);
         assert!(world.get::<MimicJoint>(leader).is_none());
+    }
+
+    #[test]
+    fn convex_import_preserves_scaled_rotated_mesh_vertices_and_rejects_mixed_shapes() {
+        let mesh_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/mesh_diff_drive_package/meshes/base_link.stl");
+        let text = format!(
+            r#"<robot name="convex"><link name="base"><collision>
+            <origin xyz="1 2 3" rpy="0 0 1.5707963267948966"/>
+            <geometry><mesh filename="{}" scale="2 3 4"/></geometry>
+            </collision></link></robot>"#,
+            mesh_path.display()
+        );
+        let mut urdf = parse_urdf(&text).unwrap();
+        let config = UrdfSpawnConfig {
+            attach_mesh_colliders: true,
+            mesh_assets_root: Some(mesh_path.parent().unwrap().to_path_buf()),
+            ..UrdfSpawnConfig::default()
+        };
+        let mut world = World::new();
+        let robot = spawn_urdf_robot_with_config(&mut world, &urdf, config.clone()).unwrap();
+        assert!(world
+            .get::<rne_physics::ConvexCollider>(robot.base_link)
+            .is_none());
+        assert_eq!(
+            attach_urdf_convex_colliders(&mut world, &urdf, &robot, &config).unwrap(),
+            1
+        );
+        let convex = world
+            .get::<rne_physics::ConvexCollider>(robot.base_link)
+            .unwrap();
+        assert_eq!(convex.vertices_m.len(), 8);
+        let min = convex
+            .vertices_m
+            .iter()
+            .copied()
+            .reduce(rne_math::Vec3::min)
+            .unwrap();
+        let max = convex
+            .vertices_m
+            .iter()
+            .copied()
+            .reduce(rne_math::Vec3::max)
+            .unwrap();
+        assert!((min - rne_math::Vec3::new(0.55, 1.5, 2.2)).length() < 1e-6);
+        assert!((max - rne_math::Vec3::new(1.45, 2.5, 3.8)).length() < 1e-6);
+        let duplicate = urdf.links[0].collisions[0].clone();
+        urdf.links[0].collisions.push(duplicate);
+        assert!(attach_urdf_convex_colliders(&mut world, &urdf, &robot, &config).is_err());
+    }
+
+    #[test]
+    fn compound_import_is_opt_in_and_preserves_primitive_origins() {
+        let urdf = parse_urdf(r#"<robot name="sole"><link name="foot">
+          <collision><origin xyz="-.05 0 -.03"/><geometry><sphere radius=".002"/></geometry></collision>
+          <collision><origin xyz=".09 0 -.03"/><geometry><sphere radius=".002"/></geometry></collision>
+        </link></robot>"#).unwrap();
+        for preserve in [false, true] {
+            let mut world = World::new();
+            let config = UrdfSpawnConfig::default();
+            let robot = spawn_urdf_robot_with_config(&mut world, &urdf, config.clone()).unwrap();
+            if preserve {
+                assert_eq!(
+                    attach_urdf_collision_parts(&mut world, &urdf, &robot, &config),
+                    1
+                );
+            }
+            let parts = world.get::<CompoundCollider>(robot.base_link);
+            assert_eq!(parts.is_some(), preserve);
+            if let Some(compound) = parts {
+                assert_eq!(compound.parts.len(), 2);
+                assert_eq!(
+                    compound.parts[0].local_offset.translation,
+                    rne_math::Vec3::new(-0.05, 0.0, -0.03)
+                );
+                assert_eq!(compound.parts[1].local_offset.translation.x, 0.09);
+                assert!(compound.is_valid());
+            }
+        }
     }
 
     #[test]

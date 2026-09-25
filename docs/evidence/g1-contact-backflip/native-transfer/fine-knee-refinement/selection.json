@@ -1,0 +1,36 @@
+{
+  "selected": "0p005",
+  "reason": "Lowest existing diagnostic loss among completed finer-step probes; all retain speed/effort/contact geometry limits. Full standing and timestep refinement still required.",
+  "rows": [
+    {
+      "knee_increment": "0p002",
+      "loss": 4.26052773391385,
+      "speed_ratio": 1.0439163208007813,
+      "failed_gates": [
+        "final_second_max_base_speed_m_s",
+        "final_standing_error",
+        "continuous_support"
+      ]
+    },
+    {
+      "knee_increment": "0p005",
+      "loss": 4.253353506818997,
+      "speed_ratio": 1.0394285202026368,
+      "failed_gates": [
+        "final_second_max_base_speed_m_s",
+        "final_standing_error",
+        "continuous_support"
+      ]
+    },
+    {
+      "knee_increment": "0p01",
+      "loss": 4.363718668333259,
+      "speed_ratio": 1.0350631713867187,
+      "failed_gates": [
+        "final_second_max_base_speed_m_s",
+        "final_standing_error",
+        "continuous_support"
+      ]
+    }
+  ]
+}

@@ -506,7 +506,8 @@ impl UnitreeG1CommandedTorquePolicy {
     /// The same gains keep the 240-tick final-yaw sign contract and the
     /// 480-tick mean yaw-rate sign contract. Contact-schedule asymmetry is
     /// absorbed by the reduced negative-turn scale rather than by a larger
-    /// absolute torque budget.
+    /// absolute torque budget. The 0.45 scale is calibrated with normalized
+    /// f64 rotations; both existing horizon checks retain their original gates.
     #[must_use]
     pub const fn validated_heading() -> Self {
         Self {
@@ -514,7 +515,7 @@ impl UnitreeG1CommandedTorquePolicy {
             nominal_forward_velocity_m_s: 0.0276,
             forward_velocity_feedback_gain: 0.25,
             yaw_rate_kp_nm_per_rad_s: 32.0,
-            negative_yaw_rate_gain_scale: 0.5,
+            negative_yaw_rate_gain_scale: 0.45,
             heading_kp_nm_per_rad: 0.0,
             max_yaw_torque_nm: 16.0,
             max_heading_torque_nm: 8.0,
