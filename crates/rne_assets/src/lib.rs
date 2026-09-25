@@ -18,9 +18,11 @@ pub use pipeline::{
     AssetHotReloader, AssetRevision, SceneAssetBundle, ValidatedAsset,
 };
 pub use robot::{
-    load_robot_asset, load_robot_asset_passive_dynamics, parse_robot_asset,
-    parse_robot_asset_passive_dynamics, LidarRobotAsset, RobotAsset, RobotKind,
-    UrdfJointPassiveDynamicsAsset, UrdfRobotAsset, VisualsRobotAsset, WristCameraRobotAsset,
+    load_robot_asset, load_robot_asset_collision_parts, load_robot_asset_convex_collisions,
+    load_robot_asset_passive_dynamics, parse_robot_asset, parse_robot_asset_collision_parts,
+    parse_robot_asset_convex_collisions, parse_robot_asset_passive_dynamics, LidarRobotAsset,
+    RobotAsset, RobotKind, UrdfJointPassiveDynamicsAsset, UrdfRobotAsset, VisualsRobotAsset,
+    WristCameraRobotAsset,
 };
 pub use run::{
     load_run_manifest, parse_run_manifest, RunClock, RunController, RunControllerKind,
@@ -34,9 +36,10 @@ pub use scene::{
     SceneTaskMarkerAsset, SceneVisualAsset,
 };
 pub use spawn::{
-    load_and_spawn_scene, spawn_robot_asset, spawn_robot_asset_with_sources, spawn_scene,
-    spawn_scene_bundle, spawn_scene_with_sources, LidarMountSpawned, RobotSensorMounts,
-    SpawnSceneOptions, SpawnedRobot, SpawnedScene, UrdfSourceMap, WristCameraMountSpawned,
+    attach_ground_heightfield, load_and_spawn_scene, spawn_robot_asset,
+    spawn_robot_asset_with_sources, spawn_scene, spawn_scene_bundle, spawn_scene_with_sources,
+    LidarMountSpawned, RobotSensorMounts, SpawnSceneOptions, SpawnedRobot, SpawnedScene,
+    UrdfSourceMap, WristCameraMountSpawned,
 };
 pub use visual::{
     load_visual_manifest, parse_visual_manifest, validate_visual_manifest, VisualBudget,

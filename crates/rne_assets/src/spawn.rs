@@ -1,7 +1,10 @@
 //! Spawn ECS entities from parsed assets.
 
 use crate::error::AssetError;
-use crate::robot::{load_robot_asset_passive_dynamics, LidarRobotAsset, RobotAsset, RobotKind};
+use crate::robot::{
+    load_robot_asset_collision_parts, load_robot_asset_convex_collisions,
+    load_robot_asset_passive_dynamics, LidarRobotAsset, RobotAsset, RobotKind,
+};
 use crate::scene::{
     ObstacleBodyType, SceneAsset, SceneCollisionAsset, SceneDeformableAsset,
     SceneDeformableMaterialAsset, SceneObjectAsset, SceneObstacleAsset, SceneTaskMarkerAsset,
@@ -11,15 +14,16 @@ use rne_data::StreamId;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, JointPassiveDynamics, PhysicsMaterial, RigidBody, RigidBodyType,
+    Collider, ColliderShape, HeightfieldCollider, JointPassiveDynamics, PhysicsMaterial, RigidBody,
+    RigidBodyType,
 };
 use rne_render::{Visual, VisualShape};
 use rne_robot::{spawn_diff_drive_robot, DiffDriveSpawned, Link};
 use rne_sensor::{Sensor, SensorKind, SensorState};
 use rne_urdf_import::{
-    attach_urdf_document_articulation, attach_urdf_visuals, parse_urdf_document,
-    parse_urdf_document_file, parse_urdf_file, spawn_urdf_document_with_config, SpawnedUrdfRobot,
-    UrdfDocument,
+    attach_urdf_collision_parts, attach_urdf_convex_colliders, attach_urdf_document_articulation,
+    attach_urdf_visuals, parse_urdf_document, parse_urdf_document_file, parse_urdf_file,
+    spawn_urdf_document_with_config, SpawnedUrdfRobot, UrdfDocument,
 };
 use rne_world::{
     spawn_world, world_transform_of, Gravity, TaskMarker, Transform3, WorldEntity, WorldRandom,
@@ -166,6 +170,8 @@ pub fn spawn_robot_asset_with_sources(
             } else {
                 Vec::new()
             };
+            let preserve_parts =
+                asset_path.is_file() && load_robot_asset_collision_parts(asset_path)?;
             let urdf_path = section.resolve_path(base_dir);
             let document = load_urdf_document(&urdf_path, urdf_sources).map_err(|error| {
                 AssetError::invalid(
@@ -179,15 +185,23 @@ pub fn spawn_robot_asset_with_sources(
                 spawn_config.mesh_assets_root = Some(parent.to_path_buf());
             }
 
-            let spawned = spawn_urdf_document_with_config(world, &document, spawn_config).map_err(
-                |error| {
-                    AssetError::invalid(
-                        asset_path.display().to_string(),
-                        format!("urdf spawn failed: {error}"),
-                    )
-                },
-            )?;
+            let spawned = spawn_urdf_document_with_config(world, &document, spawn_config.clone())
+                .map_err(|error| {
+                AssetError::invalid(
+                    asset_path.display().to_string(),
+                    format!("urdf spawn failed: {error}"),
+                )
+            })?;
 
+            if preserve_parts {
+                attach_urdf_collision_parts(world, &document.robot, &spawned, &spawn_config);
+            }
+            if asset_path.is_file() && load_robot_asset_convex_collisions(asset_path)? {
+                attach_urdf_convex_colliders(world, &document.robot, &spawned, &spawn_config)
+                    .map_err(|error| {
+                        AssetError::invalid(asset_path.display().to_string(), error.to_string())
+                    })?;
+            }
             if wire_articulation && section.articulation {
                 attach_urdf_document_articulation(
                     world,
@@ -565,6 +579,60 @@ pub fn spawn_ground_plane(world: &mut World) -> Entity {
         Transform3::from_translation_rotation(Vec3::new(0.0, -0.5, 0.0), Quat::IDENTITY),
     ));
     ground
+}
+
+/// Replaces a spawned scene's flat ground collider with sampled terrain.
+///
+/// The scene's `ground` entity keeps its name, body type, material and
+/// collision groups; only its geometry and pose change. The patch is re-posed
+/// to the world origin so [`HeightfieldCollider::heights_m`] are world heights
+/// directly, and the companion [`Collider`] becomes a bounding cuboid for
+/// consumers that do not read terrain.
+///
+/// Call this before the first physics synchronization: backends build collider
+/// geometry once, so terrain attached to an already-synchronized ground is
+/// ignored. Returns false when the scene has no `ground` entity or the patch
+/// fails [`HeightfieldCollider::is_valid`], leaving the world unchanged.
+///
+/// The replaced ground box is a solid 1 m thick volume, so it pushes out a link
+/// that spawns slightly beneath its surface. A heightfield is an open surface
+/// and does not: a link spawned below it keeps falling. Author the patch below
+/// every spawned link, or raise the scene's spawn pose, and let the robot
+/// settle onto the terrain.
+pub fn attach_ground_heightfield(world: &mut World, field: HeightfieldCollider) -> bool {
+    if !field.is_valid() {
+        return false;
+    }
+    let Some(ground) = world.iter_entities().find_map(|entity_ref| {
+        world
+            .get::<rne_ecs::Name>(entity_ref.id())
+            .is_some_and(|name| name.0 == "ground")
+            .then_some(entity_ref.id())
+    }) else {
+        return false;
+    };
+    let Some(mut collider) = world.get_mut::<Collider>(ground) else {
+        return false;
+    };
+    // A bounding box tall enough to cover the sampled relief in both directions.
+    let bound_y_m = field
+        .heights_m
+        .iter()
+        .fold(0.0f64, |bound, height| bound.max(height.abs()))
+        * field.scale_m.y.abs();
+    collider.shape = ColliderShape::Cuboid {
+        half_extents_m: Vec3::new(
+            field.scale_m.x / 2.0,
+            bound_y_m.max(f64::EPSILON),
+            field.scale_m.z / 2.0,
+        ),
+    };
+    collider.local_offset = Transform3::IDENTITY;
+    world.entity_mut(ground).insert(field);
+    if let Some(mut transform) = world.get_mut::<Transform3>(ground) {
+        *transform = Transform3::IDENTITY;
+    }
+    true
 }
 
 fn spawn_scene_obstacle(world: &mut World, obstacle: &SceneObstacleAsset) -> Entity {

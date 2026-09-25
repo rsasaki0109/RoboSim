@@ -26,6 +26,7 @@ pub mod horizontal;
 pub mod lipm;
 pub mod pattern;
 pub mod preview;
+pub mod support;
 
 pub use centroidal::{
     distribute_contact_forces, flight_apex_height_m, flight_duration_s, raibert_foot_placement,
@@ -44,3 +45,4 @@ pub use lipm::{
 };
 pub use pattern::{plan_walking_pattern, WalkingPattern};
 pub use preview::{PreviewGains, PreviewTrajectory, ZmpPreviewController};
+pub use support::{StabilityMargin, SupportPolygon};

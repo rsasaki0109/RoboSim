@@ -101,8 +101,8 @@ pub use vectorized::{
 };
 
 use rne_assets::{
-    load_and_spawn_scene, load_scene_bundle, mesh_package_roots, spawn_scene_bundle, AssetError,
-    SpawnSceneOptions,
+    attach_ground_heightfield, load_and_spawn_scene, load_scene_bundle, mesh_package_roots,
+    spawn_scene_bundle, AssetError, SpawnSceneOptions,
 };
 use rne_core::{SimDuration, SimTime};
 use rne_data::{DataBus, StreamId};
@@ -114,11 +114,12 @@ use rne_deformable::{
 use rne_ecs::{spawn_named, Entity, Name, Parent, World};
 use rne_math::{y_up_euler_rad, Hertz, Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointActuation, JointMotor,
-    JointMotorGainModel, JointState, MultibodyLink, PhysicsBackend, PhysicsWorldDesc,
-    PhysicsWorldId, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
+    Collider, ColliderShape, CollisionGroups, ExternalBodyWrench, FixedJointDesc,
+    HeightfieldCollider, JointActuation, JointMotor, JointMotorGainModel, JointState,
+    MultibodyLink, PhysicsBackend, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc,
+    RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
 };
-use rne_physics_rapier::{step_physics, RapierBackend};
+use rne_physics_rapier::RapierBackend;
 use rne_robot::{Joint, JointKind, Link};
 use rne_sensor::{
     sample_joint_feedback_sensors, JointFeedbackChannelSpec, JointFeedbackError,
@@ -309,6 +310,9 @@ pub struct UrdfSceneSim {
     dt: SimDuration,
     deformable_solver_config: DeformableSolverConfig,
     render_joint_projections: Vec<RenderJointProjection>,
+    /// World-frame wrenches queued for exactly the next physics step, in the
+    /// order they were requested so a replay applies them identically.
+    pending_link_wrenches: Vec<ExternalBodyWrench>,
 }
 
 /// Authored link state used as the origin for render-only remote projection.
@@ -340,7 +344,7 @@ impl UrdfSceneSim {
     /// locomotion batches whose environments share topology but need distinct
     /// reproducible seeds.
     pub fn from_scene_path_with_seed(scene_path: &Path, seed: u64) -> Result<Self, AssetError> {
-        Self::from_scene_path_with_options_and_seed(scene_path, 0, &[], Some(seed))
+        Self::from_scene_path_with_options_and_seed(scene_path, 0, &[], Some(seed), None)
     }
 
     /// Loads a URDF scene with an explicit constraint-solver iteration count.
@@ -387,6 +391,49 @@ impl UrdfSceneSim {
         Self::from_scene_path_with_options(scene_path, 0, fixed_link_names)
     }
 
+    /// Loads a URDF scene whose flat ground is replaced by sampled terrain.
+    ///
+    /// The patch is attached before the first physics synchronization, which is
+    /// the only point at which a backend builds collider geometry. Heights are
+    /// world heights, so a zero-height patch reproduces the flat ground plane.
+    /// Fails when the scene has no `ground` entity or the patch is invalid.
+    pub fn from_scene_path_with_ground_heightfield(
+        scene_path: &Path,
+        ground_heightfield: HeightfieldCollider,
+    ) -> Result<Self, AssetError> {
+        Self::from_scene_path_with_options_and_seed(
+            scene_path,
+            0,
+            &[],
+            None,
+            Some(ground_heightfield),
+        )
+    }
+
+    /// Loads a sampled-terrain scene stepped at an explicit fixed duration.
+    ///
+    /// A heightfield is an open surface with no thickness, so a body that
+    /// penetrates it within one step is not pushed back out and falls freely.
+    /// A shorter step bounds that penetration, which is why terrain scenes take
+    /// an explicit rate rather than inheriting the scene's 60 Hz default. A
+    /// zero duration is rejected.
+    pub fn from_scene_path_with_ground_heightfield_and_fixed_delta(
+        scene_path: &Path,
+        ground_heightfield: HeightfieldCollider,
+        fixed_delta: SimDuration,
+    ) -> Result<Self, AssetError> {
+        if fixed_delta.ticks() == 0 {
+            return Err(AssetError::Invalid {
+                path: scene_path.display().to_string(),
+                message: "fixed simulation delta must be greater than zero ticks".into(),
+            });
+        }
+        let mut sim =
+            Self::from_scene_path_with_ground_heightfield(scene_path, ground_heightfield)?;
+        sim.dt = fixed_delta;
+        Ok(sim)
+    }
+
     fn from_scene_path_with_options(
         scene_path: &Path,
         solver_iterations: usize,
@@ -397,6 +444,7 @@ impl UrdfSceneSim {
             solver_iterations,
             fixed_link_names,
             None,
+            None,
         )
     }
 
@@ -405,6 +453,7 @@ impl UrdfSceneSim {
         solver_iterations: usize,
         fixed_link_names: &[&str],
         seed: Option<u64>,
+        ground_heightfield: Option<HeightfieldCollider>,
     ) -> Result<Self, AssetError> {
         let mut world = World::new();
         let spawned = if let Some(seed) = seed {
@@ -493,7 +542,16 @@ impl UrdfSceneSim {
             dt: SimDuration::from_hertz(Hertz::new(60.0)),
             deformable_solver_config: DeformableSolverConfig::default(),
             render_joint_projections,
+            pending_link_wrenches: Vec::new(),
         };
+        if let Some(field) = ground_heightfield {
+            if !attach_ground_heightfield(&mut sim.world, field) {
+                return Err(AssetError::Invalid {
+                    path: scene_path.display().to_string(),
+                    message: "scene has no valid ground for a heightfield".into(),
+                });
+            }
+        }
         sim.backend
             .sync_from_ecs(&mut sim.world, sim.physics_world)
             .map_err(|error| asset_physics_error(scene_path, error))?;
@@ -1058,6 +1116,27 @@ impl UrdfSceneSim {
         Some(velocity.x.hypot(velocity.y).hypot(velocity.z))
     }
 
+    /// Returns backend-neutral contact pairs from the latest completed physics step.
+    ///
+    /// Entity identities and normal impulses permit whole-robot contact auditing
+    /// without repeated named-pair searches. The slice is invalidated by the next
+    /// mutable simulation operation. Backend errors are propagated.
+    pub fn physics_contact_events(
+        &self,
+    ) -> Result<&[rne_physics::ContactEvent], rne_physics::PhysicsError> {
+        self.backend.contacts(self.physics_world)
+    }
+
+    /// Returns signed solver-manifold separation evidence, including zero-impulse pairs.
+    ///
+    /// These are the latest contact-generation distances, not post-integration
+    /// geometric distance queries. No simulation step is taken.
+    pub fn physics_contact_separations(
+        &self,
+    ) -> Result<Vec<rne_physics::ContactSeparationSample>, rne_physics::PhysicsError> {
+        self.backend.contact_separations(self.physics_world)
+    }
+
     /// Returns whether two named entities contacted during the latest physics step.
     pub fn named_entities_in_contact(&self, first_name: &str, second_name: &str) -> bool {
         let Some(first) = find_entity_by_name(&self.world, first_name) else {
@@ -1313,6 +1392,142 @@ impl UrdfSceneSim {
         collider.material.friction = friction as f32;
         self.backend
             .set_collider_friction(self.physics_world, entity, friction as f32)
+    }
+
+    /// Queues a world-frame external wrench on a named link for the next step.
+    ///
+    /// This is the physical disturbance primitive: unlike
+    /// [`Self::tilt_named_body_rad`], which re-poses a root body, a wrench
+    /// enters the solver as a force and is therefore resisted by contact,
+    /// inertia and actuation exactly as an external push would be. It works on
+    /// reduced-coordinate articulation links as well as plain rigid bodies,
+    /// because the multibody solver projects body forces onto generalized
+    /// coordinates through the body Jacobian.
+    ///
+    /// The force acts at `point_world_m`, so a push applied away from the
+    /// link's center of mass induces the corresponding moment. The wrench
+    /// affects exactly the next completed step and is then cleared; a sustained
+    /// push is queued once per step. Queued wrenches are applied in request
+    /// order, so a replay reproduces them.
+    ///
+    /// Returns false without queuing anything when the link is missing, the
+    /// wrench is not finite, or the link has no dynamic rigid body.
+    pub fn apply_named_link_wrench(
+        &mut self,
+        link_name: &str,
+        point_world_m: rne_math::Vec3,
+        force_world_n: rne_math::Vec3,
+        torque_world_nm: rne_math::Vec3,
+    ) -> bool {
+        let Some(entity) = find_link_by_name(&self.world, link_name) else {
+            return false;
+        };
+        let wrench = ExternalBodyWrench {
+            entity,
+            point_world_m,
+            force_world_n,
+            torque_world_nm,
+        };
+        if !wrench.is_finite() {
+            return false;
+        }
+        if self
+            .world
+            .get::<RigidBody>(entity)
+            .is_none_or(|body| body.body_type != RigidBodyType::Dynamic)
+        {
+            return false;
+        }
+        self.pending_link_wrenches.push(wrench);
+        true
+    }
+
+    /// Returns the world position of a named link, for aiming a wrench.
+    ///
+    /// Returns `None` when the link does not exist.
+    pub fn named_link_position_m(&self, link_name: &str) -> Option<rne_math::Vec3> {
+        find_link_by_name(&self.world, link_name)
+            .map(|entity| world_transform_of(&self.world, entity).translation)
+    }
+
+    /// Returns solved contact points from the last step involving a named body.
+    ///
+    /// Points are world positions in meters, in the backend's deterministic
+    /// contact order, and only load-bearing samples are returned: a sample with
+    /// no normal force is a tracked pair rather than support. Returns an empty
+    /// vector when the body does not exist or bore no load.
+    ///
+    /// This is the measured support geometry, so feeding it to
+    /// [`rne_legged::SupportPolygon`] describes the support the plant actually
+    /// had, not the support a gait schedule intended.
+    pub fn named_body_contact_points_m(&self, name: &str) -> Vec<rne_math::Vec3> {
+        self.named_body_contact_loads(name)
+            .into_iter()
+            .map(|(point_world_m, _)| point_world_m)
+            .collect()
+    }
+
+    /// Returns solved contact points and their normal forces for a named body.
+    ///
+    /// Each entry is `(point_world_m, normal_force_n)` in the backend's
+    /// deterministic contact order, restricted to load-bearing samples. This is
+    /// what a force-sensitive fixture such as
+    /// [`rne_nav::CallButton`](rne_nav::CallButton) consumes: where it was
+    /// touched and how hard.
+    pub fn named_body_contact_loads(&self, name: &str) -> Vec<(rne_math::Vec3, f64)> {
+        let Some(entity) = find_entity_by_name(&self.world, name) else {
+            return Vec::new();
+        };
+        self.backend
+            .contact_points(self.physics_world)
+            .map(|samples| {
+                samples
+                    .iter()
+                    .filter(|sample| {
+                        (sample.entity_a == entity || sample.entity_b == entity)
+                            && sample.normal_force_n > 0.0
+                    })
+                    .map(|sample| (sample.point_world_m, sample.normal_force_n))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Returns the mass-weighted center of mass of every dynamic body, in world
+    /// meters, and the total mass in kilograms.
+    ///
+    /// Each body contributes at its declared
+    /// [`RigidBodyInertia::center_of_mass_local_m`] when one is present and at
+    /// its origin otherwise, which matches what the plant integrates. Fixed and
+    /// kinematic bodies, including the ground, are excluded. Returns `None`
+    /// when no dynamic body carries positive mass.
+    pub fn dynamic_center_of_mass_m(&self) -> Option<(rne_math::Vec3, f64)> {
+        let mut weighted_sum = rne_math::Vec3::ZERO;
+        let mut total_mass_kg = 0.0;
+        for entity_ref in self.world.iter_entities() {
+            let entity = entity_ref.id();
+            let Some(body) = self.world.get::<RigidBody>(entity) else {
+                continue;
+            };
+            // `is_finite` first so a NaN mass is skipped rather than poisoning
+            // the weighted sum.
+            if body.body_type != RigidBodyType::Dynamic
+                || !body.mass_kg.is_finite()
+                || body.mass_kg <= 0.0
+            {
+                continue;
+            }
+            let transform = world_transform_of(&self.world, entity);
+            let local_com_m = self
+                .world
+                .get::<RigidBodyInertia>(entity)
+                .map(|inertia| inertia.center_of_mass_local_m)
+                .unwrap_or(rne_math::Vec3::ZERO);
+            let world_com_m = transform.translation + (transform.rotation * local_com_m);
+            weighted_sum += world_com_m * body.mass_kg;
+            total_mass_kg += body.mass_kg;
+        }
+        (total_mass_kg > 0.0).then(|| (weighted_sum / total_mass_kg, total_mass_kg))
     }
 
     /// Sets backend-neutral collision membership and filter masks on a named entity.
@@ -2080,13 +2295,24 @@ impl UrdfSceneSim {
     }
 
     fn step_physics_with_delta(&mut self, delta: SimDuration) {
-        step_physics(
-            &mut self.backend,
-            &mut self.world,
-            self.physics_world,
-            delta,
-        )
-        .expect("urdf scene physics step");
+        // Expanded from `rne_physics_rapier::step_physics` so queued wrenches
+        // land between the synchronization that creates the bodies and the
+        // step that consumes the forces. Rapier clears them afterwards, so a
+        // wrench affects exactly one step.
+        self.backend
+            .sync_from_ecs(&mut self.world, self.physics_world)
+            .expect("urdf scene physics sync");
+        for wrench in self.pending_link_wrenches.drain(..) {
+            self.backend
+                .apply_external_body_wrench(self.physics_world, wrench)
+                .expect("urdf scene link wrench");
+        }
+        self.backend
+            .step(self.physics_world, delta)
+            .expect("urdf scene physics step");
+        self.backend
+            .sync_to_ecs(&mut self.world, self.physics_world)
+            .expect("urdf scene physics readback");
         let gravity_m_s2 = self
             .world
             .iter_entities()
@@ -2578,6 +2804,93 @@ mod tests {
             .expect("shoulder motor");
         assert_eq!(motor.velocity_rad_s, 0.0);
         assert!(motor.max_force > 0.0 && motor.max_force < 1.0e-6);
+    }
+
+    /// The standing pose pinned by
+    /// `official_unitree_go2_dynamic_multibody_stands_on_four_feet`.
+    fn go2_standing_targets() -> Vec<UrdfJointPositionTarget<'static>> {
+        let mut targets = Vec::with_capacity(12);
+        for (hip, thigh, calf) in [
+            ("FL_hip", "FL_thigh", "FL_calf"),
+            ("FR_hip", "FR_thigh", "FR_calf"),
+            ("RL_hip", "RL_thigh", "RL_calf"),
+            ("RR_hip", "RR_thigh", "RR_calf"),
+        ] {
+            targets.push(UrdfJointPositionTarget {
+                link_name: hip,
+                position: 0.0,
+            });
+            targets.push(UrdfJointPositionTarget {
+                link_name: thigh,
+                position: 0.8,
+            });
+            targets.push(UrdfJointPositionTarget {
+                link_name: calf,
+                position: -1.5,
+            });
+        }
+        targets
+    }
+
+    #[test]
+    fn named_link_wrench_disturbs_an_articulated_robot_and_validates_its_target() {
+        fn peak_tilt(force_n: f64) -> f64 {
+            let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+                .expect("spawn dynamic Unitree Go2");
+            sim.configure_position_motors(180.0, 18.0, 23.7);
+            let targets = go2_standing_targets();
+            for _ in 0..120 {
+                sim.step_joint_position_targets(&targets);
+            }
+            let mut peak_rad = 0.0f64;
+            for _ in 0..12 {
+                if force_n != 0.0 {
+                    let trunk_m = sim.named_link_position_m("base").expect("trunk link");
+                    assert!(sim.apply_named_link_wrench(
+                        "base",
+                        trunk_m,
+                        rne_math::Vec3::new(0.0, 0.0, force_n),
+                        rne_math::Vec3::ZERO,
+                    ));
+                }
+                sim.step_joint_position_targets(&targets);
+                let observation = sim.observe();
+                peak_rad = peak_rad.max(
+                    observation
+                        .base_relative_roll_rad
+                        .abs()
+                        .max(observation.base_relative_pitch_rad.abs()),
+                );
+            }
+            peak_rad
+        }
+
+        // A wrench on a reduced-coordinate link must reach the solver. The
+        // rejected `tilt_named_body_rad` alternative re-poses a body instead,
+        // so this is the check that the disturbance is a force.
+        let undisturbed = peak_tilt(0.0);
+        let pushed = peak_tilt(120.0);
+        assert!(
+            pushed > undisturbed + 0.05,
+            "lateral wrench did not disturb the Go2: {pushed} vs {undisturbed} rad"
+        );
+
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+            .expect("spawn dynamic Unitree Go2");
+        assert!(!sim.apply_named_link_wrench(
+            "missing_link",
+            rne_math::Vec3::ZERO,
+            rne_math::Vec3::X,
+            rne_math::Vec3::ZERO,
+        ));
+        assert!(!sim.apply_named_link_wrench(
+            "base",
+            rne_math::Vec3::ZERO,
+            rne_math::Vec3::splat(f64::NAN),
+            rne_math::Vec3::ZERO,
+        ));
+        assert!(sim.named_link_position_m("missing_link").is_none());
+        assert!(sim.named_link_position_m("base").is_some());
     }
 
     #[test]

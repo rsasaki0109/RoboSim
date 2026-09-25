@@ -13,11 +13,27 @@ Go2 (probes live in `unitree_go2_episode.rs`):
 | mechanism | result | why |
 | --- | --- | --- |
 | ECS velocity write on a link | no effect | multibody link velocities derive from the articulation's generalized joint state; the next solve recomputes them |
-| body-level impulse / one-step force | no effect | Rapier's multibody solver does not consume body-level external forces on articulated links |
 | root **translation** | no disturbance | forward kinematics moves the whole tree — feet included — so the contact configuration is unchanged and nothing has to recover |
 
 Each failure mode produced bit-identical tilt across disturbance magnitudes, which is
 how they were caught: a disturbance whose size does not matter is not being applied.
+
+### Retracted (2026-09-25): "body-level forces do not reach multibody links"
+
+This table previously also listed *body-level impulse / one-step force* as having
+no effect, explained as "Rapier's multibody solver does not consume body-level
+external forces on articulated links". **That explanation is wrong and the row is
+withdrawn.** Rapier's multibody solver does consume them: it projects each link's
+body force and torque onto the generalized coordinates through the body Jacobian
+(`third_party/rapier3d/.../multibody.rs`, where `rb.forces` enters
+`accelerations.gemv_tr(.., body_jacobians[i], ..)`).
+
+The measurement that replaces it is
+`external_wrench_drives_reduced_coordinate_multibody_links`: a one-link pendulum
+under a 10 N lateral wrench swings 0.157 m as a reduced-coordinate multibody and
+0.181 m as an impulse-joint chain, against exactly 0.000 m for both with no
+force, and doubling the force increases the response. Whatever produced the
+original negative result, it was not the solver discarding the force.
 
 ## What works: rotation
 
@@ -39,6 +55,40 @@ Two velocity-preserving primitives from the same investigation remain available 
 plain (non-articulated) dynamic bodies: `RapierBackend::apply_velocity_impulse`
 (a one-step force of `mass * delta_v / dt`, auto-cleared after the step) and
 `UrdfSceneSim::displace_named_body_m`.
+
+## What also works: a real external wrench
+
+`UrdfSceneSim::apply_named_link_wrench(link, point_world_m, force_world_n,
+torque_world_nm)` queues a world-frame wrench on any dynamic link, including a
+reduced-coordinate articulation link, for exactly the next step. Unlike a
+rotation, nothing is re-posed: the force enters the solver and is opposed by
+contact friction, inertia and actuation, and a push applied away from the link's
+center of mass induces the matching moment. A sustained shove is queued once per
+step, and queued wrenches are applied in request order so a replay reproduces
+them.
+
+This is the preferred primitive when the disturbance should be a *force* with a
+magnitude in newtons. The rotation primitive above remains useful when the
+intent is to set a contact configuration directly rather than to apply a load.
+
+Example 118 sweeps it on the pinned Go2 standing pose, with a 12-step lateral
+trunk push and 4 s of recovery:
+
+| push | peak tilt | residual tilt | lateral displacement | recovers |
+| --- | --- | --- | --- | --- |
+| 0 N | 0.009 rad | 0.009 rad | +0.001 m | yes |
+| 40 N | 0.016 rad | 0.009 rad | +0.002 m | yes |
+| 80 N | 0.073 rad | 0.052 rad | +0.018 m | yes |
+| 120 N | 0.463 rad | 0.081 rad | +0.005 m | yes |
+| 160 N | 3.089 rad | 3.076 rad | +0.593 m | no |
+| 200 N | 2.746 rad | 2.722 rad | +0.640 m | no |
+
+The pinned pose recovers up to 120 N and is flipped by 160 N. Peak tilt is
+ordered in the push force only while the robot stays on its feet; past the
+tipping point the body rotates through large angles and settles wherever it
+lands, so tilt there is a fall indicator rather than a measure of push strength.
+The 40 N case replays bit-identically. This measures the *existing* pinned pose,
+not a push-recovery controller: no controller was added or retuned.
 
 ## The measured Go2 actuation map
 

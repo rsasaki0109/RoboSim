@@ -174,6 +174,158 @@ impl Default for ColliderShape {
     }
 }
 
+/// Optional convex-hull geometry replacing the companion [`Collider`]'s shape.
+///
+/// Vertices are expressed in entity-local meters; the companion's local offset
+/// is ignored. Material, sensor and collision groups still come from `Collider`.
+/// Author before the first physics synchronization; runtime geometry edits are
+/// unsupported. Rapier builds a three-dimensional convex hull and rejects
+/// nonfinite, degenerate or conflicting compound geometry. Backends without
+/// support must not be used to qualify convex-contact behavior. The companion
+/// primitive remains a bounding approximation for other consumers.
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ConvexCollider {
+    /// Deterministically ordered point cloud spanning a nonzero 3D volume.
+    pub vertices_m: Vec<Vec3>,
+}
+
+/// Optional heightfield terrain geometry replacing the companion [`Collider`]'s shape.
+///
+/// Samples are stored row-major with `rows` samples along the entity-local X
+/// axis and `columns` samples along the entity-local Z axis, so index
+/// `row * columns + column` is the height at that cell corner. Heights are
+/// meters along the entity-local Y axis before [`Self::scale_m`] is applied.
+/// The patch is centered on the entity: `scale_m.x` and `scale_m.z` are the
+/// total horizontal extents, and `scale_m.y` multiplies every stored height
+/// (use `1.0` to keep the samples in meters).
+///
+/// The companion [`Collider`]'s local offset is ignored, exactly as it is for
+/// [`ConvexCollider`]; material, sensor and collision groups still come from
+/// the companion. Author before the first physics synchronization; runtime
+/// terrain edits are unsupported. A heightfield is an open surface rather than
+/// a solid, so it carries no volume and must be attached to a
+/// [`RigidBodyType::Fixed`] body. Backends without heightfield support must not
+/// be used to qualify terrain-contact behavior, and the companion primitive
+/// remains a bounding approximation for other consumers.
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HeightfieldCollider {
+    /// Sample count along the entity-local X axis; at least two.
+    pub rows: u32,
+    /// Sample count along the entity-local Z axis; at least two.
+    pub columns: u32,
+    /// Row-major heights in meters; exactly `rows * columns` entries.
+    pub heights_m: Vec<f64>,
+    /// Total X and Z extents in meters; Y multiplies [`Self::heights_m`].
+    pub scale_m: Vec3,
+}
+
+impl HeightfieldCollider {
+    /// Builds a flat patch of the requested sample grid and extents.
+    ///
+    /// Every sample starts at zero height, so callers can fill
+    /// [`Self::heights_m`] through [`Self::height_mut`] without recomputing the
+    /// row-major layout.
+    pub fn flat(rows: u32, columns: u32, scale_m: Vec3) -> Self {
+        Self {
+            rows,
+            columns,
+            heights_m: vec![0.0; (rows as usize).saturating_mul(columns as usize)],
+            scale_m,
+        }
+    }
+
+    /// Returns the row-major index of one sample, or `None` when out of range.
+    pub fn index(&self, row: u32, column: u32) -> Option<usize> {
+        (row < self.rows && column < self.columns)
+            .then(|| (row as usize) * (self.columns as usize) + (column as usize))
+    }
+
+    /// Returns the height at one sample in meters, or `None` when out of range.
+    pub fn height_m(&self, row: u32, column: u32) -> Option<f64> {
+        self.index(row, column)
+            .and_then(|index| self.heights_m.get(index).copied())
+    }
+
+    /// Returns a mutable height at one sample, or `None` when out of range.
+    pub fn height_mut(&mut self, row: u32, column: u32) -> Option<&mut f64> {
+        self.index(row, column)
+            .and_then(|index| self.heights_m.get_mut(index))
+    }
+
+    /// Returns whether the grid, heights and extents are usable by a backend.
+    ///
+    /// A valid patch has at least two samples per axis, exactly
+    /// `rows * columns` heights, finite heights that survive the `f32` backend
+    /// boundary, and positive finite horizontal extents with a finite nonzero
+    /// height scale.
+    pub fn is_valid(&self) -> bool {
+        let finite32 = |x: f64| x.is_finite() && (x as f32).is_finite();
+        let positive32 = |x: f64| finite32(x) && x > 0.0 && (x as f32) > 0.0;
+        self.rows >= 2
+            && self.columns >= 2
+            && self.heights_m.len() == (self.rows as usize) * (self.columns as usize)
+            && self.heights_m.iter().copied().all(finite32)
+            && positive32(self.scale_m.x)
+            && positive32(self.scale_m.z)
+            && finite32(self.scale_m.y)
+            && self.scale_m.y != 0.0
+    }
+}
+
+/// One finite primitive in a compound collision shape.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ColliderPart {
+    /// Primitive geometry; infinite planes are not supported in compounds.
+    pub shape: ColliderShape,
+    /// Pose relative to the entity, not to the companion collider's offset.
+    pub local_offset: Transform3,
+}
+
+/// Optional compound geometry replacing the companion [`Collider`]'s shape.
+///
+/// The companion retains material, sensor and collision-group behavior. Parts
+/// share one rigid body and do not add mass when declared inertia is present.
+/// Rapier supports this component at collider creation; author it before the
+/// first physics synchronization. Backends without compound support must not
+/// be used to validate compound-contact behavior. Legacy `Collider` geometry
+/// remains available as a broad bounding approximation for other consumers.
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompoundCollider {
+    /// Nonempty, deterministically ordered finite primitives.
+    pub parts: Vec<ColliderPart>,
+}
+
+impl CompoundCollider {
+    /// Returns whether all parts have finite poses and positive finite extents.
+    pub fn is_valid(&self) -> bool {
+        let positive =
+            |x: f64| x.is_finite() && x > 0.0 && (x as f32).is_finite() && (x as f32) > 0.0;
+        !self.parts.is_empty()
+            && self.parts.iter().all(|part| {
+                let pose = part.local_offset;
+                pose.translation.is_finite()
+                    && pose.rotation.is_finite()
+                    && (pose.rotation.length_squared() - 1.0).abs() < 1e-6
+                    && match part.shape {
+                        ColliderShape::Sphere { radius_m } => positive(radius_m),
+                        ColliderShape::Cuboid { half_extents_m } => {
+                            half_extents_m.to_array().into_iter().all(positive)
+                        }
+                        ColliderShape::Capsule {
+                            half_height_m,
+                            radius_m,
+                        } => {
+                            half_height_m.is_finite()
+                                && (half_height_m as f32).is_finite()
+                                && half_height_m >= 0.0
+                                && positive(radius_m)
+                        }
+                        ColliderShape::Plane { .. } => false,
+                    }
+            })
+    }
+}
+
 /// Collider attached to an entity.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Collider {
@@ -272,12 +424,27 @@ impl Default for PhysicsMaterial {
     }
 }
 
+/// Constant diagonal inertia added to one revolute generalized coordinate.
+///
+/// Attach to the child link alongside `RevoluteJointDesc` and `MultibodyLink`.
+/// The Rapier backend with `experimental-armature` and the repository patch
+/// applies this to force and constraint dynamics without
+/// changing link spatial mass/inertia. Zero or absence preserves the original
+/// plant. Non-finite, negative, unrepresentable or unsupported configurations
+/// are rejected. Other backends do not yet implement this component.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RevoluteJointArmature {
+    /// Reflected motor inertia in kilogram-square-metres.
+    pub inertia_kg_m2: f64,
+}
+
 /// Revolute joint description for physics backends.
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct RevoluteJointDesc {
     /// Parent rigid body entity.
     pub parent: Entity,
-    /// Joint axis in parent-local coordinates.
+    /// Joint axis before applying [`Self::relative_rotation`] and the parent
+    /// body rotation; the identity relative rotation preserves parent-local axes.
     pub axis: Vec3,
     /// Anchor point in the parent body's local frame.
     pub anchor_parent_m: Vec3,
@@ -303,7 +470,8 @@ pub struct RevoluteJointDesc {
 pub struct PrismaticJointDesc {
     /// Parent rigid body entity.
     pub parent: Entity,
-    /// Sliding axis in parent-local coordinates.
+    /// Sliding axis before applying [`Self::relative_rotation`] and the parent
+    /// body rotation; the identity relative rotation preserves parent-local axes.
     pub axis: Vec3,
     /// Anchor point in the parent body's local frame.
     pub anchor_parent_m: Vec3,
@@ -751,7 +919,7 @@ impl Default for JointMotor {
 
 #[cfg(test)]
 mod tests {
-    use super::{JointActuation, JointPassiveDynamics, RigidBodyInertia};
+    use super::{HeightfieldCollider, JointActuation, JointPassiveDynamics, RigidBodyInertia};
     use rne_math::Vec3;
 
     #[test]
@@ -859,5 +1027,78 @@ mod tests {
             max_force_n: 10.0,
         }
         .has_valid_values());
+    }
+
+    #[test]
+    fn heightfield_grid_indexes_row_major_and_rejects_out_of_range_samples() {
+        let mut field = HeightfieldCollider::flat(3, 4, Vec3::new(6.0, 1.0, 8.0));
+        assert_eq!(field.heights_m.len(), 12);
+        assert_eq!(field.index(0, 0), Some(0));
+        assert_eq!(field.index(1, 0), Some(4));
+        assert_eq!(field.index(2, 3), Some(11));
+        assert_eq!(field.index(3, 0), None);
+        assert_eq!(field.index(0, 4), None);
+
+        *field.height_mut(1, 2).expect("in-range sample") = 0.25;
+        assert_eq!(field.heights_m[6], 0.25);
+        assert_eq!(field.height_m(1, 2), Some(0.25));
+        assert_eq!(field.height_m(1, 4), None);
+        assert!(field.height_mut(3, 0).is_none());
+        assert!(field.is_valid());
+    }
+
+    #[test]
+    fn heightfield_validation_rejects_degenerate_grids_heights_and_extents() {
+        let valid = HeightfieldCollider::flat(2, 2, Vec3::new(4.0, 1.0, 4.0));
+        assert!(valid.is_valid());
+
+        let mut single_row = valid.clone();
+        single_row.rows = 1;
+        single_row.heights_m.truncate(2);
+        assert!(!single_row.is_valid());
+
+        let mut wrong_length = valid.clone();
+        wrong_length.heights_m.push(0.0);
+        assert!(!wrong_length.is_valid());
+
+        let mut nonfinite_height = valid.clone();
+        nonfinite_height.heights_m[0] = f64::NAN;
+        assert!(!nonfinite_height.is_valid());
+
+        let mut overflowing_height = valid.clone();
+        overflowing_height.heights_m[0] = 1e40;
+        assert!(!overflowing_height.is_valid());
+
+        let mut zero_extent = valid.clone();
+        zero_extent.scale_m.x = 0.0;
+        assert!(!zero_extent.is_valid());
+
+        let mut negative_extent = valid.clone();
+        negative_extent.scale_m.z = -4.0;
+        assert!(!negative_extent.is_valid());
+
+        let mut zero_height_scale = valid.clone();
+        zero_height_scale.scale_m.y = 0.0;
+        assert!(!zero_height_scale.is_valid());
+    }
+
+    #[test]
+    fn heightfield_round_trips_through_serde_with_row_major_heights() {
+        let mut field = HeightfieldCollider::flat(2, 3, Vec3::new(2.0, 1.0, 3.0));
+        *field.height_mut(0, 1).expect("in-range sample") = -0.5;
+        *field.height_mut(1, 2).expect("in-range sample") = 1.5;
+        let json = serde_json::to_value(&field).expect("serialize heightfield");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "rows": 2,
+                "columns": 3,
+                "heights_m": [0.0, -0.5, 0.0, 0.0, 0.0, 1.5],
+                "scale_m": [2.0, 1.0, 3.0],
+            })
+        );
+        let restored: HeightfieldCollider =
+            serde_json::from_value(json).expect("deserialize heightfield");
+        assert_eq!(restored, field);
     }
 }

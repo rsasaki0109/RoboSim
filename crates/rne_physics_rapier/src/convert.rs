@@ -1,9 +1,9 @@
 //! Type conversion between RNE math and Rapier.
 
-use rapier3d::na::{Point3, Unit, UnitQuaternion, Vector3};
+use rapier3d::na::{DMatrix, Point3, Unit, UnitQuaternion, Vector3};
 use rapier3d::prelude::{Isometry, SharedShape};
 use rne_math::{Quat, Vec3};
-use rne_physics::{ColliderShape, RigidBodyType};
+use rne_physics::{ColliderShape, HeightfieldCollider, RigidBodyType};
 use rne_world::Transform3;
 
 pub fn vec3_to_rapier(v: Vec3) -> Vector3<f32> {
@@ -36,6 +36,10 @@ pub fn quat_from_rapier(q: UnitQuaternion<f32>) -> Quat {
         coords[2] as f64,
         coords[3] as f64,
     )
+    // Promoting an f32 UnitQuaternion does not make it unit length in f64.
+    // RNE's conjugate-based inverse assumes a unit rotation; normalize at
+    // this boundary to prevent hierarchical world/local error amplification.
+    .normalize()
 }
 
 pub fn transform_to_isometry(transform: &Transform3) -> Isometry<f32> {
@@ -77,10 +81,55 @@ pub fn shape_to_shared(shape: ColliderShape) -> SharedShape {
     }
 }
 
+/// Builds a Rapier heightfield from a validated [`HeightfieldCollider`].
+///
+/// Returns `None` when the patch fails [`HeightfieldCollider::is_valid`], so
+/// callers can reject terrain before a collider is created.
+///
+/// Parry indexes heightfield samples with the matrix **column** along the local
+/// X axis and the matrix **row** along the local Z axis (`x_at(j)`, `z_at(i)`),
+/// which is the transpose of the component's row-along-X layout. The transpose
+/// happens here so the authoring convention stays backend-neutral.
+///
+/// Parry's `FIX_INTERNAL_EDGES` flag is deliberately not set: it was tried
+/// against the tunnelling described in ADR 033, did not prevent it, and did
+/// change the rolling trajectory of an existing example, so it is not carried
+/// as an unmotivated behaviour change.
+pub fn heightfield_to_shared(field: &HeightfieldCollider) -> Option<SharedShape> {
+    if !field.is_valid() {
+        return None;
+    }
+    let x_samples = field.rows as usize;
+    let z_samples = field.columns as usize;
+    let heights = DMatrix::from_fn(z_samples, x_samples, |z_index, x_index| {
+        field.heights_m[x_index * z_samples + z_index] as f32
+    });
+    Some(SharedShape::heightfield(
+        heights,
+        vec3_to_rapier(field.scale_m),
+    ))
+}
+
 pub fn body_type_to_rapier(body_type: RigidBodyType) -> rapier3d::prelude::RigidBodyType {
     match body_type {
         RigidBodyType::Dynamic => rapier3d::prelude::RigidBodyType::Dynamic,
         RigidBodyType::Fixed => rapier3d::prelude::RigidBodyType::Fixed,
         RigidBodyType::Kinematic => rapier3d::prelude::RigidBodyType::KinematicPositionBased,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn promoted_rotation_has_unit_length_for_f64_transform_inverse() {
+        let native = UnitQuaternion::from_axis_angle(&Vector3::z_axis(), 1.0);
+        let rotation = quat_from_rapier(native);
+        assert!((rotation.length_squared() - 1.0).abs() < 1e-14);
+        let point = Vec3::new(0.7, -0.3, 0.2);
+        assert!((rotation.conjugate() * (rotation * point) - point).length() < 1e-14);
+        let expected = Quat::from_rotation_z(1.0);
+        assert!(rotation.dot(expected).abs() > 1.0 - 1e-14);
     }
 }

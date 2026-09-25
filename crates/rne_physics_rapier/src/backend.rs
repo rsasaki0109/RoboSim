@@ -1,8 +1,9 @@
 //! Rapier backend implementation.
 
 use crate::convert::{
-    body_type_to_rapier, isometry_to_transform, quat_to_rapier, shape_to_shared,
-    transform_to_isometry, vec3_from_point, vec3_from_rapier, vec3_to_point, vec3_to_rapier,
+    body_type_to_rapier, heightfield_to_shared, isometry_to_transform, quat_to_rapier,
+    shape_to_shared, transform_to_isometry, vec3_from_point, vec3_from_rapier, vec3_to_point,
+    vec3_to_rapier,
 };
 use rapier3d::na::{Matrix3, Translation3, Unit, UnitQuaternion, Vector3};
 use rapier3d::pipeline::{PhysicsPipeline, QueryPipeline};
@@ -12,10 +13,12 @@ use rne_ecs::Parent;
 use rne_ecs::{Entity, World};
 use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
+use rne_physics::RevoluteJointArmature;
 use rne_physics::{
-    Collider, ContactEvent, ContactPointSample, ExternalBodyWrench, FixedJointDesc, GravityScale,
-    JointActuation, JointEffortMeasurement, JointMotor, JointMotorGainModel, JointPassiveDynamics,
-    JointState, MultibodyLink, PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability,
+    Collider, CompoundCollider, ContactEvent, ContactPointSample, ConvexCollider,
+    ExternalBodyWrench, FixedJointDesc, GravityScale, HeightfieldCollider, JointActuation,
+    JointEffortMeasurement, JointMotor, JointMotorGainModel, JointPassiveDynamics, JointState,
+    MultibodyLink, PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability,
     PhysicsCapability, PhysicsError, PhysicsOwnedPose, PhysicsWorldDesc, PhysicsWorldId,
     PrismaticJointDesc, RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyInertia,
     RigidBodyType,
@@ -130,6 +133,43 @@ impl RapierBackend {
         body.add_force(force, true);
         state.impulse_forced.push(body_handle);
         true
+    }
+
+    /// Returns signed manifold separations, including pairs with zero impulse.
+    ///
+    /// Values describe the latest solver contact-generation pose, not a fresh
+    /// post-integration distance query. Contact filtering remains authoritative.
+    /// This optional Rapier query does not alter the public backend trait.
+    pub fn contact_separations(
+        &self,
+        id: PhysicsWorldId,
+    ) -> Result<Vec<rne_physics::ContactSeparationSample>, PhysicsError> {
+        let state = self.world(id)?;
+        let mut samples = Vec::new();
+        for pair in state.narrow_phase.contact_pairs() {
+            let (Some(&a), Some(&b)) = (
+                state.collider_to_entity.get(&pair.collider1),
+                state.collider_to_entity.get(&pair.collider2),
+            ) else {
+                continue;
+            };
+            let Some(distance) = pair
+                .manifolds
+                .iter()
+                .flat_map(|m| m.points.iter())
+                .map(|point| point.dist)
+                .reduce(f32::min)
+            else {
+                continue;
+            };
+            samples.push(rne_physics::ContactSeparationSample {
+                entity_a: if a.index() <= b.index() { a } else { b },
+                entity_b: if a.index() <= b.index() { b } else { a },
+                min_separation_m: f64::from(distance),
+            });
+        }
+        samples.sort_by_key(|s| (s.entity_a.index(), s.entity_b.index()));
+        Ok(samples)
     }
 
     fn world(&self, id: PhysicsWorldId) -> Result<&RapierWorldState, PhysicsError> {
@@ -296,6 +336,43 @@ impl PhysicsBackend for RapierBackend {
                 continue;
             };
             let collider = world.get::<Collider>(entity);
+            if world.get::<CompoundCollider>(entity).is_some_and(|parts| {
+                collider.is_none()
+                    || !parts.is_valid()
+                    || parts.parts.iter().any(|part| {
+                        part.local_offset
+                            .translation
+                            .to_array()
+                            .into_iter()
+                            .any(|v| !(v as f32).is_finite())
+                    })
+            }) {
+                return Err(PhysicsError::InitializationFailed);
+            }
+            if let Some(convex) = world.get::<ConvexCollider>(entity) {
+                if collider.is_none()
+                    || world.get::<CompoundCollider>(entity).is_some()
+                    || (!state.entity_to_collider.contains_key(&entity)
+                        && convex_shape(convex).is_none())
+                {
+                    return Err(PhysicsError::InitializationFailed);
+                }
+            }
+            if let Some(field) = world.get::<HeightfieldCollider>(entity) {
+                // A heightfield is an open surface with no volume, so it cannot
+                // carry a dynamic body's mass properties. Reject the mixed
+                // geometry declarations here as well, rather than silently
+                // letting one component win in `collider_builder`.
+                if collider.is_none()
+                    || world.get::<CompoundCollider>(entity).is_some()
+                    || world.get::<ConvexCollider>(entity).is_some()
+                    || rigid_body.body_type != RigidBodyType::Fixed
+                    || (!state.entity_to_collider.contains_key(&entity)
+                        && heightfield_to_shared(field).is_none())
+                {
+                    return Err(PhysicsError::InitializationFailed);
+                }
+            }
             if collider.is_none() && world.get::<MultibodyLink>(entity).is_none() {
                 continue;
             }
@@ -312,7 +389,17 @@ impl PhysicsBackend for RapierBackend {
                 let physics_owned = world.get::<PhysicsOwnedPose>(entity).is_some();
                 if let Some(body) = state.bodies.get_mut(body_handle) {
                     if !physics_owned {
-                        body.set_position(isometry, true);
+                        if rigid_body.body_type == RigidBodyType::Kinematic {
+                            // A kinematic body is commanded, not teleported: the
+                            // solver derives its velocity from the target pose,
+                            // which is what lets a moving platform carry what
+                            // stands on it. `set_position` leaves that velocity
+                            // at zero, so a rider is only nudged by penetration
+                            // resolution and lags behind the platform.
+                            body.set_next_kinematic_position(isometry);
+                        } else {
+                            body.set_position(isometry, true);
+                        }
                         if rigid_body.body_type != RigidBodyType::Fixed {
                             body.set_linvel(vec3_to_rapier(rigid_body.linear_velocity_m_s), true);
                             body.set_angvel(
@@ -782,9 +869,59 @@ fn sync_entity_collider(
     }
 }
 
+fn convex_shape(convex: &ConvexCollider) -> Option<SharedShape> {
+    if convex.vertices_m.len() < 4
+        || convex
+            .vertices_m
+            .iter()
+            .any(|v| !v.is_finite() || v.to_array().iter().any(|x| !(*x as f32).is_finite()))
+    {
+        return None;
+    }
+    let points: Vec<_> = convex
+        .vertices_m
+        .iter()
+        .copied()
+        .map(vec3_to_point)
+        .collect();
+    let (vertices, indices) = rapier3d::parry::transformation::try_convex_hull(&points).ok()?;
+    let shape = SharedShape::convex_mesh(vertices, &indices)?;
+    let mass = shape.mass_properties(1.0).mass();
+    (mass.is_finite() && mass > 0.0).then_some(shape)
+}
+
 fn collider_builder(world: &World, entity: Entity, collider: &Collider) -> ColliderBuilder {
-    let mut builder = ColliderBuilder::new(shape_to_shared(collider.shape))
-        .position(transform_to_isometry(&collider.local_offset))
+    let (shape, offset) = if let Some(compound) = world.get::<CompoundCollider>(entity) {
+        (
+            SharedShape::compound(
+                compound
+                    .parts
+                    .iter()
+                    .map(|part| {
+                        (
+                            transform_to_isometry(&part.local_offset),
+                            shape_to_shared(part.shape),
+                        )
+                    })
+                    .collect(),
+            ),
+            Transform3::IDENTITY,
+        )
+    } else if let Some(convex) = world.get::<ConvexCollider>(entity) {
+        (
+            convex_shape(convex).expect("convex collider validated before creation"),
+            Transform3::IDENTITY,
+        )
+    } else if let Some(field) = world.get::<HeightfieldCollider>(entity) {
+        (
+            heightfield_to_shared(field).expect("heightfield collider validated before creation"),
+            Transform3::IDENTITY,
+        )
+    } else {
+        (shape_to_shared(collider.shape), collider.local_offset)
+    };
+    let mut builder = ColliderBuilder::new(shape)
+        .position(transform_to_isometry(&offset))
         .friction(collider.material.friction)
         .restitution(collider.material.restitution)
         .sensor(collider.sensor)
@@ -987,6 +1124,24 @@ fn sync_joints_from_ecs(world: &World, state: &mut RapierWorldState) -> Result<(
 }
 
 fn apply_joint_motors(world: &World, state: &mut RapierWorldState) -> Result<(), PhysicsError> {
+    for id in sorted_entities(world) {
+        let entity = world.entity(id);
+        if let Some(armature) = entity.get::<RevoluteJointArmature>() {
+            if !cfg!(feature = "experimental-armature") && armature.inertia_kg_m2 != 0.0 {
+                return Err(invalid_passive_dynamics(entity.id(), "nonzero armature requires experimental-armature and the repository Rapier patch"));
+            }
+            if !armature.inertia_kg_m2.is_finite()
+                || armature.inertia_kg_m2 < 0.0
+                || !(armature.inertia_kg_m2 as f32).is_finite()
+                || (armature.inertia_kg_m2 > 0.0 && armature.inertia_kg_m2 as f32 == 0.0)
+                || entity.get::<RevoluteJointDesc>().is_none()
+                || entity.get::<MultibodyLink>().is_none()
+                || !state.entity_to_multibody_joint.contains_key(&entity.id())
+            {
+                return Err(invalid_passive_dynamics(entity.id(), "armature requires a realized revolute multibody joint and finite nonnegative representable inertia"));
+            }
+        }
+    }
     for (entity, joint_handle) in &state.entity_to_joint {
         let Some(axis) = motor_axis_for_entity(world, *entity) else {
             continue;
@@ -1023,6 +1178,15 @@ fn apply_joint_motors(world: &World, state: &mut RapierWorldState) -> Result<(),
                 *entity,
                 "supported articulated joints must have exactly one degree of freedom",
             ));
+        }
+        #[cfg(feature = "experimental-armature")]
+        {
+            let armature = world
+                .get::<RevoluteJointArmature>(*entity)
+                .map_or(0.0, |v| v.inertia_kg_m2 as f32);
+            if !multibody.set_armature(assembly_id, armature) {
+                return Err(PhysicsError::InitializationFailed);
+            }
         }
         if let Some(damping) = passive_viscous_damping(world, *entity)? {
             multibody.damping_mut()[assembly_id] = damping as f32;
@@ -1293,7 +1457,21 @@ fn apply_generalized_effort(
     effort: f64,
     revolute: bool,
 ) -> Result<f64, PhysicsError> {
-    let axis_world = world_transform_of(world, parent).rotation * axis_local.normalize();
+    // Match the parent joint frame built in sync_joints: the authored origin
+    // rotation precedes the local axis. Omitting it applies effort to a locked
+    // direction on rotated URDF joints instead of their free coordinate.
+    let origin_rotation = if revolute {
+        world
+            .get::<RevoluteJointDesc>(entity)
+            .map(|desc| desc.relative_rotation)
+    } else {
+        world
+            .get::<PrismaticJointDesc>(entity)
+            .map(|desc| desc.relative_rotation)
+    }
+    .ok_or_else(|| invalid_actuation(entity, "joint effort has no joint descriptor"))?;
+    let axis_world =
+        world_transform_of(world, parent).rotation * origin_rotation * axis_local.normalize();
     if !axis_world.is_finite() || axis_world.length_squared() <= f64::EPSILON {
         return Err(invalid_actuation(
             entity,
@@ -1476,6 +1654,448 @@ mod tests {
         ));
 
         (backend, physics_world, world, ground, cube)
+    }
+
+    #[test]
+    fn signed_contact_separations_include_zero_impulse_and_respect_filters() {
+        for (gap, filtered) in [(0.0, false), (0.001, false), (-0.1, false), (-0.1, true)] {
+            let mut backend = RapierBackend::new();
+            let id = backend
+                .create_world(PhysicsWorldDesc {
+                    gravity_m_s2: Vec3::ZERO,
+                    ..PhysicsWorldDesc::default()
+                })
+                .unwrap();
+            let mut world = World::new();
+            let a = spawn_named(&mut world, "a");
+            let b = spawn_named(&mut world, "b");
+            for (entity, x, kind) in [
+                (a, 0.0, RigidBodyType::Fixed),
+                (b, 2.0 + gap, RigidBodyType::Dynamic),
+            ] {
+                world.entity_mut(entity).insert((
+                    RigidBody {
+                        body_type: kind,
+                        ..RigidBody::default()
+                    },
+                    Collider {
+                        shape: ColliderShape::Sphere { radius_m: 1.0 },
+                        ..Collider::default()
+                    },
+                    Transform3::from_translation_rotation(Vec3::new(x, 0.0, 0.0), Quat::IDENTITY),
+                ));
+                if filtered {
+                    world
+                        .entity_mut(entity)
+                        .insert(rne_physics::CollisionGroups::without_self_collision(1));
+                }
+            }
+            backend.sync_from_ecs(&mut world, id).unwrap();
+            backend.step(id, fixed_step()).unwrap();
+            let samples = backend.contact_separations(id).unwrap();
+            if filtered {
+                assert!(samples.is_empty());
+                continue;
+            }
+            assert_eq!(samples.len(), 1);
+            assert_eq!((samples[0].entity_a, samples[0].entity_b), (a, b));
+            if gap < 0.0 {
+                // Solver substeps may already have reduced the initial overlap.
+                assert!(samples[0].min_separation_m < 0.0);
+                assert!(samples[0].min_separation_m >= gap - 1e-6);
+            } else {
+                assert_relative_eq!(samples[0].min_separation_m, gap, epsilon = 1e-6);
+            }
+            if gap >= 0.0 {
+                assert!(backend
+                    .contacts(id)
+                    .unwrap()
+                    .iter()
+                    .all(|c| c.impulse == 0.0));
+            }
+            for entity in [a, b] {
+                world
+                    .entity_mut(entity)
+                    .insert(rne_physics::CollisionGroups::without_self_collision(1));
+            }
+            backend.sync_from_ecs(&mut world, id).unwrap();
+            backend.step(id, fixed_step()).unwrap();
+            assert!(backend.contact_separations(id).unwrap().is_empty());
+        }
+    }
+
+    /// Terrain ramping along local X only: a transposed grid would move the
+    /// slope onto Z and change every off-diagonal sample.
+    fn ramp_along_x() -> HeightfieldCollider {
+        let mut field = HeightfieldCollider::flat(3, 2, Vec3::new(4.0, 1.0, 4.0));
+        for column in 0..2 {
+            *field.height_mut(0, column).expect("sample") = 0.0;
+            *field.height_mut(1, column).expect("sample") = 0.5;
+            *field.height_mut(2, column).expect("sample") = 1.0;
+        }
+        field
+    }
+
+    fn spawn_terrain(world: &mut World, field: HeightfieldCollider) -> Entity {
+        let terrain = spawn_named(world, "terrain");
+        world.entity_mut(terrain).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider::cuboid(Vec3::splat(2.0)),
+            field,
+            Transform3::IDENTITY,
+        ));
+        terrain
+    }
+
+    #[test]
+    fn heightfield_surface_follows_the_row_major_grid_along_local_x() {
+        let mut backend = RapierBackend::new();
+        let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+        let mut world = World::new();
+        let terrain = spawn_terrain(&mut world, ramp_along_x());
+        backend.sync_from_ecs(&mut world, id).unwrap();
+
+        // Row index runs along X, so the sampled height must depend on x and
+        // stay constant along z. A transposed grid inverts both.
+        for (x_m, z_m, expected_y_m) in [
+            (0.0, 0.0, 0.5),
+            (0.0, 1.5, 0.5),
+            (1.0, 0.0, 0.75),
+            (1.0, -1.5, 0.75),
+            (-1.0, 0.0, 0.25),
+            (-2.0, 1.0, 0.0),
+            (2.0, -1.0, 1.0),
+        ] {
+            let hits = backend
+                .raycast(id, RaycastQuery::downward(Vec3::new(x_m, 3.0, z_m), 6.0))
+                .unwrap();
+            assert_eq!(hits.len(), 1, "expected one terrain hit at ({x_m}, {z_m})");
+            assert_eq!(hits[0].entity, terrain);
+            assert_relative_eq!(hits[0].point_m.y, expected_y_m, epsilon = 1e-5);
+        }
+    }
+
+    #[test]
+    fn heightfield_scale_stretches_heights_and_horizontal_extents() {
+        let mut backend = RapierBackend::new();
+        let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+        let mut world = World::new();
+        let mut field = ramp_along_x();
+        field.scale_m = Vec3::new(8.0, 2.0, 4.0);
+        spawn_terrain(&mut world, field);
+        backend.sync_from_ecs(&mut world, id).unwrap();
+
+        // The 8 m X extent puts the ramp midpoint at x = 2, and the 2x height
+        // scale doubles every sample.
+        let hits = backend
+            .raycast(id, RaycastQuery::downward(Vec3::new(2.0, 5.0, 0.0), 9.0))
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_relative_eq!(hits[0].point_m.y, 1.5, epsilon = 1e-5);
+        // Beyond the half extent the patch has ended.
+        assert!(backend
+            .raycast(id, RaycastQuery::downward(Vec3::new(4.5, 5.0, 0.0), 9.0))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn body_dropped_on_sloped_terrain_rolls_along_the_sampled_surface() {
+        const RADIUS_M: f64 = 0.1;
+        // The ramp rises 1 m over its 4 m X extent, so the surface height at x
+        // is (x + 2) / 4 and its normal tilts by atan(0.25) from vertical.
+        let surface_m = |x_m: f64| (x_m + 2.0) / 4.0;
+        let resting_center_m = |x_m: f64| surface_m(x_m) + RADIUS_M * (1.0f64 + 0.0625).sqrt();
+
+        let mut backend = RapierBackend::new();
+        let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+        let mut world = World::new();
+        spawn_terrain(&mut world, ramp_along_x());
+        let ball = spawn_named(&mut world, "ball");
+        world.entity_mut(ball).insert((
+            RigidBody::default(),
+            Collider {
+                shape: ColliderShape::Sphere { radius_m: RADIUS_M },
+                ..Collider::default()
+            },
+            Transform3::from_translation_rotation(Vec3::new(0.5, 1.5, 0.0), Quat::IDENTITY),
+        ));
+
+        // 105 steps keep the ball on the patch; it leaves the low-X edge after
+        // roughly 120 and then free-falls, which is the open surface behaving
+        // as declared rather than an infinite plane.
+        let mut previous_x_m = f64::INFINITY;
+        for step in 0..=105 {
+            step_physics(&mut backend, &mut world, id, fixed_step()).unwrap();
+            let center_m = world
+                .get::<Transform3>(ball)
+                .expect("ball transform")
+                .translation;
+            if step >= 45 {
+                // Contact tracks the sampled slope instead of a flat plane.
+                assert_relative_eq!(center_m.y, resting_center_m(center_m.x), epsilon = 0.02);
+                assert!(
+                    center_m.x < previous_x_m,
+                    "step {step}: ball stopped rolling downhill at x = {}",
+                    center_m.x
+                );
+                assert!(
+                    center_m.x > -2.0,
+                    "step {step}: ball left the patch early at x = {}",
+                    center_m.x
+                );
+            }
+            previous_x_m = center_m.x;
+        }
+
+        let center_m = world
+            .get::<Transform3>(ball)
+            .expect("ball transform")
+            .translation;
+        assert!(
+            center_m.x < 0.0,
+            "ball did not roll past the ramp midpoint: x = {}",
+            center_m.x
+        );
+        assert_relative_eq!(center_m.z, 0.0, epsilon = 0.05);
+    }
+
+    #[test]
+    fn heightfield_rejects_invalid_grids_dynamic_bodies_and_conflicting_geometry() {
+        let mut short_grid = ramp_along_x();
+        short_grid.rows = 1;
+        short_grid.heights_m.truncate(2);
+        let mut wrong_length = ramp_along_x();
+        wrong_length.heights_m.push(0.0);
+        let mut nonfinite = ramp_along_x();
+        nonfinite.heights_m[0] = f64::INFINITY;
+        let mut zero_extent = ramp_along_x();
+        zero_extent.scale_m.x = 0.0;
+        for field in [short_grid, wrong_length, nonfinite, zero_extent] {
+            let mut backend = RapierBackend::new();
+            let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+            let mut world = World::new();
+            spawn_terrain(&mut world, field);
+            assert!(matches!(
+                backend.sync_from_ecs(&mut world, id),
+                Err(PhysicsError::InitializationFailed)
+            ));
+        }
+
+        // A heightfield is an open surface with no volume, so a dynamic or
+        // kinematic body would have no mass properties to solve with.
+        for body_type in [RigidBodyType::Dynamic, RigidBodyType::Kinematic] {
+            let mut backend = RapierBackend::new();
+            let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+            let mut world = World::new();
+            world.spawn((
+                RigidBody {
+                    body_type,
+                    ..RigidBody::default()
+                },
+                Collider::default(),
+                ramp_along_x(),
+                Transform3::IDENTITY,
+            ));
+            assert!(matches!(
+                backend.sync_from_ecs(&mut world, id),
+                Err(PhysicsError::InitializationFailed)
+            ));
+        }
+
+        // Missing companion, and each conflicting geometry declaration.
+        let mut backend = RapierBackend::new();
+        let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+        let mut world = World::new();
+        world.spawn((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            ramp_along_x(),
+            Transform3::IDENTITY,
+        ));
+        assert!(matches!(
+            backend.sync_from_ecs(&mut world, id),
+            Err(PhysicsError::InitializationFailed)
+        ));
+
+        for conflicting in 0..2 {
+            let mut backend = RapierBackend::new();
+            let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+            let mut world = World::new();
+            let terrain = spawn_terrain(&mut world, ramp_along_x());
+            if conflicting == 0 {
+                world.entity_mut(terrain).insert(CompoundCollider {
+                    parts: vec![rne_physics::ColliderPart {
+                        shape: ColliderShape::Sphere { radius_m: 0.5 },
+                        local_offset: Transform3::IDENTITY,
+                    }],
+                });
+            } else {
+                world.entity_mut(terrain).insert(ConvexCollider {
+                    vertices_m: vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z],
+                });
+            }
+            assert!(matches!(
+                backend.sync_from_ecs(&mut world, id),
+                Err(PhysicsError::InitializationFailed)
+            ));
+        }
+    }
+
+    #[test]
+    fn convex_hull_raycast_excludes_aabb_corners_and_preserves_declared_mass() {
+        let mut backend = RapierBackend::new();
+        let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+        let mut world = World::new();
+        let body = spawn_named(&mut world, "tetrahedron");
+        let mut collider = Collider::cuboid(Vec3::ONE);
+        collider.local_offset.translation = Vec3::splat(50.0);
+        world.entity_mut(body).insert((
+            RigidBody {
+                mass_kg: 3.0,
+                ..RigidBody::default()
+            },
+            RigidBodyInertia {
+                center_of_mass_local_m: Vec3::splat(0.25),
+                ixx_kg_m2: 0.1,
+                ixy_kg_m2: 0.0,
+                ixz_kg_m2: 0.0,
+                iyy_kg_m2: 0.1,
+                iyz_kg_m2: 0.0,
+                izz_kg_m2: 0.1,
+            },
+            collider,
+            ConvexCollider {
+                vertices_m: vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z],
+            },
+            Transform3::IDENTITY,
+        ));
+        backend.sync_from_ecs(&mut world, id).unwrap();
+        let hits = backend
+            .raycast(id, RaycastQuery::downward(Vec3::new(0.1, 2.0, 0.1), 3.0))
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].entity, body);
+        assert_relative_eq!(hits[0].point_m.y, 0.8, epsilon = 1e-5);
+        assert!(backend
+            .raycast(id, RaycastQuery::downward(Vec3::new(0.8, 2.0, 0.8), 3.0))
+            .unwrap()
+            .is_empty());
+        backend.step(id, fixed_step()).unwrap();
+        let state = backend.world(id).unwrap();
+        assert_relative_eq!(
+            state.bodies[state.entity_to_body[&body]].mass() as f64,
+            3.0,
+            epsilon = 1e-6
+        );
+    }
+
+    #[test]
+    fn convex_hull_rejects_invalid_geometry_and_conflicting_components() {
+        let valid = vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z];
+        for vertices_m in [
+            vec![],
+            vec![Vec3::ZERO; 4],
+            vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::X + Vec3::Y],
+            vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::splat(f64::NAN)],
+            vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::splat(f64::MAX)],
+        ] {
+            let mut backend = RapierBackend::new();
+            let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+            let mut world = World::new();
+            world.spawn((
+                RigidBody::default(),
+                Collider::default(),
+                ConvexCollider { vertices_m },
+            ));
+            assert!(matches!(
+                backend.sync_from_ecs(&mut world, id),
+                Err(PhysicsError::InitializationFailed)
+            ));
+        }
+        for with_companion in [false, true] {
+            let mut backend = RapierBackend::new();
+            let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+            let mut world = World::new();
+            let mut entity = world.spawn((
+                RigidBody::default(),
+                ConvexCollider {
+                    vertices_m: valid.clone(),
+                },
+            ));
+            if with_companion {
+                entity.insert((Collider::default(), CompoundCollider { parts: vec![] }));
+            }
+            assert!(matches!(
+                backend.sync_from_ecs(&mut world, id),
+                Err(PhysicsError::InitializationFailed)
+            ));
+        }
+    }
+
+    #[test]
+    fn compound_spheres_leave_a_gap_and_preserve_declared_mass() {
+        let mut backend = RapierBackend::new();
+        let id = backend.create_world(PhysicsWorldDesc::default()).unwrap();
+        let mut world = World::new();
+        let foot = spawn_named(&mut world, "foot");
+        let parts = [-0.2, 0.2].map(|x| rne_physics::ColliderPart {
+            shape: ColliderShape::Sphere { radius_m: 0.04 },
+            local_offset: Transform3::from_translation_rotation(
+                Vec3::new(x, 0.0, 0.0),
+                Quat::IDENTITY,
+            ),
+        });
+        world.entity_mut(foot).insert((
+            RigidBody {
+                mass_kg: 3.0,
+                ..RigidBody::default()
+            },
+            RigidBodyInertia {
+                center_of_mass_local_m: Vec3::ZERO,
+                ixx_kg_m2: 0.01,
+                ixy_kg_m2: 0.0,
+                ixz_kg_m2: 0.0,
+                iyy_kg_m2: 0.01,
+                iyz_kg_m2: 0.0,
+                izz_kg_m2: 0.01,
+            },
+            Collider::cuboid(Vec3::new(0.24, 0.04, 0.04)),
+            CompoundCollider {
+                parts: parts.to_vec(),
+            },
+            Transform3::IDENTITY,
+        ));
+        backend.sync_from_ecs(&mut world, id).unwrap();
+        assert!(backend
+            .raycast(id, RaycastQuery::downward(Vec3::Y, 2.0))
+            .unwrap()
+            .is_empty());
+        for x in [-0.2, 0.2] {
+            let hits = backend
+                .raycast(id, RaycastQuery::downward(Vec3::new(x, 1.0, 0.0), 2.0))
+                .unwrap();
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0].entity, foot);
+            assert_relative_eq!(hits[0].point_m.y, 0.04, epsilon = 1e-5);
+        }
+        // Rapier finalizes newly attached collider mass properties on its first step.
+        backend.step(id, fixed_step()).unwrap();
+        let state = backend.world(id).unwrap();
+        let body = &state.bodies[state.entity_to_body[&foot]];
+        assert_relative_eq!(body.mass() as f64, 3.0, epsilon = 1e-6);
+        world
+            .entity_mut(foot)
+            .insert(CompoundCollider { parts: Vec::new() });
+        assert!(matches!(
+            backend.sync_from_ecs(&mut world, id),
+            Err(PhysicsError::InitializationFailed)
+        ));
     }
 
     #[test]
@@ -2055,6 +2675,105 @@ mod tests {
         );
     }
 
+    /// Swings a one-link pendulum and returns the link's world X displacement.
+    ///
+    /// The joint sits one meter above the link, so a lateral force rotates the
+    /// joint and moves the link; a force that never reached the solver leaves
+    /// the link exactly where it started.
+    fn pendulum_swing_m(multibody: bool, force_n: f64) -> f64 {
+        let mut backend = RapierBackend::new();
+        let id = backend
+            .create_world(PhysicsWorldDesc {
+                gravity_m_s2: Vec3::ZERO,
+                ..PhysicsWorldDesc::default()
+            })
+            .unwrap();
+        let mut world = World::new();
+        let anchor = spawn_named(&mut world, "anchor");
+        world.entity_mut(anchor).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider::cuboid(Vec3::splat(0.05)),
+            Transform3::from_translation_rotation(Vec3::new(0.0, 3.0, 0.0), Quat::IDENTITY),
+        ));
+        let link = spawn_named(&mut world, "link");
+        world.entity_mut(link).insert((
+            RigidBody {
+                mass_kg: 1.0,
+                ..RigidBody::default()
+            },
+            Collider::cuboid(Vec3::splat(0.1)),
+            Transform3::from_translation_rotation(Vec3::new(0.0, 1.0, 0.0), Quat::IDENTITY),
+            RevoluteJointDesc {
+                parent: anchor,
+                axis: Vec3::Z,
+                anchor_parent_m: Vec3::new(0.0, -1.0, 0.0),
+                anchor_child_m: Vec3::new(0.0, 1.0, 0.0),
+                relative_rotation: Quat::IDENTITY,
+                lower_rad: None,
+                upper_rad: None,
+            },
+        ));
+        if multibody {
+            world.entity_mut(anchor).insert(MultibodyLink);
+            world.entity_mut(link).insert(MultibodyLink);
+        }
+
+        for _ in 0..60 {
+            backend.sync_from_ecs(&mut world, id).unwrap();
+            if force_n != 0.0 {
+                let point_world_m = world_transform_of(&world, link).translation;
+                backend
+                    .apply_external_body_wrench(
+                        id,
+                        ExternalBodyWrench {
+                            entity: link,
+                            point_world_m,
+                            force_world_n: Vec3::new(force_n, 0.0, 0.0),
+                            torque_world_nm: Vec3::ZERO,
+                        },
+                    )
+                    .unwrap();
+            }
+            backend.step(id, fixed_step()).unwrap();
+            backend.sync_to_ecs(&mut world, id).unwrap();
+        }
+        world.get::<Transform3>(link).unwrap().translation.x
+    }
+
+    #[test]
+    fn external_wrench_drives_reduced_coordinate_multibody_links() {
+        // Rapier's multibody solver projects a link's body force onto the
+        // generalized coordinates through the body Jacobian, so a reduced
+        // coordinate articulation responds to an external wrench just as an
+        // impulse-joint chain does. Without that projection the multibody case
+        // would stay at exactly zero.
+        assert_relative_eq!(pendulum_swing_m(true, 0.0), 0.0, epsilon = 1e-9);
+        assert_relative_eq!(pendulum_swing_m(false, 0.0), 0.0, epsilon = 1e-9);
+
+        let multibody = pendulum_swing_m(true, 10.0);
+        let impulse_joint = pendulum_swing_m(false, 10.0);
+        assert!(
+            multibody > 0.05,
+            "multibody link ignored the external wrench: x = {multibody}"
+        );
+        assert!(
+            impulse_joint > 0.05,
+            "impulse-joint link ignored the external wrench: x = {impulse_joint}"
+        );
+        // The two solvers need not agree exactly, but a wrench that reached one
+        // and not the other would differ by orders of magnitude.
+        assert!(
+            (multibody / impulse_joint - 1.0).abs() < 0.5,
+            "solvers disagree on the wrench response: {multibody} vs {impulse_joint}"
+        );
+
+        // Doubling the force must increase the response.
+        assert!(pendulum_swing_m(true, 20.0) > multibody + 0.05);
+    }
+
     #[test]
     fn multibody_link_collider_contacts_external_dynamic_body() {
         let mut backend = RapierBackend::new();
@@ -2198,6 +2917,311 @@ mod tests {
             step_physics(&mut backend, &mut world, physics_world, fixed_step()).unwrap();
         }
         *world.get::<JointState>(child).expect("joint state")
+    }
+
+    #[test]
+    fn direct_effort_follows_rotated_joint_origin() {
+        for revolute in [true, false] {
+            let run = |origin: Quat| {
+                let mut backend = RapierBackend::new();
+                let physics_world = backend
+                    .create_world(PhysicsWorldDesc {
+                        gravity_m_s2: Vec3::ZERO,
+                        solver_iterations: 16,
+                    })
+                    .unwrap();
+                let mut world = World::new();
+                let parent_rotation = Quat::from_rotation_y(0.37);
+                let parent = spawn_named(&mut world, "rotated_parent");
+                world.entity_mut(parent).insert((
+                    RigidBody {
+                        body_type: RigidBodyType::Fixed,
+                        ..RigidBody::default()
+                    },
+                    MultibodyLink,
+                    Transform3::from_translation_rotation(Vec3::ZERO, parent_rotation),
+                ));
+                let child = spawn_named(&mut world, "rotated_child");
+                let rotation = parent_rotation * origin;
+                world.entity_mut(child).insert((
+                    RigidBody::default(),
+                    Collider::sphere(0.1),
+                    MultibodyLink,
+                    Transform3::from_translation_rotation(rotation * -Vec3::Y, rotation),
+                ));
+                if revolute {
+                    world.entity_mut(child).insert((
+                        RevoluteJointDesc {
+                            parent,
+                            axis: Vec3::Z,
+                            anchor_parent_m: Vec3::ZERO,
+                            anchor_child_m: Vec3::Y,
+                            relative_rotation: origin,
+                            lower_rad: None,
+                            upper_rad: None,
+                        },
+                        JointActuation::RevoluteEffort {
+                            effort_nm: 0.5,
+                            max_effort_nm: 0.5,
+                        },
+                    ));
+                } else {
+                    world.entity_mut(child).insert((
+                        PrismaticJointDesc {
+                            parent,
+                            axis: Vec3::Z,
+                            anchor_parent_m: Vec3::ZERO,
+                            anchor_child_m: Vec3::Y,
+                            relative_rotation: origin,
+                            lower_m: None,
+                            upper_m: None,
+                        },
+                        JointActuation::PrismaticEffort {
+                            force_n: 0.5,
+                            max_force_n: 0.5,
+                        },
+                    ));
+                }
+                for _ in 0..30 {
+                    step_physics(&mut backend, &mut world, physics_world, fixed_step()).unwrap();
+                }
+                backend
+                    .multibody_joint_position(physics_world, child)
+                    .unwrap()
+            };
+            let aligned = run(Quat::IDENTITY);
+            let rotated = run(Quat::from_rotation_y(std::f64::consts::FRAC_PI_2));
+            assert!(aligned > 0.01, "fixture must move: {aligned}");
+            assert!((rotated-aligned).abs() < 1e-4,
+                "joint-origin rotation must preserve generalized effort: revolute={revolute}, aligned={aligned}, rotated={rotated}");
+        }
+    }
+
+    #[test]
+    fn floating_offset_com_rotates_about_stationary_center_of_mass() {
+        let mut backend = RapierBackend::new();
+        let id = backend
+            .create_world(PhysicsWorldDesc {
+                gravity_m_s2: Vec3::ZERO,
+                solver_iterations: 16,
+            })
+            .unwrap();
+        let mut world = World::new();
+        let parent = spawn_named(&mut world, "offset_root");
+        let child = spawn_named(&mut world, "offset_weld");
+        let com = Vec3::new(0.2, 0.0, 0.0);
+        for entity in [parent, child] {
+            world.entity_mut(entity).insert((
+                RigidBody {
+                    mass_kg: 1.0,
+                    ..RigidBody::default()
+                },
+                RigidBodyInertia {
+                    center_of_mass_local_m: com,
+                    ixx_kg_m2: 0.02,
+                    iyy_kg_m2: 0.02,
+                    izz_kg_m2: 0.02,
+                    ixy_kg_m2: 0.0,
+                    ixz_kg_m2: 0.0,
+                    iyz_kg_m2: 0.0,
+                },
+                MultibodyLink,
+                Transform3::default(),
+            ));
+        }
+        world.entity_mut(child).insert(FixedJointDesc {
+            parent,
+            anchor_parent_m: Vec3::ZERO,
+            anchor_child_m: Vec3::ZERO,
+            relative_rotation: Quat::IDENTITY,
+        });
+        backend.sync_from_ecs(&mut world, id).unwrap();
+        let state = backend.world_mut(id).unwrap();
+        let handle = state.entity_to_multibody_joint[&child];
+        let multibody = state.multibody_joints.get_mut(handle).unwrap().0;
+        multibody.damping_mut().fill(0.0);
+        multibody.generalized_velocity_mut()[5] = 10.0;
+        for _ in 0..100 {
+            backend
+                .step(id, SimDuration::from_ticks(1_000_000))
+                .unwrap();
+        }
+        backend.sync_to_ecs(&mut world, id).unwrap();
+        let state = backend.world(id).unwrap();
+        for entity in [parent, child] {
+            let body = &state.bodies[state.entity_to_body[&entity]];
+            let actual = vec3_from_rapier(body.center_of_mass().coords);
+            assert!(
+                (actual - com).length() < 1e-4,
+                "free-body COM drift: {:?}",
+                actual - com
+            );
+            assert!(body.linvel().norm() < 1e-4);
+            assert!(body.rotation().angle() > 0.9);
+        }
+    }
+
+    #[cfg(feature = "experimental-armature")]
+    fn armature_response(
+        armature: Option<f64>,
+        motor: bool,
+        floating: bool,
+    ) -> Result<f64, PhysicsError> {
+        let mut backend = RapierBackend::new();
+        let id = backend.create_world(PhysicsWorldDesc {
+            gravity_m_s2: Vec3::ZERO,
+            solver_iterations: 16,
+        })?;
+        let mut world = World::new();
+        let inertia = RigidBodyInertia {
+            center_of_mass_local_m: Vec3::ZERO,
+            ixx_kg_m2: 0.02,
+            iyy_kg_m2: 0.02,
+            izz_kg_m2: 0.02,
+            ixy_kg_m2: 0.0,
+            ixz_kg_m2: 0.0,
+            iyz_kg_m2: 0.0,
+        };
+        let parent = spawn_named(&mut world, "armature_parent");
+        world.entity_mut(parent).insert((
+            RigidBody {
+                body_type: if floating {
+                    RigidBodyType::Dynamic
+                } else {
+                    RigidBodyType::Fixed
+                },
+                mass_kg: 1.0,
+                ..RigidBody::default()
+            },
+            inertia,
+            MultibodyLink,
+            Transform3::default(),
+        ));
+        let child = spawn_named(&mut world, "armature_child");
+        world.entity_mut(child).insert((
+            RigidBody {
+                mass_kg: 1.0,
+                ..RigidBody::default()
+            },
+            inertia,
+            MultibodyLink,
+            Transform3::default(),
+            RevoluteJointDesc {
+                parent,
+                axis: Vec3::Z,
+                anchor_parent_m: Vec3::ZERO,
+                anchor_child_m: Vec3::ZERO,
+                relative_rotation: Quat::IDENTITY,
+                lower_rad: None,
+                upper_rad: None,
+            },
+            JointPassiveDynamics::Revolute {
+                viscous_damping_nm_s_per_rad: 0.0,
+                coulomb_friction_nm: 0.0,
+                coulomb_transition_velocity_rad_s: 0.0,
+            },
+        ));
+        if let Some(value) = armature {
+            world.entity_mut(child).insert(RevoluteJointArmature {
+                inertia_kg_m2: value,
+            });
+        }
+        if motor {
+            world.entity_mut(child).insert((
+                JointMotor {
+                    velocity_rad_s: 100.0,
+                    gain: 100.0,
+                    stiffness: 0.0,
+                    target_position: 0.0,
+                    max_force: 0.5,
+                },
+                JointMotorGainModel::ForceBased,
+            ));
+        } else {
+            world
+                .entity_mut(child)
+                .insert(JointActuation::RevoluteEffort {
+                    effort_nm: 0.5,
+                    max_effort_nm: 0.5,
+                });
+        }
+        // Remove the upstream free-root numerical damping too, so the
+        // floating two-body fixture has the undamped analytic inertia.
+        backend.sync_from_ecs(&mut world, id)?;
+        let state = backend.world_mut(id)?;
+        let handle = state.entity_to_multibody_joint[&child];
+        state
+            .multibody_joints
+            .get_mut(handle)
+            .unwrap()
+            .0
+            .damping_mut()
+            .fill(0.0);
+        backend.step(id, SimDuration::from_ticks(1_000_000))?;
+        backend.sync_to_ecs(&mut world, id)?;
+        let state = backend.world(id)?;
+        let body = &state.bodies[state.entity_to_body[&child]];
+        assert!((body.mass() - 1.0).abs() < 1e-6);
+        assert_eq!(*world.get::<RigidBodyInertia>(child).unwrap(), inertia);
+        let first = match *world.get::<JointState>(child).unwrap() {
+            JointState::Revolute { velocity_rad_s, .. } => velocity_rad_s,
+            _ => panic!("expected revolute state"),
+        };
+        if armature == Some(0.01) && !floating && !motor {
+            world.entity_mut(child).remove::<RevoluteJointArmature>();
+            step_physics(
+                &mut backend,
+                &mut world,
+                id,
+                SimDuration::from_ticks(1_000_000),
+            )?;
+            let JointState::Revolute { velocity_rad_s, .. } =
+                *world.get::<JointState>(child).unwrap()
+            else {
+                panic!("revolute")
+            };
+            assert!(
+                (velocity_rad_s - first - 0.025).abs() < 2e-5,
+                "removing armature must restore physical inertia"
+            );
+        }
+        Ok(first)
+    }
+
+    #[test]
+    #[cfg(feature = "experimental-armature")]
+    fn armature_matches_analytic_acceleration_for_effort_and_motor_impulses() {
+        for motor in [false, true] {
+            for floating in [false, true] {
+                for armature in [None, Some(0.0), Some(0.01), Some(0.04)] {
+                    let actual = armature_response(armature, motor, floating).unwrap();
+                    let physical = if floating { 0.01 } else { 0.02 };
+                    let expected = 0.5 * 0.001 / (physical + armature.unwrap_or(0.0));
+                    assert!((actual - expected).abs() < 2e-5, "motor={motor}, floating={floating}, armature={armature:?}: {actual} vs {expected}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "experimental-armature")]
+    fn armature_rejects_invalid_inertia() {
+        let mut backend = RapierBackend::new();
+        let id = backend
+            .create_world(PhysicsWorldDesc {
+                gravity_m_s2: Vec3::ZERO,
+                solver_iterations: 16,
+            })
+            .unwrap();
+        let mut world = World::new();
+        let entity = spawn_named(&mut world, "unsupported_armature");
+        world.entity_mut(entity).insert(RevoluteJointArmature {
+            inertia_kg_m2: 0.01,
+        });
+        assert!(backend.sync_from_ecs(&mut world, id).is_err());
+        for value in [-0.1, f64::NAN, f64::INFINITY, f64::MAX, f64::MIN_POSITIVE] {
+            assert!(armature_response(Some(value), false, false).is_err());
+        }
     }
 
     fn coast_velocity_with_passive_loss(
