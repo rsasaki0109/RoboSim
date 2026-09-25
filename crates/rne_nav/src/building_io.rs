@@ -1,6 +1,6 @@
 //! Versioned `.rne.building` serialization for multi-floor maps.
 //!
-//! A [`BuildingMap`](crate::building::BuildingMap) built in code cannot be
+//! A [`BuildingMap`] built in code cannot be
 //! shared, reviewed, or swapped for a different building without a recompile.
 //! This module gives it a file format, so the floors of a site and the lifts and
 //! stairs that join them are data a caller edits rather than Rust they write.
