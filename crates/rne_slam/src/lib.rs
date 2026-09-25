@@ -10,6 +10,7 @@
 
 #![deny(missing_docs)]
 
+pub mod floor_reacquire;
 pub mod graph_io;
 pub mod icp;
 pub mod imu_preintegration;
@@ -32,6 +33,10 @@ pub mod slam;
 pub mod slam3d;
 pub mod systems;
 
+pub use floor_reacquire::{
+    reacquire_floor, FloorAmbiguity, FloorCandidate, FloorHypothesis, FloorIdentification,
+    ReacquisitionConfig, ReacquisitionError,
+};
 pub use graph_io::{
     combine_graphs, from_graph_json, load_graph, save_graph, to_graph_json, GraphIoError,
     RNE_POSE_GRAPH_FORMAT, RNE_POSE_GRAPH_VERSION,
