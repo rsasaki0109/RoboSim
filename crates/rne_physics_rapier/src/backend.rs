@@ -383,7 +383,17 @@ impl PhysicsBackend for RapierBackend {
                 let physics_owned = world.get::<PhysicsOwnedPose>(entity).is_some();
                 if let Some(body) = state.bodies.get_mut(body_handle) {
                     if !physics_owned {
-                        body.set_position(isometry, true);
+                        if rigid_body.body_type == RigidBodyType::Kinematic {
+                            // A kinematic body is commanded, not teleported: the
+                            // solver derives its velocity from the target pose,
+                            // which is what lets a moving platform carry what
+                            // stands on it. `set_position` leaves that velocity
+                            // at zero, so a rider is only nudged by penetration
+                            // resolution and lags behind the platform.
+                            body.set_next_kinematic_position(isometry);
+                        } else {
+                            body.set_position(isometry, true);
+                        }
                         if rigid_body.body_type != RigidBodyType::Fixed {
                             body.set_linvel(vec3_to_rapier(rigid_body.linear_velocity_m_s), true);
                             body.set_angvel(
@@ -2434,6 +2444,105 @@ mod tests {
             strong > 0.5,
             "high-gain motor should raise the mass against gravity, displacement={strong}"
         );
+    }
+
+    /// Swings a one-link pendulum and returns the link's world X displacement.
+    ///
+    /// The joint sits one meter above the link, so a lateral force rotates the
+    /// joint and moves the link; a force that never reached the solver leaves
+    /// the link exactly where it started.
+    fn pendulum_swing_m(multibody: bool, force_n: f64) -> f64 {
+        let mut backend = RapierBackend::new();
+        let id = backend
+            .create_world(PhysicsWorldDesc {
+                gravity_m_s2: Vec3::ZERO,
+                ..PhysicsWorldDesc::default()
+            })
+            .unwrap();
+        let mut world = World::new();
+        let anchor = spawn_named(&mut world, "anchor");
+        world.entity_mut(anchor).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider::cuboid(Vec3::splat(0.05)),
+            Transform3::from_translation_rotation(Vec3::new(0.0, 3.0, 0.0), Quat::IDENTITY),
+        ));
+        let link = spawn_named(&mut world, "link");
+        world.entity_mut(link).insert((
+            RigidBody {
+                mass_kg: 1.0,
+                ..RigidBody::default()
+            },
+            Collider::cuboid(Vec3::splat(0.1)),
+            Transform3::from_translation_rotation(Vec3::new(0.0, 1.0, 0.0), Quat::IDENTITY),
+            RevoluteJointDesc {
+                parent: anchor,
+                axis: Vec3::Z,
+                anchor_parent_m: Vec3::new(0.0, -1.0, 0.0),
+                anchor_child_m: Vec3::new(0.0, 1.0, 0.0),
+                relative_rotation: Quat::IDENTITY,
+                lower_rad: None,
+                upper_rad: None,
+            },
+        ));
+        if multibody {
+            world.entity_mut(anchor).insert(MultibodyLink);
+            world.entity_mut(link).insert(MultibodyLink);
+        }
+
+        for _ in 0..60 {
+            backend.sync_from_ecs(&mut world, id).unwrap();
+            if force_n != 0.0 {
+                let point_world_m = world_transform_of(&world, link).translation;
+                backend
+                    .apply_external_body_wrench(
+                        id,
+                        ExternalBodyWrench {
+                            entity: link,
+                            point_world_m,
+                            force_world_n: Vec3::new(force_n, 0.0, 0.0),
+                            torque_world_nm: Vec3::ZERO,
+                        },
+                    )
+                    .unwrap();
+            }
+            backend.step(id, fixed_step()).unwrap();
+            backend.sync_to_ecs(&mut world, id).unwrap();
+        }
+        world.get::<Transform3>(link).unwrap().translation.x
+    }
+
+    #[test]
+    fn external_wrench_drives_reduced_coordinate_multibody_links() {
+        // Rapier's multibody solver projects a link's body force onto the
+        // generalized coordinates through the body Jacobian, so a reduced
+        // coordinate articulation responds to an external wrench just as an
+        // impulse-joint chain does. Without that projection the multibody case
+        // would stay at exactly zero.
+        assert_relative_eq!(pendulum_swing_m(true, 0.0), 0.0, epsilon = 1e-9);
+        assert_relative_eq!(pendulum_swing_m(false, 0.0), 0.0, epsilon = 1e-9);
+
+        let multibody = pendulum_swing_m(true, 10.0);
+        let impulse_joint = pendulum_swing_m(false, 10.0);
+        assert!(
+            multibody > 0.05,
+            "multibody link ignored the external wrench: x = {multibody}"
+        );
+        assert!(
+            impulse_joint > 0.05,
+            "impulse-joint link ignored the external wrench: x = {impulse_joint}"
+        );
+        // The two solvers need not agree exactly, but a wrench that reached one
+        // and not the other would differ by orders of magnitude.
+        assert!(
+            (multibody / impulse_joint - 1.0).abs() < 0.5,
+            "solvers disagree on the wrench response: {multibody} vs {impulse_joint}"
+        );
+
+        // Doubling the force must increase the response.
+        assert!(pendulum_swing_m(true, 20.0) > multibody + 0.05);
     }
 
     #[test]

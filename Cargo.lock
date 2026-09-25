@@ -1084,6 +1084,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
+name = "elevator_call_button"
+version = "0.3.0"
+dependencies = [
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "rne_nav",
+ "rne_physics",
+ "rne_physics_rapier",
+ "rne_world",
+]
+
+[[package]]
+name = "elevator_ride"
+version = "0.3.0"
+dependencies = [
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "rne_nav",
+ "rne_physics",
+ "rne_physics_rapier",
+ "rne_world",
+]
+
+[[package]]
 name = "ena"
 version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1720,6 +1746,15 @@ name = "go2_pure_torque"
 version = "0.3.0"
 dependencies = [
  "rne_ai",
+ "rne_math",
+]
+
+[[package]]
+name = "go2_push_recovery"
+version = "0.3.0"
+dependencies = [
+ "rne_ai",
+ "rne_legged",
  "rne_math",
 ]
 
@@ -2592,6 +2627,14 @@ dependencies = [
  "bytemuck",
  "paste",
  "pkg-config",
+]
+
+[[package]]
+name = "multi_floor_mission"
+version = "0.3.0"
+dependencies = [
+ "rne_math",
+ "rne_nav",
 ]
 
 [[package]]

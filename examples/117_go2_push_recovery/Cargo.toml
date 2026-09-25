@@ -1,0 +1,19 @@
+[package]
+name = "go2_push_recovery"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+rne_ai = { workspace = true }
+rne_legged = { workspace = true }
+rne_math = { workspace = true }
+
+[[example]]
+name = "117_go2_push_recovery"
+path = "main.rs"
