@@ -67,18 +67,27 @@ also lengthens a 7 m ascent from 8.0 s to 9.25 s: 1.25 s to reach 1 m/s over
 
 A body standing on the car needs no special support — it is carried by ordinary
 normal contact. But this only holds if the car is *commanded* as a kinematic
-body rather than teleported. `rne_physics_rapier` originally wrote every body's
-pose with `set_position`, which leaves a kinematic body's velocity at zero from
-the solver's point of view. Two measurements exposed it:
+body rather than teleported. Writing a kinematic body's pose straight into the
+backend with `set_position` leaves its velocity at zero from the solver's point
+of view. Two measurements exposed it:
 
 | | with `set_position` | with `set_next_kinematic_position` |
 | --- | --- | --- |
 | Rider clearance drift over a 7 m ascent | 0.0708 m | **0.0000 m** |
 | Cargo carried by a platform moving 0.6 m laterally | −0.0003 m (left behind) | carried |
 
-The backend now uses `set_next_kinematic_position` for kinematic bodies. The
-change was measured against `rne_physics_rapier`, `rne_robot`, `rne_ai`,
-`rne_physics_conformance_suite` and `rne_determinism_tests` with no regression.
+`rne_physics::CommandedKinematicPose` opts a kinematic body into
+`set_next_kinematic_position`, and the elevator car carries it.
+
+The marker is **opt-in rather than the default**, which was itself a measured
+decision. Making it unconditional broke the OpenArm showcase: that demo grasps
+a block by switching it to a kinematic body and writing its pose to follow the
+gripper, and a commanded body arrives a step late with momentum handed to it,
+so the left gripper never achieved its contact-gated re-grasp. Teleport
+semantics are correct for a carried object — it should arrive exactly where it
+is put — and commanded semantics are correct for a platform, so the caller
+says which it means. With the marker in place the showcase reproduces its
+original digest and the ride stays exact.
 
 ## Call buttons
 

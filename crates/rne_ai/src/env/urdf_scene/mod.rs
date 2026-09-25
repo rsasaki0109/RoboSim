@@ -1407,8 +1407,10 @@ impl UrdfSceneSim {
     /// vector when the body does not exist or bore no load.
     ///
     /// This is the measured support geometry, so feeding it to
-    /// [`rne_legged::SupportPolygon`] describes the support the plant actually
-    /// had, not the support a gait schedule intended.
+    /// `rne_legged::SupportPolygon` describes the support the plant actually
+    /// had, not the support a gait schedule intended. The link is deliberately
+    /// plain text: `rne_ai` does not depend on `rne_legged`, and the layering
+    /// is the point — the consumer chooses the analysis.
     pub fn named_body_contact_points_m(&self, name: &str) -> Vec<rne_math::Vec3> {
         self.named_body_contact_loads(name)
             .into_iter()
@@ -1420,9 +1422,8 @@ impl UrdfSceneSim {
     ///
     /// Each entry is `(point_world_m, normal_force_n)` in the backend's
     /// deterministic contact order, restricted to load-bearing samples. This is
-    /// what a force-sensitive fixture such as
-    /// [`rne_nav::CallButton`](rne_nav::CallButton) consumes: where it was
-    /// touched and how hard.
+    /// what a force-sensitive fixture such as `rne_nav::CallButton` consumes:
+    /// where it was touched and how hard.
     pub fn named_body_contact_loads(&self, name: &str) -> Vec<(rne_math::Vec3, f64)> {
         let Some(entity) = find_entity_by_name(&self.world, name) else {
             return Vec::new();

@@ -14,12 +14,13 @@ use rne_math::Transform3 as MathTransform3;
 use rne_math::Vec3;
 use rne_physics::RevoluteJointArmature;
 use rne_physics::{
-    Collider, CompoundCollider, ContactEvent, ContactPointSample, ConvexCollider,
-    ExternalBodyWrench, FixedJointDesc, GravityScale, JointActuation, JointEffortMeasurement,
-    JointMotor, JointMotorGainModel, JointPassiveDynamics, JointState, MultibodyLink,
-    PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability, PhysicsCapability,
-    PhysicsError, PhysicsOwnedPose, PhysicsWorldDesc, PhysicsWorldId, PrismaticJointDesc,
-    RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
+    Collider, CommandedKinematicPose, CompoundCollider, ContactEvent, ContactPointSample,
+    ConvexCollider, ExternalBodyWrench, FixedJointDesc, GravityScale, JointActuation,
+    JointEffortMeasurement, JointMotor, JointMotorGainModel, JointPassiveDynamics, JointState,
+    MultibodyLink, PhysicsBackend, PhysicsBackendManifest, PhysicsBackendRepeatability,
+    PhysicsCapability, PhysicsError, PhysicsOwnedPose, PhysicsWorldDesc, PhysicsWorldId,
+    PrismaticJointDesc, RaycastHit, RaycastQuery, RevoluteJointDesc, RigidBody, RigidBodyInertia,
+    RigidBodyType,
 };
 use rne_world::{world_transform_of, Transform3};
 use std::collections::HashMap;
@@ -383,13 +384,13 @@ impl PhysicsBackend for RapierBackend {
                 let physics_owned = world.get::<PhysicsOwnedPose>(entity).is_some();
                 if let Some(body) = state.bodies.get_mut(body_handle) {
                     if !physics_owned {
-                        if rigid_body.body_type == RigidBodyType::Kinematic {
-                            // A kinematic body is commanded, not teleported: the
-                            // solver derives its velocity from the target pose,
-                            // which is what lets a moving platform carry what
-                            // stands on it. `set_position` leaves that velocity
-                            // at zero, so a rider is only nudged by penetration
-                            // resolution and lags behind the platform.
+                        if rigid_body.body_type == RigidBodyType::Kinematic
+                            && world.get::<CommandedKinematicPose>(entity).is_some()
+                        {
+                            // Opt-in: command the body toward the pose so the
+                            // solver knows its velocity and can carry what
+                            // stands on it. See `CommandedKinematicPose` for why
+                            // teleporting stays the default.
                             body.set_next_kinematic_position(isometry);
                         } else {
                             body.set_position(isometry, true);

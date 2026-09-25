@@ -22,8 +22,8 @@ use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Hertz, Quat, Vec3};
 use rne_nav::{Elevator, ElevatorSpec, ElevatorState};
 use rne_physics::{
-    hash_physics_state, Collider, ColliderShape, PhysicsBackend, PhysicsWorldDesc, RigidBody,
-    RigidBodyType,
+    hash_physics_state, Collider, ColliderShape, CommandedKinematicPose, PhysicsBackend,
+    PhysicsWorldDesc, RigidBody, RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
 use rne_world::Transform3;
@@ -66,6 +66,9 @@ fn spawn_shaft(world: &mut World, start_height_m: f64) -> Shaft {
             body_type: RigidBodyType::Kinematic,
             ..RigidBody::default()
         },
+        // The car carries its rider, so its pose is a command: the solver needs
+        // its velocity to resolve the contact that does the carrying.
+        CommandedKinematicPose,
         Collider {
             shape: ColliderShape::Cuboid {
                 half_extents_m: CAR_HALF_EXTENTS_M,
