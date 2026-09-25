@@ -40,7 +40,7 @@ and endpoints always replan identically.
 An `OccupancyGrid` that has never been observed is entirely *unknown*, and the
 default `GlobalPlannerConfig` refuses to route through unknown space. A floor
 must be declared free, not merely left empty, or even a same-floor route is
-`Unreachable`. Both the tests and example 121 mark their floors free explicitly.
+`Unreachable`. Both the tests and example 120 mark their floors free explicitly.
 
 ## Elevators
 
