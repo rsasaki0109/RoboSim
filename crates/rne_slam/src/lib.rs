@@ -20,6 +20,7 @@ pub mod pose_graph;
 pub mod relocalize;
 pub mod resources;
 pub mod scan_match;
+pub mod session;
 pub mod slam;
 pub mod slam3d;
 pub mod systems;
@@ -38,6 +39,10 @@ pub use relocalize::{
 };
 pub use resources::{PendingSlamScans, SlamScanInput, SlamState};
 pub use scan_match::{scan_points_2d, ScanMatchConfig, ScanMatchResult, ScanMatcher};
+pub use session::{
+    discover_session_constraints, DiscoveryConfig, DiscoveryError, LifelongPoseGraph, MergeOptions,
+    SessionConstraint, SessionError, SessionId, SessionRecognition, SessionScan,
+};
 pub use slam::{closure_consistent, Slam2d, SlamConfig, SlamUpdate};
 pub use slam3d::{
     pose2d_to_transform3, pose3_to_pose2d, Slam3d, Slam3dConfig, Slam3dUpdate,

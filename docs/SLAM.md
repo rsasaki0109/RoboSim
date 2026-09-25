@@ -147,6 +147,46 @@ recorded scan/odometry sequence reproduces the same map and trajectory hash.
 `tests/determinism/tests/nav_slam.rs` runs mapping, planning, DWA, and SLAM
 twice and compares exact poses and a stable FNV-1a hash of the occupancy grid.
 
+## Lifelong mapping across sessions
+
+A robot that works in one building maps it many times. `combine_graphs`
+concatenates two session graphs, but it adds no constraint between them, so the
+result is two disconnected trajectories in one container — two maps, not a
+lifelong map. Worse, `PoseGraph::optimize` accepts a disconnected graph and
+reports success, so a caller can believe two sessions were merged when the
+second was never constrained at all. (`PoseGraphError::Disconnected` is declared
+but never raised; see the limits below.)
+
+`LifelongPoseGraph` adds the missing piece. Merging a session
+
+1. rigidly aligns it into the map frame from the first correspondence, so the
+   optimizer starts from a sensible linearization point rather than from two
+   overlapping trajectories,
+2. re-indexes its intra-session edges, which are relative measurements and so
+   are unchanged by the alignment,
+3. adds one inter-session edge per [`SessionConstraint`] — the lifelong
+   equivalent of a loop closure, relating a pose from an earlier visit to a pose
+   from the current one, and
+4. re-optimizes with a Huber kernel so one bad correspondence cannot drag both
+   trajectories.
+
+Every node keeps the session it came from, because pruning old nodes, decaying
+stale structure, and reporting per-session drift all need to know which visit
+contributed what.
+
+Measured on a six-node corridor whose second visit over-reports each step by
+5 cm: concatenating and optimizing leaves the second session **bit-identical**
+to its drifting input (mean node error 0.125 m), because nothing relates it to
+the first. Merging the same session against two correspondences reduces that to
+**0.0715 m** and yields one connected map. A session recorded in a rotated,
+translated frame is aligned onto the prior trajectory to within 1e-6 m.
+
+Still open for lifelong operation: the correspondences are supplied by the
+caller rather than discovered by relocalizing the new session against the prior
+map; occupancy fusion has no notion of time, so structure that moved between
+visits accumulates in both places instead of decaying; and the graph is never
+pruned, so it grows without bound across sessions.
+
 ## Limits
 
 - Loop closure is pairwise against the likelihood field; there is no robust
@@ -156,3 +196,9 @@ twice and compares exact poses and a stable FNV-1a hash of the occupancy grid.
   optimizations.
 - The map is a single-resolution dense grid; pose-graph optimization does not
   yet re-integrate the map after the trajectory changes.
+- `PoseGraphError::Disconnected` is declared but never returned: the optimizer
+  does not check that every node is reachable from the anchor, so a disconnected
+  graph optimizes "successfully" while its detached components stay unrelated.
+  `LifelongPoseGraph::is_connected` is the guard for the multi-session path;
+  raising the error from the optimizer itself would change existing callers and
+  has not been done.
