@@ -15,10 +15,10 @@ pub use backend::{
     PHYSICS_TOLERANCE_REGISTRY_VERSION,
 };
 pub use components::{
-    Collider, ColliderPart, ColliderShape, CollisionGroups, CompoundCollider, CompoundPart,
-    ConvexCollider, FixedJointDesc, GravityScale, JointActuation, JointEffortMeasurement,
-    JointMotor, JointMotorGainModel, JointPassiveDynamics, JointState, MultibodyLink,
-    PhysicsMaterial, PhysicsOwnedPose, PrismaticJointDesc, RevoluteJointArmature,
+    Collider, ColliderPart, ColliderShape, CollisionGroups, CommandedKinematicPose,
+    CompoundCollider, CompoundPart, ConvexCollider, FixedJointDesc, GravityScale, JointActuation,
+    JointEffortMeasurement, JointMotor, JointMotorGainModel, JointPassiveDynamics, JointState,
+    MultibodyLink, PhysicsMaterial, PhysicsOwnedPose, PrismaticJointDesc, RevoluteJointArmature,
     RevoluteJointDesc, RigidBody, RigidBodyInertia, RigidBodyType,
 };
 pub use events::{

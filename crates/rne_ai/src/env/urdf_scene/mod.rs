@@ -116,11 +116,12 @@ use rne_deformable::{
 use rne_ecs::{spawn_named, Entity, Name, Parent, World};
 use rne_math::{y_up_euler_rad, Hertz, Quat, Vec3};
 use rne_physics::{
-    Collider, ColliderShape, CollisionGroups, FixedJointDesc, JointActuation, JointMotor,
-    JointMotorGainModel, JointState, MultibodyLink, PhysicsBackend, PhysicsWorldDesc,
-    PhysicsWorldId, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyType,
+    Collider, ColliderShape, CollisionGroups, ExternalBodyWrench, FixedJointDesc, JointActuation,
+    JointMotor, JointMotorGainModel, JointState, MultibodyLink, PhysicsBackend, PhysicsWorldDesc,
+    PhysicsWorldId, PrismaticJointDesc, RevoluteJointDesc, RigidBody, RigidBodyInertia,
+    RigidBodyType,
 };
-use rne_physics_rapier::{step_physics, RapierBackend};
+use rne_physics_rapier::RapierBackend;
 use rne_robot::{Joint, JointKind, Link};
 use rne_sensor::{
     sample_joint_feedback_sensors, JointFeedbackChannelSpec, JointFeedbackError,
@@ -311,6 +312,9 @@ pub struct UrdfSceneSim {
     dt: SimDuration,
     deformable_solver_config: DeformableSolverConfig,
     render_joint_projections: Vec<RenderJointProjection>,
+    /// World-frame wrenches queued for exactly the next physics step, in the
+    /// order they were requested so a replay applies them identically.
+    pending_link_wrenches: Vec<ExternalBodyWrench>,
 }
 
 /// Authored link state used as the origin for render-only remote projection.
@@ -495,6 +499,7 @@ impl UrdfSceneSim {
             dt: SimDuration::from_hertz(Hertz::new(60.0)),
             deformable_solver_config: DeformableSolverConfig::default(),
             render_joint_projections,
+            pending_link_wrenches: Vec::new(),
         };
         sim.backend
             .sync_from_ecs(&mut sim.world, sim.physics_world)
@@ -1338,6 +1343,143 @@ impl UrdfSceneSim {
             .set_collider_friction(self.physics_world, entity, friction as f32)
     }
 
+    /// Queues a world-frame external wrench on a named link for the next step.
+    ///
+    /// This is the physical disturbance primitive: unlike
+    /// [`Self::tilt_named_body_rad`], which re-poses a root body, a wrench
+    /// enters the solver as a force and is therefore resisted by contact,
+    /// inertia and actuation exactly as an external push would be. It works on
+    /// reduced-coordinate articulation links as well as plain rigid bodies,
+    /// because the multibody solver projects body forces onto generalized
+    /// coordinates through the body Jacobian.
+    ///
+    /// The force acts at `point_world_m`, so a push applied away from the
+    /// link's center of mass induces the corresponding moment. The wrench
+    /// affects exactly the next completed step and is then cleared; a sustained
+    /// push is queued once per step. Queued wrenches are applied in request
+    /// order, so a replay reproduces them.
+    ///
+    /// Returns false without queuing anything when the link is missing, the
+    /// wrench is not finite, or the link has no dynamic rigid body.
+    pub fn apply_named_link_wrench(
+        &mut self,
+        link_name: &str,
+        point_world_m: rne_math::Vec3,
+        force_world_n: rne_math::Vec3,
+        torque_world_nm: rne_math::Vec3,
+    ) -> bool {
+        let Some(entity) = find_link_by_name(&self.world, link_name) else {
+            return false;
+        };
+        let wrench = ExternalBodyWrench {
+            entity,
+            point_world_m,
+            force_world_n,
+            torque_world_nm,
+        };
+        if !wrench.is_finite() {
+            return false;
+        }
+        if self
+            .world
+            .get::<RigidBody>(entity)
+            .is_none_or(|body| body.body_type != RigidBodyType::Dynamic)
+        {
+            return false;
+        }
+        self.pending_link_wrenches.push(wrench);
+        true
+    }
+
+    /// Returns the world position of a named link, for aiming a wrench.
+    ///
+    /// Returns `None` when the link does not exist.
+    pub fn named_link_position_m(&self, link_name: &str) -> Option<rne_math::Vec3> {
+        find_link_by_name(&self.world, link_name)
+            .map(|entity| world_transform_of(&self.world, entity).translation)
+    }
+
+    /// Returns solved contact points from the last step involving a named body.
+    ///
+    /// Points are world positions in meters, in the backend's deterministic
+    /// contact order, and only load-bearing samples are returned: a sample with
+    /// no normal force is a tracked pair rather than support. Returns an empty
+    /// vector when the body does not exist or bore no load.
+    ///
+    /// This is the measured support geometry, so feeding it to
+    /// `rne_legged::SupportPolygon` describes the support the plant actually
+    /// had, not the support a gait schedule intended. The link is deliberately
+    /// plain text: `rne_ai` does not depend on `rne_legged`, and the layering
+    /// is the point — the consumer chooses the analysis.
+    pub fn named_body_contact_points_m(&self, name: &str) -> Vec<rne_math::Vec3> {
+        self.named_body_contact_loads(name)
+            .into_iter()
+            .map(|(point_world_m, _)| point_world_m)
+            .collect()
+    }
+
+    /// Returns solved contact points and their normal forces for a named body.
+    ///
+    /// Each entry is `(point_world_m, normal_force_n)` in the backend's
+    /// deterministic contact order, restricted to load-bearing samples. This is
+    /// what a force-sensitive fixture such as `rne_nav::CallButton` consumes:
+    /// where it was touched and how hard.
+    pub fn named_body_contact_loads(&self, name: &str) -> Vec<(rne_math::Vec3, f64)> {
+        let Some(entity) = find_entity_by_name(&self.world, name) else {
+            return Vec::new();
+        };
+        self.backend
+            .contact_points(self.physics_world)
+            .map(|samples| {
+                samples
+                    .iter()
+                    .filter(|sample| {
+                        (sample.entity_a == entity || sample.entity_b == entity)
+                            && sample.normal_force_n > 0.0
+                    })
+                    .map(|sample| (sample.point_world_m, sample.normal_force_n))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Returns the mass-weighted center of mass of every dynamic body, in world
+    /// meters, and the total mass in kilograms.
+    ///
+    /// Each body contributes at its declared
+    /// [`RigidBodyInertia::center_of_mass_local_m`] when one is present and at
+    /// its origin otherwise, which matches what the plant integrates. Fixed and
+    /// kinematic bodies, including the ground, are excluded. Returns `None`
+    /// when no dynamic body carries positive mass.
+    pub fn dynamic_center_of_mass_m(&self) -> Option<(rne_math::Vec3, f64)> {
+        let mut weighted_sum = rne_math::Vec3::ZERO;
+        let mut total_mass_kg = 0.0;
+        for entity_ref in self.world.iter_entities() {
+            let entity = entity_ref.id();
+            let Some(body) = self.world.get::<RigidBody>(entity) else {
+                continue;
+            };
+            // `is_finite` first so a NaN mass is skipped rather than poisoning
+            // the weighted sum.
+            if body.body_type != RigidBodyType::Dynamic
+                || !body.mass_kg.is_finite()
+                || body.mass_kg <= 0.0
+            {
+                continue;
+            }
+            let transform = world_transform_of(&self.world, entity);
+            let local_com_m = self
+                .world
+                .get::<RigidBodyInertia>(entity)
+                .map(|inertia| inertia.center_of_mass_local_m)
+                .unwrap_or(rne_math::Vec3::ZERO);
+            let world_com_m = transform.translation + (transform.rotation * local_com_m);
+            weighted_sum += world_com_m * body.mass_kg;
+            total_mass_kg += body.mass_kg;
+        }
+        (total_mass_kg > 0.0).then(|| (weighted_sum / total_mass_kg, total_mass_kg))
+    }
+
     /// Sets backend-neutral collision membership and filter masks on a named entity.
     ///
     /// Returns false if the entity is missing. The masks take effect on the next
@@ -2103,13 +2245,24 @@ impl UrdfSceneSim {
     }
 
     fn step_physics_with_delta(&mut self, delta: SimDuration) {
-        step_physics(
-            &mut self.backend,
-            &mut self.world,
-            self.physics_world,
-            delta,
-        )
-        .expect("urdf scene physics step");
+        // Expanded from `rne_physics_rapier::step_physics` so queued wrenches
+        // land between the synchronization that creates the bodies and the
+        // step that consumes the forces. Rapier clears them afterwards, so a
+        // wrench affects exactly one step.
+        self.backend
+            .sync_from_ecs(&mut self.world, self.physics_world)
+            .expect("urdf scene physics sync");
+        for wrench in self.pending_link_wrenches.drain(..) {
+            self.backend
+                .apply_external_body_wrench(self.physics_world, wrench)
+                .expect("urdf scene link wrench");
+        }
+        self.backend
+            .step(self.physics_world, delta)
+            .expect("urdf scene physics step");
+        self.backend
+            .sync_to_ecs(&mut self.world, self.physics_world)
+            .expect("urdf scene physics readback");
         let gravity_m_s2 = self
             .world
             .iter_entities()

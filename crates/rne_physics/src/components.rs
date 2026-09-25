@@ -238,6 +238,22 @@ pub struct ConvexCollider {
     pub vertices_m: Vec<Vec3>,
 }
 
+/// Marks a kinematic body whose pose is a *command* rather than a teleport.
+///
+/// Without this, a kinematic body's ECS pose is written straight into the
+/// backend. That leaves its velocity at zero from the solver's point of view,
+/// so nothing standing on it is carried: a platform moving laterally slides
+/// out from under its cargo, and a rider on a rising platform trails it by the
+/// penetration the solver has to resolve each step. With this component the
+/// backend commands the body toward the pose over the step instead, so contact
+/// behaves as it would for a real moving platform.
+///
+/// It is opt-in because teleport semantics are what some callers need. An
+/// object carried by a gripper, for instance, should arrive exactly where it is
+/// put each step, with no lag and no momentum handed to it on release.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandedKinematicPose;
+
 /// One finite primitive in a compound collision shape.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ColliderPart {

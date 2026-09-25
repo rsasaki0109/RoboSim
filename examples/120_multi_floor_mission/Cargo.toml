@@ -1,0 +1,18 @@
+[package]
+name = "multi_floor_mission"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+rne_math = { workspace = true }
+rne_nav = { workspace = true }
+
+[[example]]
+name = "120_multi_floor_mission"
+path = "main.rs"

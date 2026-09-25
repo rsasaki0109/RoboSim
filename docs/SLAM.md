@@ -147,6 +147,46 @@ recorded scan/odometry sequence reproduces the same map and trajectory hash.
 `tests/determinism/tests/nav_slam.rs` runs mapping, planning, DWA, and SLAM
 twice and compares exact poses and a stable FNV-1a hash of the occupancy grid.
 
+## Lifelong mapping across sessions
+
+A robot that works in one building maps it many times. `combine_graphs`
+concatenates two session graphs, but it adds no constraint between them, so the
+result is two disconnected trajectories in one container — two maps, not a
+lifelong map. Worse, `PoseGraph::optimize` accepts a disconnected graph and
+reports success, so a caller can believe two sessions were merged when the
+second was never constrained at all. (`PoseGraphError::Disconnected` is declared
+but never raised; see the limits below.)
+
+`LifelongPoseGraph` adds the missing piece. Merging a session
+
+1. rigidly aligns it into the map frame from the first correspondence, so the
+   optimizer starts from a sensible linearization point rather than from two
+   overlapping trajectories,
+2. re-indexes its intra-session edges, which are relative measurements and so
+   are unchanged by the alignment,
+3. adds one inter-session edge per [`SessionConstraint`] — the lifelong
+   equivalent of a loop closure, relating a pose from an earlier visit to a pose
+   from the current one, and
+4. re-optimizes with a Huber kernel so one bad correspondence cannot drag both
+   trajectories.
+
+Every node keeps the session it came from, because pruning old nodes, decaying
+stale structure, and reporting per-session drift all need to know which visit
+contributed what.
+
+Measured on a six-node corridor whose second visit over-reports each step by
+5 cm: concatenating and optimizing leaves the second session **bit-identical**
+to its drifting input (mean node error 0.125 m), because nothing relates it to
+the first. Merging the same session against two correspondences reduces that to
+**0.0715 m** and yields one connected map. A session recorded in a rotated,
+translated frame is aligned onto the prior trajectory to within 1e-6 m.
+
+Still open for lifelong operation: the correspondences are supplied by the
+caller rather than discovered by relocalizing the new session against the prior
+map; occupancy fusion has no notion of time, so structure that moved between
+visits accumulates in both places instead of decaying; and the graph is never
+pruned, so it grows without bound across sessions.
+
 ## Limits
 
 - Loop closure is pairwise against the likelihood field; there is no robust
@@ -156,65 +196,9 @@ twice and compares exact poses and a stable FNV-1a hash of the occupancy grid.
   optimizations.
 - The map is a single-resolution dense grid; pose-graph optimization does not
   yet re-integrate the map after the trajectory changes.
-
-## 3D LiDAR-inertial SLAM
-
-The 3D side adds five deterministic, backend-neutral pieces:
-
-- `se3` provides the SE(3) exponential/logarithmic maps, SO(3) helpers, and the
-  left Jacobian and its inverse. Tangents are rotation-first
-  `[phi(3), rho(3)]`.
-- `imu_preintegration::ImuPreintegrator` folds high-rate gyroscope and
-  accelerometer samples into a pose-independent `PreintegratedDelta`
-  (`delta_R`, `delta_v`, `delta_p`). `predict` propagates a start pose and
-  velocity with gravity; bias is an additive estimate subtracted per sample.
-- `point_to_plane` provides `VoxelPointIndex` (deterministic voxel nearest
-  neighbour), `estimate_normals` (neighbourhood PCA by power iteration), and
-  `IcpPointToPlane::align`, which linearizes point-to-plane residuals into a 6x6
-  damped normal-equation system and returns a right-perturbation SE(3) update
-  plus an information diagonal.
-- `lio::LioOdometry` is the front-end: IMU samples are preintegrated to predict
-  the next pose, each scan is registered to a maintained local map (downsampled
-  points with normals) by point-to-plane ICP initialized from the prediction, and
-  keyframes plus relative-pose `PoseGraph3dEdge`s are recorded for the back-end.
-- `lio_ekf::LioEkf` adds an explicit 6-DoF pose covariance: IMU prediction
-  inflates it, the point-to-plane match supplies a pose measurement whose
-  information diagonal comes from the registration normal equations, and a
-  Kalman update fuses them.
-- `lio_iekf::LioIekf` is the tightly-coupled counterpart: it feeds the raw
-  point-to-plane residuals into an iterated information-form update
-  (`(P^-1 + H/sigma^2) delta = -g/sigma^2`, `P <- (P^-1 + H/sigma^2)^-1`),
-  re-linearizing at the current pose estimate. The state is pose-only.
-- `lio_inertial::LioInertialEkf` extends that to a 15-DoF error state
-  (`[rotation, translation, velocity, gyro_bias, accel_bias]`): IMU samples
-  propagate pose, velocity, and biases with the error-state transition `F`, and
-  the same raw-residual update corrects all of them. The biases are observed only
-  through the covariance correlation built up during propagation, so estimating
-  them needs a short window of motion or scan mismatch.
-- `pose_graph3d::PoseGraph3d` stores SE(3) nodes and relative-pose edges with
-  diagonal information. `optimize` linearizes the SE(3)-log residual with
-  central finite-difference Jacobians in each node's right-perturbation tangent
-  space and solves the reduced normal equations by dense Cholesky, anchoring one
-  node.
-
-The 3D modules are additive exports; the 2D pipeline is unaffected.
-
-### Limits
-
-- IMU bias handling is a fixed estimate; there is no online bias or
-  first-order bias-correction Jacobian yet.
-- Jacobians are numerical, not analytic; adequate for the graph sizes targeted
-  here but slower than closed-form SE(3) Jacobians.
-- `LioOdometry` is a predict-then-scan-match front-end, not a tightly-coupled
-  iterated EKF: the scan-to-map update is applied to the predicted pose rather
-  than jointly estimated with IMU states and covariance.
-- `LioEkf` is a loosely-coupled pose EKF: the measurement is the scan-match pose,
-  not the raw point residuals, and the state is pose-only (no velocity or bias
-  covariance).
-- `LioIekf` is tightly-coupled but its state is still pose-only; velocity and
-  IMU-bias estimation inside the filter, and an adaptive correspondence/outlier
-  model, are later increments.
-- `LioInertialEkf` estimates velocity and IMU gyro/accel bias with a 15-DoF error
-  state; the bias random-walk process model is heuristic and the update is
-  gated/outlier-free (no robust kernel or correspondence rejection beyond the
-  distance threshold).
+- `PoseGraphError::Disconnected` is declared but never returned: the optimizer
+  does not check that every node is reachable from the anchor, so a disconnected
+  graph optimizes "successfully" while its detached components stay unrelated.
+  `LifelongPoseGraph::is_connected` is the guard for the multi-session path;
+  raising the error from the optimizer itself would change existing callers and
+  has not been done.

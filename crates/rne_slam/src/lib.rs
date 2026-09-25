@@ -27,6 +27,7 @@ pub mod relocalize;
 pub mod resources;
 pub mod scan_match;
 pub mod se3;
+pub mod session;
 pub mod slam;
 pub mod slam3d;
 pub mod systems;
@@ -60,6 +61,10 @@ pub use scan_match::{scan_points_2d, ScanMatchConfig, ScanMatchResult, ScanMatch
 pub use se3::{
     mat3_add, mat3_identity, mat3_mul, mat3_scale, mat3_vec, skew, so3_exp, so3_left_jacobian,
     so3_left_jacobian_inverse, so3_log, Se3,
+};
+pub use session::{
+    discover_session_constraints, DiscoveryConfig, DiscoveryError, LifelongPoseGraph, MergeOptions,
+    SessionConstraint, SessionError, SessionId, SessionRecognition, SessionScan,
 };
 pub use slam::{closure_consistent, Slam2d, SlamConfig, SlamUpdate};
 pub use slam3d::{
