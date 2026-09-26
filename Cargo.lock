@@ -2720,6 +2720,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nav_map_media"
+version = "0.3.0"
+dependencies = [
+ "png",
+ "rne_math",
+ "rne_nav",
+ "rne_render",
+ "rne_render_wgpu",
+ "rne_world",
+]
+
+[[package]]
 name = "nav_occupancy_grid"
 version = "0.3.0"
 dependencies = [

@@ -158,6 +158,7 @@ members = [
   "examples/114_policy_artifact",
   "examples/115_trainer",
   "examples/116_robot_workbench",
+  "examples/121_nav_map_media",
   "examples/117_go2_push_recovery",
   "examples/118_elevator_ride",
   "examples/119_elevator_call_button",
