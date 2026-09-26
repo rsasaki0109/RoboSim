@@ -192,7 +192,37 @@ lifts, 2 crossings, and an identical replan.
   `direct_effort_actuation_retains_ceiling_and_clamps_command` pins exactly, and
   a change that weakens a pinned assertion without delivering a working arm is
   not worth making.
-- **Floor transitions in scene assets.** Buildings are constructed in code;
-  there is no `.rne.scene.toml` representation of floors or transitions yet.
-- **Localization across floors.** A robot in a moving lift is in a featureless
-  box with no odometry cues; nothing here addresses relocalizing on arrival.
+- **Being carried is not modelled.** `reacquire_floor` answers the question on
+  arrival; nothing represents the ride itself, during which the robot's building
+  pose is unknowable from its own sensors and its floor-frame pose is the only
+  valid one.
+
+## Knowing which floor you arrived on
+
+A robot riding a lift is not navigating: its wheels are still, its odometry
+reports no motion, and its scan sees the same car walls the whole way. Yet its
+pose in the building changes by a whole storey. When the doors open it has to
+answer a question odometry cannot.
+
+`rne_slam::reacquire_floor` answers it from a bounded hypothesis set: the robot
+knows which lift it boarded and therefore which floors that lift serves, so the
+candidates are one pose per served floor near that lift's alighting point, each
+matched locally rather than searched across the building.
+
+**The hard part is not finding a match; it is that floors look alike.** An
+office landing on 3F and on 4F can be identical to a planar scanner, and a
+matcher asked for its best candidate returns one with high confidence. Placing a
+robot on the wrong floor is worse than admitting ignorance — it will navigate
+confidently to a room that is not there. So an identification is accepted only
+when the winner beats the runner-up by a declared margin, the runner-up is
+always reported as the evidence for the answer, and identical floors return
+`FloorAmbiguity::Ambiguous` rather than a guess.
+
+### The margin is the defence; the score floor is weak
+
+`min_score` is a sanity floor and not much more. Mean scan likelihood is
+dominated by whatever the candidate floors have in common: a map missing a
+**full-height interior partition** still scores 0.83 against a scan taken on the
+partitioned floor, because the shared outer walls carry most of the beams. A
+caller with only one candidate has no margin to fall back on and has to raise
+`min_score` deliberately.
