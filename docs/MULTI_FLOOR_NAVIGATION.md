@@ -157,7 +157,16 @@ penetration-recovery term, which is a push the button genuinely receives.
 | --- | --- |
 | 118 `elevator_ride` | A rider boards the car and rides 7 m across three floors with zero clearance drift; the car never travels with its doors open and never reports a boardable floor while parked elsewhere |
 | 119 `elevator_call_button` | A dynamic fingertip presses the call button through solved contact forces; one press per contact however long it is held, and the car answers |
+| 122 `multi_floor_media` | The whole sequence in one rendered scene: the robot drives to the lobby panel, presses it through solved contact, waits, boards, is carried 3.2 m by the car and drives out on the floor above |
 | 120 `multi_floor_mission` | A 1F-to-3F delivery planned through a `BuildingMap` and executed on the real elevator, routed onto the far lift because a wall seals the near lift's 2F landing |
+
+![A service robot pressing a lift call button, boarding the car, riding to the floor above and driving out](media/multi-floor-lift.gif)
+
+*Example 122. The car and door leaves are kinematic bodies driven by `Elevator`'s
+state machine, the button is `CallButton` reading solved contact forces from the
+robot's own bumper, and the robot is an ordinary dynamic body the car carries by
+contact — not parented to it. Worst clearance error over the 3.2 m ride is
+0.0197 m.*
 
 Example 120's measured run: 5 legs at cost 60.25, 20.25 m driven, 22.65 s in
 lifts, 2 crossings, and an identical replan.
