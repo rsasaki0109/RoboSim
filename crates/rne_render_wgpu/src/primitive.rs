@@ -3010,6 +3010,13 @@ fn scene_temporal_key(scene: &RenderScene) -> u64 {
     hash
 }
 
+/// Builds the inverse-transpose the vertex stage multiplies shading normals by.
+///
+/// This is correct for a mirrored model matrix as it stands: the shading normal
+/// comes from the vertex attribute, not from triangle winding, and `M⁻ᵀ` maps
+/// it to the mirrored surface's outward direction. What a mirror does break is
+/// the winding, which back-face culling reads; that is corrected by handing the
+/// GPU winding-reversed geometry, not by touching this matrix.
 fn normal_matrix_cols(model: Mat4) -> [[f32; 4]; 3] {
     let cols = model.inverse().transpose().to_cols_array_2d();
     [
@@ -3178,11 +3185,50 @@ fn unit_sphere() -> (Vec<Vertex>, Vec<u16>) {
 #[cfg(test)]
 mod mesh_tests {
     use super::{
-        directional_light_view_projection, unit_cube, unit_cylinder, unit_sphere, RenderScene,
-        Transform3, Vec3, VisualShape, SHADER, SHADOW_SHADER, SKY_SHADER,
+        directional_light_view_projection, normal_matrix_cols, unit_cube, unit_cylinder,
+        unit_sphere, Mat4, RenderScene, Transform3, Vec3, VisualShape, SHADER, SHADOW_SHADER,
+        SKY_SHADER,
     };
     use crate::taa::{COPY_SHADER, TAA_SHADER};
     use rne_render::RenderSceneItem;
+
+    #[test]
+    fn a_mirrored_model_matrix_keeps_its_normals_pointing_outward() {
+        // +Y face of a unit box, mirrored through the XZ plane by the negative
+        // Y scale a URDF uses to mirror one arm onto the other side. The face
+        // lands at -Y, so its outward normal must be -Y too. Negating this
+        // matrix on a negative determinant -- a tempting way to explain black
+        // mirrored links -- points it back into the surface instead.
+        let authored_normal = Vec3::new(0.0, 1.0, 0.0);
+        let mirror = Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0));
+
+        let cols = normal_matrix_cols(mirror);
+        let transformed = Vec3::new(
+            f64::from(cols[0][0]) * authored_normal.x
+                + f64::from(cols[1][0]) * authored_normal.y
+                + f64::from(cols[2][0]) * authored_normal.z,
+            f64::from(cols[0][1]) * authored_normal.x
+                + f64::from(cols[1][1]) * authored_normal.y
+                + f64::from(cols[2][1]) * authored_normal.z,
+            f64::from(cols[0][2]) * authored_normal.x
+                + f64::from(cols[1][2]) * authored_normal.y
+                + f64::from(cols[2][2]) * authored_normal.z,
+        );
+
+        assert!(
+            transformed.y < 0.0,
+            "mirrored normal must point away from the surface, got {transformed:?}"
+        );
+    }
+
+    #[test]
+    fn an_unmirrored_model_matrix_leaves_its_normals_alone() {
+        let cols = normal_matrix_cols(Mat4::from_scale(Vec3::new(2.0, 2.0, 2.0)));
+        assert!(
+            cols[1][1] > 0.0,
+            "a positive uniform scale must not flip the normal, got {cols:?}"
+        );
+    }
 
     #[test]
     fn shaders_validate_without_gpu() {
