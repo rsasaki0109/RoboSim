@@ -28,7 +28,7 @@ rne_log = { workspace = true }
 rne_math = { workspace = true }
 rne_openscenario = { workspace = true }
 rne_physics_conformance = { workspace = true }
-rne_physics_conformance_suite = { version = "=0.3.0", path = "../physics_conformance" }
+rne_physics_conformance_suite = { version = "=0.4.0", path = "../physics_conformance" }
 rne_plugin = { workspace = true }
 rne_plugin_sdk = { workspace = true }
 serde = { workspace = true }

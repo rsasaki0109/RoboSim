@@ -17,9 +17,9 @@ All notable changes to Robot Native Engine are documented in this file.
   importer entry points, error/result types required by another public
   function's signature, and anything referenced from `docs/*.md` - were kept
   public. `release/rust-api-baseline.toml` / `rust-api-additions-v1.toml` are
-  untouched here per ADR-020/ADR-033; retarget them at the next minor release
-  the way PR #275 did, using this entry for the removed-item list. See the PR
-  description for the full per-crate breakdown.
+  untouched here per ADR-020/ADR-033; the retarget this entry asked for is the
+  `0.4.0` release above, whose migration notes carry the full item list. See
+  the PR description for the per-crate breakdown.
 
 ### Changed
 
@@ -1312,6 +1312,36 @@ All notable changes to Robot Native Engine are documented in this file.
   process with explicit sandboxed HIL authorization. The Rust process mock and
   Python LeKiwi bridge pass the same runner, and installed-rehearsal schema v2
   adds the required hardware-adapter check on Linux and Windows.
+
+## [0.4.0] - 2026-09-26
+
+### Changed
+
+- Retarget the immutable Rust API baseline to
+  `aa4aa7b46bcb3486042b346be6dfdd14b7cbcf6a`, absorbing the 94 breaking changes
+  merged after the `0.3.0` freeze rather than reverting them. 80 items left the
+  public surface (39 demoted to `pub(crate)`, 41 deleted), 10 structs gained a
+  `pub` field that breaks exhaustive struct literals, `Collider`,
+  `ColliderShape` and `DeformableCollider` stopped deriving `Copy` because
+  `ColliderShape` gained owned-geometry variants, and `FrameId::WORLD` became
+  `#[doc(hidden)]`. The complete item list is in `docs/COMPATIBILITY.md`; the
+  decision is [ADR 035](docs/adr/035-rust-api-baseline-retarget-0-4-0.md).
+- Bump every workspace package and exact internal dependency requirement from
+  `0.3.0` to `0.4.0`, along with the release registry, xtask's
+  `RELEASE_VERSION` and `FUZZ_SMOKE_RELEASE_VERSION`, bundle identities, the
+  Python API contract version, the release workflow tag trigger, the
+  evidence-campaign templates and the installation docs.
+- Move the 1.0 readiness candidate to the same commit and tree as the new
+  baseline. `support.committed` remains `false`.
+
+### Removed
+
+- `release/rust-api-additions-v1.toml`. ADR 033 created it because
+  `rne_collision_bake` and `rne_usd` did not exist at the `0.3.0` baseline;
+  they exist at the `0.4.0` baseline, so its own validation ("an addition must
+  not have existed at the original baseline") can no longer hold. The single
+  registry covers all 36 publishable packages again, and the SemVer matrix no
+  longer selects a second registry for one shard.
 
 ## [0.1.0] - 2026-08-14
 

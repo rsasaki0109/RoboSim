@@ -100,7 +100,7 @@ const EXTERNAL_FLAGSHIP_REQUIRED_PROOF_PATHS: [&str; 5] = [
 const MAX_EXTERNAL_SUBMISSION_BYTES: u64 = 128 * 1024;
 const MAX_EXTERNAL_LOG_BYTES: u64 = 16 * 1024 * 1024;
 
-const BUNDLE_FILES: [(&str, &str); 92] = [
+const BUNDLE_FILES: [(&str, &str); 91] = [
     ("README.md", "README.md"),
     ("CHANGELOG.md", "CHANGELOG.md"),
     ("LICENSE-MIT", "LICENSE-MIT"),
@@ -182,10 +182,6 @@ const BUNDLE_FILES: [(&str, &str); 92] = [
     (
         "release/rust-api-baseline.toml",
         "release/rust-api-baseline.toml",
-    ),
-    (
-        "release/rust-api-additions-v1.toml",
-        "release/rust-api-additions-v1.toml",
     ),
     (
         "release/artifact-attestation.toml",
@@ -4105,8 +4101,8 @@ mod tests {
                 target_ms: 15 * 60 * 1_000,
             },
             release_archive: SubmissionArtifact {
-                url: "https://example.invalid/rne-0.3.0-windows.zip".to_string(),
-                file_name: "rne-0.3.0-windows.zip".to_string(),
+                url: "https://example.invalid/rne-0.4.0-windows.zip".to_string(),
+                file_name: "rne-0.4.0-windows.zip".to_string(),
                 size_bytes: 7,
                 sha256: sha256_hex(b"archive"),
             },
@@ -4135,7 +4131,7 @@ mod tests {
     #[test]
     fn staged_external_flagship_report_rebinds_every_retained_input() {
         let directory = tempfile::tempdir().expect("external flagship evidence");
-        let archive = directory.path().join("rne-0.3.0-windows.zip");
+        let archive = directory.path().join("rne-0.4.0-windows.zip");
         let proof_bundle = directory.path().join("proof.zip");
         let candidate_path = directory.path().join("candidate.json");
         let stdout = directory.path().join("stdout.txt");
@@ -4350,7 +4346,7 @@ mod tests {
     #[allow(clippy::too_many_lines)] // TODO(cleanup): split (208/150 lines); see PR body
     fn installed_flagship_proof_rehashes_every_declared_artifact() {
         let directory = tempfile::tempdir().expect("temporary proof");
-        let bundle_root = directory.path().join("rne-0.3.0-test-target");
+        let bundle_root = directory.path().join("rne-0.4.0-test-target");
         fs::create_dir_all(bundle_root.join("bin")).expect("bundle bin");
         fs::write(bundle_root.join("release-report.json"), b"release\n").expect("release report");
         let producer = bundle_root.join("bin").join(if cfg!(windows) {
@@ -4966,8 +4962,8 @@ mod tests {
         let output = tempfile::tempdir().expect("temporary bundle");
         stage_static_files(&root, output.path()).expect("stage bundle files");
         assert_eq!(
-            fs::read(output.path().join("release/rust-api-additions-v1.toml")).unwrap(),
-            fs::read(root.join("release/rust-api-additions-v1.toml")).unwrap()
+            fs::read(output.path().join("release/rust-api-baseline.toml")).unwrap(),
+            fs::read(root.join("release/rust-api-baseline.toml")).unwrap()
         );
         assert_eq!(
             fs::read(output.path().join("release/one-zero-readiness.toml")).unwrap(),
@@ -5154,10 +5150,20 @@ mod tests {
         assert!(validate(tag).is_err());
     }
 
+    /// The `vMAJOR.MINOR.*` tag series for the version being released.
+    ///
+    /// Derived rather than written out: these fixtures previously spelled the
+    /// series literally and silently rotted at the next minor bump.
+    fn current_tag_series() -> String {
+        let parts = RELEASE_VERSION.split('.').collect::<Vec<_>>();
+        format!("v{}.{}.*", parts[0], parts[1])
+    }
+
     #[test]
     fn release_workflow_accepts_the_current_release_series() {
         let workflow = format!(
-            "on:\n  push:\n    tags: [\"v0.3.*\"]\nenv:\n  RELEASE_VERSION: \"{RELEASE_VERSION}\"\n"
+            "on:\n  push:\n    tags: [\"{}\"]\nenv:\n  RELEASE_VERSION: \"{RELEASE_VERSION}\"\n",
+            current_tag_series()
         );
         validate_release_workflow_text(&workflow).unwrap();
     }
@@ -5202,13 +5208,16 @@ mod tests {
             "on:\n  push:\n    tags: [\"v0.1.*\"]\nenv:\n  RELEASE_VERSION: \"{RELEASE_VERSION}\"\n"
         );
         let error = validate_release_workflow_text(&workflow).unwrap_err();
-        assert!(error.to_string().contains("v0.3.*"));
+        assert!(error.to_string().contains(&current_tag_series()));
     }
 
     #[test]
     fn release_workflow_rejects_a_stale_declared_version() {
-        let workflow = "on:\n  push:\n    tags: [\"v0.3.*\"]\nenv:\n  RELEASE_VERSION: \"0.1.0\"\n";
-        let error = validate_release_workflow_text(workflow).unwrap_err();
+        let workflow = format!(
+            "on:\n  push:\n    tags: [\"{}\"]\nenv:\n  RELEASE_VERSION: \"0.1.0\"\n",
+            current_tag_series()
+        );
+        let error = validate_release_workflow_text(&workflow).unwrap_err();
         assert!(error.to_string().contains(RELEASE_VERSION));
     }
 }

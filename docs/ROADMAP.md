@@ -768,6 +768,18 @@ Shipped 2026-06-13. See [CHANGELOG.md](../CHANGELOG.md).
   workspace-internal crates to public, semver-checked release packages
 - Unblocks `cargo package -p rne_adapter_ros2`, which path-depends on `rne_nav`
 
+## v0.4.0 (Rust API baseline retarget)
+
+- Rust API baseline retargeted a second time, absorbing the 94 breaking changes
+  merged into `main` since the `0.3.0` freeze: 80 items removed from the public
+  surface, 10 structs given a new `pub` field, three types no longer deriving
+  `Copy` (`ColliderShape` gained owned-geometry variants), one associated const
+  hidden. Full list in [COMPATIBILITY.md](COMPATIBILITY.md); decision in
+  [ADR 035](adr/035-rust-api-baseline-retarget-0-4-0.md)
+- `release/rust-api-additions-v1.toml` folded back into the single registry,
+  which covers all 36 publishable packages again
+- Operational rule recorded: do not merge while `semver` or `workspace` is red
+
 ## v0.4 candidates
 
 | Area | Idea | Status |
@@ -802,7 +814,7 @@ After merging release changes, set `RNE_VERSION` to the exact version being
 shipped and run the clean release gate before creating generated release notes:
 
 ```bash
-RNE_VERSION=0.3.0
+RNE_VERSION=0.4.0
 cargo run --locked -p xtask -- ci
 cargo run --locked -p xtask -- release-exit --output artifacts/release-exit/report.json
 git diff --exit-code

@@ -1,6 +1,6 @@
 # Flagship validation workflow
 
-The v0.3.0 release flagship is one fixed-step workflow, not a launcher for
+The v0.4.0 release flagship is one fixed-step workflow, not a launcher for
 disconnected demos. A lift-capable mobile manipulator loads the committed
 scene, robot manifest, and URDF, validates wrist RGB-D observations, yields at
 a red signal while a traffic actor clears a shared aisle, then navigates,

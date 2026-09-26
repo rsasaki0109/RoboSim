@@ -36,7 +36,7 @@ use std::{
 
 const HERO_CONTACT_SHEET_FRAMES: [usize; 9] = [0, 6, 12, 18, 24, 30, 36, 42, 47];
 const DEFAULT_BEHAVIOR_SEED_RANGE: &str = "0..10";
-pub(crate) const RELEASE_VERSION: &str = "0.3.0";
+pub(crate) const RELEASE_VERSION: &str = "0.4.0";
 const RELEASE_MSRV: &str = "1.88.0";
 const SUPPLY_CHAIN_POLICY_DATE: &str = "2026-08-12";
 const CARGO_DENY_VERSION: &str = "0.20.2";
@@ -91,9 +91,6 @@ const PUBLIC_RELEASE_PACKAGES: &[&str] = &[
     "rne_usd",
     "rne_world",
 ];
-
-// ADR 033: first baselines for new packages, never replacements for old APIs.
-const ADDITIONAL_RELEASE_PACKAGES: &[&str] = &["rne_collision_bake", "rne_usd"];
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -225,10 +222,6 @@ fn release_check(args: &mut impl Iterator<Item = String>) -> anyhow::Result<()> 
         root.join("release/rust-api-baseline.toml"),
     )?)?;
     validate_rust_api_baseline(&root, &metadata, &rust_api_baseline)?;
-    let additions: RustApiBaselineRegistry = toml::from_str(&fs::read_to_string(
-        root.join("release/rust-api-additions-v1.toml"),
-    )?)?;
-    validate_rust_api_additions(&root, &metadata, &rust_api_baseline, &additions)?;
 
     let blocker_text = fs::read_to_string(root.join("release/blockers.toml"))?;
     let blocker_registry = blocker_text.parse::<toml::Value>()?;
@@ -303,39 +296,7 @@ fn validate_rust_api_baseline(
     metadata: &serde_json::Value,
     registry: &RustApiBaselineRegistry,
 ) -> anyhow::Result<()> {
-    let original_packages = PUBLIC_RELEASE_PACKAGES
-        .iter()
-        .copied()
-        .filter(|name| !ADDITIONAL_RELEASE_PACKAGES.contains(name))
-        .collect::<Vec<_>>();
-    validate_rust_api_registry(root, metadata, registry, &original_packages)
-}
-
-fn validate_rust_api_additions(
-    root: &Path,
-    metadata: &serde_json::Value,
-    original: &RustApiBaselineRegistry,
-    additions: &RustApiBaselineRegistry,
-) -> anyhow::Result<()> {
-    validate_rust_api_registry(root, metadata, additions, ADDITIONAL_RELEASE_PACKAGES)?;
-    for entry in &additions.package {
-        anyhow::ensure!(
-            !original.package.iter().any(|old| old.name == entry.name),
-            "additional baseline cannot replace existing package {}",
-            entry.name
-        );
-        let object = format!("{}:{}", original.baseline_revision, entry.manifest_path);
-        let output = Command::new("git")
-            .current_dir(root)
-            .args(["cat-file", "-e", &object])
-            .output()?;
-        anyhow::ensure!(
-            !output.status.success(),
-            "additional baseline package {} already existed in the original baseline",
-            entry.name
-        );
-    }
-    Ok(())
+    validate_rust_api_registry(root, metadata, registry, PUBLIC_RELEASE_PACKAGES)
 }
 
 fn validate_rust_api_registry(
@@ -4565,52 +4526,6 @@ mod tests {
         let mut retargeted = registry;
         retargeted.baseline_tree = "0000000000000000000000000000000000000000".to_string();
         assert!(validate_rust_api_baseline(&root, &metadata, &retargeted).is_err());
-    }
-
-    #[test]
-    fn new_package_baselines_cannot_replace_or_retarget_existing_apis() {
-        let root = super::workspace_root().expect("workspace root");
-        let metadata = super::cargo_metadata(&root).expect("cargo metadata");
-        super::validate_release_metadata(&metadata).expect("complete public release inventory");
-        super::validate_public_docs(&metadata).expect("documented public packages");
-        let original: RustApiBaselineRegistry =
-            toml::from_str(include_str!("../../release/rust-api-baseline.toml")).unwrap();
-        let additions: RustApiBaselineRegistry =
-            toml::from_str(include_str!("../../release/rust-api-additions-v1.toml")).unwrap();
-        super::validate_rust_api_additions(&root, &metadata, &original, &additions).unwrap();
-
-        let mut missing = additions.clone();
-        missing.package.pop();
-        assert!(super::validate_rust_api_additions(&root, &metadata, &original, &missing).is_err());
-        let mut replacement = additions.clone();
-        replacement.package[0] = original.package[0].clone();
-        assert!(
-            super::validate_rust_api_additions(&root, &metadata, &original, &replacement).is_err()
-        );
-        let mut wrong_tree = additions.clone();
-        wrong_tree.baseline_tree = original.baseline_tree.clone();
-        assert!(
-            super::validate_rust_api_additions(&root, &metadata, &original, &wrong_tree).is_err()
-        );
-        let mut missing_at_baseline = additions.clone();
-        missing_at_baseline.baseline_revision = original.baseline_revision.clone();
-        missing_at_baseline.baseline_tree = original.baseline_tree.clone();
-        assert!(super::validate_rust_api_additions(
-            &root,
-            &metadata,
-            &original,
-            &missing_at_baseline
-        )
-        .is_err());
-
-        // Even correctly named additions cannot reset a package that existed
-        // in the original baseline. Simulate that historical membership.
-        let mut already_existed = original;
-        already_existed.baseline_revision = additions.baseline_revision.clone();
-        assert!(
-            super::validate_rust_api_additions(&root, &metadata, &already_existed, &additions)
-                .is_err()
-        );
     }
 
     #[test]

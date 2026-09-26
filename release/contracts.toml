@@ -1,5 +1,5 @@
 schema_version = 1
-release_version = "0.3.0"
+release_version = "0.4.0"
 
 [controller_abi]
 minimum = 2

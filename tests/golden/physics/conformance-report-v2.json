@@ -8,7 +8,7 @@
       "manifest": {
         "schema_version": 3,
         "backend_id": "analytic",
-        "adapter_version": "0.3.0",
+        "adapter_version": "0.4.0",
         "engine_id": "rne_analytic",
         "engine_version": "semi_implicit_euler_v1",
         "capabilities": [
@@ -36,7 +36,7 @@
       "manifest": {
         "schema_version": 3,
         "backend_id": "rapier",
-        "adapter_version": "0.3.0",
+        "adapter_version": "0.4.0",
         "engine_id": "rapier3d",
         "engine_version": "0.22",
         "capabilities": [

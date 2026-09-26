@@ -1809,7 +1809,7 @@ mod tests {
                 "revision": "a".repeat(40),
                 "measured_on": "2026-08-27",
                 "author_assistance": false,
-                "release_version": "0.3.0",
+                "release_version": "0.4.0",
                 "release_revision": "b".repeat(40),
                 "release_target": "x86_64-pc-windows-msvc",
                 "machine_label": "community-lab-desktop-a",

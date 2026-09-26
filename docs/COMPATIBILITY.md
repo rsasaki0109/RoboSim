@@ -5,7 +5,10 @@ historical compatibility baseline. Release `0.2.0` was the first product-proof
 minor. Release `0.3.0` retargets the Rust API baseline to absorb breaking
 changes merged into `main` after the `0.2.0` freeze and promotes `rne_nav`,
 `rne_slam`, and `rne_planning` to public, semver-checked crates; it must not
-silently reinterpret artifacts accepted by their retained 0.2 readers.
+silently reinterpret artifacts accepted by their retained 0.2 readers. Release
+`0.4.0` again retargets the baseline, absorbing 94 breaking changes merged
+after the `0.3.0` freeze, and folds the ADR 033 additions registry back into
+the single registry.
 
 ## Supported toolchains and platforms
 
@@ -48,7 +51,12 @@ Patch releases must not retarget the baseline. A deliberate pre-1.0 baseline
 change requires a minor version, migration notes, an ADR, and a final passing
 comparison against the prior baseline before the registry changes. Workspace
 CI rejects changes to an already-present registry relative to the pull-request
-base or push parent while the release remains 0.3.0. Rustdoc runs with warnings
+base or push parent while the release remains 0.4.0.
+
+A pull request must not be merged while `semver` or the aggregate `workspace`
+job is failing. The 0.3.0 baseline was broken 94 times precisely because it was
+already red, so each new break was indistinguishable from the previous ones; a
+retarget clears that debt once and is not a substitute for the gate. Rustdoc runs with warnings
 denied, and public libraries deny missing documentation.
 
 The v0.3 interchangeable-dynamics milestone extends the pre-1.0 exhaustive
@@ -665,13 +673,88 @@ The current 0.x support status and the explicit commitment required before a
 1.0 readiness tracker must remain empty rather than imply a maintainer, period,
 or published policy that has not been authorized.
 
+### 0.4.0 Rust API baseline retarget (2026-09-26)
+
+Release `0.4.0` retargets the immutable Rust API baseline to main commit
+`aa4aa7b46bcb3486042b346be6dfdd14b7cbcf6a`, absorbing breaking changes merged
+after the `0.3.0` freeze rather than reverting them. It also folds
+`release/rust-api-additions-v1.toml` back into `release/rust-api-baseline.toml`,
+which again covers all 36 publishable packages; see
+[ADR 035](adr/035-rust-api-baseline-retarget-0-4-0.md).
+
+The SemVer gate had been failing since about PR #290 and was red on every pull
+request merged after it. Because the gate was already red, each further break
+landed without a distinguishable signal. 94 breaking changes accumulated across
+17 crates. They are listed in full below so that a 0.3 caller can find what it
+depends on.
+
+**Removed from the public surface (80).** 39 of these still exist as
+`pub(crate)` and 41 were deleted. Both are breaking for an external caller.
+
+*Methods and associated functions (59):*
+
+  `ActuatorCommandBuffer::discard_stale`, `ActuatorCommandBuffer::with_max_age`, `AllowedCollisionMatrix::is_allowed`,
+  `AppBuilder::schedule_mut`, `AppBuilder::with_fixed_delta`, `ArtifactRef::from_path`,
+  `AssetRevision::from_paths`, `AssetRevision::has_changed`, `BodyMotion::track_index`,
+  `BodyMotion::track_names`, `CameraDistortion::is_identity`, `CameraSpec::effective_band_count`,
+  `CollisionPrimitive::from_shape`, `CollisionWorld::add_object`, `CollisionWorld::voxel_grids`,
+  `ControllerCommand::for_joint`, `ControllerScheduler::controller_ids`, `DatasetBundleWriter::write_record`,
+  `DifferentialDrive::wheel_speeds`, `DriveKind::zero_actuation`, `ElevationMap::world_to_cell`,
+  `ImuAxisErrors::apply_scale_misalignment`, `Jacobian::rows_slice`, `KeyedRandom::sample_u64`,
+  `KinematicModel::forward_kinematics_with_base`, `LaserScan2d::angle_at`, `LidarAtmosphere::extinction_per_m`,
+  `LidarMaterial::with_retroreflective_gain`, `LidarSpec::channel_elevation_rad`, `LidarSpec::column_time_s`,
+  `LidarSpec::effective_channel_count`, `MecanumDrive::wheel_speeds`, `MobileBase::applied_command`,
+  `MobileBase::is_disabled`, `NavGoal::with_yaw`, `Path2d::position_at`,
+  `PlanningPipeline::add_adapter`, `PlanningPipeline::planner_name`, `PlanningScene::add_chain_group`,
+  `PlanningScene::collision_world_mut`, `PlanningScene::register_solver`, `ReplayRandomSnapshot::push_rng_state`,
+  `RneApp::clock_mut`, `RobotState::set_positions`, `SelfCollisionChecker::allowed_collision_matrix`,
+  `SelfCollisionChecker::from_robot_with_allowed_collision_matrix`, `SimClock::is_paused`, `SimulationLog::record_imu`,
+  `SimulationLog::record_wheel_encoder`, `SimulationLog::set_header`, `Slam2d::into_grid`,
+  `TiledOccupancyGrid::occupied_world_cells`, `TiledOccupancyGrid::probability_at`, `TiledOccupancyGrid::tile_size_cells`,
+  `TrafficCoordinator::claim_count`, `TransportFrame::encoded_len`, `VoxelLayer::to_occupancy`,
+  `VoxelLayer::voxel_centers`, `WorldRandom::main_stream_mut`.
+
+*Module-level constants (13):*
+
+  `CELL_UNKNOWN`, `CONTACT_EPSILON_M`, `DATASET_MAX_MANIFEST_BYTES`,
+  `DATASET_MAX_STREAMS`, `DEFAULT_FREE_PROBABILITY`, `FLOATING_BASE_TRANSLATION_LIMIT_M`,
+  `LOG_ODDS_SCALE`, `MAX_ALLAN_FACTORS`, `SUMO_IMPORT_VERSION`,
+  `TRANSPORT_MAGIC`, `TRANSPORT_MAX_REJECT_MESSAGE_BYTES`, `URDF_COULOMB_TRANSITION_VELOCITY_M_S`,
+  `URDF_COULOMB_TRANSITION_VELOCITY_RAD_S`.
+
+*Free functions (8):*
+
+  `rne_assets::spawn::spawn_diff_drive_from_asset`, `rne_assets::spawn::spawn_ground_plane`, `rne_physics::hash::entity_translation`,
+  `rne_plateau::import_citygml_str`, `rne_urdf_import::geometry::collider_from_link`, `rne_urdf_import::geometry::cylinder_collider_rotation`,
+  `rne_urdf_import::geometry::mesh_aabb`, `rne_urdf_import::geometry::mesh_aabb_collider`.
+
+**Struct-literal construction broken by a new `pub` field (10).**
+These structs can no longer be built with an exhaustive struct literal; add the
+new field or construct from `Default`.
+
+  `KinematicTrafficConfig.car_following`, `LongitudinalMobilityPlantSpec.longitudinal_load_transfer`, `LongitudinalMobilityPlantState.previous_chassis_acceleration_m_s2`,
+  `UrdfArticulationConfig.weld_fixed_children`, `UrdfRobotAsset.weld_fixed_children`, `VehicleDynamics.cornering_stiffness_load_sensitivity`,
+  `VehicleDynamics.four_wheel`, `VehicleDynamics.lateral_load_transfer`, `VehicleDynamics.wheel_saturated`,
+  `VehicleDynamics.wheel_slip_rad`.
+
+**`Copy` no longer derived (3).**
+`ColliderShape` gained `HeightField`, `TriMesh`, `ConvexHull` and `Compound`,
+which carry owned geometry, so it and the two types embedding it are move-only.
+Call sites that relied on implicit copies need `clone()` or a borrow.
+
+  `Collider`, `ColliderShape`, `DeformableCollider`.
+
+**Associated const hidden (1).** `FrameId::WORLD` is now `#[doc(hidden)]` and
+is no longer part of the documented surface.
+
 ### New package API registration (2026-09-22)
 
-`rne_collision_bake` and `rne_usd` now have first immutable API baselines in
-`release/rust-api-additions-v1.toml`, pinned to their introducing main commit.
-The original registry and all existing package baselines are unchanged; see
-[ADR 033](adr/033-additive-package-api-baselines.md). Both registries ship in
-native bundles and their package sets are checked by the release gate.
+`rne_collision_bake` and `rne_usd` received first immutable API baselines in
+`release/rust-api-additions-v1.toml`, pinned to their introducing main commit,
+leaving the original registry and all existing package baselines unchanged; see
+[ADR 033](adr/033-additive-package-api-baselines.md). That registry was removed
+in 0.4.0: both packages exist at the 0.4.0 baseline, so the single registry
+covers them and ships in native bundles.
 
 After integrating the normalized Rapier quaternion conversion, the physics
 conformance golden was regenerated from the CI runtime report at `7718c10`.

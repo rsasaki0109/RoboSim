@@ -857,7 +857,7 @@ mod tests {
             &registry
         )
         .is_err());
-        assert!(validate_readme_discovery(&readme.replace("v0.3.0", "v0.2.0"), &registry).is_err());
+        assert!(validate_readme_discovery(&readme.replace("v0.4.0", "v0.2.0"), &registry).is_err());
     }
 
     #[test]
@@ -876,7 +876,7 @@ mod tests {
             conditional_requirements: Vec::new(),
             form_fields: vec!["one".to_string(), "two".to_string()],
         };
-        let valid = "name: Test\ndescription: Test\ntitle: Test\nbody:\n  - type: input\n    id: one\n    validations:\n      required: true\n  - type: input\n    id: two\n    validations:\n      required: true\n# Current campaign: v0.3.0 — https://github.com/rsasaki0109/RoboSim/releases/tag/v0.3.0\n# Do not submit before these assets are published.\n# A submitted issue is not acceptance evidence\n";
+        let valid = "name: Test\ndescription: Test\ntitle: Test\nbody:\n  - type: input\n    id: one\n    validations:\n      required: true\n  - type: input\n    id: two\n    validations:\n      required: true\n# Current campaign: v0.4.0 — https://github.com/rsasaki0109/RoboSim/releases/tag/v0.4.0\n# Do not submit before these assets are published.\n# A submitted issue is not acceptance evidence\n";
         validate_issue_form(valid, &route).unwrap();
         assert!(
             validate_issue_form(&valid.replace("required: true", "required: false"), &route)

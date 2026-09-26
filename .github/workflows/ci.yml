@@ -181,11 +181,10 @@ jobs:
       - name: Reject breaking changes to frozen public APIs
         shell: bash
         run: |
+          # ADR 034: one registry covers every public package again, because the
+          # 0.4.0 baseline is newer than the commit that introduced the two
+          # packages ADR 033 had to register separately.
           registry_file="release/rust-api-baseline.toml"
-          if [[ "${{ matrix.packages }}" == *rne_collision_bake* ]]; then
-            # ADR 033: initial baselines for new packages; existing APIs retain theirs.
-            registry_file="release/rust-api-additions-v1.toml"
-          fi
           export RNE_SEMVER_REGISTRY="$registry_file"
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             registry_guard_ref="origin/${{ github.base_ref }}"

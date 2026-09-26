@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent_policy"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_ecs",
@@ -219,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "asset_hot_reload"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_assets",
 ]
@@ -681,7 +681,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "clutter_pick_place_e2e"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
@@ -698,7 +698,7 @@ dependencies = [
 
 [[package]]
 name = "collision_bake"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_collision_bake",
  "rne_core",
@@ -762,7 +762,7 @@ dependencies = [
 
 [[package]]
 name = "control_eval_demo"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -915,7 +915,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
 name = "deformable_cable"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_assets",
  "rne_deformable",
@@ -928,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "deformable_cloth"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_assets",
  "rne_deformable",
@@ -962,7 +962,7 @@ dependencies = [
 
 [[package]]
 name = "diff_drive_dataset_capture"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_core",
@@ -978,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "diff_drive_lidar"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_core",
  "rne_data",
@@ -1046,7 +1046,7 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
 name = "drjohnson_euroc_export"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "png",
  "rne_ai",
@@ -1059,7 +1059,7 @@ dependencies = [
 
 [[package]]
 name = "dynamics_diagnostics"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_dynamics",
  "rne_ecs",
@@ -1085,7 +1085,7 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "elevator_call_button"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_core",
  "rne_ecs",
@@ -1098,7 +1098,7 @@ dependencies = [
 
 [[package]]
 name = "elevator_ride"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_core",
  "rne_ecs",
@@ -1120,7 +1120,7 @@ dependencies = [
 
 [[package]]
 name = "episode_diff_drive"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
@@ -1198,7 +1198,7 @@ dependencies = [
 
 [[package]]
 name = "external_urdf"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_render",
@@ -1206,7 +1206,7 @@ dependencies = [
 
 [[package]]
 name = "falling_cube"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_core",
  "rne_ecs",
@@ -1257,7 +1257,7 @@ checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
 name = "flagship_validation_workflow"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "bevy_ecs",
@@ -1399,14 +1399,14 @@ dependencies = [
 
 [[package]]
 name = "g1_commanded_locomotion"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "g1_head_splat_background"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "png",
  "rne_ai",
@@ -1421,14 +1421,14 @@ dependencies = [
 
 [[package]]
 name = "g1_heading_turn"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "g1_learned_stride"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_math",
@@ -1436,7 +1436,7 @@ dependencies = [
 
 [[package]]
 name = "g1_photoreal_capture"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -1448,7 +1448,7 @@ dependencies = [
 
 [[package]]
 name = "g1_rgbd_sensor"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -1469,7 +1469,7 @@ dependencies = [
 
 [[package]]
 name = "g1_stride_gif"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -1481,7 +1481,7 @@ dependencies = [
 
 [[package]]
 name = "g1_sustained_walk_gif"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -1493,7 +1493,7 @@ dependencies = [
 
 [[package]]
 name = "g1_workbench_mission"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
@@ -1644,7 +1644,7 @@ dependencies = [
 
 [[package]]
 name = "gltf_humanoid_gpu"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "png",
  "rne_math",
@@ -1664,7 +1664,7 @@ dependencies = [
 
 [[package]]
 name = "go2_authority_turn"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_math",
@@ -1672,7 +1672,7 @@ dependencies = [
 
 [[package]]
 name = "go2_fall_vs_save"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -1684,7 +1684,7 @@ dependencies = [
 
 [[package]]
 name = "go2_jump"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_math",
@@ -1723,7 +1723,7 @@ dependencies = [
 
 [[package]]
 name = "go2_learned_sprint"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_math",
@@ -1731,7 +1731,7 @@ dependencies = [
 
 [[package]]
 name = "go2_learned_turn"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -1743,7 +1743,7 @@ dependencies = [
 
 [[package]]
 name = "go2_pure_torque"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_math",
@@ -1751,7 +1751,7 @@ dependencies = [
 
 [[package]]
 name = "go2_push_recovery"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_legged",
@@ -1760,7 +1760,7 @@ dependencies = [
 
 [[package]]
 name = "go2_steered_turn"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_math",
@@ -1768,7 +1768,7 @@ dependencies = [
 
 [[package]]
 name = "go2_stepped_turn"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -1780,7 +1780,7 @@ dependencies = [
 
 [[package]]
 name = "go2_torque_policy"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_math",
@@ -1788,7 +1788,7 @@ dependencies = [
 
 [[package]]
 name = "go2_torque_turn"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_math",
@@ -1796,7 +1796,7 @@ dependencies = [
 
 [[package]]
 name = "go2_turn_gif"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -1808,7 +1808,7 @@ dependencies = [
 
 [[package]]
 name = "go2_velocity_terrain"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_math",
@@ -1816,7 +1816,7 @@ dependencies = [
 
 [[package]]
 name = "go2_walk_vs_stand_push"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -1828,7 +1828,7 @@ dependencies = [
 
 [[package]]
 name = "goal_conditioned_agent"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_ecs",
@@ -1961,7 +1961,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hello_world"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bevy_ecs",
  "rne_core",
@@ -1984,7 +1984,7 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
 name = "house_3dgs_hybrid"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "png",
  "rne_math",
@@ -1998,7 +1998,7 @@ dependencies = [
 
 [[package]]
 name = "house_mobile_lift_hero"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "image",
@@ -2018,7 +2018,7 @@ dependencies = [
 
 [[package]]
 name = "humanoid_stand"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
@@ -2065,7 +2065,7 @@ checksum = "89194689a993ab15268672e99e7b0e19da2da3268ac682e8f02d29d4d1434cd7"
 
 [[package]]
 name = "imu_dead_reckoning"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -2097,7 +2097,7 @@ checksum = "a257582fdcde896fd96463bf2d40eefea0580021c0712a0e2b028b60b47a837a"
 
 [[package]]
 name = "interactive_viewer"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64",
  "rne_ai",
@@ -2244,7 +2244,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "latency_in_the_loop"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -2274,7 +2274,7 @@ checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 
 [[package]]
 name = "legged_pattern"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_legged",
 ]
@@ -2325,7 +2325,7 @@ dependencies = [
 
 [[package]]
 name = "lidar_render"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_core",
  "rne_data",
@@ -2342,7 +2342,7 @@ dependencies = [
 
 [[package]]
 name = "lift_pick_place_hero"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -2389,7 +2389,7 @@ dependencies = [
 
 [[package]]
 name = "locomotion_vectorized"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
@@ -2480,21 +2480,21 @@ dependencies = [
 
 [[package]]
 name = "mobile_clutter_pick_place_e2e"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "mobile_lift_friction_pick_place"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "mobile_manipulator_arm"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_core",
  "rne_ecs",
@@ -2507,84 +2507,84 @@ dependencies = [
 
 [[package]]
 name = "mobile_manipulator_curriculum"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "mobile_manipulator_episode"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "mobile_manipulator_grasp"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "mobile_manipulator_lift"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "mobile_manipulator_lift_pick_place"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "mobile_manipulator_place"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "mobile_manipulator_reach"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "mobile_manipulator_transport"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "mobile_manipulator_vectorized"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "mobile_manipulator_wrist_cam"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "mobile_so101_clutter"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "motion_planning"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ecs",
  "rne_math",
@@ -2595,7 +2595,7 @@ dependencies = [
 
 [[package]]
 name = "motion_planning_media"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "png",
  "rne_ai",
@@ -2631,7 +2631,7 @@ dependencies = [
 
 [[package]]
 name = "multi_floor_mission"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_math",
  "rne_nav",
@@ -2639,7 +2639,7 @@ dependencies = [
 
 [[package]]
 name = "multi_robot_agent"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_math",
@@ -2648,7 +2648,7 @@ dependencies = [
 
 [[package]]
 name = "multi_robot_avoidance"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_math",
  "rne_nav",
@@ -2656,7 +2656,7 @@ dependencies = [
 
 [[package]]
 name = "multi_robot_collision"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
@@ -2712,7 +2712,7 @@ dependencies = [
 
 [[package]]
 name = "nav_elevation_icp"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_math",
  "rne_nav",
@@ -2721,7 +2721,7 @@ dependencies = [
 
 [[package]]
 name = "nav_map_media"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "png",
  "rne_math",
@@ -2733,7 +2733,7 @@ dependencies = [
 
 [[package]]
 name = "nav_occupancy_grid"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ecs",
  "rne_math",
@@ -2742,7 +2742,7 @@ dependencies = [
 
 [[package]]
 name = "nav_planning"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_math",
  "rne_nav",
@@ -2750,7 +2750,7 @@ dependencies = [
 
 [[package]]
 name = "nav_slam_mapping"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ecs",
  "rne_nav",
@@ -2759,7 +2759,7 @@ dependencies = [
 
 [[package]]
 name = "nav_slam_physics"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_core",
  "rne_data",
@@ -3145,21 +3145,21 @@ dependencies = [
 
 [[package]]
 name = "office_agv_delivery"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "office_agv_desk_place"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "office_agv_shared_aisle"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
@@ -3361,7 +3361,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "plateau_drone_gif"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -3409,7 +3409,7 @@ dependencies = [
 
 [[package]]
 name = "policy_artifact"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
@@ -3600,7 +3600,7 @@ dependencies = [
 
 [[package]]
 name = "quadruped_stand"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
@@ -3808,7 +3808,7 @@ dependencies = [
 
 [[package]]
 name = "render_clear"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_render",
  "rne_render_wgpu",
@@ -3816,7 +3816,7 @@ dependencies = [
 
 [[package]]
 name = "render_primitives"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ecs",
  "rne_math",
@@ -3840,7 +3840,7 @@ checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
 
 [[package]]
 name = "rne_accelerator_contract"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "serde",
@@ -3852,7 +3852,7 @@ dependencies = [
 
 [[package]]
 name = "rne_adapter_ros2"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "rne_core",
@@ -3865,7 +3865,7 @@ dependencies = [
 
 [[package]]
 name = "rne_adapter_ssl"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "prost",
  "thiserror 2.0.18",
@@ -3873,7 +3873,7 @@ dependencies = [
 
 [[package]]
 name = "rne_ai"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -3899,7 +3899,7 @@ dependencies = [
 
 [[package]]
 name = "rne_asset_cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3936,7 +3936,7 @@ dependencies = [
 
 [[package]]
 name = "rne_assets"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "rne_data",
@@ -3956,7 +3956,7 @@ dependencies = [
 
 [[package]]
 name = "rne_collision_bake"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_math",
  "rne_physics",
@@ -3968,7 +3968,7 @@ dependencies = [
 
 [[package]]
 name = "rne_compatibility_suite"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "rne_accelerator_contract",
@@ -3992,7 +3992,7 @@ dependencies = [
 
 [[package]]
 name = "rne_core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "rne_math",
@@ -4003,7 +4003,7 @@ dependencies = [
 
 [[package]]
 name = "rne_data"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "rne_core",
@@ -4018,7 +4018,7 @@ dependencies = [
 
 [[package]]
 name = "rne_deformable"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -4032,7 +4032,7 @@ dependencies = [
 
 [[package]]
 name = "rne_determinism_tests"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "rne_ai",
@@ -4049,7 +4049,7 @@ dependencies = [
 
 [[package]]
 name = "rne_dynamics"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "rne_ecs",
@@ -4062,7 +4062,7 @@ dependencies = [
 
 [[package]]
 name = "rne_dynamics_tests"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "rne_core",
@@ -4077,7 +4077,7 @@ dependencies = [
 
 [[package]]
 name = "rne_ecs"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bevy_ecs",
  "serde",
@@ -4087,7 +4087,7 @@ dependencies = [
 
 [[package]]
 name = "rne_fuzz_smoke"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_data",
  "rne_mjcf",
@@ -4103,7 +4103,7 @@ dependencies = [
 
 [[package]]
 name = "rne_hardware_gateway"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "rne_ai",
@@ -4115,7 +4115,7 @@ dependencies = [
 
 [[package]]
 name = "rne_hardware_lekiwi"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_hardware_gateway",
@@ -4127,7 +4127,7 @@ dependencies = [
 
 [[package]]
 name = "rne_legged"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "rne_math",
@@ -4137,7 +4137,7 @@ dependencies = [
 
 [[package]]
 name = "rne_log"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_core",
  "rne_data",
@@ -4152,7 +4152,7 @@ dependencies = [
 
 [[package]]
 name = "rne_math"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "glam",
@@ -4161,7 +4161,7 @@ dependencies = [
 
 [[package]]
 name = "rne_mjcf"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_urdf_import",
  "roxmltree",
@@ -4170,7 +4170,7 @@ dependencies = [
 
 [[package]]
 name = "rne_mobility_benchmark"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "rne_ai",
@@ -4193,7 +4193,7 @@ dependencies = [
 
 [[package]]
 name = "rne_nav"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -4206,7 +4206,7 @@ dependencies = [
 
 [[package]]
 name = "rne_oc"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "rne_dynamics",
@@ -4220,7 +4220,7 @@ dependencies = [
 
 [[package]]
 name = "rne_openscenario"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_core",
  "rne_ecs",
@@ -4235,7 +4235,7 @@ dependencies = [
 
 [[package]]
 name = "rne_physics"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -4250,7 +4250,7 @@ dependencies = [
 
 [[package]]
 name = "rne_physics_analytic"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_core",
  "rne_ecs",
@@ -4261,7 +4261,7 @@ dependencies = [
 
 [[package]]
 name = "rne_physics_conformance"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_core",
  "rne_ecs",
@@ -4277,7 +4277,7 @@ dependencies = [
 
 [[package]]
 name = "rne_physics_conformance_suite"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "rne_ai",
@@ -4295,7 +4295,7 @@ dependencies = [
 
 [[package]]
 name = "rne_physics_mujoco"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "mujoco-rs",
  "rne_core",
@@ -4308,7 +4308,7 @@ dependencies = [
 
 [[package]]
 name = "rne_physics_rapier"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "rapier3d",
@@ -4321,7 +4321,7 @@ dependencies = [
 
 [[package]]
 name = "rne_planning"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -4336,7 +4336,7 @@ dependencies = [
 
 [[package]]
 name = "rne_plateau"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "earcutr",
  "image",
@@ -4354,7 +4354,7 @@ dependencies = [
 
 [[package]]
 name = "rne_plateau_import"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4363,7 +4363,7 @@ dependencies = [
 
 [[package]]
 name = "rne_plugin"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "libloading",
  "rne_plugin_sdk",
@@ -4375,22 +4375,22 @@ dependencies = [
 
 [[package]]
 name = "rne_plugin_example_velocity_servo"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_plugin_sdk",
 ]
 
 [[package]]
 name = "rne_plugin_legacy_v2_fixture"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "rne_plugin_sdk"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "rne_py"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "pyo3",
@@ -4401,7 +4401,7 @@ dependencies = [
 
 [[package]]
 name = "rne_render"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -4420,7 +4420,7 @@ dependencies = [
 
 [[package]]
 name = "rne_render_3dgs"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "glam",
@@ -4437,7 +4437,7 @@ dependencies = [
 
 [[package]]
 name = "rne_render_wgpu"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "bytemuck",
@@ -4455,7 +4455,7 @@ dependencies = [
 
 [[package]]
 name = "rne_robot"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -4471,7 +4471,7 @@ dependencies = [
 
 [[package]]
 name = "rne_scenario_scale"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "rne_openscenario",
@@ -4482,7 +4482,7 @@ dependencies = [
 
 [[package]]
 name = "rne_sdf"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_urdf_import",
  "roxmltree",
@@ -4491,7 +4491,7 @@ dependencies = [
 
 [[package]]
 name = "rne_sensor"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -4510,7 +4510,7 @@ dependencies = [
 
 [[package]]
 name = "rne_slam"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -4524,7 +4524,7 @@ dependencies = [
 
 [[package]]
 name = "rne_sumo"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_traffic",
  "roxmltree",
@@ -4533,7 +4533,7 @@ dependencies = [
 
 [[package]]
 name = "rne_traci"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ecs",
  "rne_traffic",
@@ -4543,7 +4543,7 @@ dependencies = [
 
 [[package]]
 name = "rne_traffic"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bevy_ecs",
  "rne_core",
@@ -4556,7 +4556,7 @@ dependencies = [
 
 [[package]]
 name = "rne_urdf_import"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "rne_collision_bake",
@@ -4574,7 +4574,7 @@ dependencies = [
 
 [[package]]
 name = "rne_usd"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "rne_math",
@@ -4583,7 +4583,7 @@ dependencies = [
 
 [[package]]
 name = "rne_wbc"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "rne_dynamics",
@@ -4598,7 +4598,7 @@ dependencies = [
 
 [[package]]
 name = "rne_world"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "approx",
  "bevy_ecs",
@@ -4611,7 +4611,7 @@ dependencies = [
 
 [[package]]
 name = "robot_kinematics"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ecs",
  "rne_math",
@@ -4621,7 +4621,7 @@ dependencies = [
 
 [[package]]
 name = "robot_workbench"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -4737,7 +4737,7 @@ dependencies = [
 
 [[package]]
 name = "scene_episode"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
  "rne_ecs",
@@ -4751,7 +4751,7 @@ dependencies = [
 
 [[package]]
 name = "scene_load"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_assets",
  "rne_core",
@@ -4862,7 +4862,7 @@ dependencies = [
 
 [[package]]
 name = "shared_world_agent"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
@@ -4875,7 +4875,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "showcase_captures"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "png",
@@ -5039,7 +5039,7 @@ dependencies = [
 
 [[package]]
 name = "ssl_adapter_smoke"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "prost",
  "rne_adapter_ssl",
@@ -5047,7 +5047,7 @@ dependencies = [
 
 [[package]]
 name = "ssl_physics_coupling"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_adapter_ssl",
  "rne_ai",
@@ -5055,7 +5055,7 @@ dependencies = [
 
 [[package]]
 name = "ssl_small_pitch"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
@@ -5340,7 +5340,7 @@ dependencies = [
 
 [[package]]
 name = "traffic_city_replay"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bevy_ecs",
  "rne_core",
@@ -5351,14 +5351,14 @@ dependencies = [
 
 [[package]]
 name = "trainer"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "tsukuba_3dgs_background"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "png",
  "rne_math",
@@ -5371,7 +5371,7 @@ dependencies = [
 
 [[package]]
 name = "tsukuba_3dgs_depth"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "png",
  "rne_math",
@@ -5384,21 +5384,21 @@ dependencies = [
 
 [[package]]
 name = "tsukuba_confirmation"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "tsukuba_full_run"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "tsukuba_plateau_backdrop"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "png",
  "rne_ai",
@@ -5457,7 +5457,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "unitree_g1_cloth_handling"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "png",
  "rne_ai",
@@ -5468,7 +5468,7 @@ dependencies = [
 
 [[package]]
 name = "unitree_g1_dex3_pick_place"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "png",
  "rne_ai",
@@ -5479,14 +5479,14 @@ dependencies = [
 
 [[package]]
 name = "unitree_g1_factory_inspection"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "unitree_g1_gif"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -5498,7 +5498,7 @@ dependencies = [
 
 [[package]]
 name = "unitree_g1_parts_pick_place"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -5510,7 +5510,7 @@ dependencies = [
 
 [[package]]
 name = "unitree_go2_gif"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -5522,7 +5522,7 @@ dependencies = [
 
 [[package]]
 name = "urdf_import"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ecs",
  "rne_urdf_import",
@@ -5530,7 +5530,7 @@ dependencies = [
 
 [[package]]
 name = "urdf_mesh_render"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ecs",
  "rne_math",
@@ -5575,14 +5575,14 @@ dependencies = [
 
 [[package]]
 name = "vectorized_episode"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_ai",
 ]
 
 [[package]]
 name = "vehicle_dynamics_compare"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "image",
  "png",
@@ -5946,7 +5946,7 @@ dependencies = [
 
 [[package]]
 name = "whole_body_control"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rne_dynamics",
  "rne_ecs",
@@ -6278,7 +6278,7 @@ checksum = "3ae8337f8a065cfc972643663ea4279e04e7256de865aa66fe25cec5fb912d3f"
 
 [[package]]
 name = "xtask"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "image",
