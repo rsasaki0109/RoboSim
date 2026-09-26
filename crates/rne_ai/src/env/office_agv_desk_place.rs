@@ -267,8 +267,7 @@ enum ScriptPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OtherMotion {
     Waiting,
-    Entering,
-    Exiting,
+    Crossing,
     Cleared,
 }
 
@@ -341,28 +340,28 @@ impl OfficeAgvDeskPlaceScenario {
     /// Returns the render-only oncoming AGV position in world X/Z meters.
     #[must_use]
     pub fn other_agv_translation_m(&self) -> (f64, f64) {
-        (self.other_agv_x_m, 0.0)
+        (
+            self.other_agv_x_m,
+            self.course.aisle.other_lane_z_m(self.other_agv_x_m),
+        )
     }
 
+    /// Drives the oncoming AGV down its own lane and out of the aisle.
+    ///
+    /// It travels in one direction throughout, so its heading never has to
+    /// reverse and it passes the yielding ego rather than retreating from it.
     fn advance_other_agv(&mut self) {
         let elapsed_s = self.sim.step_count() as f64 * DT_S;
         let step_m = self.course.aisle.other_speed_m_s * DT_S;
-        let turn_x_m = 0.5 * (self.course.aisle.shared_min_x_m + self.course.aisle.shared_max_x_m);
         match self.other_motion {
             OtherMotion::Waiting => {
                 if elapsed_s >= self.course.aisle.other_departure_delay_s {
-                    self.other_motion = OtherMotion::Entering;
+                    self.other_motion = OtherMotion::Crossing;
                 }
             }
-            OtherMotion::Entering => {
+            OtherMotion::Crossing => {
                 self.other_agv_x_m -= step_m;
-                if self.other_agv_x_m <= turn_x_m {
-                    self.other_motion = OtherMotion::Exiting;
-                }
-            }
-            OtherMotion::Exiting => {
-                self.other_agv_x_m += step_m;
-                if self.other_agv_x_m >= self.course.aisle.other_clear_x_m {
+                if self.other_agv_x_m <= self.course.aisle.other_clear_x_m {
                     self.other_agv_x_m = self.course.aisle.other_clear_x_m;
                     self.other_motion = OtherMotion::Cleared;
                 }
@@ -384,7 +383,10 @@ impl OfficeAgvDeskPlaceScenario {
             self.course
                 .delivery()
                 .robot_aabb(drive.base_x_m, drive.base_z_m, drive.base_yaw_rad);
-        let other = self.course.aisle.other_aabb(self.other_agv_x_m, 0.0);
+        let other = self.course.aisle.other_aabb(
+            self.other_agv_x_m,
+            self.course.aisle.other_lane_z_m(self.other_agv_x_m),
+        );
         let shared_aisle_occupied = self.course.aisle.other_occupies_shared(self.other_agv_x_m);
         let other_agv_contact = self.other_agv_contact || aabb.overlaps(other);
         let out_of_corridor = aabb.max_z_m > self.course.delivery().corridor_half_width_m
@@ -426,7 +428,10 @@ impl OfficeAgvDeskPlaceScenario {
             observation.base_z_m,
             observation.base_yaw_rad,
         );
-        let other = self.course.aisle.other_aabb(self.other_agv_x_m, 0.0);
+        let other = self.course.aisle.other_aabb(
+            self.other_agv_x_m,
+            self.course.aisle.other_lane_z_m(self.other_agv_x_m),
+        );
         self.other_agv_contact = observation.other_agv_contact || aabb.overlaps(other);
 
         if !self.yielded_for_shared_aisle {

@@ -542,6 +542,7 @@ pub(crate) fn render_scene(
         ([0.83, 0.81, 0.76, 1.0], [0.76, 0.74, 0.69, 1.0]),
     );
     let (cargo_x_m, cargo_z_m) = scenario.cargo_translation_m();
+    let (other_agv_x_m, other_agv_z_m) = scenario.other_agv_translation_m();
     push_agv(
         &mut scene,
         Vec3::new(observation.base_x_m, 0.24, observation.base_z_m),
@@ -551,10 +552,12 @@ pub(crate) fn render_scene(
         [1.0, 0.55, 0.06, 1.0],
     );
     // The oncoming AGV and cargo are intentionally render-only proxies whose
-    // transforms are copied from the scenario observation on every frame.
+    // transforms are copied from the scenario state on every frame. The AGV
+    // travels in the opposite lane and only ever drives toward -X, so a fixed
+    // heading of PI is the direction it is actually going.
     push_agv(
         &mut scene,
-        Vec3::new(observation.other_agv_x_m, 0.24, 0.0),
+        Vec3::new(other_agv_x_m, 0.24, other_agv_z_m),
         std::f64::consts::PI,
         [0.10, 0.32, 0.72, 1.0],
         [0.13, 0.14, 0.16, 1.0],
