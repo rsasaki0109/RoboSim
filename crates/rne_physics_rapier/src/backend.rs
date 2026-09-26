@@ -2901,6 +2901,80 @@ mod tests {
         }
     }
 
+    /// A position servo must reach its target whatever the joint origin is.
+    ///
+    /// `direct_effort_follows_rotated_joint_origin` covers effort control. The
+    /// position motor is a separate path: it writes a target into the Rapier
+    /// motor rather than an external torque, and the authored joint-origin
+    /// rotation is composed into `local_frame1` only. On a robot whose joint
+    /// origins are identity (`mm_minimal`) a servo holds its pose to 0.0004 m;
+    /// on one whose origins are not (SO-101) a gain of 2000 N·m/rad is
+    /// indistinguishable from no servo at all.
+    #[test]
+    fn position_servo_follows_rotated_joint_origin() {
+        let run = |origin: Quat| {
+            let mut backend = RapierBackend::new();
+            let physics_world = backend
+                .create_world(PhysicsWorldDesc {
+                    gravity_m_s2: Vec3::ZERO,
+                    solver_iterations: 16,
+                })
+                .unwrap();
+            let mut world = World::new();
+            let parent_rotation = Quat::from_rotation_y(0.37);
+            let parent = spawn_named(&mut world, "servo_parent");
+            world.entity_mut(parent).insert((
+                RigidBody {
+                    body_type: RigidBodyType::Fixed,
+                    ..RigidBody::default()
+                },
+                MultibodyLink,
+                Transform3::from_translation_rotation(Vec3::ZERO, parent_rotation),
+            ));
+            let child = spawn_named(&mut world, "servo_child");
+            let rotation = parent_rotation * origin;
+            world.entity_mut(child).insert((
+                RigidBody::default(),
+                Collider::sphere(0.1),
+                MultibodyLink,
+                Transform3::from_translation_rotation(rotation * -Vec3::Y, rotation),
+                RevoluteJointDesc {
+                    parent,
+                    axis: Vec3::Z,
+                    anchor_parent_m: Vec3::ZERO,
+                    anchor_child_m: Vec3::Y,
+                    relative_rotation: origin,
+                    lower_rad: None,
+                    upper_rad: None,
+                },
+                JointActuation::RevolutePosition {
+                    target_position_rad: 0.4,
+                    stiffness_nm_per_rad: 40.0,
+                    damping_nm_s_per_rad: 4.0,
+                    max_effort_nm: 20.0,
+                },
+                JointMotorGainModel::ForceBased,
+            ));
+            for _ in 0..240 {
+                step_physics(&mut backend, &mut world, physics_world, fixed_step()).unwrap();
+            }
+            backend
+                .multibody_joint_position(physics_world, child)
+                .unwrap()
+        };
+        let aligned = run(Quat::IDENTITY);
+        let rotated = run(Quat::from_rotation_y(std::f64::consts::FRAC_PI_2));
+        assert!(
+            (aligned - 0.4).abs() < 0.02,
+            "the servo must reach its target with an identity joint origin: {aligned}"
+        );
+        assert!(
+            (rotated - 0.4).abs() < 0.02,
+            "the servo must reach its target with a rotated joint origin too: \
+             aligned={aligned}, rotated={rotated}"
+        );
+    }
+
     #[test]
     fn floating_offset_com_rotates_about_stationary_center_of_mass() {
         let mut backend = RapierBackend::new();
