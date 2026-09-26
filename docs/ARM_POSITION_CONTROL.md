@@ -138,7 +138,7 @@ On SO-101 no cell differs from the no-servo column at any rate up to 1920 Hz.
 So this is neither a gain problem, nor a timestep problem, nor a problem with
 the actuation path in general.
 
-### Two hypotheses tried and refuted
+### Hypotheses tried and refuted
 
 The first was that the servo held a different angle from the one measured. The
 settled-angle table above refutes it: the configured target is 0 rad and the
@@ -185,26 +185,32 @@ Ground contact is ruled out: with the base lifted 1 m and the ground plane
 disabled, the gain sweep is 0.06456 / 0.06452 / 0.06363 m for no servo, k=20 and
 k=200.
 
-### A separate defect found along the way: every link weighs 1 kg
+### A separate defect, now fixed: every link weighed 1 kg
 
-The URDF declares 0.079 to 0.104 kg per link. The simulation uses exactly
+The URDF declares 0.079 to 0.104 kg per link. The simulation used exactly
 1.0000 kg for all of them — the `RigidBody` default, not a geometry-derived
-value:
+value — so the arm massed about 5 kg instead of 0.5 kg.
 
-| link | declared | realized | ratio |
-| --- | ---: | ---: | ---: |
-| shoulder_link | 0.1000 kg | 1.0000 kg | 10.0x |
-| upper_arm_link | 0.1030 kg | 1.0000 kg | 9.7x |
-| lower_arm_link | 0.1040 kg | 1.0000 kg | 9.6x |
-| wrist_link | 0.0790 kg | 1.0000 kg | 12.7x |
-| gripper_link | 0.0870 kg | 1.0000 kg | 11.5x |
+`use_declared_inertial_masses = true` is the fix and could not be applied: the
+import failed with `invalid inertial properties for link gripper_frame_link`.
+That link declares 1e-9 kg and an all-zero inertia tensor, which CAD exporters
+emit wherever a model needs a named coordinate frame. The importer now reads a
+degenerate tensor on a link of a milligram or less as a frame marker and treats
+its inertial as absent rather than refusing the whole robot; a link carrying
+real mass with a malformed tensor still fails, because that is data the caller
+meant and got wrong. The asset opts in, and every link now simulates at its
+declared mass.
 
-The arm masses about 5 kg instead of 0.5 kg, which puts the shoulder's gravity
-load near 7 N·m against the 10 N·m ceiling these measurements used. That is a
-defect in its own right and worth fixing.
+**It did not fix the servo.** With the arm at its true mass, a servo is *worse*
+than no servo at every gain and rate measured:
 
-It is **not** the explanation for the missing authority. Raising the ceiling
-well past the gravity load does not restore holding — it makes it worse:
+| | no servo | k=2 | k=20 | k=200 |
+| --- | ---: | ---: | ---: | ---: |
+| 240 Hz | 0.10548 | 0.18154 | 0.18970 | 0.22174 |
+| 960 Hz | 0.12387 | 0.17938 | 0.17636 | 0.19092 |
+
+Raising the effort ceiling does not help either. Before the mass fix, with the
+arm ten times too heavy:
 
 | effort ceiling | hold drift | commanded −1 rad moved |
 | ---: | ---: | ---: |
@@ -213,24 +219,48 @@ well past the gravity load does not restore holding — it makes it worse:
 | 200 N·m | 0.19684 m | 0.39218 m |
 | 1000 N·m | 0.22442 m | 0.28195 m |
 
-More authority produces more motion and worse holding, which is the signature
-this document already recorded at 60 Hz, now reappearing at 240 Hz once the
-effort ceiling stops clamping it.
-
-The obvious fix for the mass is `use_declared_inertial_masses = true`, and it
-cannot be applied as-is: the import fails with `invalid inertial properties for
-link gripper_frame_link`. That link declares a mass of 1e-9 kg and an all-zero
-inertia tensor, and `weld_fixed_children = true` does not fold it away before
-validation runs.
+More authority, more motion, worse holding — the same signature at every stage
+of this investigation.
 
 **What is established:** joint actuation of any kind — position or effort —
 produces only marginal motion on the SO-101 scene, over gains spanning two
 orders of magnitude, rates spanning thirty-two, with and without ground
-contact, while an identical call on a control arm improves the held pose by
-three orders of magnitude. **What is not established:** why. Three mechanisms
-suggested themselves — a frame mismatch, the parent-frame-only origin
-composition, and ground contact — and all three have been measured and ruled
-out.
+contact, and at both the wrong mass and the right one, while an identical call
+on a control arm improves the held pose by three orders of magnitude.
+
+**What is not established:** why. Six mechanisms have suggested themselves and
+all six have been measured and ruled out: a frame mismatch between the servo's
+target and the reading; the parent-frame-only joint-origin composition; ground
+contact; a saturating effort ceiling; the ten-times-too-heavy links; and the
+arm's own collision geometry. The mass was a real defect and is fixed, but it
+was not this one.
+
+### The arm has been resting on itself
+
+The sixth attempt found the control arm's one clear structural difference:
+SO-101 carries 34 mesh elements and `mm_minimal` carries none, so SO-101's
+collision geometry is 34 AABBs approximating meshes while the control's is
+primitives. Overlapping boxes on adjacent links would give the solver a
+permanent penetration to chew on, which could plausibly swamp a joint torque.
+
+Turning self-collision off makes the drift **worse**, not better, and leaves
+the servo exactly as ineffective:
+
+| | no servo | k=2 | k=20 |
+| --- | ---: | ---: | ---: |
+| self-collision on | 0.08888 | 0.09309 | 0.08794 |
+| self-collision off | 0.32985 | 0.32918 | 0.35325 |
+
+That refutes the mechanism and establishes something more useful about every
+other measurement in this document: **the 0.089 m figure is partly the arm
+jamming on its own colliders.** With them removed it falls three times as far.
+The SO-101 arm has not been holding a pose, resting in a gravity equilibrium,
+or being held by a servo — it has been propped up by its own approximated
+collision geometry.
+
+Note that removing the colliders entirely is not a usable comparison: every
+SO-101 collision element is a mesh, so `mesh_collisions = false` takes the arm
+out of physics altogether and it reads 0.00000 m of drift with no servo at all.
 
 A related usability problem is established: the shipped SO-101 scene cannot
 report its own joint angles at all. `named_joint_position` reads `JointState`,

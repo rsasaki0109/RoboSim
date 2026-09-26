@@ -11,3 +11,7 @@ articulation = true
 # violation on step one: the chain is launched 11.7 km. With it, the worst
 # first-step link displacement is 0.0089 m.
 use_joint_origin_rpy = true
+# The URDF declares 0.079 to 0.104 kg per link. Without this every link
+# simulates at the 1 kg default, so the arm masses about 5 kg instead of 0.5 kg
+# and its gravity load is ten times what the actuators are sized for.
+use_declared_inertial_masses = true
