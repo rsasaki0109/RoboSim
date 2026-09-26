@@ -181,9 +181,12 @@ lifts, 2 crossings, and an identical replan.
   artifact: `named_joint_position` reports `JointState`, which the impulse
   joints in this scene do not carry. The joints were moving.
 
-  What remains open is a residual of about 0.085 m that responds to neither
-  gain nor physics rate, which is recorded with its suspected cause in the
-  arm-control document.
+  What remains open is larger than a residual: on this scene the position
+  servo has no usable authority at all. A gain of 2000 N·m/rad is
+  indistinguishable from configuring no servo, and joints told to hold 0 rad
+  settle as far away as 1.5 rad. The shoulder's 0.146 rad is the "0.147 rad"
+  this section used to report. Measurements and what they do and do not
+  establish are in the arm-control document.
 - **Being carried is not modelled.** `reacquire_floor` answers the question on
   arrival; nothing represents the ride itself, during which the robot's building
   pose is unknowable from its own sensors and its floor-frame pose is the only

@@ -64,9 +64,9 @@ under 1 N·m/rad, which is below any gain that would hold the arm at all. Adding
 solver iterations does not help because the instability is between steps, not
 within one.
 
-**Any servo on this arm needs at least 240 Hz.** Use
-`step_joint_position_actuation_targets_substeps` to subdivide the control period
-rather than raising the control rate itself.
+Raising the rate removes the instability. It does not make the servo work — see
+the next section. Use `step_joint_position_actuation_targets_substeps` to
+subdivide the control period rather than raising the control rate itself.
 
 ## Use the unit-explicit actuation path
 
@@ -85,32 +85,54 @@ There are two position-control paths and they do not mean the same thing.
 Manipulator work should use the first. The second remains for the existing
 callers that were tuned against it.
 
-## Open: a gain- and rate-independent residual
+## Open: the position servo has no authority on this arm
 
-From 240 Hz upward a residual of about 0.085 m remains, and it responds to
-neither stiffness nor physics rate. That pattern is not a control-loop
-limitation: a servo that is merely too soft improves when stiffened, and one
-that is unstable improves when the step shrinks. A constant offset that ignores
-both is the signature of the servo holding a different angle from the one being
-measured.
+From 240 Hz upward the held-pose error stops responding to stiffness. It is not
+that the servo is too soft — **it is indistinguishable from no servo at all.**
+Worst-link displacement after 1200 control steps at 240 Hz, effort ceiling
+10 N·m, damping `0.1 * k`:
 
-The suspected mechanism is the initial target.
-`configure_named_revolute_position_actuation` reads the current angle from
-`multibody_joint_position`, which returns `None` for an impulse-joint scene such
-as this one, and falls back to the `Joint` component's `position`. If that
-fallback reads zero while the joint frame carries the URDF's origin `rpy`, the
-servo holds a pose the arm was never in.
+| | shoulder | upper_arm | lower_arm | wrist | gripper | gripper_frame |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| no servo configured | 0.0002 | 0.0177 | 0.0353 | 0.0733 | 0.0889 | 0.1643 |
+| k = 20 N·m/rad | 0.0005 | 0.0181 | 0.0393 | 0.0759 | 0.0879 | 0.1222 |
+| k = 200 | 0.0003 | 0.0173 | 0.0420 | 0.0801 | 0.0956 | 0.1327 |
+| k = 2000 | 0.0002 | 0.0168 | 0.0421 | 0.0803 | 0.0937 | 0.1281 |
 
-**This is a hypothesis and has not been demonstrated.** What is established is
-that the residual exists, that it is about 0.085 m, and that it is independent
-of both gain and timestep over the ranges measured above.
+A gain of 2000 N·m/rad against an arm whose gravity torques are near 0.1 N·m
+changes nothing. Read on a multibody build of the same arm, where joint angles
+are legible, the joints configured to hold 0 rad settle at:
+
+| joint | target | settled |
+| --- | ---: | ---: |
+| shoulder_link | 0.000 | 0.1460 |
+| upper_arm_link | 0.000 | −0.0639 |
+| lower_arm_link | 0.000 | 0.2508 |
+| wrist_link | 0.000 | **−1.3145** |
+| gripper_link | 0.000 | **1.5045** |
+
+The target is correct and the joint is nowhere near it. The shoulder's
+0.1460 rad is the same number an earlier investigation recorded as "0.147 rad"
+and attributed to weak tracking; it is the arm hanging where gravity leaves it.
+
+The error accumulating monotonically down the chain is a consequence of each
+joint being free, not a per-joint servo droop: link displacement sums the
+angular error of every joint above it.
+
+**What is established:** the unit-explicit position actuation path produces no
+usable torque on this scene, over gains spanning two orders of magnitude and
+rates spanning sixteen. **What is not established:** why. An earlier revision of
+this document proposed that the servo was holding a different angle from the one
+being measured; the table above refutes that — the configured target is 0 and
+the servo neither reaches nor defends it.
 
 A related usability problem is established: the shipped SO-101 scene cannot
 report its own joint angles at all. `named_joint_position` reads `JointState`,
 which impulse joints do not carry, so every joint reads exactly 0.000 rad while
 the links are visibly moving. An earlier revision of
 `docs/MULTI_FLOOR_NAVIGATION.md` reported that reading as evidence the motors
-were dead; it was an artifact of the accessor.
+were dead; it was an artifact of the accessor, but the motors are in fact
+ineffective for the different reason above.
 
 ## Reproducing
 
