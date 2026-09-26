@@ -701,6 +701,23 @@ Run example 114 with `--native-recording` and the held-recovery directory for
 headless verification; add `--gif` to write a new GIF. Existing output is not
 overwritten, and a 30 GiB reserve is checked before streaming the GIF.
 
+The GIF at the top of this document comes from the 62.5 µs recording, which is
+stored compressed and under a prefixed name, so it has to be staged into the
+layout the example reads before it can be re-rendered:
+
+```bash
+S=$(mktemp -d)
+E=docs/evidence/g1-contact-backflip/native-transfer/selected005-long-validation
+cp $E/62p5-render-manifest.json $S/render-manifest.json
+gunzip -c $E/62p5-rollout.json.gz > $S/rollout.json
+cargo run --release --locked -p g1_backflip_gif --example 114_g1_backflip_gif \
+  -- --native-recording $S --gif
+```
+
+The example verifies the staged rollout against the manifest checksum, so a
+mis-staged directory fails before rendering rather than producing a GIF of the
+wrong run.
+
 ### G1 visual material colors
 
 The URDF importer now resolves robot-level named material colors, including

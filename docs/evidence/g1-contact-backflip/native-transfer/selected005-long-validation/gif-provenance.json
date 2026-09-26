@@ -2,11 +2,11 @@
   "rollout_sha256": "b549cfc8448eb559b661bfbbfa4f2dc5fe7f250e1ae3794c772a63eb822948cf",
   "visual_urdf_sha256": "b462e1367ccb50f148db8c82f93421cb3f47497b10b735e891d2c9d000870cfc",
   "gif_path": "docs/media/unitree-g1-robosim-native-backflip.gif",
-  "gif_sha256": "7bb09044bed6e2c4ca13570e7ff9504b78f34f06d0dc6158b258ddb772f8d898",
+  "gif_sha256": "0611474faa6cb8632a1b88205c64d96291c1e07dd9c7c24d78ea5df5effefed2",
   "gif_frame_count": 204,
   "gif_duration_ms": 15210,
   "source_physics_frame_count": 1600,
   "rendering_physics_ticks": 0,
-  "producer_source_commit": "0c84bfdec8bdbdd3a4d9724e5bf13469fc895243",
+  "producer_source_commit": "a5343fa25e8fad062ae72d476eeb8a97d2d67320",
   "previous_diagnostic_git_commit": "021d40d4c39105c824c7339b0c9d713a775024e8"
 }

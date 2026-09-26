@@ -126,15 +126,23 @@ SLAM with loop closure and AMCL (a ROS 2 adapter maps to Nav2). Details:
 
 ## G1 locomotion
 
-![The official Unitree G1 walking a sustained curved path for 50 seconds in a robotics test bay](docs/media/unitree-g1-sustained-walk.gif)
+![The official Unitree G1 completing a backflip in native RoboSim/Rapier dynamics and landing on its feet](docs/media/unitree-g1-robosim-native-backflip.gif)
 
-*v0.3 long-horizon walk: the official G1 holds its feet for 50 s under a forward+turn command, upright throughout, walked curve drawn as a floor trail.*
+*A full backflip in native RoboSim/Rapier: 62.5 µs step, 21 convex body colliders with self-collision, bounded joint effort and gravity only — no imposed base trajectory, no root wrench, no RL. It lands on its feet and is still standing 15 s later. Peak joint speed is 1.039x the URDF rating, under the unchanged 1.05 gate.*
 
-Example 67 evaluates typed commands headlessly; example 68 adds a bounded
-heading candidate and the v0.3 sustained envelope (3000 ticks / 50 s, correct
-yaw-rate sign). A gait-schedule search found **no** upright sustained turn on
-the official contact schedule, so v0.3 is a stability claim, not a turning
-claim. Details: [docs/G1_LOCOMOTION.md](docs/G1_LOCOMOTION.md).
+The GIF replays a recorded native rollout — the renderer applies the recorded
+poses and takes zero physics ticks, and the model and recording hashes are
+checked before the first frame. The controller comes from a parameter search,
+not a learned policy. This is a simulator result; hardware is unvalidated.
+Details and the full evidence trail:
+[docs/G1_CONTACT_BACKFLIP.md](docs/G1_CONTACT_BACKFLIP.md).
+
+Walking is a separate and much weaker claim: example 67 evaluates typed
+commands headlessly and example 68 holds the [v0.3 sustained
+envelope](docs/media/unitree-g1-sustained-walk.gif) for 3000 ticks / 50 s. A
+gait-schedule search found **no** upright sustained turn on the official
+contact schedule, so v0.3 is a stability claim, not a turning claim. Details:
+[docs/G1_LOCOMOTION.md](docs/G1_LOCOMOTION.md).
 
 ## Quickstart
 
