@@ -165,33 +165,25 @@ lifts, 2 crossings, and an identical replan.
 ## Open
 
 - **Pressing the button with an arm.** Example 120 uses a driven fingertip, not
-  a manipulator. The standalone SO-101 scene cannot hold a commanded pose, for
-  reasons traced below; that is an arm-control problem, separate from the
-  button.
+  a manipulator. Two of the three reasons the SO-101 arm could not do it are now
+  understood and one is fixed; see
+  [ARM_POSITION_CONTROL.md](ARM_POSITION_CONTROL.md).
+
+  The shipped asset omitted `use_joint_origin_rpy`, so the arm was launched
+  11.7 km off its authored pose by the first physics step and every measurement
+  taken afterwards described a robot that had already been thrown. That is
+  fixed. The servo instability was a timestep bound, not a tuning problem: at
+  the default 60 Hz the held-pose error *grows* with stiffness, and the arm
+  needs at least 240 Hz.
 
   An earlier revision of this section reported that "all six joints read
-  0.000 rad against non-zero targets". **That reading was an artifact.**
-  `assets/robots/so101.rne.robot.toml` sets `articulation = true` but not
-  `multibody = true`, so its six joints are impulse joints rather than
-  reduced-coordinate ones, and impulse joints carry no `JointState` — which is
-  what `named_joint_position` reports. The joints were moving; the accessor had
-  nothing to read.
+  0.000 rad against non-zero targets" and read it as dead motors. That was an
+  artifact: `named_joint_position` reports `JointState`, which the impulse
+  joints in this scene do not carry. The joints were moving.
 
-  Setting `multibody = true` alone makes the scene produce NaN on the first
-  step, because SO-101 joints carry a non-identity origin `rpy` and the joint
-  frames must include it (`use_joint_origin_rpy = true`, as
-  `mm_mobile_so101.rne.robot.toml` does and documents). With both flags the
-  scene is stable and reports real joint angles.
-
-  What remains unexplained is tracking: with the asset corrected, a shoulder
-  commanded to 0.5 rad settles near 0.147 rad, and that residual does not
-  respond to stiffness (200-4000), to solver iterations (16, 32, 64, 128, 256 —
-  it plateaus), or to disabling self-collisions. So it is not a convergence
-  problem. The corrected asset is **not** committed: enabling the multibody path
-  also changes realized effort from an exact 1.0 N·m to 0.9723 N·m, which
-  `direct_effort_actuation_retains_ceiling_and_clamps_command` pins exactly, and
-  a change that weakens a pinned assertion without delivering a working arm is
-  not worth making.
+  What remains open is a residual of about 0.085 m that responds to neither
+  gain nor physics rate, which is recorded with its suspected cause in the
+  arm-control document.
 - **Being carried is not modelled.** `reacquire_floor` answers the question on
   arrival; nothing represents the ride itself, during which the robot's building
   pose is unknowable from its own sensors and its floor-frame pose is the only
