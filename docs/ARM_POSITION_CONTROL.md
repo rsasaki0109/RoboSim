@@ -185,6 +185,44 @@ Ground contact is ruled out: with the base lifted 1 m and the ground plane
 disabled, the gain sweep is 0.06456 / 0.06452 / 0.06363 m for no servo, k=20 and
 k=200.
 
+### A separate defect found along the way: every link weighs 1 kg
+
+The URDF declares 0.079 to 0.104 kg per link. The simulation uses exactly
+1.0000 kg for all of them — the `RigidBody` default, not a geometry-derived
+value:
+
+| link | declared | realized | ratio |
+| --- | ---: | ---: | ---: |
+| shoulder_link | 0.1000 kg | 1.0000 kg | 10.0x |
+| upper_arm_link | 0.1030 kg | 1.0000 kg | 9.7x |
+| lower_arm_link | 0.1040 kg | 1.0000 kg | 9.6x |
+| wrist_link | 0.0790 kg | 1.0000 kg | 12.7x |
+| gripper_link | 0.0870 kg | 1.0000 kg | 11.5x |
+
+The arm masses about 5 kg instead of 0.5 kg, which puts the shoulder's gravity
+load near 7 N·m against the 10 N·m ceiling these measurements used. That is a
+defect in its own right and worth fixing.
+
+It is **not** the explanation for the missing authority. Raising the ceiling
+well past the gravity load does not restore holding — it makes it worse:
+
+| effort ceiling | hold drift | commanded −1 rad moved |
+| ---: | ---: | ---: |
+| 10 N·m | 0.09560 m | 0.19794 m |
+| 50 N·m | 0.11918 m | 0.26496 m |
+| 200 N·m | 0.19684 m | 0.39218 m |
+| 1000 N·m | 0.22442 m | 0.28195 m |
+
+More authority produces more motion and worse holding, which is the signature
+this document already recorded at 60 Hz, now reappearing at 240 Hz once the
+effort ceiling stops clamping it.
+
+The obvious fix for the mass is `use_declared_inertial_masses = true`, and it
+cannot be applied as-is: the import fails with `invalid inertial properties for
+link gripper_frame_link`. That link declares a mass of 1e-9 kg and an all-zero
+inertia tensor, and `weld_fixed_children = true` does not fold it away before
+validation runs.
+
 **What is established:** joint actuation of any kind — position or effort —
 produces only marginal motion on the SO-101 scene, over gains spanning two
 orders of magnitude, rates spanning thirty-two, with and without ground
