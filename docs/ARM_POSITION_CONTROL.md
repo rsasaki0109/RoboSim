@@ -228,11 +228,39 @@ orders of magnitude, rates spanning thirty-two, with and without ground
 contact, and at both the wrong mass and the right one, while an identical call
 on a control arm improves the held pose by three orders of magnitude.
 
-**What is not established:** why. Five mechanisms have suggested themselves and
-all five have been measured and ruled out: a frame mismatch between the servo's
+**What is not established:** why. Six mechanisms have suggested themselves and
+all six have been measured and ruled out: a frame mismatch between the servo's
 target and the reading; the parent-frame-only joint-origin composition; ground
-contact; a saturating effort ceiling; and the ten-times-too-heavy links. The
-last of those was a real defect and is fixed, but it was not this one.
+contact; a saturating effort ceiling; the ten-times-too-heavy links; and the
+arm's own collision geometry. The mass was a real defect and is fixed, but it
+was not this one.
+
+### The arm has been resting on itself
+
+The sixth attempt found the control arm's one clear structural difference:
+SO-101 carries 34 mesh elements and `mm_minimal` carries none, so SO-101's
+collision geometry is 34 AABBs approximating meshes while the control's is
+primitives. Overlapping boxes on adjacent links would give the solver a
+permanent penetration to chew on, which could plausibly swamp a joint torque.
+
+Turning self-collision off makes the drift **worse**, not better, and leaves
+the servo exactly as ineffective:
+
+| | no servo | k=2 | k=20 |
+| --- | ---: | ---: | ---: |
+| self-collision on | 0.08888 | 0.09309 | 0.08794 |
+| self-collision off | 0.32985 | 0.32918 | 0.35325 |
+
+That refutes the mechanism and establishes something more useful about every
+other measurement in this document: **the 0.089 m figure is partly the arm
+jamming on its own colliders.** With them removed it falls three times as far.
+The SO-101 arm has not been holding a pose, resting in a gravity equilibrium,
+or being held by a servo — it has been propped up by its own approximated
+collision geometry.
+
+Note that removing the colliders entirely is not a usable comparison: every
+SO-101 collision element is a mesh, so `mesh_collisions = false` takes the arm
+out of physics altogether and it reads 0.00000 m of drift with no servo at all.
 
 A related usability problem is established: the shipped SO-101 scene cannot
 report its own joint angles at all. `named_joint_position` reads `JointState`,
