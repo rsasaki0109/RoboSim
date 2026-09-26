@@ -6,8 +6,8 @@ it is never itself evidence, and opening one cannot change a readiness result.
 Stars, forks, self-authored reference implementations, screenshots, and copied
 JSON reports do not satisfy an external-use gate.
 
-The current campaign accepts only [v0.3.0 official
-assets](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.3.0). Until that
+The current campaign accepts only [v0.4.0 official
+assets](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.4.0). Until that
 page contains the native archives and release-level `SHA256SUMS`, prepare the
 external repository and candidate files but do not open an evidence issue.
 The published v0.1.0 prerelease is not qualifying input.

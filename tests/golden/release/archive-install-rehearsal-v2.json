@@ -2,11 +2,11 @@
   "kind": "rne_archive_install_rehearsal",
   "schema_version": 2,
   "archive": {
-    "file": "rne-0.3.0-x86_64-pc-windows-msvc.zip",
+    "file": "rne-0.4.0-x86_64-pc-windows-msvc.zip",
     "size_bytes": 27,
     "sha256": "sha256:a584daf42486d7c87e4513fdcca9c58d2e2ec897774bafdbd43e6c0696c29979"
   },
-  "bundle_root": "rne-0.3.0-x86_64-pc-windows-msvc",
+  "bundle_root": "rne-0.4.0-x86_64-pc-windows-msvc",
   "release_report": {
     "path": "release-report.json",
     "size_bytes": 1451,
@@ -24,7 +24,7 @@
   },
   "rehearsal": {
     "schema_version": 7,
-    "release_version": "0.3.0",
+    "release_version": "0.4.0",
     "target": "x86_64-pc-windows-msvc",
     "status": "passed",
     "checks": [

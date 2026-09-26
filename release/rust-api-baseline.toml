@@ -1,7 +1,7 @@
 schema_version = 1
-release_version = "0.3.0"
-baseline_revision = "d0139576c232fed66d2f0b97ea7b01b0773b83b8"
-baseline_tree = "6269a96cdc26c3ddd6f22ad097e4c14af21600ae"
+release_version = "0.4.0"
+baseline_revision = "aa4aa7b46bcb3486042b346be6dfdd14b7cbcf6a"
+baseline_tree = "41e0c9db2aee1bc65c92804a3fd022984d8f1629"
 cargo_semver_checks_version = "0.49.0"
 
 [[package]]
@@ -15,6 +15,10 @@ manifest_path = "crates/rne_ai/Cargo.toml"
 [[package]]
 name = "rne_assets"
 manifest_path = "crates/rne_assets/Cargo.toml"
+
+[[package]]
+name = "rne_collision_bake"
+manifest_path = "crates/rne_collision_bake/Cargo.toml"
 
 [[package]]
 name = "rne_core"
@@ -135,6 +139,10 @@ manifest_path = "crates/rne_traffic/Cargo.toml"
 [[package]]
 name = "rne_urdf_import"
 manifest_path = "crates/rne_urdf_import/Cargo.toml"
+
+[[package]]
+name = "rne_usd"
+manifest_path = "crates/rne_usd/Cargo.toml"
 
 [[package]]
 name = "rne_world"

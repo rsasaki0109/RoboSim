@@ -89,8 +89,8 @@ RNE remains below 1.0 until outside projects reproduce tasks and pass the
 shipped conformance kits (native bundles include the tools; no source
 checkout needed).
 
-Only [v0.3.0 official
-assets](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.3.0) qualify;
+Only [v0.4.0 official
+assets](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.4.0) qualify;
 if that page lacks the native archives and `SHA256SUMS` yet, prepare the
 checklist but do not open an evidence issue (v0.1.0 does not qualify).
 

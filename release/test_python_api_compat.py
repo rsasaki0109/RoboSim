@@ -44,7 +44,7 @@ class PythonApiCompatibilityTests(unittest.TestCase):
 
     def test_mismatch_emits_a_bounded_failed_report(self) -> None:
         module = ModuleType("rne_py")
-        module.__version__ = "0.3.0"
+        module.__version__ = "0.4.0"
         module.VALUE = 7
 
         def hello() -> None:
