@@ -719,7 +719,7 @@ fn sync_from_ecs_state(
 
 fn sync_free_joint_from_ecs(
     data: &mut MjData<Box<MjModel>>,
-    entity: rne_ecs::Entity,
+    entity: Entity,
     joint_name: &str,
     world: &World,
 ) -> Result<(), MuJoCoError> {
@@ -771,7 +771,7 @@ fn sync_free_joint_from_ecs(
 
 fn sync_scalar_joint_from_ecs(
     data: &mut MjData<Box<MjModel>>,
-    entity: rne_ecs::Entity,
+    entity: Entity,
     joint_name: &str,
     actuator_name: &str,
     revolute: bool,
@@ -846,7 +846,7 @@ fn sync_scalar_joint_from_ecs(
 
 fn joint_control(
     world: &World,
-    entity: rne_ecs::Entity,
+    entity: Entity,
     revolute: bool,
     position: f64,
     velocity: f64,

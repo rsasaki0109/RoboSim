@@ -1519,7 +1519,100 @@ fn build_cross_backend_report(
         );
     }
 
-    let checks = vec![
+    let checks = tolerance_checks(rapier_seed, mujoco_seed, rapier_final, mujoco_final);
+    let outcomes = vec![
+        CrossBackendOutcome {
+            backend_id: "rapier_native",
+            status: if rapier_report.passed() && semantic_outcome_passed(rapier_final) {
+                "passed"
+            } else {
+                "failed"
+            },
+            steps: rapier_seed.steps,
+            sim_time_ticks: rapier_seed.sim_time_ticks,
+            final_state_digest: rapier_seed.final_state_digest,
+            behavior_report: "success.behavior-report.json".to_string(),
+            final_observation: rapier_final.clone(),
+        },
+        CrossBackendOutcome {
+            backend_id: "mujoco_native",
+            status: if mujoco_report.passed() && semantic_outcome_passed(mujoco_final) {
+                "passed"
+            } else {
+                "failed"
+            },
+            steps: mujoco_seed.steps,
+            sim_time_ticks: mujoco_seed.sim_time_ticks,
+            final_state_digest: mujoco_seed.final_state_digest,
+            behavior_report: "mujoco-success.behavior-report.json".to_string(),
+            final_observation: mujoco_final.clone(),
+        },
+    ];
+    let (failure_checks, failure_inputs_and_contracts_match, intentional_failures) =
+        failure_comparison(
+            rapier_failure,
+            &mujoco_failure,
+            rapier_matched_replay_frames,
+            mujoco_matched_replay_frames,
+        );
+    let passed = outcomes.iter().all(|outcome| outcome.status == "passed")
+        && checks.iter().all(|check| check.status == "passed")
+        && failure_inputs_and_contracts_match
+        && failure_checks.iter().all(|check| check.status == "passed");
+    let task_spec = flagship_task_spec(fixed_delta_ticks);
+    let task_spec_digest = stable_behavior_digest(&serde_json::to_vec(&task_spec)?);
+    Ok(CrossBackendEvidence {
+        report: CrossBackendReport {
+            schema_version: FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION,
+            kind: FLAGSHIP_CROSS_BACKEND_REPORT_KIND,
+            status: if passed { "passed" } else { "failed" },
+            scenario: SCENARIO,
+            seed: SEED,
+            task_id: TASK_ID,
+            task_spec: "flagship.task.json",
+            task_spec_digest,
+            controller_id: CONTROLLER_ID,
+            controller_contract: "identical_controller_type_and_configuration_per_backend",
+            fixed_delta_ticks,
+            comparison_contract: "semantic_outcome_and_named_si_tolerances",
+            exact_outcomes: vec![
+                "all_behavior_contracts_passed",
+                "inspection_completed",
+                "traffic_cleared_without_collision_or_signal_violation",
+                "payload_grasped_once",
+                "pick_place_completed",
+                "terminated_without_truncation_or_fail_closed_abort",
+            ],
+            state_digest_contract: "backend_specific_not_compared",
+            backends: outcomes,
+            tolerance_checks: checks,
+            failure_exact_outcomes: vec![
+                "same_seed_and_minimized_fault_dimensions",
+                "same_expected_contract",
+                "same_first_violation_step",
+                "same_first_violation_sim_time",
+                "both_failure_replays_verified",
+            ],
+            intentional_failures,
+            failure_tolerance_checks: failure_checks,
+        },
+        mujoco_success_report: mujoco_report.clone(),
+        rapier_failure_report: rapier_failure_report.clone(),
+        mujoco_failure_report: mujoco_failure_report.clone(),
+        mujoco_failure_replay: mujoco_failure,
+    })
+}
+
+#[cfg(feature = "mujoco")]
+/// Compares the two backends' final states against the named SI tolerances the
+/// cross-backend contract declares.
+fn tolerance_checks(
+    rapier_seed: &rne_ai::BehaviorSeedReport,
+    mujoco_seed: &rne_ai::BehaviorSeedReport,
+    rapier_final: &FlagshipObservation,
+    mujoco_final: &FlagshipObservation,
+) -> Vec<CrossBackendCheck> {
+    vec![
         comparison_check(
             "completion_step_delta",
             "completion step",
@@ -1594,35 +1687,22 @@ fn build_cross_backend_report(
             (rapier_final.total_reward - mujoco_final.total_reward).abs(),
             REWARD_DELTA_MAX,
         ),
-    ];
-    let outcomes = vec![
-        CrossBackendOutcome {
-            backend_id: "rapier_native",
-            status: if rapier_report.passed() && semantic_outcome_passed(rapier_final) {
-                "passed"
-            } else {
-                "failed"
-            },
-            steps: rapier_seed.steps,
-            sim_time_ticks: rapier_seed.sim_time_ticks,
-            final_state_digest: rapier_seed.final_state_digest,
-            behavior_report: "success.behavior-report.json".to_string(),
-            final_observation: rapier_final.clone(),
-        },
-        CrossBackendOutcome {
-            backend_id: "mujoco_native",
-            status: if mujoco_report.passed() && semantic_outcome_passed(mujoco_final) {
-                "passed"
-            } else {
-                "failed"
-            },
-            steps: mujoco_seed.steps,
-            sim_time_ticks: mujoco_seed.sim_time_ticks,
-            final_state_digest: mujoco_seed.final_state_digest,
-            behavior_report: "mujoco-success.behavior-report.json".to_string(),
-            final_observation: mujoco_final.clone(),
-        },
-    ];
+    ]
+}
+
+#[cfg(feature = "mujoco")]
+/// Compares the two backends' intentional failures: the same seed and minimized
+/// dimensions must reach the same contract violation at the same step and time.
+fn failure_comparison(
+    rapier_failure: &BehaviorReplayArtifact,
+    mujoco_failure: &BehaviorReplayArtifact,
+    rapier_matched_replay_frames: usize,
+    mujoco_matched_replay_frames: usize,
+) -> (
+    Vec<CrossBackendCheck>,
+    bool,
+    Vec<CrossBackendFailureOutcome>,
+) {
     let rapier_violation = &rapier_failure.failure.violation;
     let mujoco_violation = &mujoco_failure.failure.violation;
     let failure_checks = vec![
@@ -1681,52 +1761,11 @@ fn build_cross_backend_report(
             replay: "mujoco-failure.rne-replay".to_string(),
         },
     ];
-    let passed = outcomes.iter().all(|outcome| outcome.status == "passed")
-        && checks.iter().all(|check| check.status == "passed")
-        && failure_inputs_and_contracts_match
-        && failure_checks.iter().all(|check| check.status == "passed");
-    let task_spec = flagship_task_spec(fixed_delta_ticks);
-    let task_spec_digest = stable_behavior_digest(&serde_json::to_vec(&task_spec)?);
-    Ok(CrossBackendEvidence {
-        report: CrossBackendReport {
-            schema_version: FLAGSHIP_CROSS_BACKEND_REPORT_SCHEMA_VERSION,
-            kind: FLAGSHIP_CROSS_BACKEND_REPORT_KIND,
-            status: if passed { "passed" } else { "failed" },
-            scenario: SCENARIO,
-            seed: SEED,
-            task_id: TASK_ID,
-            task_spec: "flagship.task.json",
-            task_spec_digest,
-            controller_id: CONTROLLER_ID,
-            controller_contract: "identical_controller_type_and_configuration_per_backend",
-            fixed_delta_ticks,
-            comparison_contract: "semantic_outcome_and_named_si_tolerances",
-            exact_outcomes: vec![
-                "all_behavior_contracts_passed",
-                "inspection_completed",
-                "traffic_cleared_without_collision_or_signal_violation",
-                "payload_grasped_once",
-                "pick_place_completed",
-                "terminated_without_truncation_or_fail_closed_abort",
-            ],
-            state_digest_contract: "backend_specific_not_compared",
-            backends: outcomes,
-            tolerance_checks: checks,
-            failure_exact_outcomes: vec![
-                "same_seed_and_minimized_fault_dimensions",
-                "same_expected_contract",
-                "same_first_violation_step",
-                "same_first_violation_sim_time",
-                "both_failure_replays_verified",
-            ],
-            intentional_failures,
-            failure_tolerance_checks: failure_checks,
-        },
-        mujoco_success_report: mujoco_report.clone(),
-        rapier_failure_report: rapier_failure_report.clone(),
-        mujoco_failure_report: mujoco_failure_report.clone(),
-        mujoco_failure_replay: mujoco_failure,
-    })
+    (
+        failure_checks,
+        failure_inputs_and_contracts_match,
+        intentional_failures,
+    )
 }
 
 #[cfg(feature = "mujoco")]
