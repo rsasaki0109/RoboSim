@@ -19,6 +19,7 @@ rne_core = { workspace = true }
 rne_data = { workspace = true }
 rne_ecs = { workspace = true }
 rne_math = { workspace = true }
+rne_nav = { workspace = true }
 rne_plateau = { workspace = true }
 rne_physics = { workspace = true }
 rne_physics_mujoco = { workspace = true, optional = true }
