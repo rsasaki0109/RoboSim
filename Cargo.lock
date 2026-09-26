@@ -2630,6 +2630,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "multi_floor_media"
+version = "0.4.0"
+dependencies = [
+ "png",
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "rne_nav",
+ "rne_physics",
+ "rne_physics_rapier",
+ "rne_render",
+ "rne_render_wgpu",
+ "rne_world",
+]
+
+[[package]]
 name = "multi_floor_mission"
 version = "0.4.0"
 dependencies = [

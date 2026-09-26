@@ -1,0 +1,26 @@
+[package]
+name = "multi_floor_media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+png = { workspace = true }
+rne_core = { workspace = true }
+rne_ecs = { workspace = true }
+rne_math = { workspace = true }
+rne_nav = { workspace = true }
+rne_physics = { workspace = true }
+rne_physics_rapier = { workspace = true }
+rne_render = { workspace = true }
+rne_render_wgpu = { workspace = true, features = ["viewer"] }
+rne_world = { workspace = true }
+
+[[example]]
+name = "122_multi_floor_media"
+path = "main.rs"
