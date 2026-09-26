@@ -35,6 +35,45 @@ Two deliberate choices:
 Expansion is in cost order with ties broken by node index, so the same building
 and endpoints always replan identically.
 
+### Buildings are data
+
+A building built in code cannot be shared, reviewed, or swapped without a
+recompile. `BuildingDescription` gives it a versioned `.rne.building` file:
+which floors exist, where their maps live, and how a robot crosses between
+them.
+
+```json
+{
+  "format": "rne.building",
+  "version": 1,
+  "name": "office three floor",
+  "floors": [
+    { "id": 0, "name": "1F", "elevation_m": 0.0, "map": "1f.rne.map", "inflation_radius_m": 0.2 }
+  ],
+  "transitions": [
+    { "name": "far lift", "kind": "Elevator", "from": 0, "to": 1,
+      "from_point_m": [10.0, 10.0, 0.0], "to_point_m": [10.0, 10.0, 0.0],
+      "cost_s": 20.0, "bidirectional": true }
+  ]
+}
+```
+
+Three decisions worth naming:
+
+- **Floors reference their maps by path rather than embedding them**, so a
+  building file stays readable and the maps remain ordinary `.rne.map` files
+  that the SLAM and navigation tools already produce. Paths resolve against the
+  building file's own directory, so a site directory can be copied whole.
+- **Inflation is part of the description, not a caller default.** Two robots
+  with different footprints need different inflation over the same map, and a
+  building that silently picked one would plan routes the other cannot drive.
+- **Load-time validation is the same validation planning uses.** A transition
+  whose endpoint falls outside its floor fails when the file is loaded, naming
+  the floor, rather than surfacing later as an unexplained routing failure.
+
+`assets/buildings/office_three_floor/` is a committed example; example 120
+loads it, and `--emit-site` regenerates it.
+
 ### A freshly created grid is unknown, not free
 
 An `OccupancyGrid` that has never been observed is entirely *unknown*, and the
@@ -126,12 +165,33 @@ lifts, 2 crossings, and an identical replan.
 ## Open
 
 - **Pressing the button with an arm.** Example 120 uses a driven fingertip, not
-  a manipulator. The SO-101 arm is currently unusable for this: at the default
-  solver iteration count its articulation diverges (gripper drift up to 1.30 m
-  while holding a fixed target), and at 32 iterations it is stable
-  (0.0013 m drift) but the position motors do not move it — all six joints read
-  0.000 rad against non-zero targets. That is an arm-control defect, separate
-  from the button.
+  a manipulator. The standalone SO-101 scene cannot hold a commanded pose, for
+  reasons traced below; that is an arm-control problem, separate from the
+  button.
+
+  An earlier revision of this section reported that "all six joints read
+  0.000 rad against non-zero targets". **That reading was an artifact.**
+  `assets/robots/so101.rne.robot.toml` sets `articulation = true` but not
+  `multibody = true`, so its six joints are impulse joints rather than
+  reduced-coordinate ones, and impulse joints carry no `JointState` — which is
+  what `named_joint_position` reports. The joints were moving; the accessor had
+  nothing to read.
+
+  Setting `multibody = true` alone makes the scene produce NaN on the first
+  step, because SO-101 joints carry a non-identity origin `rpy` and the joint
+  frames must include it (`use_joint_origin_rpy = true`, as
+  `mm_mobile_so101.rne.robot.toml` does and documents). With both flags the
+  scene is stable and reports real joint angles.
+
+  What remains unexplained is tracking: with the asset corrected, a shoulder
+  commanded to 0.5 rad settles near 0.147 rad, and that residual does not
+  respond to stiffness (200-4000), to solver iterations (16, 32, 64, 128, 256 —
+  it plateaus), or to disabling self-collisions. So it is not a convergence
+  problem. The corrected asset is **not** committed: enabling the multibody path
+  also changes realized effort from an exact 1.0 N·m to 0.9723 N·m, which
+  `direct_effort_actuation_retains_ceiling_and_clamps_command` pins exactly, and
+  a change that weakens a pinned assertion without delivering a working arm is
+  not worth making.
 - **Floor transitions in scene assets.** Buildings are constructed in code;
   there is no `.rne.scene.toml` representation of floors or transitions yet.
 - **Localization across floors.** A robot in a moving lift is in a featureless

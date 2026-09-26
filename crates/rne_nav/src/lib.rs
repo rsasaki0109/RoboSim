@@ -20,6 +20,7 @@
 pub mod avoidance;
 pub mod behavior_tree;
 pub mod building;
+pub mod building_io;
 pub mod call_button;
 pub mod components;
 pub mod control;
@@ -53,6 +54,10 @@ pub use behavior_tree::{Action, BtContext, BtNode, BtStatus, Condition, Selector
 pub use building::{
     plan_building_route, BuildingError, BuildingMap, BuildingRoute, Floor, FloorId, FloorPosition,
     FloorTransition, RouteCosts, RouteLeg, TransitionKind,
+};
+pub use building_io::{
+    BuildingDescription, BuildingIoError, FloorEntry, TransitionEntry, RNE_BUILDING_FORMAT,
+    RNE_BUILDING_VERSION,
 };
 pub use call_button::{
     ButtonContact, CallButton, CallButtonError, CallButtonSpec, CallButtonState,
