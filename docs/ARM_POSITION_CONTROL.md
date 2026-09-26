@@ -119,12 +119,52 @@ The error accumulating monotonically down the chain is a consequence of each
 joint being free, not a per-joint servo droop: link displacement sums the
 angular error of every joint above it.
 
+### It is specific to this arm, and not to the rate
+
+`mm_minimal` is the control: a two-joint arm whose URDF joint origins are all
+identity. Same API, same gains, same rates. Worst link displacement after 1200
+control steps:
+
+| | no servo | k=20 | k=200 | k=2000 |
+| --- | ---: | ---: | ---: | ---: |
+| **so101** @ 240 Hz | 0.08888 | 0.08794 | 0.09560 | 0.09367 |
+| **so101** @ 960 Hz | 0.08173 | 0.08439 | 0.08512 | 0.08420 |
+| **so101** @ 1920 Hz | 0.08231 | 0.08218 | 0.08185 | 0.08221 |
+| mm_minimal @ 240 Hz | 0.23367 | **0.00041** | 0.00033 | 0.00032 |
+| mm_minimal @ 960 Hz | 0.99436 | **0.00033** | 0.00005 | 0.00002 |
+
+On `mm_minimal` the servo improves the held pose by three orders of magnitude.
+On SO-101 no cell differs from the no-servo column at any rate up to 1920 Hz.
+So this is neither a gain problem, nor a timestep problem, nor a problem with
+the actuation path in general.
+
+### Two hypotheses tried and refuted
+
+The first was that the servo held a different angle from the one measured. The
+settled-angle table above refutes it: the configured target is 0 rad and the
+joint is as far as 1.5 rad from it.
+
+The second was the obvious code-level suspect. Joint wiring composes the
+authored joint-origin rotation into the parent frame only:
+
+```rust
+joint.data.local_frame1.rotation =
+    quat_to_rapier(desc.relative_rotation) * joint.data.local_frame1.rotation;
+```
+
+SO-101 is the robot with non-identity origins and `mm_minimal` is not, so this
+looked like the difference. It is not: `position_servo_follows_rotated_joint_origin`
+in `rne_physics_rapier` drives a single revolute joint to 0.4 rad with a
+90-degree joint origin and reaches it, exactly as it does with an identity
+origin. That test is new — the path had coverage for direct effort under a
+rotated origin but not for a position servo — and it passes.
+
 **What is established:** the unit-explicit position actuation path produces no
-usable torque on this scene, over gains spanning two orders of magnitude and
-rates spanning sixteen. **What is not established:** why. An earlier revision of
-this document proposed that the servo was holding a different angle from the one
-being measured; the table above refutes that — the configured target is 0 and
-the servo neither reaches nor defends it.
+usable torque on the SO-101 scene, over gains spanning two orders of magnitude
+and rates spanning thirty-two, while producing three orders of magnitude of
+improvement on a control arm under identical conditions. **What is not
+established:** why. The two mechanisms that suggested themselves have been
+measured and ruled out.
 
 A related usability problem is established: the shipped SO-101 scene cannot
 report its own joint angles at all. `named_joint_position` reads `JointState`,
