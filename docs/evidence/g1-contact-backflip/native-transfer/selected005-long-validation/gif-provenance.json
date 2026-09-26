@@ -7,6 +7,6 @@
   "gif_duration_ms": 15210,
   "source_physics_frame_count": 1600,
   "rendering_physics_ticks": 0,
-  "producer_source_commit": "a5343fa25e8fad062ae72d476eeb8a97d2d67320",
+  "producer_source_commit": "de8c686d80a7cc1f353021a3ea56529b93d8df08",
   "previous_diagnostic_git_commit": "021d40d4c39105c824c7339b0c9d713a775024e8"
 }
