@@ -4885,6 +4885,7 @@ dependencies = [
  "rne_data",
  "rne_ecs",
  "rne_math",
+ "rne_nav",
  "rne_physics",
  "rne_physics_mujoco",
  "rne_plateau",

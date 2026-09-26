@@ -111,7 +111,13 @@ in-repo reference implementations do not count as independent evidence.
 
 ## Navigation, SLAM, and multi-robot
 
-![Mobile AGV driving a planned route to a docking goal, driven trajectory trailing behind](docs/media/showcase-nav.gif)
+![Office AGV following a planned route around the dock and desk, with the costmap inflation it was charged for drawn on the floor](docs/media/showcase-nav.gif)
+
+*The magenta route is what `plan_path` returned over the corridor's own
+collision geometry, and the amber band is the costmap inflation that pushed it
+off the centre line: the dock and the desk stand in a 2.3 m corridor, so the
+6.63 m plan swings 0.82 m wide where a straight line would be 5.95 m and
+impassable.*
 
 `rne_nav`/`rne_slam`: deterministic, ROS-free costmaps, a transform tree,
 A*/DWA/pure-pursuit, multi-robot avoidance, an EKF, 3D ICP, and online 2D
