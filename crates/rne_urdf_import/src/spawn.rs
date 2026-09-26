@@ -479,6 +479,12 @@ fn attach_link_geometry(
     Ok(counts)
 }
 
+/// Declared mass at or below which a degenerate inertia tensor reads as a
+/// frame marker rather than as broken data, in kilograms.
+///
+/// A milligram. No link a caller intends to simulate weighs less.
+const FRAME_MARKER_MASS_KG: f64 = 1.0e-6;
+
 fn exact_link_inertia(
     link_name: &str,
     source: Option<&UrdfInertial>,
@@ -523,7 +529,26 @@ fn exact_link_inertia(
         iyz_kg_m2: rotated[1][2],
         izz_kg_m2: rotated[2][2],
     };
-    if !inertia.is_valid() || !source.mass_kg.is_finite() || source.mass_kg <= 0.0 {
+    if !source.mass_kg.is_finite() || source.mass_kg <= 0.0 {
+        return Err(UrdfSpawnError::InvalidGraph(format!(
+            "invalid inertial properties for link {link_name}"
+        )));
+    }
+    if !inertia.is_valid() {
+        // A frame marker, not a body. CAD exporters emit a link with a
+        // placeholder mass and an all-zero inertia tensor wherever the model
+        // needs a named coordinate frame -- SO-101's `gripper_frame_link`
+        // declares 1e-9 kg and zeros. A zero tensor is not inertial data, so
+        // it is treated as absent rather than as a reason to refuse the whole
+        // robot: the link falls back to the same derived inertia it would get
+        // if the asset had not opted into declared inertials at all.
+        //
+        // Deliberately narrow. A link carrying real mass with a malformed
+        // tensor is a broken model and still fails, because that is data the
+        // caller meant and got wrong.
+        if source.mass_kg <= FRAME_MARKER_MASS_KG {
+            return Ok(None);
+        }
         return Err(UrdfSpawnError::InvalidGraph(format!(
             "invalid inertial properties for link {link_name}"
         )));
@@ -781,6 +806,67 @@ mod tests {
         assert!((inertia.ixx_kg_m2 - 2.0).abs() < 1.0e-12);
         assert!((inertia.iyy_kg_m2 - 1.0).abs() < 1.0e-12);
         assert!((inertia.izz_kg_m2 - 3.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn a_massless_frame_marker_does_not_block_declared_inertials() {
+        // SO-101's `gripper_frame_link` is this: 1e-9 kg and an all-zero
+        // inertia tensor, emitted by the CAD exporter wherever the model needs
+        // a named coordinate frame. Refusing the whole robot over it meant
+        // every other link kept the 1 kg default instead of its declared mass.
+        let document = parse_urdf_document(
+            r#"
+            <robot name="framed">
+              <link name="base_link">
+                <inertial>
+                  <mass value="0.103"/>
+                  <inertia ixx="1e-4" ixy="0" ixz="0" iyy="2e-4" iyz="0" izz="3e-4"/>
+                </inertial>
+                <collision><geometry><box size="0.1 0.1 0.1"/></geometry></collision>
+              </link>
+              <link name="frame_link">
+                <inertial>
+                  <mass value="1e-9"/>
+                  <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+                </inertial>
+              </link>
+              <joint name="frame_joint" type="fixed">
+                <parent link="base_link"/>
+                <child link="frame_link"/>
+                <origin xyz="0 0 0.1" rpy="0 0 0"/>
+              </joint>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        let mut world = World::new();
+        let spawned = spawn_urdf_document_with_config(
+            &mut world,
+            &document,
+            UrdfSpawnConfig {
+                use_declared_inertial_masses: true,
+                ..UrdfSpawnConfig::default()
+            },
+        )
+        .unwrap();
+        // The real link keeps its declared mass rather than the 1 kg default.
+        assert!(
+            (world
+                .get::<RigidBody>(spawned.base_link)
+                .expect("base rigid body")
+                .mass_kg
+                - 0.103)
+                .abs()
+                < 1.0e-12
+        );
+        // The marker carries no exact inertia: a zero tensor is not data.
+        let marker = spawned
+            .links
+            .iter()
+            .find(|(name, _)| name.as_str() == "frame_link")
+            .map(|(_, entity)| *entity)
+            .expect("frame link spawned");
+        assert!(world.get::<RigidBodyInertia>(marker).is_none());
     }
 
     #[test]
