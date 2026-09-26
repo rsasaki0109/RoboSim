@@ -15,13 +15,15 @@ mod structural_contact;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{build_visual_render_scene, unitree_g1_dynamic_scene_path, UrdfSceneSim};
 use rne_dynamics::ArticulatedModel;
 use rne_math::{Quat, Transform3 as MathTransform, Vec3};
 use rne_render::{
-    Camera, MeshRenderCache, RenderBackend, RenderScene, RenderSceneItem, VisualShape,
+    Camera, ImageFrame, MeshRenderCache, PbrMaterial, RenderBackend, RenderScene, RenderSceneItem,
+    TriangleMesh, VisualShape,
 };
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 use rne_robot::{FloatingBase, Robot};
@@ -32,7 +34,7 @@ const PANEL_WIDTH: u32 = 720;
 const PANEL_HEIGHT: u32 = 720;
 const FRAME_COUNT: usize = 112;
 const FPS: f64 = 14.0;
-const CLEAR_COLOR: [f32; 4] = [0.04, 0.055, 0.08, 1.0];
+const CLEAR_COLOR: [f32; 4] = [0.07, 0.085, 0.11, 1.0];
 
 fn to_math(transform: Transform3) -> MathTransform {
     MathTransform {
@@ -327,15 +329,15 @@ fn render_panel(
     scene
         .items
         .retain(|item| !matches!(item.shape, VisualShape::Box { .. }));
-    append_checker_floor(&mut scene, 0.0, 0.0, 0.25);
+    append_backdrop(&mut scene);
     mesh_cache
         .resolve_scene(&mut scene, mesh_root_refs)
         .expect("resolve official G1 meshes");
     // Side view so the sagittal flip is fully visible.
     let orbit = CameraOrbit {
         focus: Vec3::new(-0.55, 0.7, 0.0),
-        yaw_rad: 0.10,
-        pitch_rad: 1.45,
+        yaw_rad: 0.0,
+        pitch_rad: 1.30,
         distance_m: 3.0,
     };
     let output = backend
@@ -344,33 +346,149 @@ fn render_panel(
     output.color.rgba8
 }
 
-fn append_checker_floor(scene: &mut RenderScene, center_x_m: f64, center_z_m: f64, tile_m: f64) {
-    let snap = |value: f64| (value / (2.0 * tile_m)).floor() * 2.0 * tile_m;
-    for row in -10..=10 {
-        for column in -10..=10 {
-            let color = if (row + column) & 1 == 0 {
-                [0.11, 0.15, 0.21, 1.0]
-            } else {
-                [0.055, 0.075, 0.11, 1.0]
-            };
-            scene.items.push(RenderSceneItem {
-                transform: MathTransform {
-                    translation: Vec3::new(
-                        snap(center_x_m) + column as f64 * tile_m,
-                        -0.008,
-                        snap(center_z_m) + row as f64 * tile_m,
-                    ),
-                    rotation: Quat::IDENTITY,
-                    scale: Vec3::new(tile_m * 0.96, 0.008, tile_m * 0.96),
-                },
-                shape: VisualShape::Box { size_m: Vec3::ONE },
-                color_rgba: color,
-                mesh: None,
-                base_color_texture: None,
-                material: Default::default(),
-            });
+/// Loads a PBR texture used by the test-bay floor.
+fn load_texture(path: &Path) -> Arc<ImageFrame> {
+    let rgba = image::open(path)
+        .unwrap_or_else(|error| panic!("load render texture {}: {error}", path.display()))
+        .into_rgba8();
+    Arc::new(ImageFrame::from_rgba8(
+        rgba.width(),
+        rgba.height(),
+        rgba.into_raw(),
+    ))
+}
+
+/// The surfaces the flip is read against.
+struct Backdrop {
+    floor: Arc<ImageFrame>,
+    floor_normal: Arc<ImageFrame>,
+    floor_roughness: Arc<ImageFrame>,
+}
+
+/// Loads the backdrop once; every frame draws the same three textures.
+fn backdrop() -> &'static Backdrop {
+    static BACKDROP: OnceLock<Backdrop> = OnceLock::new();
+    BACKDROP.get_or_init(|| {
+        let assets = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("examples directory")
+            .join("63_g1_stride_gif/assets/photoreal_test_bay");
+        Backdrop {
+            floor: load_texture(&assets.join("concrete_floor_basecolor.png")),
+            floor_normal: load_texture(&assets.join("concrete_floor_normal.png")),
+            floor_roughness: load_texture(&assets.join("concrete_floor_roughness.png")),
         }
+    })
+}
+
+/// Draws the concrete floor and the wall behind the robot.
+///
+/// The checkerboard this replaces was 441 small boxes: high-frequency noise
+/// that competed with the figure for attention, and a floor the eye could not
+/// judge height against because every tile looked like every other tile. One
+/// textured slab reads as a floor, and a wall gives the flip a horizon to
+/// rotate against instead of an empty void.
+fn append_backdrop(scene: &mut RenderScene) {
+    const FOOTPRINT_M: Vec3 = Vec3::new(9.0, 0.0, 7.0);
+    const WALL: [f32; 4] = [0.085, 0.10, 0.135, 1.0];
+    const WALL_PANEL: [f32; 4] = [0.13, 0.16, 0.21, 1.0];
+    const SAFETY_YELLOW: [f32; 4] = [0.72, 0.62, 0.22, 1.0];
+    const BASEBOARD: [f32; 4] = [0.26, 0.31, 0.39, 1.0];
+
+    let backdrop = backdrop();
+    let half_x = (FOOTPRINT_M.x * 0.5) as f32;
+    let half_z = (FOOTPRINT_M.z * 0.5) as f32;
+    let repeat_x = (FOOTPRINT_M.x / 1.5) as f32;
+    let repeat_z = (FOOTPRINT_M.z / 1.5) as f32;
+    let mesh = TriangleMesh {
+        positions: vec![
+            [-half_x, 0.0, -half_z],
+            [half_x, 0.0, -half_z],
+            [half_x, 0.0, half_z],
+            [-half_x, 0.0, half_z],
+        ],
+        normals: vec![[0.0, 1.0, 0.0]; 4],
+        texcoords: vec![
+            [0.0, 0.0],
+            [repeat_x, 0.0],
+            [repeat_x, repeat_z],
+            [0.0, repeat_z],
+        ],
+        indices: vec![0, 1, 2, 0, 2, 3],
+        skinning: None,
+    };
+    scene.items.push(RenderSceneItem {
+        transform: MathTransform {
+            translation: Vec3::new(-0.55, -0.004, 0.0),
+            rotation: Quat::IDENTITY,
+            scale: Vec3::ONE,
+        },
+        shape: VisualShape::DynamicMesh,
+        color_rgba: [1.0; 4],
+        mesh: Some(Arc::new(mesh)),
+        base_color_texture: Some(Arc::clone(&backdrop.floor)),
+        material: PbrMaterial::new([1.0; 4], 0.9, 0.0, [0.0; 3]).with_texture_maps(
+            Some(Arc::clone(&backdrop.floor_normal)),
+            Some(Arc::clone(&backdrop.floor_roughness)),
+        ),
+    });
+
+    // The wall sits behind the robot along the camera's view axis. The flip is
+    // a rotation, and a rotation needs a static reference to be read against.
+    push_backdrop_box(
+        scene,
+        Vec3::new(-0.55, 1.6, -2.6),
+        Vec3::new(9.0, 3.2, 0.12),
+        WALL,
+    );
+    // Recessed panels and a floor-level kick strip give the wall a scale the
+    // eye can measure the robot's apex against.
+    for x_offset in [-3.0, -1.5, 0.0, 1.5, 3.0] {
+        push_backdrop_box(
+            scene,
+            Vec3::new(-0.55 + x_offset, 1.75, -2.53),
+            Vec3::new(1.15, 2.1, 0.02),
+            WALL_PANEL,
+        );
     }
+    // A baseboard where the wall meets the floor. Without it the two surfaces
+    // are the same value from this angle and the room reads as one flat card.
+    push_backdrop_box(
+        scene,
+        Vec3::new(-0.55, 0.055, -2.5),
+        Vec3::new(9.0, 0.11, 0.06),
+        BASEBOARD,
+    );
+    // A landing lane on the floor: the flip travels backwards, and a marked
+    // lane makes how far it travelled legible without a caption.
+    for z_offset in [-0.55, 0.55] {
+        push_backdrop_box(
+            scene,
+            Vec3::new(-0.55, 0.003, z_offset),
+            Vec3::new(4.2, 0.006, 0.035),
+            SAFETY_YELLOW,
+        );
+    }
+}
+
+fn push_backdrop_box(
+    scene: &mut RenderScene,
+    translation: Vec3,
+    size_m: Vec3,
+    color_rgba: [f32; 4],
+) {
+    scene.items.push(RenderSceneItem {
+        transform: MathTransform {
+            translation,
+            rotation: Quat::IDENTITY,
+            scale: size_m,
+        },
+        shape: VisualShape::Box { size_m: Vec3::ONE },
+        color_rgba,
+        mesh: None,
+        base_color_texture: None,
+        material: Default::default(),
+    });
 }
 
 fn run_smoke() {
