@@ -9,6 +9,7 @@ pub mod depth;
 pub mod environment;
 pub mod gaussian_splat;
 pub mod gaussian_splat_validation;
+pub mod grid_mesh;
 pub mod headless;
 pub mod image;
 pub mod lidar;
@@ -42,6 +43,7 @@ pub use gaussian_splat_validation::{
     GaussianSplatObservationMetrics, GaussianSplatObservationTolerances,
     GaussianSplatValidationAudit, GaussianSplatValidationError,
 };
+pub use grid_mesh::{grid_mesh, GridMeshSpec};
 pub use headless::HeadlessRenderBackend;
 pub use image::{hash_rgba8, ImageFrame, RenderTarget};
 pub use material::PbrMaterial;
