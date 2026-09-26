@@ -8,10 +8,10 @@
     "scenario": "OpenArm v2 bimanual pick / relay / place under delayed joint-feedback and portable PD-effort control",
     "steps": 1400,
     "initial_state_digest": 12400570697989891035,
-    "final_state_digest": 13258032841384518884,
-    "replay_final_state_digest": 13258032841384518884,
+    "final_state_digest": 4762126441418038385,
+    "replay_final_state_digest": 4762126441418038385,
     "replay_match": true,
-    "outcome": "actuators=18; typed_feedback_decisions=1398; sensor_samples=1400; feedback_latency_ticks=16666666; max_tracking_error_rad=1.49274; saturated_channel_samples=12556; left_ee_travel_m=0.4334; right_ee_travel_m=0.5237; left_gripper_aperture_change_m=0.0592; right_gripper_aperture_change_m=0.0591; max_final_proximal_joint_error_rad=0.09126; visual_mesh_parts=59; contact_gated_pick_grasp_step=281; contact_gated_relay_regrasp_step=867; block_released_to_dynamics=true"
+    "outcome": "actuators=18; typed_feedback_decisions=1398; sensor_samples=1400; feedback_latency_ticks=16666666; max_tracking_error_rad=1.49274; saturated_channel_samples=12555; left_ee_travel_m=0.4334; right_ee_travel_m=0.5237; left_gripper_aperture_change_m=0.0592; right_gripper_aperture_change_m=0.0591; max_final_proximal_joint_error_rad=0.09126; visual_mesh_parts=59; contact_gated_pick_grasp_step=281; contact_gated_relay_regrasp_step=867; block_released_to_dynamics=true"
   },
   "capture": {
     "gpu_rendered": true,
@@ -20,11 +20,11 @@
     "frame_count": 38,
     "frame_pattern": "target/rne-showcase-openarm/frame-%03d.png",
     "gif_path": "docs/media/showcase-openarm.gif",
-    "gif_bytes": 2341410,
-    "gif_sha256": "2cfd7a6e879f6e89b2ac2281fec20371030185d4ef280a8af99fa9ab163a0c4d",
+    "gif_bytes": 2285431,
+    "gif_sha256": "be1741a206c2e94657c9b711c2813b3c12ae8d3e91a406fbccd873e2ddf5bd1e",
     "poster_path": "docs/media/showcase-openarm.png",
-    "poster_bytes": 53829,
-    "poster_sha256": "b4e7487a54588638dec91413f73a48d93d688a78f768c599ede1eeb1be8b1fc7",
+    "poster_bytes": 45663,
+    "poster_sha256": "71f11adb0f86585ae4d4ef192be8057db939564aa5306cd5a4f1393a353e28c5",
     "poster_frame": 22,
     "sampled_sim_steps": [
       36,
@@ -113,8 +113,8 @@
   "camera": {
     "fov_y_rad": 0.7853981633974483,
     "yaw_rad": 0.85,
-    "pitch_rad": 0.75,
-    "distance_m": 1.05
+    "pitch_rad": 1.08,
+    "distance_m": 1.26
   },
   "provenance": [
     "assets/robots/openarm_description/PROVENANCE.md",

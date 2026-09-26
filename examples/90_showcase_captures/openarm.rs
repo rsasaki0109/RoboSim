@@ -59,8 +59,14 @@ const JOINT_FEEDBACK_STREAM: StreamId = StreamId::new(9_090);
 const CAMERA: CameraEvidence = CameraEvidence {
     fov_y_rad: std::f64::consts::FRAC_PI_4,
     yaw_rad: 0.85,
-    pitch_rad: 0.75,
-    distance_m: 1.05,
+    // Larger pitch is nearer horizontal here. 0.75 looked down steeply enough
+    // to flatten the arms onto each other however far apart they actually are;
+    // a three-quarter view keeps the near arm in front of the far one rather
+    // than on top of it.
+    pitch_rad: 1.08,
+    // 1.05 m framed the torso out of the top and pushed the robot against the
+    // right edge, leaving most of the image empty table.
+    distance_m: 1.26,
 };
 
 /// Name of the dynamic block the right arm picks up and the left arm places.
@@ -406,7 +412,10 @@ pub fn run(repo_root: &Path, capture: bool) -> Result<ShowcaseMetadata> {
             ENVIRONMENT_ID,
             &first.frames,
             CameraOrbit {
-                focus: Vec3::new(0.0, 0.50, 0.28),
+                // The arms sit at y = 0.698; focusing 0.20 m below them and
+                // 0.25 m along +z put the robot off to one side of its own
+                // showcase. Focus between the shoulders and the work area.
+                focus: Vec3::new(0.0, 0.60, 0.12),
                 yaw_rad: CAMERA.yaw_rad,
                 pitch_rad: CAMERA.pitch_rad,
                 distance_m: CAMERA.distance_m,
