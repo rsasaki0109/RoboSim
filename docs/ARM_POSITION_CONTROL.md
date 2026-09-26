@@ -159,12 +159,40 @@ in `rne_physics_rapier` drives a single revolute joint to 0.4 rad with a
 origin. That test is new — the path had coverage for direct effort under a
 rotated origin but not for a position servo — and it passes.
 
-**What is established:** the unit-explicit position actuation path produces no
-usable torque on the SO-101 scene, over gains spanning two orders of magnitude
-and rates spanning thirty-two, while producing three orders of magnitude of
-improvement on a control arm under identical conditions. **What is not
-established:** why. The two mechanisms that suggested themselves have been
-measured and ruled out.
+### The authority is marginal rather than absent
+
+"Indistinguishable from no servo" is measured for *holding* the authored pose.
+Commanding is slightly different: driving all five joints to a target does bias
+the outcome, just nowhere near enough to place the arm. Gripper displacement
+after 1200 steps at 240 Hz, k = 200 N·m/rad:
+
+| all joints commanded to | gripper moved |
+| ---: | ---: |
+| 0.00 rad (hold) | 0.09560 m |
+| +0.50 rad | 0.09650 m |
+| +1.00 rad | 0.10692 m |
+| −1.00 rad | 0.19794 m |
+
+Five joints turning a radian should move the gripper by tens of centimetres.
+
+Direct effort is no better, which is the finding that rules out the servo
+itself: with `configure_named_revolute_effort_actuation` at a 25 N·m ceiling,
+gripper displacement is 0.09050 m at 0 N·m, 0.09817 m at 2 N·m and 0.11553 m at
+20 N·m. Twenty newton-metres on a 0.1 kg arm moves it by 2.6 cm. Whatever the
+fault is, it is upstream of the choice between position and effort control.
+
+Ground contact is ruled out: with the base lifted 1 m and the ground plane
+disabled, the gain sweep is 0.06456 / 0.06452 / 0.06363 m for no servo, k=20 and
+k=200.
+
+**What is established:** joint actuation of any kind — position or effort —
+produces only marginal motion on the SO-101 scene, over gains spanning two
+orders of magnitude, rates spanning thirty-two, with and without ground
+contact, while an identical call on a control arm improves the held pose by
+three orders of magnitude. **What is not established:** why. Three mechanisms
+suggested themselves — a frame mismatch, the parent-frame-only origin
+composition, and ground contact — and all three have been measured and ruled
+out.
 
 A related usability problem is established: the shipped SO-101 scene cannot
 report its own joint angles at all. `named_joint_position` reads `JointState`,
