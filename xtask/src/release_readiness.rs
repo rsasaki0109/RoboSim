@@ -3073,7 +3073,7 @@ report = {{ path = "process-conformance-report-v1.json", sha256 = "{}" }}
             &root,
             &path,
             &manifest,
-            CivilDate::parse("2026-09-15").unwrap(),
+            CivilDate::parse("2026-09-26").unwrap(),
         )
         .unwrap();
         assert!(!report.eligible);
@@ -3105,7 +3105,7 @@ report = {{ path = "process-conformance-report-v1.json", sha256 = "{}" }}
             &root,
             &path,
             &manifest,
-            CivilDate::parse("2026-09-15").unwrap(),
+            CivilDate::parse("2026-09-26").unwrap(),
         )
         .unwrap();
         let mut actual = serde_json::to_string_pretty(&report).unwrap();

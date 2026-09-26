@@ -10,12 +10,12 @@
   "release_report": {
     "path": "release-report.json",
     "size_bytes": 1451,
-    "sha256": "4ebab711b2cbe0bac48b7e7b5c588a1fd4d2fdf6766a427282a87115dc54782e"
+    "sha256": "835467b25f58f2a1953562f482add3f65df2bf633b858561f53eda654bacf93f"
   },
   "checksum_manifest": {
     "path": "SHA256SUMS",
     "size_bytes": 258,
-    "sha256": "b7ee871c81846686f32243728116627cada810c476d7e7c0d8f9e1fa14f5f80b"
+    "sha256": "3982311e11f557f440b5056d5b4cced6d125f807f4dfd11e69ad94b3169eaae5"
   },
   "time_to_proof": {
     "path": "flagship-proof/time-to-proof-report.json",

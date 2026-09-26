@@ -4962,8 +4962,8 @@ mod tests {
         let output = tempfile::tempdir().expect("temporary bundle");
         stage_static_files(&root, output.path()).expect("stage bundle files");
         assert_eq!(
-            fs::read(output.path().join("release/rust-api-additions-v1.toml")).unwrap(),
-            fs::read(root.join("release/rust-api-additions-v1.toml")).unwrap()
+            fs::read(output.path().join("release/rust-api-baseline.toml")).unwrap(),
+            fs::read(root.join("release/rust-api-baseline.toml")).unwrap()
         );
         assert_eq!(
             fs::read(output.path().join("release/one-zero-readiness.toml")).unwrap(),
@@ -5150,10 +5150,20 @@ mod tests {
         assert!(validate(tag).is_err());
     }
 
+    /// The `vMAJOR.MINOR.*` tag series for the version being released.
+    ///
+    /// Derived rather than written out: these fixtures previously spelled the
+    /// series literally and silently rotted at the next minor bump.
+    fn current_tag_series() -> String {
+        let parts = RELEASE_VERSION.split('.').collect::<Vec<_>>();
+        format!("v{}.{}.*", parts[0], parts[1])
+    }
+
     #[test]
     fn release_workflow_accepts_the_current_release_series() {
         let workflow = format!(
-            "on:\n  push:\n    tags: [\"v0.3.*\"]\nenv:\n  RELEASE_VERSION: \"{RELEASE_VERSION}\"\n"
+            "on:\n  push:\n    tags: [\"{}\"]\nenv:\n  RELEASE_VERSION: \"{RELEASE_VERSION}\"\n",
+            current_tag_series()
         );
         validate_release_workflow_text(&workflow).unwrap();
     }
@@ -5198,13 +5208,16 @@ mod tests {
             "on:\n  push:\n    tags: [\"v0.1.*\"]\nenv:\n  RELEASE_VERSION: \"{RELEASE_VERSION}\"\n"
         );
         let error = validate_release_workflow_text(&workflow).unwrap_err();
-        assert!(error.to_string().contains("v0.3.*"));
+        assert!(error.to_string().contains(&current_tag_series()));
     }
 
     #[test]
     fn release_workflow_rejects_a_stale_declared_version() {
-        let workflow = "on:\n  push:\n    tags: [\"v0.3.*\"]\nenv:\n  RELEASE_VERSION: \"0.1.0\"\n";
-        let error = validate_release_workflow_text(workflow).unwrap_err();
+        let workflow = format!(
+            "on:\n  push:\n    tags: [\"{}\"]\nenv:\n  RELEASE_VERSION: \"0.1.0\"\n",
+            current_tag_series()
+        );
+        let error = validate_release_workflow_text(&workflow).unwrap_err();
         assert!(error.to_string().contains(RELEASE_VERSION));
     }
 }
