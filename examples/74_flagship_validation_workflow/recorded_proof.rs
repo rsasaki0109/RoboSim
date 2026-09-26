@@ -91,7 +91,132 @@ pub(super) fn write_recorded_shadow_proof(
     validate_controller_trace("rapier_native", rapier)?;
     validate_controller_trace("mujoco_native", mujoco)?;
 
-    let task_sha256 = sha256_file(&output.join("flagship.task.json"))?;
+    let digests = write_proof_inputs(output, sample_count, rapier, mujoco)?;
+
+    let playback = run_case(
+        output,
+        task,
+        rapier,
+        rapier,
+        "playback",
+        HardwareMode::Playback,
+        None,
+        &digests.task,
+        &digests.controller,
+        &digests.calibration,
+        &digests.requirements,
+        &digests.rapier,
+        &digests.rapier,
+        "recorded-shadow-rapier.trace.json",
+        "recorded-shadow-rapier.trace.json",
+    )?;
+    let shadow = run_case(
+        output,
+        task,
+        rapier,
+        mujoco,
+        "shadow",
+        HardwareMode::Shadow,
+        None,
+        &digests.task,
+        &digests.controller,
+        &digests.calibration,
+        &digests.requirements,
+        &digests.rapier,
+        &digests.mujoco,
+        "recorded-shadow-rapier.trace.json",
+        "recorded-shadow-mujoco.trace.json",
+    )?;
+    let disconnect = run_case(
+        output,
+        task,
+        rapier,
+        rapier,
+        "disconnect",
+        HardwareMode::Shadow,
+        Some(DISCONNECT_SEQUENCE),
+        &digests.task,
+        &digests.controller,
+        &digests.calibration,
+        &digests.requirements,
+        &digests.rapier,
+        &digests.rapier,
+        "recorded-shadow-rapier.trace.json",
+        "recorded-shadow-rapier.trace.json",
+    )?;
+
+    anyhow::ensure!(
+        playback.summary.status == "passed"
+            && shadow.summary.status == "failed"
+            && shadow
+                .comparison
+                .samples
+                .iter()
+                .any(|sample| sample.first_violation.is_some())
+            && disconnect.summary.status == "failed_as_expected",
+        "installed recorded/shadow cases did not match their predeclared outcomes"
+    );
+    anyhow::ensure!(
+        [&playback, &shadow, &disconnect]
+            .iter()
+            .all(|report| !report.summary.actuator_writes_emitted),
+        "installed recorded/shadow proof emitted an actuator write"
+    );
+    let proof = InstalledRecordedShadowProof {
+        kind: PROOF_KIND,
+        schema_version: PROOF_SCHEMA_VERSION,
+        status: "passed",
+        task_id: TASK_ID,
+        controller_id: CONTROLLER_ID,
+        clock_source: "sim_clock_fixed_step",
+        cases: vec![
+            case("playback", HardwareMode::Playback, "passed", &playback),
+            case("shadow", HardwareMode::Shadow, "failed", &shadow),
+            case(
+                "disconnect",
+                HardwareMode::Shadow,
+                "failed_as_expected",
+                &disconnect,
+            ),
+        ],
+    };
+    write_pretty_json(&output.join("recorded-shadow-proof.json"), &proof)
+}
+
+fn validate_controller_trace(backend: &str, trace: &[FlagshipRecordedStep]) -> Result<()> {
+    let mut controller = FlagshipMobileLiftControllerV2::new();
+    for (index, sample) in trace.iter().enumerate() {
+        let action = controller
+            .next_action(&sample.controller_observation_values)
+            .with_context(|| format!("{backend} controller rejected recorded sample {index}"))?;
+        anyhow::ensure!(
+            action == sample.action_values,
+            "{backend} recorded action differs from portable controller at sample {index}"
+        );
+    }
+    Ok(())
+}
+
+/// The sha256 of every input the three recorded/shadow cases are evaluated
+/// against, so each case binds to bytes that are already on disk.
+struct ProofInputDigests {
+    task: String,
+    controller: String,
+    calibration: String,
+    requirements: String,
+    rapier: String,
+    mujoco: String,
+}
+
+/// Writes the controller contract, the calibration, the requirements and both
+/// backend traces, then hashes them along with the task.
+fn write_proof_inputs(
+    output: &Path,
+    sample_count: usize,
+    rapier: &[FlagshipRecordedStep],
+    mujoco: &[FlagshipRecordedStep],
+) -> Result<ProofInputDigests> {
+    let task = sha256_file(&output.join("flagship.task.json"))?;
     write_pretty_json(
         &output.join("recorded-shadow-controller.json"),
         &FlagshipMobileLiftControllerContract::built_in(),
@@ -150,114 +275,20 @@ pub(super) fn write_recorded_shadow_proof(
         },
     )?;
 
-    let controller_sha256 = sha256_file(&output.join("recorded-shadow-controller.json"))?;
-    let calibration_sha256 = sha256_file(&output.join("recorded-shadow-calibration.json"))?;
-    let requirements_sha256 = sha256_file(&output.join("recorded-shadow-requirements.json"))?;
-    let rapier_sha256 = sha256_file(&output.join("recorded-shadow-rapier.trace.json"))?;
-    let mujoco_sha256 = sha256_file(&output.join("recorded-shadow-mujoco.trace.json"))?;
+    let controller = sha256_file(&output.join("recorded-shadow-controller.json"))?;
+    let calibration = sha256_file(&output.join("recorded-shadow-calibration.json"))?;
+    let requirements = sha256_file(&output.join("recorded-shadow-requirements.json"))?;
+    let rapier_digest = sha256_file(&output.join("recorded-shadow-rapier.trace.json"))?;
+    let mujoco_digest = sha256_file(&output.join("recorded-shadow-mujoco.trace.json"))?;
 
-    let playback = run_case(
-        output,
+    Ok(ProofInputDigests {
         task,
-        rapier,
-        rapier,
-        "playback",
-        HardwareMode::Playback,
-        None,
-        &task_sha256,
-        &controller_sha256,
-        &calibration_sha256,
-        &requirements_sha256,
-        &rapier_sha256,
-        &rapier_sha256,
-        "recorded-shadow-rapier.trace.json",
-        "recorded-shadow-rapier.trace.json",
-    )?;
-    let shadow = run_case(
-        output,
-        task,
-        rapier,
-        mujoco,
-        "shadow",
-        HardwareMode::Shadow,
-        None,
-        &task_sha256,
-        &controller_sha256,
-        &calibration_sha256,
-        &requirements_sha256,
-        &rapier_sha256,
-        &mujoco_sha256,
-        "recorded-shadow-rapier.trace.json",
-        "recorded-shadow-mujoco.trace.json",
-    )?;
-    let disconnect = run_case(
-        output,
-        task,
-        rapier,
-        rapier,
-        "disconnect",
-        HardwareMode::Shadow,
-        Some(DISCONNECT_SEQUENCE),
-        &task_sha256,
-        &controller_sha256,
-        &calibration_sha256,
-        &requirements_sha256,
-        &rapier_sha256,
-        &rapier_sha256,
-        "recorded-shadow-rapier.trace.json",
-        "recorded-shadow-rapier.trace.json",
-    )?;
-
-    anyhow::ensure!(
-        playback.summary.status == "passed"
-            && shadow.summary.status == "failed"
-            && shadow
-                .comparison
-                .samples
-                .iter()
-                .any(|sample| sample.first_violation.is_some())
-            && disconnect.summary.status == "failed_as_expected",
-        "installed recorded/shadow cases did not match their predeclared outcomes"
-    );
-    anyhow::ensure!(
-        [&playback, &shadow, &disconnect]
-            .iter()
-            .all(|report| !report.summary.actuator_writes_emitted),
-        "installed recorded/shadow proof emitted an actuator write"
-    );
-    let proof = InstalledRecordedShadowProof {
-        kind: PROOF_KIND,
-        schema_version: PROOF_SCHEMA_VERSION,
-        status: "passed",
-        task_id: TASK_ID,
-        controller_id: CONTROLLER_ID,
-        clock_source: "sim_clock_fixed_step",
-        cases: vec![
-            case("playback", HardwareMode::Playback, "passed", &playback),
-            case("shadow", HardwareMode::Shadow, "failed", &shadow),
-            case(
-                "disconnect",
-                HardwareMode::Shadow,
-                "failed_as_expected",
-                &disconnect,
-            ),
-        ],
-    };
-    write_pretty_json(&output.join("recorded-shadow-proof.json"), &proof)
-}
-
-fn validate_controller_trace(backend: &str, trace: &[FlagshipRecordedStep]) -> Result<()> {
-    let mut controller = FlagshipMobileLiftControllerV2::new();
-    for (index, sample) in trace.iter().enumerate() {
-        let action = controller
-            .next_action(&sample.controller_observation_values)
-            .with_context(|| format!("{backend} controller rejected recorded sample {index}"))?;
-        anyhow::ensure!(
-            action == sample.action_values,
-            "{backend} recorded action differs from portable controller at sample {index}"
-        );
-    }
-    Ok(())
+        controller,
+        calibration,
+        requirements,
+        rapier: rapier_digest,
+        mujoco: mujoco_digest,
+    })
 }
 
 // Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
