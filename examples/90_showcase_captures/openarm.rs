@@ -58,15 +58,15 @@ const JOINT_FEEDBACK_STREAM: StreamId = StreamId::new(9_090);
 // side-on to turn it into visible screen-space width instead.
 const CAMERA: CameraEvidence = CameraEvidence {
     fov_y_rad: std::f64::consts::FRAC_PI_4,
-    yaw_rad: 0.85,
+    yaw_rad: 0.52,
     // Larger pitch is nearer horizontal here. 0.75 looked down steeply enough
     // to flatten the arms onto each other however far apart they actually are;
     // a three-quarter view keeps the near arm in front of the far one rather
     // than on top of it.
-    pitch_rad: 1.08,
+    pitch_rad: 1.14,
     // 1.05 m framed the torso out of the top and pushed the robot against the
     // right edge, leaving most of the image empty table.
-    distance_m: 1.26,
+    distance_m: 1.62,
 };
 
 /// Name of the dynamic block the right arm picks up and the left arm places.
@@ -159,11 +159,16 @@ struct BimanualPose {
 /// two mimicked finger joints.
 type ArmPose = [f64; 9];
 
+// Joint 3's travel stops at +-pi/2 and joint 6's at +-pi/4, and several poses
+// sit exactly on those stops, which is why the constants appear among
+// otherwise unremarkable decimals.
+//
 // Every named pose below is an inverse-kinematics solution against the real
 // OpenArm v2 URDF chain (solved offline; see the module doc comment), so the
 // commanded fingertip midpoint actually lands on the block or the pad instead
-// of an arbitrary joint-space guess. `READY` is the shared tucked resting
-// pose both arms start and end in.
+// of an arbitrary joint-space guess. `READY` is the exception and is authored:
+// it is where the arms rest, and a solved reach held there loads the shoulder
+// hard enough that the servos track it 0.66 rad out.
 const READY_R: ArmPose = [
     0.0,
     0.0,
@@ -176,16 +181,40 @@ const READY_R: ArmPose = [
     -0.55,
 ];
 const HOVER_PICK_R: ArmPose = [
-    0.1520, 1.1987, -0.0588, 1.1824, -0.1735, 0.3151, 1.0023, -0.55, -0.55,
+    1.4826,
+    0.9187,
+    -std::f64::consts::FRAC_PI_2,
+    1.2899,
+    0.0000,
+    0.3712,
+    1.4826,
+    -0.55,
+    -0.55,
 ];
 const PICK_R_OPEN: ArmPose = [
-    0.4922, 0.8083, -0.2360, 0.5538, -0.3318, 0.3847, 0.8179, -0.55, -0.55,
+    1.1619,
+    0.7848,
+    -std::f64::consts::FRAC_PI_2,
+    1.0612,
+    0.0000,
+    0.2765,
+    1.1619,
+    -0.55,
+    -0.55,
 ];
 const PICK_R_CLOSED: ArmPose = [
-    0.6389, 0.8025, -0.2978, 0.4220, -0.3782, 0.4661, 0.9659, -0.08, -0.08,
+    1.1619,
+    0.7848,
+    -std::f64::consts::FRAC_PI_2,
+    1.0612,
+    0.0000,
+    0.2765,
+    1.1619,
+    -0.08,
+    -0.08,
 ];
 const LIFT_R_CLOSED: ArmPose = [
-    0.7663, 1.0899, -0.4171, 0.7954, -0.4356, 0.4834, 1.5374, -0.08, -0.08,
+    1.4601, 0.9184, -1.5345, 1.2899, -0.0236, 0.3711, 1.4975, -0.08, -0.08,
 ];
 // A true mid-air hand-to-hand meet left the two wrists visually fused into
 // one silhouette from the showcase camera, no matter how the elbows were
@@ -197,24 +226,48 @@ const LIFT_R_CLOSED: ArmPose = [
 // and pick it up on its own -- two clearly separated, individually legible
 // pick/place actions instead of one crowded simultaneous one.
 const RIGHT_HOVER_MID_CLOSED: ArmPose = [
-    0.1551,
-    1.5063,
-    -0.9782,
-    2.4435,
-    -0.0384,
-    0.5128,
+    1.4162,
+    0.1250,
+    -1.4569,
+    1.1286,
+    -0.2023,
+    std::f64::consts::FRAC_PI_4,
     std::f64::consts::FRAC_PI_2,
     -0.08,
     -0.08,
 ];
 const RIGHT_MID_CLOSED: ArmPose = [
-    -0.1308, 1.2983, -1.2026, 2.2172, -0.5453, 0.6331, 0.9176, -0.08, -0.08,
+    0.9765,
+    -0.0034,
+    -1.1562,
+    0.8793,
+    -0.6062,
+    std::f64::consts::FRAC_PI_4,
+    1.4308,
+    -0.08,
+    -0.08,
 ];
 const RIGHT_MID_OPEN: ArmPose = [
-    -0.2150, 1.2996, -1.2636, 2.2122, -0.7099, 0.6862, 0.7098, -0.55, -0.55,
+    0.9765,
+    -0.0034,
+    -1.1562,
+    0.8793,
+    -0.6062,
+    std::f64::consts::FRAC_PI_4,
+    1.4308,
+    -0.55,
+    -0.55,
 ];
 const RIGHT_HOVER_MID_OPEN: ArmPose = [
-    0.1214, 1.6356, -1.0521, 2.4435, 0.1017, 0.4521, 1.2856, -0.55, -0.55,
+    1.4162,
+    0.1250,
+    -1.4569,
+    1.1286,
+    -0.2023,
+    std::f64::consts::FRAC_PI_4,
+    std::f64::consts::FRAC_PI_2,
+    -0.55,
+    -0.55,
 ];
 
 const READY_L: ArmPose = [
@@ -229,52 +282,68 @@ const READY_L: ArmPose = [
     0.55,
 ];
 const LEFT_HOVER_MID_OPEN: ArmPose = [
-    0.2118, 0.1745, 1.4439, 1.7356, -0.0055, -0.7345, 0.0178, 0.55, 0.55,
+    -1.4826,
+    -0.1288,
+    std::f64::consts::FRAC_PI_2,
+    1.1286,
+    -0.0000,
+    -std::f64::consts::FRAC_PI_4,
+    -1.4826,
+    0.55,
+    0.55,
 ];
 const LEFT_MID_OPEN: ArmPose = [
-    0.0279, 0.1745, 1.5447, 1.2975, -0.0074, -0.5384, 0.0126, 0.55, 0.55,
+    -0.9765,
+    0.0034,
+    1.1562,
+    0.8793,
+    0.6062,
+    -std::f64::consts::FRAC_PI_4,
+    -1.4308,
+    0.55,
+    0.55,
 ];
 const LEFT_MID_CLOSED: ArmPose = [
-    0.0078, 0.1745, 1.5645, 1.3640, -0.0101, -0.6951, 0.0110, 0.08, 0.08,
+    -0.9765,
+    0.0034,
+    1.1562,
+    0.8793,
+    0.6062,
+    -std::f64::consts::FRAC_PI_4,
+    -1.4308,
+    0.08,
+    0.08,
 ];
 const LEFT_HOVER_MID_CLOSED: ArmPose = [
-    -0.2044,
-    0.1745,
-    std::f64::consts::FRAC_PI_2,
-    1.7663,
-    0.1181,
+    -1.4162,
+    -0.1250,
+    1.4569,
+    1.1286,
+    0.2023,
     -std::f64::consts::FRAC_PI_4,
-    -0.3929,
+    -std::f64::consts::FRAC_PI_2,
     0.08,
     0.08,
 ];
 const HOVER_PLACE_L_CLOSED: ArmPose = [
-    1.0798,
-    0.1745,
-    std::f64::consts::FRAC_PI_2,
-    1.1568,
-    -0.1057,
-    -0.3194,
-    0.3637,
+    -1.3504,
+    -0.9100,
+    1.3566,
+    1.2899,
+    0.1402,
+    -0.3654,
+    -std::f64::consts::FRAC_PI_2,
     0.08,
     0.08,
 ];
 const PLACE_L_CLOSED: ArmPose = [
-    0.7501, 0.1745, 1.5697, 0.8454, -0.1359, -0.0208, 0.0404, 0.08, 0.08,
+    -1.0677, -0.7787, 1.3885, 1.0613, 0.1344, -0.2719, -1.2328, 0.08, 0.08,
 ];
 const PLACE_L_OPEN: ArmPose = [
-    0.7501, 0.1745, 1.5697, 0.8454, -0.1359, -0.0208, 0.0404, 0.55, 0.55,
+    -1.0677, -0.7787, 1.3885, 1.0613, 0.1344, -0.2719, -1.2328, 0.55, 0.55,
 ];
 const HOVER_PLACE_L_OPEN: ArmPose = [
-    1.0798,
-    0.1745,
-    std::f64::consts::FRAC_PI_2,
-    1.1568,
-    -0.1057,
-    -0.3194,
-    0.3637,
-    0.55,
-    0.55,
+    -1.3565, -0.9108, 1.3666, 1.2899, 0.1335, -0.3660, -1.5667, 0.55, 0.55,
 ];
 
 /// Right-arm keyframes: reach out and down to the block, close, lift, carry
@@ -415,7 +484,7 @@ pub fn run(repo_root: &Path, capture: bool) -> Result<ShowcaseMetadata> {
                 // The arms sit at y = 0.698; focusing 0.20 m below them and
                 // 0.25 m along +z put the robot off to one side of its own
                 // showcase. Focus between the shoulders and the work area.
-                focus: Vec3::new(0.0, 0.60, 0.12),
+                focus: Vec3::new(0.0, 0.56, 0.26),
                 yaw_rad: CAMERA.yaw_rad,
                 pitch_rad: CAMERA.pitch_rad,
                 distance_m: CAMERA.distance_m,
