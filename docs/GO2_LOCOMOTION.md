@@ -5,6 +5,25 @@ cannot do, on the dynamic multibody under RNE physics. Everything here was
 measured on the plant; the numbers that matter are pinned by tests in
 `unitree_go2_episode.rs`.
 
+> **The robot measured here has no feet ([#346](https://github.com/rsasaki0109/RoboSim/issues/346)).**
+> `unitree_go2_dynamic.rne.robot.toml` does not set `weld_fixed_children`, so
+> the importer leaves the fixed-joint children -- the four `*_foot` links and
+> `Head_upper`/`Head_lower` -- as loose bodies at their spawn poses on the
+> floor. The robot walks on its bare calf ends. Everything on this page was
+> measured on that robot, and two things follow directly:
+>
+> * `link_contact_impulse_ns("*_foot")` reads the loose foot, a constant
+>   ~0.2 N·s, so every "contact-gated" torque term below is applied on every
+>   step, not only in stance.
+> * The foot-friction result in "The feet are not slipping" changed the
+>   friction of the loose feet, which cannot affect the robot.
+>
+> On this asset the scripted trot also walks tail first (it faces +x and
+> travels -x). The same model with its fixed children welded
+> (`unitree_go2_jump`) does not walk or steer with the current stack. Until
+> the walking asset is fixed and re-measured, treat the results here as
+> results for this footless robot.
+
 ## Speed
 
 Forward speed follows stride amplitude and cadence
@@ -273,6 +292,12 @@ from that channel, and scores the corrected heading, is the obvious next step.
 
 ## The feet are not slipping
 
+> **Invalid ([#346](https://github.com/rsasaki0109/RoboSim/issues/346)).** The
+> `*_foot` colliders this section changes are loose bodies lying at the spawn
+> point, not part of the walking robot, so identical trajectories under
+> different foot friction say nothing about slip. Kept as the log of what was
+> run.
+
 `UrdfSceneSim::set_named_collider_friction` reaches the live collider
 (verified by its own test). An **eight-fold foot-friction range (μ 0.25 →
 2.0) produces bit-identical turning trajectories** for the position-space
@@ -379,6 +404,12 @@ position-space regime as the walkable schedule. Under position servos,
 flight phases cost stability and buy no extra turn.
 
 ## Foot clearance and the parkour boundary
+
+> **Almost certainly an artifact ([#346](https://github.com/rsasaki0109/RoboSim/issues/346)).**
+> The loose `*_foot` bodies rest on the floor at y = 0.021 m, which is exactly
+> the "fixed" 2.1 cm clearance below. The measurement was not pinned in code,
+> so which link it read cannot be checked, but a swing-foot height that no
+> stride, lift or overlay changes is what a foot left on the floor reports.
 
 The obvious next crowd-pleaser — a Go2 parkour course — was measured before it
 was built, and the plant says no. The swing foot's maximum world height is
