@@ -10,6 +10,13 @@
 //! ulp-perturbed replays, so knife-edge trajectories cannot win.
 //! `--train` reproduces the search (seed 42); the default mode replays the
 //! pinned winner headlessly; `--ensemble` prints its perturbation spread.
+//!
+//! Measurement note: until 2026-09-27 `base_relative_yaw_rad` measured a
+//! rotation about a horizontal axis on this z-up robot, so the turns this
+//! search scored and the claims it was built on were measured on the wrong
+//! axis. `--train` now scores the corrected heading and will not reproduce
+//! the pinned coefficients. What the pinned winner measurably does is in the
+//! correction table at the top of `docs/GO2_LOCOMOTION.md`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -355,22 +362,11 @@ fn main() {
         return;
     }
 
-    // Default: replay the pinned winner headlessly. The distinguishing claim
-    // of the closed-loop policy is the operating point — a sustained turn
-    // *while walking* — so both windows and forward progress are asserted.
-    // Cross-platform, the exact rates are platform-local (persistent libm ulp
-    // differences settle onto nearby orbits); the sustained turn is the bar.
+    // Default: replay the pinned winner headlessly. Measured about the world
+    // vertical the policy does not sustain a coherent turn (Linux:
+    // +0.049/+2.965 rad per window); what it holds is the operating point —
+    // it keeps walking under feedback — so forward progress is the bar.
     let outcome = rollout(&UnitreeGo2TorquePolicy::LEARNED_TURN, ROLLOUT_STEPS);
-    // The turn's direction is chaos-selected across platforms (Windows turns
-    // one way, Linux the other), so the bar is a coherent sustained turn.
-    assert!(
-        outcome.window_a_yaw_rad.signum() == outcome.window_b_yaw_rad.signum()
-            && outcome.window_a_yaw_rad.abs() > 0.08
-            && outcome.window_b_yaw_rad.abs() > 0.08,
-        "policy must sustain a coherent turn, got {:+.3}/{:+.3}",
-        outcome.window_a_yaw_rad,
-        outcome.window_b_yaw_rad
-    );
     assert!(
         outcome.forward_m > 1.5,
         "policy turn must keep walking, got {:.2} m",

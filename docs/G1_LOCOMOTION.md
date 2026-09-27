@@ -58,8 +58,9 @@ searches for transport the stepper does not have.
 The winner (`UnitreeG1TorqueOverlay::LEARNED_STRIDE`) is the first G1 gait
 in these measurements that genuinely covers ground: **0.22 m per 8 s window
 (over 2× the stepper), 0.66 m per 24 s**, at full height (0.784 m), dead
-straight (|yaw| ≈ 0.01 rad), with ulp-perturbed replays inside a few
-centimeters of each other. It is still a slow shuffle (0.0276 m/s), honestly
+with ulp-perturbed replays inside a few centimeters of each other. It is not
+straight: measured about the world vertical the members turn +0.77 to +1.33
+rad over 24 s. It is still a slow shuffle (0.0276 m/s), honestly
 reported as such — but the humanoid walks, and every tool that carried the
 Go2 campaign (torque pathway, deterministic resumable CEM, ensemble
 objectives, 12-decimal pinning) carried straight over.
@@ -69,10 +70,10 @@ the pinned command is `stride_rad = 0.065`, `foot_lift_rad = 0.12`, and
 `cycle_steps = 100`, with the learned feed-forward at 66% strength. It reaches
 about 0.0276 m/s in the local optimized replay — a small but measurable gain
 over the previous 0.0265 m/s command while retaining the three-member median,
-full-height, and straightness constraints. `-- --sweep` evaluates the
+full-height, and heading-drift constraints. `-- --sweep` evaluates the
 fixed-overlay command neighborhood and prints the ranked candidates.
 `learned_torques_make_the_g1_stride` pins the comparison, uprightness,
-straightness, and a bit-exact replay — at the cross-platform bar the Go2
+a bounded heading drift, and a bit-exact replay — at the cross-platform bar the Go2
 campaign's chaos-floor doctrine demands: a degraded humanoid orbit does not
 merely score less, it can blow the solver up mid-step (the ulp-shifted
 orbit on Linux CI did exactly that), so every replay runs under
@@ -138,21 +139,21 @@ The release run currently measures the following on the dynamic official G1:
 > scored `hypot(dx, dz)`, a distance with no direction.
 > `FORWARD_STRIDE` (example 124) walks forwards, straight and without turning,
 > but only under its exact training conditions; see that example.
->
-> **Body yaw.** Accumulated body-yaw figures on this page are integrated from
-> `UrdfSceneObservation::base_relative_yaw_rad`, which on the z-up G1 measures
-> a rotation about a horizontal axis rather than heading: a G1 measured turning
-> 3.0 rad in 24 s read +0.05 rad from it. Treat them as unverified until that
-> field is fixed and they are re-measured.
 
 The signed steering displacement is the world-Z path component produced by the
-current contact schedule. This distinction is intentional: the ±0.05 rad/s
-commands produce opposite signed paths, while measured accumulated body yaw is
-still close to zero (`+0.018` and `+0.006` rad in the pinned left/right run).
-Therefore v0.1 is a robust differential-steering/path milestone, not yet a
-claim of true heading-yaw tracking. The bounded v0.2 candidate below closes
-that gap for a short, explicitly limited heading envelope; sustained long-
-horizon tracking remains future work.
+current contact schedule. The body heading is not still: measured about the
+world vertical (see the measurement note below), the forward command alone
+turns **+0.88 rad** in 24 s, the left command +0.83 rad — no more than forward
+— and the right command −1.07 rad. The left path displacement is likewise the
+forward one. So v0.1 turns right on command and drifts left on its own; it is
+not yet a left/right steering claim.
+
+> **Measurement note (2026-09-27).** Until then `base_relative_yaw_rad` was
+> computed in the z-up robot's own spawn frame, so its "yaw" was a rotation
+> about a horizontal axis and a heading change read as roll. Every accumulated
+> body-yaw number on this page before that date was that signal, and so was
+> the score of the sustained-turn schedule search below. The numbers here are
+> re-measured; the search was not re-run.
 
 The example's `--train` mode runs a seeded CEM over a 24-dimensional,
 contact-gated differential Fourier overlay. Its objective rewards opposite
@@ -164,8 +165,8 @@ injects and validates a light pelvis tilt disturbance.
 
 ## v0.2 bounded heading-yaw candidate
 
-The v0.2 control boundary keeps v0.1 as a regression and adds true body-frame
-heading measurements to `UnitreeG1VelocityPolicyInput`: the accumulated target,
+The v0.2 control boundary keeps v0.1 as a regression and adds heading
+measurements to `UnitreeG1VelocityPolicyInput`: the accumulated target,
 measured accumulated yaw, heading error, and yaw-rate error. The 60 Hz harness
 reports the final and mean absolute heading error, mean absolute yaw-rate error,
 and an estimated turn radius (`|mean forward velocity| / mean |yaw rate|`).
@@ -194,8 +195,12 @@ bounded target of `±0.08 rad`. The optimized release run measures:
 
 | command | target heading | body yaw (4 s) | mean yaw rate (8 s) | final error (4 s) | mean abs yaw-rate error | turn radius | min height | max tilt | max torque | fell |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| left `(+0.0276, +0.05)` | +0.080 rad | +0.026 rad | ≈ +0.051 rad/s | +0.054 rad | 0.387 rad/s | 0.017 m | 0.784 m | 0.106 rad | 28.19 N·m | no |
-| right `(+0.0276, -0.05)` | −0.080 rad | −0.002 rad | ≈ −0.043 rad/s | −0.078 rad | 0.266 rad/s | 0.026 m | 0.784 m | 0.090 rad | 18.05 N·m | no |
+| left `(+0.0276, +0.05)` | +0.080 rad | +0.143 rad | +0.038 rad/s | −0.063 rad | 0.388 rad/s | 0.018 m | 0.784 m | 0.117 rad | 27.10 N·m | no |
+| right `(+0.0276, -0.05)` | −0.080 rad | −0.192 rad | −0.042 rad/s | +0.112 rad | 0.264 rad/s | 0.024 m | 0.784 m | 0.088 rad | 17.28 N·m | no |
+
+Over 8 s the body yaw is +0.326 and −0.327 rad: already four times the
+±0.08 rad target, in the commanded direction. The candidate's heading gain is
+zero, so the target is reported, not tracked.
 
 The sign reversal, height above 0.75 m, no-fall result, finite metrics, torque
 ceiling of 88 N·m, and bit-exact replay are pinned by the library test and the
@@ -213,15 +218,16 @@ The same validated heading candidate walks for **50 s (3000 ticks)** — six
 times the v0.2.1 horizon — without falling: pelvis height stays above 0.784 m,
 tilt stays under 0.13 rad, and the proximal torque stays inside its ceiling.
 Both turn commands keep the correct mean yaw-rate sign and cover ~1.2 m of
-ground (`x=-0.722, z=+0.916` left; `x=-0.332, z=-0.410` right).
+ground (`x=-0.567, z=+0.990` left; `x=-0.401, z=-0.378` right).
 
-Crucially, the integrated yaw does **not** accumulate: it stays bounded by the
-clamped heading target (|yaw| ≤ 0.087 rad) even with the clamp raised to 100 rad.
-The plant cannot sustain net turn on this contact schedule at any horizon — the
-mean yaw rate is a bounded oscillation, not a trackable rate. v0.3 is therefore
-a long-horizon **stability** claim, not a sustained-turn claim; the honest next
-step remains a better gait schedule. `v03_sustained_envelope_walks_50s_without_falling`
-pins no-fall, height, tilt, bounded integrated yaw, and the mean-rate sign, and
+The heading turns the commanded way the whole time: **+1.62 rad left and
+−2.18 rad right** over the 50 s (mean yaw rate +0.029 and −0.045 rad/s),
+upright. The clamped ±0.08 rad target is not held — the candidate's heading
+gain is zero — so v0.3 is a long-horizon stability and turn-direction claim,
+not a heading-hold claim. It is also an upright sustained turn in both
+directions, which the section below had concluded did not exist.
+`v03_sustained_envelope_walks_50s_without_falling`
+pins no-fall, height, tilt, the accumulated turn direction, and the mean-rate sign, and
 example 68 prints the full v0.3 metrics.
 
 Example 68 also provides a deterministic 48-dimensional CEM over the optional
@@ -252,15 +258,16 @@ usable in CI without a GPU.
 
 ## The sustained-turn boundary, searched
 
-v0.3 walks 50 s upright but cannot accumulate yaw. To test whether that is a
-tuning artifact, an eight-dimension deterministic CEM searched the schedule
+This section's premise was measured on the faulty yaw signal (see the
+measurement note above): v0.3 does accumulate yaw. It is kept as a log. An
+eight-dimension deterministic CEM searched the schedule
 knobs the harness exposes — base stride and foot lift, differential stride
 scale, right-leg phase offset, torso-yaw target, and hip-roll / hip-yaw /
 swing-hip-yaw targets — over 18 iterations of 40 candidates, scoring the
 minimum signed integrated yaw of both turn directions at 25 s with an upright
 gate (pelvis > 0.75 m, tilt < 0.35 rad).
 
-**No upright sustained-turn candidate exists in this space.** The best
+On that signal no candidate scored as an upright sustained turn. The best
 candidates turn hard and fall: a phase-offset bias of `5 s/(rad/s)` integrates
 **+4.66 rad (267°)** in 20 s and a hip-roll bias of `1.0 rad/(rad/s)` integrates
 **+14.2 rad (811°)** — both end flat (pelvis below zero, tilt > 1.9 rad). The

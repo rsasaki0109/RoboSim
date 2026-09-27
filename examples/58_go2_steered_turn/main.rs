@@ -10,6 +10,13 @@
 //! turn left when told left and right when told right, with one set of
 //! weights. `--train` reproduces the search (seed 42); the default mode
 //! replays the pinned winner under both commands headlessly.
+//!
+//! Measurement note: until 2026-09-27 `base_relative_yaw_rad` measured a
+//! rotation about a horizontal axis on this z-up robot, so the turns this
+//! search scored and the claims it was built on were measured on the wrong
+//! axis. `--train` now scores the corrected heading and will not reproduce
+//! the pinned coefficients. What the pinned winner measurably does is in the
+//! correction table at the top of `docs/GO2_LOCOMOTION.md`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -345,12 +352,9 @@ fn main() {
         return;
     }
 
-    // Default: replay the pinned winner under both commands. The
-    // cross-platform claim is the *differential* response — commanding +
-    // versus − shifts the total yaw in the commanded direction well above
-    // the chaos floor — while absolute per-window obedience is a
-    // same-platform observation (the achieved ~0.1 rad windows sit inside
-    // the ±0.3 rad cross-OS orbit spread).
+    // Default: replay the pinned winner under both commands. It turns left
+    // under both; the claim is only the *differential* response — commanding
+    // + rather than − adds counter-clockwise turn (about +1.06 rad on Linux).
     let positive = rollout(
         &UnitreeGo2TorquePolicy::LEARNED_COMMANDED_TURN,
         YAW_RATE_REF_RAD_S,

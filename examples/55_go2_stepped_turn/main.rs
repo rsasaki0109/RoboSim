@@ -1,22 +1,24 @@
 //! Searches the Go2 *contact schedule* for a turning gait.
 //!
-//! `docs/GO2_LOCOMOTION.md` measures the boundary in order: hand-scripted
-//! steering fails entirely, and a 60-dimensional learned joint-offset overlay
-//! on the fixed trot reaches only ~0.025 rad/s, because additive offsets cannot
-//! re-sequence the contacts. This example searches the contact schedule itself
-//! (`UnitreeGo2GaitSchedule`: per-leg phase, duty, stride scale, and hip
-//! placement/sweep) with the same deterministic, resumable, parallel
-//! cross-entropy method and the same anti-cheat objective — the minimum yaw
-//! over two disjoint late windows.
+//! It searches the contact schedule itself (`UnitreeGo2GaitSchedule`: per-leg
+//! phase, duty, stride scale, and hip placement/sweep) with the same
+//! deterministic, resumable, parallel cross-entropy method as the joint-offset
+//! overlay search and the same objective — the minimum yaw over two disjoint
+//! late windows.
 //!
-//! The result is a pinned *negative* one: the best schedule sustains a turn
-//! (~0.015 rad/s) but does not beat the fixed-schedule overlay (~0.025 rad/s),
-//! and a torque-limit scan shows neither is actuation-limited — the yaw
-//! plateau is a contact/morphology property. The default mode replays the
-//! pinned [`UnitreeGo2GaitSchedule::LEARNED_TURN`] headlessly and verifies it;
-//! `--train` reproduces the search (seed 42); `--gif` renders media. The
-//! pinned schedule is verified against the overlay by the
-//! `learned_schedule_turn_is_sustained_but_does_not_beat_the_overlay` test.
+//! The pinned winner sustains a clockwise turn (about 0.025 rad/s) and edges
+//! past the fixed-schedule overlay by about 1.5x in the worse window. The
+//! default mode replays the pinned [`UnitreeGo2GaitSchedule::LEARNED_TURN`]
+//! headlessly and verifies it; `--train` runs the search (seed 42); `--gif`
+//! renders media. The comparison is pinned by the
+//! `learned_schedule_turn_is_sustained_and_edges_past_the_overlay` test.
+//!
+//! Measurement note: until 2026-09-27 `base_relative_yaw_rad` measured a
+//! rotation about a horizontal axis on this z-up robot, so the turns this
+//! search scored and the claims it was built on were measured on the wrong
+//! axis. `--train` now scores the corrected heading and will not reproduce
+//! the pinned coefficients. What the pinned winner measurably does is in the
+//! correction table at the top of `docs/GO2_LOCOMOTION.md`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -318,6 +320,16 @@ fn train(aerial: bool) {
     println!("],");
 }
 
+/// The smaller of two window turns when both share a sign, else zero: the
+/// magnitude of a turn sustained in one direction through both windows.
+fn sustained_turn(window_a: f64, window_b: f64) -> f64 {
+    if window_a.signum() == window_b.signum() {
+        window_a.abs().min(window_b.abs())
+    } else {
+        0.0
+    }
+}
+
 fn main() {
     if std::env::args().any(|argument| argument == "--train-aerial") {
         train(true);
@@ -331,7 +343,7 @@ fn main() {
     // Replay the pinned learned schedule and verify the sustained turn.
     let outcome = rollout(&learned_schedule(), ROLLOUT_STEPS);
     assert!(
-        outcome.window_a_yaw_rad > 0.06 && outcome.window_b_yaw_rad > 0.06,
+        sustained_turn(outcome.window_a_yaw_rad, outcome.window_b_yaw_rad) > 0.1,
         "learned schedule should keep turning, windows {:+.3}/{:+.3}",
         outcome.window_a_yaw_rad,
         outcome.window_b_yaw_rad
@@ -346,7 +358,7 @@ fn main() {
         "learned stepped turn verified: windows {:+.3}/{:+.3} rad per 8 s ({:.3} rad/s sustained), totalYaw {:+.3}, maxTilt {:.2}",
         outcome.window_a_yaw_rad,
         outcome.window_b_yaw_rad,
-        outcome.window_a_yaw_rad.min(outcome.window_b_yaw_rad) / 8.0,
+        sustained_turn(outcome.window_a_yaw_rad, outcome.window_b_yaw_rad) / 8.0,
         outcome.total_yaw_rad,
         outcome.max_tilt_rad
     );
@@ -362,10 +374,9 @@ fn main() {
         );
     }
     let aerial = rollout(&UnitreeGo2GaitSchedule::LEARNED_AERIAL_TURN, ROLLOUT_STEPS);
+    let aerial_turn = sustained_turn(aerial.window_a_yaw_rad, aerial.window_b_yaw_rad);
     assert!(
-        aerial.window_a_yaw_rad > 0.06
-            && aerial.window_b_yaw_rad > 0.06
-            && aerial.window_a_yaw_rad.min(aerial.window_b_yaw_rad) < 0.2,
+        aerial_turn > 0.1 && aerial_turn < 0.25,
         "aerial winner must sustain a plateau-bound turn, windows {:+.3}/{:+.3}",
         aerial.window_a_yaw_rad,
         aerial.window_b_yaw_rad
