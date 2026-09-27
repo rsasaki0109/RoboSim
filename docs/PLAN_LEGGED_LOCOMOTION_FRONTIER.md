@@ -26,6 +26,10 @@ in PR #311, and the historical campaign notes below remain as experiment logs.
 
 ## What is done
 
+- **Go2 walking asset has no feet (#346).** Its fixed-joint children (feet,
+  head) are loose bodies left at the spawn point, so every Go2 result below
+  was measured on a robot walking on its calf ends, with stance gates that
+  are always on.
 - **Go2 learning boundary.** The learned turn, sprint, and schedule searches,
   the torque pathway, and the aerial-duty test are all complete and pinned by
   tests and examples 52–65. Their turns were re-measured on 2026-09-27 after a
@@ -43,7 +47,7 @@ in PR #311, and the historical campaign notes below remain as experiment logs.
 
 | Goal | Wall | Measurement |
 |---|---|---|
-| Go2 parkour | Foot clearance is kinematic | Swing foot tops out at 2.1 cm for every tested stride/lift/overlay; a 4 cm step topples the walk |
+| Go2 parkour | Unknown until the walking asset has feet (#346) | The "2.1 cm swing-foot ceiling" matches the loose foot resting on the floor (y = 0.021 m); a 4 cm step topples the walk |
 | Go2 commanded steering | No learned policy obeys the direction yet | The learned policies turn left whichever way they are told; hand differential thrust does steer both ways (measured 2026-09-27, after the yaw-axis fix) |
 | G1 heading hold | Heading gain is zero | v0.3 turns the commanded way for 50 s upright but runs far past its ±0.08 rad target; the old "no upright sustained turn" search scored the faulty yaw signal |
 | G1 higher speed | 60 Hz solver stability | Any forward command above the pinned 0.0276 m/s blows the solver up into NaNs |
