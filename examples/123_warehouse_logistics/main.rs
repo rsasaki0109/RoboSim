@@ -1593,14 +1593,15 @@ fn main() {
     // floors, and an orbiting camera both fights the eye and destroys
     // inter-frame compression.
     let orbit = CameraOrbit {
-        focus: Vec3::new(SHAFT_X_M - 1.95, 1.65, 0.0),
+        focus: Vec3::new(SHAFT_X_M - 1.95, 1.95, 0.0),
         yaw_rad: 0.46,
         // Larger pitch is nearer horizontal. At 1.44 the two decks were seen
         // edge-on and read as lines; a three-quarter view puts the load on a
         // surface the eye can see.
         pitch_rad: 1.16,
-        // 10.6 m framed the job as a grey postage stamp in an empty room.
-        distance_m: 7.6,
+        // 10.6 m framed the job as a grey postage stamp in an empty room; 7.6 m
+        // cut the upper floor off the top, which is where the delivery happens.
+        distance_m: 8.3,
     };
 
     for (index, frame) in mission.frames.iter().enumerate() {
