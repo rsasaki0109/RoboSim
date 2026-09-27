@@ -20,22 +20,22 @@ visual = { shape = "mesh", path = "../robots/openarm_description/assets/robot/op
 
 [[objects]]
 name = "openarm_workbench"
-translation_m = [0.0, 0.30, 0.48]
+translation_m = [0.0, 0.37, 0.36]
 body_type = "fixed"
 friction = 0.85
-visual = { shape = "box", size_m = [1.45, 0.06, 0.62], color_rgba = [0.74, 0.71, 0.64, 1.0] }
-collision = { shape = "box", size_m = [1.45, 0.06, 0.62] }
+visual = { shape = "box", size_m = [1.45, 0.06, 0.40], color_rgba = [0.74, 0.71, 0.64, 1.0] }
+collision = { shape = "box", size_m = [1.45, 0.06, 0.40] }
 
 [[objects]]
 name = "openarm_target_pad"
-translation_m = [-0.28, 0.336, 0.20]
+translation_m = [0.25, 0.406, 0.30]
 body_type = "fixed"
 visual = { shape = "box", size_m = [0.16, 0.012, 0.16], color_rgba = [0.14, 0.82, 0.38, 1.0] }
 collision = { shape = "box", size_m = [0.16, 0.012, 0.16] }
 
 [[objects]]
 name = "openarm_part_right"
-translation_m = [0.27, 0.37, 0.45]
+translation_m = [-0.25, 0.45, 0.30]
 body_type = "dynamic"
 mass_kg = 0.08
 friction = 1.0

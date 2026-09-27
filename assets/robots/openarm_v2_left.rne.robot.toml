@@ -4,8 +4,11 @@ model_name = "openarm_v2_left"
 [urdf]
 path = "openarm_description/openarm_v2_left.rne.urdf"
 base_body_type = "fixed"
-initial_translation_m = [0.0, 0.698, -0.031]
-initial_rotation_rpy = [-1.5707963267948966, 0.0, 0.0]
+initial_translation_m = [0.031, 0.698, 0.0]
+# Turned a quarter turn about the vertical so the shoulder line runs along
+# world x and the chest faces the workbench at +z. Without the turn the
+# shoulders point at the bench and the arms work sideways across it.
+initial_rotation_rpy = [-1.5707963267948966, -1.5707963267948966, 0.0]
 articulation = true
 collisions = true
 mesh_collisions = false
