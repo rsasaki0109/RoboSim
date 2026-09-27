@@ -341,6 +341,13 @@ impl UnitreeG1TorqueOverlay {
     /// 0.12 rad, 100-step gait command. Pinned at the search state's
     /// 12-decimal precision per the chaos discipline;
     /// `learned_torques_make_the_g1_stride` pins the comparison.
+    ///
+    /// **It walks the robot backwards.** The search scored each window as
+    /// `hypot(dx, dz)`, a distance with no direction, so a backward walk scored
+    /// exactly as well as a forward one. Measured along the way the robot faces
+    /// (the pelvis's local +x, toward which the knees bend), its windows are
+    /// -0.16 m and -0.22 m. Kept as it is because every pinned result above
+    /// depends on it bit for bit; [`Self::FORWARD_STRIDE`] is the forward walk.
     pub const LEARNED_STRIDE: Self = Self {
         coefficients: [
             [
@@ -406,6 +413,102 @@ impl UnitreeG1TorqueOverlay {
                 2.281156548618,
                 -0.895711846245,
                 0.341133308541,
+            ],
+        ],
+    };
+
+    /// The G1's forward walk (`examples/124_g1_forward_stride`).
+    ///
+    /// Same 48-coefficient contact-gated overlay and ensemble-median CEM as
+    /// [`Self::LEARNED_STRIDE`], on the same library stepper; what changed is
+    /// what the search rewards. It took four searches, each closing a hole the
+    /// previous one found by walking through it:
+    ///
+    /// 1. Displacement scored along the facing, signed, instead of as
+    ///    `hypot(dx, dz)`. Went forwards -- and spun 3 rad in 24 s, because the
+    ///    straightness penalty read `base_relative_yaw_rad`, which on this
+    ///    z-up robot is a rotation about a horizontal axis.
+    /// 2. Heading measured from the pelvis's facing. Straight and not spinning,
+    ///    but travelling 0.86 rad off the way it faced.
+    /// 3. Sideways travel penalised at 1.0/m: 0.35 rad off.
+    /// 4. At 3.0/m: this overlay.
+    ///
+    /// Measured over three ulp-perturbed 1440-tick replays: 0.14-0.16 m per
+    /// 8 s window along the facing, 0.36 m in 24 s, minimum height 0.779 m,
+    /// maximum tilt 0.20 rad. Per full gait period the path is straight (0.379
+    /// m travelled, 0.362 m start to end), the pelvis heading holds within 0.2
+    /// rad, and travel runs a mean 0.20 rad off the facing. The knees bend
+    /// toward the direction of travel.
+    ///
+    /// Trained with the default ([`UnitreeG1ArmPose::Reaching`]) arms and the
+    /// overlay at full strength. Outside those conditions it is not validated:
+    /// driven through [`UnitreeG1CommandedTorquePolicy`] with hanging arms and
+    /// velocity-scaled strength, an earlier forward overlay diverged.
+    pub const FORWARD_STRIDE: Self = Self {
+        coefficients: [
+            [
+                -1.346428334644,
+                1.166379293956,
+                7.524035307906,
+                1.077827821746,
+                -3.746855259801,
+                -9.159180054383,
+            ],
+            [
+                -6.198963235766,
+                4.947771649433,
+                -12.455299978887,
+                19.135720009943,
+                -0.347516677938,
+                -2.602897866493,
+            ],
+            [
+                5.309171771918,
+                1.573451737229,
+                -6.733506839966,
+                -10.720325423092,
+                6.536579644862,
+                -0.352870975758,
+            ],
+            [
+                12.764754064135,
+                2.893023908670,
+                -5.975210863991,
+                -13.698497695577,
+                -4.520128661869,
+                -5.503400330058,
+            ],
+            [
+                -0.740317228694,
+                0.145495012296,
+                -13.171130915387,
+                -6.177221883241,
+                -0.839545566490,
+                -11.077370222322,
+            ],
+            [
+                -2.638049747529,
+                -0.656173086050,
+                -2.485028064680,
+                15.962266717556,
+                -8.284528725023,
+                3.136844932442,
+            ],
+            [
+                -5.883241153837,
+                -6.028824446303,
+                -8.634871204272,
+                -4.672436504025,
+                -1.490281984815,
+                -0.645152978223,
+            ],
+            [
+                2.103434457190,
+                7.965505486689,
+                -2.054969517344,
+                4.856880057104,
+                -6.558598333278,
+                -7.190182836010,
             ],
         ],
     };
