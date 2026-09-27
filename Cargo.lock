@@ -5632,6 +5632,7 @@ dependencies = [
 name = "warehouse_logistics"
 version = "0.4.0"
 dependencies = [
+ "image",
  "png",
  "rne_core",
  "rne_ecs",

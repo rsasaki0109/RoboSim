@@ -30,7 +30,7 @@
 
 use rne_core::SimDuration;
 use rne_ecs::{spawn_named, Entity, World};
-use rne_math::{Hertz, Quat, Vec3};
+use rne_math::{Hertz, Quat, Transform3 as MathTransform, Vec3};
 use rne_nav::{ButtonContact, CallButton, CallButtonSpec, Elevator, ElevatorSpec, ElevatorState};
 use rne_physics::{
     Collider, ColliderShape, CommandedKinematicPose, JointMotor, JointMotorGainModel,
@@ -38,11 +38,15 @@ use rne_physics::{
     RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
-use rne_render::{Camera, MeshRenderCache, RenderBackend, RenderScene, VisualShape};
+use rne_render::{
+    Camera, EnvironmentLighting, EnvironmentMap, ImageFrame, MeshRenderCache, PbrMaterial,
+    RenderBackend, RenderScene, RenderSceneItem, TriangleMesh, VisualShape,
+};
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 use rne_world::Transform3;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 /// Deck half extents per floor, in meters.
 ///
@@ -205,7 +209,7 @@ const MAX_SECONDS: f64 = 95.0;
 
 const WIDTH: u32 = 960;
 const HEIGHT: u32 = 540;
-const CLEAR_COLOR: [f32; 4] = [0.62, 0.68, 0.76, 1.0];
+const CLEAR_COLOR: [f32; 4] = [0.30, 0.34, 0.40, 1.0];
 const FRAME_COUNT: usize = 120;
 
 fn elevator_spec() -> ElevatorSpec {
@@ -353,39 +357,9 @@ fn spawn_lift(world: &mut World) -> (Entity, Entity, Entity, Entity) {
     (car, left_door, right_door, button)
 }
 
-fn spawn_site(world: &mut World) -> Site {
-    // Warehouse decks, one per served floor, stopping short of the shaft so the
-    // camera sees into it.
-    for (index, height_m) in FLOOR_HEIGHTS_M.iter().enumerate() {
-        let slab = spawn_named(world, if index == 0 { "deck_1f" } else { "deck_2f" });
-        world.entity_mut(slab).insert((
-            RigidBody {
-                body_type: RigidBodyType::Fixed,
-                ..RigidBody::default()
-            },
-            Collider {
-                shape: ColliderShape::Cuboid {
-                    half_extents_m: DECK_HALF_M[index],
-                },
-                material: high_friction(),
-                ..Collider::default()
-            },
-            // Flush with the car platform's top rather than 6 cm below it. A
-            // step at the doorway is a trip hazard for a long truck with a
-            // loaded fork out front, and it put the truck on its roof.
-            Transform3::from_translation_rotation(
-                Vec3::new(DECK_X_M[index], *height_m, 0.0),
-                Quat::IDENTITY,
-            ),
-        ));
-    }
-
-    // Goods-in stand: two legs with an open middle, which is the only reason a
-    // fork can get under anything. A solid plinth would have to be shoved.
-    spawn_stand(world, "goods_in", STAND_X_M, CAR_HALF_M.y);
-
-    let (car, left_door, right_door, button) = spawn_lift(world);
-
+/// Spawns the four bodies the truck and its load are made of: chassis, fork
+/// carriage, backrest and the case itself.
+fn spawn_truck_bodies(world: &mut World) -> (Entity, Entity, Entity, Entity) {
     let chassis_y_m = CAR_HALF_M.y + CHASSIS_HALF_M.y + 0.01;
     let chassis = spawn_named(world, "forklift_chassis");
     world.entity_mut(chassis).insert((
@@ -535,6 +509,44 @@ fn spawn_site(world: &mut World) -> Site {
             Quat::IDENTITY,
         ),
     ));
+
+    (chassis, fork, backrest, case)
+}
+
+fn spawn_site(world: &mut World) -> Site {
+    // Warehouse decks, one per served floor, stopping short of the shaft so the
+    // camera sees into it.
+    for (index, height_m) in FLOOR_HEIGHTS_M.iter().enumerate() {
+        let slab = spawn_named(world, if index == 0 { "deck_1f" } else { "deck_2f" });
+        world.entity_mut(slab).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider {
+                shape: ColliderShape::Cuboid {
+                    half_extents_m: DECK_HALF_M[index],
+                },
+                material: high_friction(),
+                ..Collider::default()
+            },
+            // Flush with the car platform's top rather than 6 cm below it. A
+            // step at the doorway is a trip hazard for a long truck with a
+            // loaded fork out front, and it put the truck on its roof.
+            Transform3::from_translation_rotation(
+                Vec3::new(DECK_X_M[index], *height_m, 0.0),
+                Quat::IDENTITY,
+            ),
+        ));
+    }
+
+    // Goods-in stand: two legs with an open middle, which is the only reason a
+    // fork can get under anything. A solid plinth would have to be shoved.
+    spawn_stand(world, "goods_in", STAND_X_M, CAR_HALF_M.y);
+
+    let (car, left_door, right_door, button) = spawn_lift(world);
+
+    let (chassis, fork, backrest, case) = spawn_truck_bodies(world);
 
     Site {
         car,
@@ -730,6 +742,68 @@ fn drive_truck(
     }
 }
 
+/// Returns the phase the mission is in after this step.
+fn advance_phase(
+    phase: Phase,
+    chassis: Vec3,
+    case: Vec3,
+    presses: u32,
+    elevator: &mut Elevator,
+) -> Phase {
+    match phase {
+        Phase::Approach if (chassis.x - APPROACH_X_M).abs() < 0.06 => Phase::Engage,
+        Phase::Engage if (chassis.x - ENGAGED_X_M).abs() < 0.04 => Phase::Lift,
+        // Clear of the stand deck by a margin the solver cannot produce by
+        // jitter, so the haul starts only once the load is genuinely up.
+        Phase::Lift if case.y > CAR_HALF_M.y + STAND_TOP_Y_M + CASE_HALF_M.y + 0.12 => Phase::Haul,
+        Phase::Haul
+            if (chassis.x - PRESS_X_M).abs() < 0.25 && (chassis.z - PRESS_Z_M).abs() < 0.25 =>
+        {
+            Phase::Press
+        }
+        Phase::Press if presses > 0 => Phase::WaitForDoors,
+        // Lined up on the doorway rather than exactly on its centreline:
+        // the truck arrives having just leaned on the panel, and holding
+        // out for the centreline outlasts the door hold.
+        Phase::WaitForDoors if elevator.is_boardable(0) && chassis.z.abs() < 0.14 => Phase::Board,
+        Phase::Board if (chassis.x - BOARD_X_M).abs() < 0.06 => {
+            // Aboard: choose the destination, which is a separate act from
+            // summoning the car.
+            elevator.call(1).expect("select the upper floor");
+            Phase::Ride
+        }
+        Phase::Ride if elevator.is_boardable(1) => Phase::DriveOut,
+        Phase::DriveOut if (chassis.x - BAY_X_M).abs() < 0.12 => Phase::Place,
+        Phase::Place if (chassis.x - BAY_X_M).abs() < 0.05 => Phase::Lower,
+        // The case is down when it is resting on the outbound stand rather
+        // than on the tines.
+        Phase::Lower if case.y < OUTBOUND_TOP_Y_M + CASE_HALF_M.y + 0.03 => Phase::Withdraw,
+        Phase::Withdraw if chassis.x > WITHDRAW_X_M - 0.08 => Phase::Done,
+        other => other,
+    }
+}
+
+/// Feeds the panel's solved contacts to the button and reports a fresh press.
+fn read_call_button(
+    backend: &mut RapierBackend,
+    physics_world: rne_physics::PhysicsWorldId,
+    panel: Entity,
+    button: &mut CallButton,
+) -> bool {
+    let contacts: Vec<ButtonContact> = backend
+        .contact_points(physics_world)
+        .expect("contact points")
+        .iter()
+        .filter(|sample| sample.entity_a == panel || sample.entity_b == panel)
+        .map(|sample| ButtonContact {
+            point_world_m: sample.point_world_m,
+            normal_force_n: sample.normal_force_n,
+        })
+        .collect();
+    button.update(&contacts);
+    button.just_pressed()
+}
+
 fn run_mission(capture: bool, trace: bool) -> Mission {
     let spec = elevator_spec();
     spec.validate().expect("elevator specification");
@@ -789,19 +863,7 @@ fn run_mission(capture: bool, trace: bool) -> Mission {
             &mut commanded_z_m_s,
         );
 
-        // The button reads the solved contact between the truck and the panel.
-        let contacts: Vec<ButtonContact> = backend
-            .contact_points(physics_world)
-            .expect("contact points")
-            .iter()
-            .filter(|sample| sample.entity_a == site.button || sample.entity_b == site.button)
-            .map(|sample| ButtonContact {
-                point_world_m: sample.point_world_m,
-                normal_force_n: sample.normal_force_n,
-            })
-            .collect();
-        button.update(&contacts);
-        if button.just_pressed() {
+        if read_call_button(&mut backend, physics_world, site.button, &mut button) {
             presses += 1;
             elevator.call(0).expect("summon the car to the lobby");
         }
@@ -846,41 +908,7 @@ fn run_mission(capture: bool, trace: bool) -> Mission {
                 lift_height_m.max(case.y - (CAR_HALF_M.y + STAND_TOP_Y_M + CASE_HALF_M.y));
         }
 
-        phase = match phase {
-            Phase::Approach if (chassis.x - APPROACH_X_M).abs() < 0.06 => Phase::Engage,
-            Phase::Engage if (chassis.x - ENGAGED_X_M).abs() < 0.04 => Phase::Lift,
-            // Clear of the stand deck by a margin the solver cannot produce by
-            // jitter, so the haul starts only once the load is genuinely up.
-            Phase::Lift if case.y > CAR_HALF_M.y + STAND_TOP_Y_M + CASE_HALF_M.y + 0.12 => {
-                Phase::Haul
-            }
-            Phase::Haul
-                if (chassis.x - PRESS_X_M).abs() < 0.25 && (chassis.z - PRESS_Z_M).abs() < 0.25 =>
-            {
-                Phase::Press
-            }
-            Phase::Press if presses > 0 => Phase::WaitForDoors,
-            // Lined up on the doorway rather than exactly on its centreline:
-            // the truck arrives having just leaned on the panel, and holding
-            // out for the centreline outlasts the door hold.
-            Phase::WaitForDoors if elevator.is_boardable(0) && chassis.z.abs() < 0.14 => {
-                Phase::Board
-            }
-            Phase::Board if (chassis.x - BOARD_X_M).abs() < 0.06 => {
-                // Aboard: choose the destination, which is a separate act from
-                // summoning the car.
-                elevator.call(1).expect("select the upper floor");
-                Phase::Ride
-            }
-            Phase::Ride if elevator.is_boardable(1) => Phase::DriveOut,
-            Phase::DriveOut if (chassis.x - BAY_X_M).abs() < 0.12 => Phase::Place,
-            Phase::Place if (chassis.x - BAY_X_M).abs() < 0.05 => Phase::Lower,
-            // The case is down when it is resting on the outbound stand rather
-            // than on the tines.
-            Phase::Lower if case.y < OUTBOUND_TOP_Y_M + CASE_HALF_M.y + 0.03 => Phase::Withdraw,
-            Phase::Withdraw if chassis.x > WITHDRAW_X_M - 0.08 => Phase::Done,
-            other => other,
-        };
+        phase = advance_phase(phase, chassis, case, presses, &mut elevator);
 
         if trace && step % 120 == 0 {
             eprintln!(
@@ -948,107 +976,484 @@ fn run_mission(capture: bool, trace: bool) -> Mission {
     }
 }
 
-fn append_site(scene: &mut RenderScene, frame: &Frame) {
-    const DECK: [f32; 4] = [0.68, 0.70, 0.73, 1.0];
-    const SHAFT: [f32; 4] = [0.44, 0.48, 0.55, 1.0];
-    const CAR: [f32; 4] = [0.76, 0.79, 0.85, 1.0];
-    const DOOR: [f32; 4] = [0.82, 0.86, 0.92, 1.0];
-    const BUTTON_IDLE: [f32; 4] = [0.55, 0.57, 0.62, 1.0];
-    const BUTTON_LIT: [f32; 4] = [0.98, 0.72, 0.18, 1.0];
-    const TRUCK: [f32; 4] = [0.96, 0.62, 0.09, 1.0];
-    const MAST: [f32; 4] = [0.20, 0.22, 0.27, 1.0];
-    const CASE: [f32; 4] = [0.74, 0.56, 0.33, 1.0];
-    const RACK: [f32; 4] = [0.22, 0.42, 0.62, 1.0];
-    const STAND: [f32; 4] = [0.42, 0.45, 0.51, 1.0];
-    const BAY: [f32; 4] = [0.16, 0.72, 0.42, 1.0];
+/// Equirectangular environment map width and height, in pixels.
+///
+/// Small on purpose: it is only ever used as a light source, and the backend
+/// prefilters it into irradiance and specular mips before anything samples it.
+const ENVIRONMENT_W: u32 = 128;
+const ENVIRONMENT_H: u32 = 64;
 
-    let mut push = |translation: Vec3, half: Vec3, color: [f32; 4]| {
-        scene.items.push(RenderScene::item_from_visual(
-            Transform3::from_translation_rotation(translation, Quat::IDENTITY),
-            VisualShape::Box { size_m: half * 2.0 },
-            color,
-            Transform3::IDENTITY,
-        ));
+/// Builds the light this warehouse is lit by.
+///
+/// Without one, every surface facing away from the single directional light
+/// renders black -- the truck came out a silhouette and no amount of tuning its
+/// colours fixed it, because the problem was that there was nothing else to
+/// light it. This is a synthesised interior rather than a photograph: a bright
+/// ceiling carrying the fixture bands, mid-tone walls and a dark floor, which
+/// is what a warehouse actually is from a surface's point of view.
+fn warehouse_environment() -> EnvironmentLighting {
+    let mut rgba32f = Vec::with_capacity((ENVIRONMENT_W * ENVIRONMENT_H * 4) as usize);
+    for row in 0..ENVIRONMENT_H {
+        // 0 at the zenith, 1 at the nadir.
+        let down = (row as f32 + 0.5) / ENVIRONMENT_H as f32;
+        for column in 0..ENVIRONMENT_W {
+            let around = (column as f32 + 0.5) / ENVIRONMENT_W as f32;
+            let (r, g, b) = if down < 0.30 {
+                // Ceiling. Four fixture runs, bright enough to read as sources.
+                let bands = (around * std::f32::consts::TAU * 4.0).sin().max(0.0);
+                let fixture = bands.powf(18.0);
+                let base = 0.75 + 0.85 * (1.0 - down / 0.30);
+                (
+                    base + 4.5 * fixture,
+                    base + 4.5 * fixture,
+                    base * 1.03 + 4.3 * fixture,
+                )
+            } else if down < 0.62 {
+                // Walls, falling off toward the floor.
+                let t = (down - 0.30) / 0.32;
+                let level = 0.52 - 0.26 * t;
+                (level * 0.94, level * 0.97, level)
+            } else {
+                // Floor bounce: dim, and slightly warm from the concrete.
+                (0.15, 0.145, 0.135)
+            };
+            rgba32f.extend_from_slice(&[r, g, b, 1.0]);
+        }
+    }
+    let map = EnvironmentMap::from_rgba32f(ENVIRONMENT_W, ENVIRONMENT_H, rgba32f)
+        .expect("warehouse environment map");
+    EnvironmentLighting {
+        map: Some(Arc::new(map)),
+        intensity: 1.0,
+        // Above the defaults (0.35 / 0.25): this map is the scene's fill light,
+        // not a subtle tint on top of one. Not far above, though -- at 0.95 the
+        // decks blew out to white.
+        diffuse_strength: 0.72,
+        specular_strength: 0.38,
+        rotation_rad: 0.0,
+    }
+}
+
+/// The PBR maps the warehouse surfaces are built from.
+struct Surfaces {
+    concrete: Arc<ImageFrame>,
+    concrete_normal: Arc<ImageFrame>,
+    concrete_roughness: Arc<ImageFrame>,
+}
+
+fn surfaces() -> &'static Surfaces {
+    static SURFACES: OnceLock<Surfaces> = OnceLock::new();
+    SURFACES.get_or_init(|| {
+        // Shared with the photoreal test bay rather than copied: a warehouse
+        // deck and a test-bay floor are the same poured concrete.
+        let assets = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("examples directory")
+            .join("63_g1_stride_gif/assets/photoreal_test_bay");
+        Surfaces {
+            concrete: load_texture(&assets.join("concrete_floor_basecolor.png")),
+            concrete_normal: load_texture(&assets.join("concrete_floor_normal.png")),
+            concrete_roughness: load_texture(&assets.join("concrete_floor_roughness.png")),
+        }
+    })
+}
+
+fn load_texture(path: &Path) -> Arc<ImageFrame> {
+    let rgba = image::open(path)
+        .unwrap_or_else(|error| panic!("load render texture {}: {error}", path.display()))
+        .into_rgba8();
+    Arc::new(ImageFrame::from_rgba8(
+        rgba.width(),
+        rgba.height(),
+        rgba.into_raw(),
+    ))
+}
+
+/// A horizontal slab of poured concrete, tiled one texture repeat per 1.5 m.
+fn push_concrete_deck(scene: &mut RenderScene, center: Vec3, half: Vec3) {
+    let surfaces = surfaces();
+    let (half_x, half_z) = (half.x as f32, half.z as f32);
+    let (repeat_x, repeat_z) = ((half.x / 0.75) as f32, (half.z / 0.75) as f32);
+    let mesh = TriangleMesh {
+        positions: vec![
+            [-half_x, 0.0, -half_z],
+            [half_x, 0.0, -half_z],
+            [half_x, 0.0, half_z],
+            [-half_x, 0.0, half_z],
+        ],
+        normals: vec![[0.0, 1.0, 0.0]; 4],
+        texcoords: vec![
+            [0.0, 0.0],
+            [repeat_x, 0.0],
+            [repeat_x, repeat_z],
+            [0.0, repeat_z],
+        ],
+        // Counter-clockwise seen from above. The obvious order winds the other
+        // way, which puts the outward normal at -Y and lets back-face culling
+        // delete the floor.
+        indices: vec![0, 2, 1, 0, 3, 2],
+        skinning: None,
     };
+    scene.items.push(RenderSceneItem {
+        transform: MathTransform {
+            translation: center + Vec3::new(0.0, half.y, 0.0),
+            rotation: Quat::IDENTITY,
+            scale: Vec3::ONE,
+        },
+        shape: VisualShape::DynamicMesh,
+        color_rgba: [1.0; 4],
+        mesh: Some(Arc::new(mesh)),
+        base_color_texture: Some(Arc::clone(&surfaces.concrete)),
+        material: PbrMaterial::new([1.0; 4], 0.92, 0.0, [0.0; 3]).with_texture_maps(
+            Some(Arc::clone(&surfaces.concrete_normal)),
+            Some(Arc::clone(&surfaces.concrete_roughness)),
+        ),
+    });
+    // The slab's own edge, so the deck reads as a thickness rather than a
+    // sheet of paper when the camera is nearly level with it. Dropped a few
+    // millimetres: its top face is otherwise coplanar with the textured quad
+    // and wins the depth test about half the time, which hides the concrete.
+    push_pbr(
+        scene,
+        center - Vec3::new(0.0, 0.006, 0.0),
+        half,
+        [0.42, 0.43, 0.45, 1.0],
+        0.95,
+        0.0,
+        [0.0; 3],
+    );
+}
+
+/// A box with real surface parameters rather than the default material.
+fn push_pbr(
+    scene: &mut RenderScene,
+    translation: Vec3,
+    half: Vec3,
+    color: [f32; 4],
+    roughness: f32,
+    metallic: f32,
+    emissive: [f32; 3],
+) {
+    // Built through `item_from_visual` rather than by hand: it folds the
+    // shape's size into the transform, and an item assembled directly with a
+    // unit scale draws every box as a 1 m cube whatever `size_m` says.
+    let mut item = RenderScene::item_from_visual(
+        Transform3::from_translation_rotation(translation, Quat::IDENTITY),
+        VisualShape::Box { size_m: half * 2.0 },
+        color,
+        Transform3::IDENTITY,
+    );
+    item.material = PbrMaterial::new(color, roughness, metallic, emissive);
+    scene.items.push(item);
+}
+
+/// Painted steel: the colour the caller asked for, with a sheen.
+///
+/// Metallic stays low. There is no image-based lighting in this shot, so a
+/// surface with nothing to reflect renders as its reflections -- that is, as
+/// black. At 0.65 the whole truck came out a silhouette.
+fn push_steel(scene: &mut RenderScene, translation: Vec3, half: Vec3, color: [f32; 4]) {
+    push_pbr(scene, translation, half, color, 0.45, 0.08, [0.0; 3]);
+}
+
+/// A stringer pallet: three deck boards on three blocks, drawn under the case.
+///
+/// The physics case is one box; this is what a box of that size is actually
+/// carried on, and without it the load looks like it is floating on the tines.
+fn push_pallet(scene: &mut RenderScene, center: Vec3) {
+    const WOOD: [f32; 4] = [0.60, 0.45, 0.28, 1.0];
+    const BOARD_HALF_Y: f64 = 0.012;
+    const BLOCK_HALF_Y: f64 = 0.045;
+    for offset in [-0.20, 0.0, 0.20] {
+        push_pbr(
+            scene,
+            center + Vec3::new(0.0, BLOCK_HALF_Y, offset),
+            Vec3::new(0.055, BLOCK_HALF_Y, 0.055),
+            [0.50, 0.37, 0.22, 1.0],
+            0.95,
+            0.0,
+            [0.0; 3],
+        );
+    }
+    for offset in [-0.21, 0.0, 0.21] {
+        push_pbr(
+            scene,
+            center + Vec3::new(0.0, 2.0 * BLOCK_HALF_Y + BOARD_HALF_Y, offset),
+            Vec3::new(0.20, BOARD_HALF_Y, 0.055),
+            WOOD,
+            0.9,
+            0.0,
+            [0.0; 3],
+        );
+    }
+}
+
+/// The truck: counterweight body, mast rails, tines, wheels and guard.
+///
+/// Only the chassis, carriage and backrest exist in physics. The rest is what
+/// those three shapes are part of, and it is drawn from their poses so it can
+/// never disagree with them.
+fn push_truck(scene: &mut RenderScene, frame: &Frame) {
+    const BODYWORK: [f32; 4] = [0.95, 0.56, 0.06, 1.0];
+    const DARK: [f32; 4] = [0.30, 0.32, 0.37, 1.0];
+    const TYRE: [f32; 4] = [0.20, 0.20, 0.22, 1.0];
+
+    let chassis = frame.chassis;
+    // Counterweight at the back, cab deck in front of it.
+    push_pbr(
+        scene,
+        chassis + Vec3::new(CHASSIS_HALF_M.x - 0.20, 0.03, 0.0),
+        Vec3::new(0.20, CHASSIS_HALF_M.y - 0.02, CHASSIS_HALF_M.z),
+        [0.88, 0.50, 0.05, 1.0],
+        0.5,
+        0.05,
+        [0.0; 3],
+    );
+    push_pbr(
+        scene,
+        chassis,
+        CHASSIS_HALF_M,
+        BODYWORK,
+        0.45,
+        0.05,
+        [0.0; 3],
+    );
+    // Overhead guard: four posts and a roof, the thing that makes a forklift
+    // read as a forklift from any angle.
+    for (dx, dz) in [
+        (CHASSIS_HALF_M.x - 0.06, CHASSIS_HALF_M.z - 0.05),
+        (CHASSIS_HALF_M.x - 0.06, -(CHASSIS_HALF_M.z - 0.05)),
+        (-(CHASSIS_HALF_M.x - 0.10), CHASSIS_HALF_M.z - 0.05),
+        (-(CHASSIS_HALF_M.x - 0.10), -(CHASSIS_HALF_M.z - 0.05)),
+    ] {
+        push_steel(
+            scene,
+            chassis + Vec3::new(dx, CHASSIS_HALF_M.y + 0.40, dz),
+            Vec3::new(0.022, 0.40, 0.022),
+            DARK,
+        );
+    }
+    push_steel(
+        scene,
+        chassis + Vec3::new(0.0, CHASSIS_HALF_M.y + 0.81, 0.0),
+        Vec3::new(CHASSIS_HALF_M.x - 0.04, 0.018, CHASSIS_HALF_M.z - 0.03),
+        DARK,
+    );
+    // Wheels, as blocks rather than cylinders: at this scale the cylinder
+    // tessellation reads as a lump rather than a wheel, and four lumps under
+    // the chassis read as one.
+    for (dx, dz) in [
+        (CHASSIS_HALF_M.x - 0.16, CHASSIS_HALF_M.z + 0.005),
+        (CHASSIS_HALF_M.x - 0.16, -(CHASSIS_HALF_M.z + 0.005)),
+        (-(CHASSIS_HALF_M.x - 0.14), CHASSIS_HALF_M.z + 0.005),
+        (-(CHASSIS_HALF_M.x - 0.14), -(CHASSIS_HALF_M.z + 0.005)),
+    ] {
+        push_pbr(
+            scene,
+            chassis + Vec3::new(dx, -CHASSIS_HALF_M.y + 0.005, dz),
+            Vec3::new(0.105, 0.105, 0.035),
+            TYRE,
+            0.95,
+            0.0,
+            [0.0; 3],
+        );
+    }
+
+    // Mast: two rails from the chassis front up past the carriage.
+    let mast_x_m = chassis.x + FORK_REACH_M + FORK_HALF_M.x + 0.04;
+    for sign in [-1.0, 1.0] {
+        push_steel(
+            scene,
+            Vec3::new(
+                mast_x_m,
+                chassis.y + MAST_ANCHOR_Y_M + 0.44,
+                chassis.z + sign * (FORK_HALF_M.z + 0.05),
+            ),
+            Vec3::new(0.035, 0.52, 0.030),
+            DARK,
+        );
+    }
+    // Two tines rather than one slab, on the carriage the physics solves.
+    for sign in [-1.0, 1.0] {
+        push_steel(
+            scene,
+            frame.fork + Vec3::new(0.0, 0.0, sign * 0.085),
+            Vec3::new(FORK_HALF_M.x, FORK_HALF_M.y, 0.045),
+            [0.72, 0.74, 0.78, 1.0],
+        );
+    }
+    push_steel(scene, frame.backrest, BACKREST_HALF_M, DARK);
+}
+
+/// The parts of the site that never move: shaft, decks, racking, fixtures and
+/// the two stands.
+fn push_building(scene: &mut RenderScene) {
+    const SHAFT: [f32; 4] = [0.33, 0.36, 0.42, 1.0];
+    const CASE: [f32; 4] = [0.72, 0.55, 0.34, 1.0];
+    const RACK_BEAM: [f32; 4] = [0.92, 0.55, 0.10, 1.0];
+    const RACK_UPRIGHT: [f32; 4] = [0.16, 0.36, 0.60, 1.0];
+    const STAND: [f32; 4] = [0.40, 0.43, 0.48, 1.0];
+    const BAY: [f32; 4] = [0.14, 0.70, 0.40, 1.0];
+    const HAZARD: [f32; 4] = [0.92, 0.78, 0.12, 1.0];
+    /// Racking runs along the back of the aisle. On the camera's side it stands
+    /// between the lens and the job and hides the whole thing.
+    const RACK_Z_M: f64 = -0.98;
 
     // Shaft walls, so the car reads as travelling inside something rather than
     // floating. Back plus one side; the open side is the camera's cutaway.
     let shaft_half_height_m = FLOOR_HEIGHTS_M[1] * 0.5 + 0.9;
     let shaft_mid_y_m = shaft_half_height_m - 0.6;
-    push(
-        Vec3::new(SHAFT_X_M + 1.05, shaft_mid_y_m, 0.0),
-        Vec3::new(0.06, shaft_half_height_m, 1.15),
+    push_pbr(
+        scene,
+        Vec3::new(SHAFT_X_M + 1.02, shaft_mid_y_m, 0.0),
+        Vec3::new(0.06, shaft_half_height_m, 0.98),
         SHAFT,
+        0.88,
+        0.03,
+        [0.0; 3],
     );
-    push(
+    push_pbr(
+        scene,
         Vec3::new(SHAFT_X_M, shaft_mid_y_m, -1.12),
         Vec3::new(1.05, shaft_half_height_m, 0.06),
         SHAFT,
-    );
-    // Back wall of the aisle, one per floor, and the panel it carries.
-    for height_m in FLOOR_HEIGHTS_M {
-        push(
-            Vec3::new(SHAFT_X_M - 3.4, height_m + 1.05, -1.30),
-            Vec3::new(3.3, 1.05, 0.05),
-            SHAFT,
-        );
-        push(
-            Vec3::new(SHAFT_X_M - 4.8, height_m, 0.0),
-            Vec3::new(3.9, 0.06, 1.5),
-            DECK,
-        );
-    }
-    // Racking down the ground-floor aisle: uprights and two beam levels. This
-    // is dressing, not physics -- the truck's route never crosses it.
-    for bay in 0..4 {
-        let x_m = SHAFT_X_M - 7.6 + f64::from(bay) * 1.55;
-        for level in 0..2 {
-            push(
-                Vec3::new(x_m, 0.62 + f64::from(level) * 0.92, -0.95),
-                Vec3::new(0.70, 0.04, 0.16),
-                RACK,
-            );
-        }
-        for side in [-1.0, 1.0] {
-            push(
-                Vec3::new(x_m + side * 0.70, 0.86, -0.95),
-                Vec3::new(0.05, 0.86, 0.16),
-                RACK,
-            );
-        }
-    }
-    // Outbound stand and its bay marking on the upper deck.
-    for sign in [-1.0, 1.0] {
-        push(
-            Vec3::new(
-                OUTBOUND_X_M,
-                FLOOR_HEIGHTS_M[1] + CAR_HALF_M.y + STAND_LEG_HALF_M.y,
-                sign * STAND_LEG_Z_M,
-            ),
-            STAND_LEG_HALF_M,
-            STAND,
-        );
-    }
-    push(
-        Vec3::new(OUTBOUND_X_M, FLOOR_HEIGHTS_M[1] + CAR_HALF_M.y + 0.005, 0.0),
-        Vec3::new(0.34, 0.005, 0.34),
-        BAY,
+        0.88,
+        0.03,
+        [0.0; 3],
     );
 
-    push(
-        Vec3::new(STAND_X_M, CAR_HALF_M.y + STAND_LEG_HALF_M.y, -STAND_LEG_Z_M),
-        STAND_LEG_HALF_M,
-        STAND,
+    for (index, height_m) in FLOOR_HEIGHTS_M.iter().enumerate() {
+        push_pbr(
+            scene,
+            Vec3::new(DECK_X_M[index], height_m + 1.05, -1.30),
+            Vec3::new(DECK_HALF_M[index].x - 0.6, 1.05, 0.05),
+            SHAFT,
+            0.9,
+            0.05,
+            [0.0; 3],
+        );
+        push_concrete_deck(
+            scene,
+            Vec3::new(DECK_X_M[index], *height_m, 0.0),
+            DECK_HALF_M[index],
+        );
+        // Hazard striping across the lift threshold, which is where the deck
+        // stops being a floor and starts being a hole.
+        for stripe in 0..5 {
+            push_pbr(
+                scene,
+                Vec3::new(
+                    SHAFT_X_M - 1.16,
+                    height_m + 2.0 * CAR_HALF_M.y + 0.003,
+                    -0.6 + f64::from(stripe) * 0.30,
+                ),
+                Vec3::new(0.10, 0.003, 0.10),
+                HAZARD,
+                0.7,
+                0.0,
+                [0.0; 3],
+            );
+        }
+    }
+
+    // Racking down the ground-floor aisle: uprights, bracing and beam levels,
+    // with pallets on them. Dressing -- the truck's route never crosses it.
+    for bay in 0..4 {
+        let x_m = SHAFT_X_M - 7.4 + f64::from(bay) * 1.62;
+        for level in 0..3 {
+            let y_m = 0.52 + f64::from(level) * 0.88;
+            push_steel(
+                scene,
+                Vec3::new(x_m, y_m, RACK_Z_M),
+                Vec3::new(0.76, 0.045, 0.05),
+                RACK_BEAM,
+            );
+            if level < 2 && bay % 2 == 0 {
+                push_pallet(scene, Vec3::new(x_m, y_m + 0.045, RACK_Z_M));
+                push_pbr(
+                    scene,
+                    Vec3::new(x_m, y_m + 0.30, RACK_Z_M),
+                    Vec3::new(0.24, 0.19, 0.24),
+                    CASE,
+                    0.9,
+                    0.0,
+                    [0.0; 3],
+                );
+            }
+        }
+        for side in [-1.0, 1.0] {
+            push_steel(
+                scene,
+                Vec3::new(x_m + side * 0.76, 1.32, RACK_Z_M),
+                Vec3::new(0.05, 1.32, 0.05),
+                RACK_UPRIGHT,
+            );
+        }
+    }
+
+    // Ceiling fixtures, emissive so the shot has a light source in it.
+    for bay in 0..4 {
+        push_pbr(
+            scene,
+            Vec3::new(SHAFT_X_M - 6.6 + f64::from(bay) * 1.7, 2.78, -0.45),
+            Vec3::new(0.52, 0.04, 0.10),
+            [0.97, 0.98, 1.0, 1.0],
+            0.35,
+            0.0,
+            [0.85, 0.87, 0.92],
+        );
+    }
+
+    for (x_m, deck_y_m) in [
+        (STAND_X_M, CAR_HALF_M.y),
+        (OUTBOUND_X_M, FLOOR_HEIGHTS_M[1] + CAR_HALF_M.y),
+    ] {
+        for sign in [-1.0, 1.0] {
+            push_steel(
+                scene,
+                Vec3::new(x_m, deck_y_m + STAND_LEG_HALF_M.y, sign * STAND_LEG_Z_M),
+                STAND_LEG_HALF_M,
+                STAND,
+            );
+        }
+    }
+    push_pbr(
+        scene,
+        Vec3::new(
+            OUTBOUND_X_M,
+            FLOOR_HEIGHTS_M[1] + 2.0 * CAR_HALF_M.y + 0.004,
+            0.0,
+        ),
+        Vec3::new(0.40, 0.004, 0.40),
+        BAY,
+        0.8,
+        0.0,
+        [0.0; 3],
     );
-    push(
-        Vec3::new(STAND_X_M, CAR_HALF_M.y + STAND_LEG_HALF_M.y, STAND_LEG_Z_M),
-        STAND_LEG_HALF_M,
-        STAND,
+}
+
+fn append_site(scene: &mut RenderScene, frame: &Frame) {
+    const CAR: [f32; 4] = [0.74, 0.77, 0.82, 1.0];
+    const DOOR: [f32; 4] = [0.80, 0.84, 0.90, 1.0];
+    const BUTTON_IDLE: [f32; 4] = [0.45, 0.47, 0.52, 1.0];
+    const BUTTON_LIT: [f32; 4] = [0.99, 0.74, 0.20, 1.0];
+    const CASE: [f32; 4] = [0.72, 0.55, 0.34, 1.0];
+
+    push_building(scene);
+
+    push_pbr(
+        scene,
+        Vec3::new(SHAFT_X_M, frame.car_y_m, 0.0),
+        CAR_HALF_M,
+        CAR,
+        0.55,
+        0.08,
+        [0.0; 3],
     );
-    push(Vec3::new(SHAFT_X_M, frame.car_y_m, 0.0), CAR_HALF_M, CAR);
     let doorway_z_m = CAR_HALF_M.z - DOOR_HALF_M.z;
     for sign in [-1.0, 1.0] {
-        push(
+        push_pbr(
+            scene,
             Vec3::new(
                 SHAFT_X_M - CAR_HALF_M.x,
                 frame.car_y_m + DOOR_HALF_M.y,
@@ -1056,35 +1461,41 @@ fn append_site(scene: &mut RenderScene, frame: &Frame) {
             ),
             DOOR_HALF_M,
             DOOR,
+            0.45,
+            0.08,
+            [0.0; 3],
         );
     }
+
     let lit = !matches!(frame.phase, Phase::Approach | Phase::Engage | Phase::Lift);
     // Drawn larger than the collider on purpose: the physical button is 10 cm
     // across and would be three pixels at this scale, so the state it reports
     // would be invisible. The collider, and therefore the press, is unchanged.
-    push(
+    push_pbr(
+        scene,
+        BUTTON_CENTER_M - BUTTON_NORMAL * 0.04,
+        Vec3::new(0.09, 0.15, 0.02),
+        [0.32, 0.34, 0.39, 1.0],
+        0.5,
+        0.05,
+        [0.0; 3],
+    );
+    push_pbr(
+        scene,
         BUTTON_CENTER_M - BUTTON_NORMAL * BUTTON_HALF_M.z,
-        Vec3::new(0.10, 0.10, BUTTON_HALF_M.z),
+        Vec3::new(0.055, 0.055, BUTTON_HALF_M.z),
         if lit { BUTTON_LIT } else { BUTTON_IDLE },
+        0.4,
+        0.1,
+        if lit { [0.55, 0.38, 0.05] } else { [0.0; 3] },
     );
 
-    push(frame.chassis, CHASSIS_HALF_M, TRUCK);
-    // Mast uprights, drawn between the chassis and the carriage so the lift
-    // reads as a mechanism rather than a floating slab.
-    let mast_x_m = frame.chassis.x - CHASSIS_HALF_M.x - 0.05;
-    let mast_half_height_m = 0.40;
-    push(
-        Vec3::new(
-            mast_x_m,
-            frame.chassis.y + MAST_ANCHOR_Y_M + mast_half_height_m,
-            0.0,
-        ),
-        Vec3::new(0.04, mast_half_height_m, FORK_HALF_M.z),
-        MAST,
+    push_truck(scene, frame);
+    push_pallet(
+        scene,
+        frame.case - Vec3::new(0.0, CASE_HALF_M.y + 0.114, 0.0),
     );
-    push(frame.fork, FORK_HALF_M, MAST);
-    push(frame.backrest, BACKREST_HALF_M, MAST);
-    push(frame.case, CASE_HALF_M, CASE);
+    push_pbr(scene, frame.case, CASE_HALF_M, CASE, 0.92, 0.0, [0.0; 3]);
 }
 
 fn write_png(path: &Path, rgba: &[u8]) -> std::io::Result<()> {
@@ -1175,20 +1586,21 @@ fn main() {
     fs::create_dir_all(&frames_dir).expect("create frame directory");
 
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
+    backend.set_environment(warehouse_environment());
     let camera = Camera::new(WIDTH, HEIGHT, std::f64::consts::FRAC_PI_4);
     let mut mesh_cache = MeshRenderCache::new();
     // A fixed viewpoint, deliberately: the subject is one route across two
     // floors, and an orbiting camera both fights the eye and destroys
     // inter-frame compression.
     let orbit = CameraOrbit {
-        focus: Vec3::new(SHAFT_X_M - 2.25, 1.60, 0.0),
-        yaw_rad: 0.42,
+        focus: Vec3::new(SHAFT_X_M - 1.95, 1.65, 0.0),
+        yaw_rad: 0.46,
         // Larger pitch is nearer horizontal. At 1.44 the two decks were seen
         // edge-on and read as lines; a three-quarter view puts the load on a
         // surface the eye can see.
         pitch_rad: 1.16,
         // 10.6 m framed the job as a grey postage stamp in an empty room.
-        distance_m: 6.9,
+        distance_m: 7.6,
     };
 
     for (index, frame) in mission.frames.iter().enumerate() {
