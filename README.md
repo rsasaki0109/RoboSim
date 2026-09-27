@@ -139,6 +139,13 @@ SLAM with loop closure and AMCL (a ROS 2 adapter maps to Nav2). Details:
       <sub>The call button reads solved contact force from the robot's own body, the car and doors are <code>rne_nav::Elevator</code> state, and the car carries the robot by ordinary contact rather than by parenting it. <a href="examples/122_multi_floor_media/main.rs">source</a></sub>
     </td>
   </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="docs/media/warehouse-relay.gif" alt="An orange forklift takes a case off the goods-in stand, turns round and sets it on a stand inside the lift car; the car carries the case up alone and a blue forklift on the upper floor takes it out, turns round and sets it on the outbound bay" width="700">
+      <br><b>Two trucks, one lift</b><br>
+      <sub>A truck on each floor and the lift as the conveyor between them. The ground-floor truck sets the case on a stand inside the car and backs out; the car goes up with only the case; the upper-floor truck forks it out and delivers it. A light-curtain check holds the doors while anything is in the doorway, and the case moves 6 mm and 1.5 mm on the two trucks' tines. Driving and turning are commanded; the wheels are not modelled. <a href="examples/125_warehouse_relay/main.rs">source</a></sub>
+    </td>
+  </tr>
 </table>
 
 ## G1 locomotion
