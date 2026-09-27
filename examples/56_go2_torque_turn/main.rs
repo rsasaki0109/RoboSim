@@ -1,9 +1,6 @@
-//! Searches torque space for the Go2 turn that joint-space control cannot find.
+//! Searches torque space for a Go2 turn.
 //!
-//! `docs/GO2_LOCOMOTION.md` measures nine hand-designed steering mechanisms
-//! across two actuation regimes — six in position space, three at force level —
-//! and none sustains a turn on this 3-DoF-per-leg platform; three learned
-//! position-space searches plateau at ~0.02 rad/s. This example runs the same
+//! This example runs the same
 //! deterministic, resumable, parallel cross-entropy search in *torque space*:
 //! contact-gated Fourier feed-forward torques
 //! ([`UnitreeGo2TorqueOverlay`], 72 coefficients) on top of the low-bandwidth
@@ -11,6 +8,13 @@
 //! bound allows), with the anti-cheat minimum-of-two-late-windows yaw
 //! objective. `--train` reproduces the search (seed 42); the default mode
 //! replays the pinned winner headlessly and verifies the measurement.
+//!
+//! Measurement note: until 2026-09-27 `base_relative_yaw_rad` measured a
+//! rotation about a horizontal axis on this z-up robot, so the turns this
+//! search scored and the claims it was built on were measured on the wrong
+//! axis. `--train` now scores the corrected heading and will not reproduce
+//! the pinned coefficients. What the pinned winner measurably does is in the
+//! correction table at the top of `docs/GO2_LOCOMOTION.md`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -410,11 +414,10 @@ fn main() {
     // contracting trajectory (`--ensemble` measures the contrast with the
     // fragile single-trajectory winner).
     let outcome = rollout(&UnitreeGo2TorqueOverlay::LEARNED_ROBUST_TURN, ROLLOUT_STEPS);
-    // The sustained turn survives cross-platform; its exact rate does not
-    // (persistent libm ulp differences settle onto a nearby orbit — measured
-    // +0.250/+0.274 on Windows, +0.146/+0.121 on Linux).
+    // Measured about the world vertical it turns +1.83/+0.71 rad per window on
+    // Linux; its exact rate is platform-local.
     assert!(
-        outcome.window_a_yaw_rad > 0.08 && outcome.window_b_yaw_rad > 0.08,
+        outcome.window_a_yaw_rad > 0.3 && outcome.window_b_yaw_rad > 0.3,
         "robust torque turn must sustain both windows, got {:+.3}/{:+.3}",
         outcome.window_a_yaw_rad,
         outcome.window_b_yaw_rad

@@ -1,15 +1,21 @@
-//! Raises the commanded turn's authority above the chaos floor.
+//! Raises the commanded turn's authority.
 //!
-//! The ±8 N·m commanded policy (`58_go2_steered_turn`) obeys its yaw-rate
-//! command, but only *differentially*: its ~0.1 rad windows sit inside the
-//! ±0.3 rad spread that cross-OS libm orbit differences produce, so absolute
-//! per-window obedience does not transfer between platforms. This example
-//! attacks the margin with two levers: the feed-forward clamp rises to
+//! The ±8 N·m commanded policy (`58_go2_steered_turn`) was built to obey a
+//! yaw-rate command; measured about the world vertical it turns left under
+//! both commands and the command only shifts the rate. This example tries
+//! two levers: the feed-forward clamp rises to
 //! ±12 N·m, and the feature vector gains an *integral* of the yaw-rate error
 //! (a learned PI structure) in place of the least useful lean-rate component.
 //! The search is the same worse-of-both-commanded-directions CEM,
 //! warm-started from the ±8 winner. `--train` reproduces it (seed 42); the
 //! default mode replays the pinned winner under both commands headlessly.
+//!
+//! Measurement note: until 2026-09-27 `base_relative_yaw_rad` measured a
+//! rotation about a horizontal axis on this z-up robot, so the turns this
+//! search scored and the claims it was built on were measured on the wrong
+//! axis. `--train` now scores the corrected heading and will not reproduce
+//! the pinned coefficients. What the pinned winner measurably does is in the
+//! correction table at the top of `docs/GO2_LOCOMOTION.md`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -373,9 +379,9 @@ fn main() {
     }
 
     // Default: replay the pinned NEGATIVE result. The authority hypothesis —
-    // that a ±12 N·m clamp plus an integral error term lifts the commanded
-    // turn above the ±0.3 rad chaos floor — is refuted: the winner's
-    // sign-corrected windows stay far below the floor.
+    // that a ±12 N·m clamp plus an integral error term makes the turn obey
+    // the commanded direction — is refuted: the winner turns left under both
+    // commands, so its worst sign-corrected window is negative.
     let policy = UnitreeGo2TorquePolicy::LEARNED_AUTHORITY_TURN;
     let mut worst_obedient_window = f64::MAX;
     for reference in [YAW_RATE_REF_RAD_S, -YAW_RATE_REF_RAD_S] {
@@ -400,7 +406,7 @@ fn main() {
     }
     assert!(
         worst_obedient_window < 0.25,
-        "the refutation must hold: authority did not clear the chaos floor, got {worst_obedient_window:+.3}"
+        "the refutation must hold: authority did not make the turn obey, got {worst_obedient_window:+.3}"
     );
-    println!("worst obedient window: {worst_obedient_window:+.3} rad (floor is ~0.3)");
+    println!("worst obedient window: {worst_obedient_window:+.3} rad");
 }

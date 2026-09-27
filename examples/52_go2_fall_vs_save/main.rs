@@ -79,8 +79,13 @@ fn main() {
     let _ = fs::remove_dir_all(&frames_dir);
     fs::create_dir_all(&frames_dir).expect("create fall-vs-save frame directory");
 
+    // Start both panels from the settled reset state, as the acceptance test
+    // does. Without the reset the save depends on where the unsettled stand
+    // happens to be when the push lands.
     let mut open_episode = episode();
     let mut saved_episode = episode();
+    open_episode.reset();
+    let mut saved_observation = Some(saved_episode.reset().observation);
     let open_start = open_episode.sim().observe();
     let saved_start = saved_episode.sim().observe();
     let focus_open = Vec3::new(
@@ -94,7 +99,6 @@ fn main() {
         saved_start.base_z_m,
     );
     let mut open_observation: Option<UnitreeGo2Observation> = None;
-    let mut saved_observation: Option<UnitreeGo2Observation> = None;
     let mut saved_lean = 0.0_f64;
 
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");

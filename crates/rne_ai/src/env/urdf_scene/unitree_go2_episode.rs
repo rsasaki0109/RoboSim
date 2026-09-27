@@ -130,11 +130,14 @@ pub struct UnitreeGo2Observation {
     pub base_linear_velocity_m_s: [f64; 3],
     /// Base angular velocity in radians per second.
     pub base_angular_velocity_rad_s: [f64; 3],
-    /// Base yaw relative to the loaded upright pose in radians.
+    /// Base heading change since the loaded pose: rotation about the world
+    /// vertical, in radians.
     pub base_relative_yaw_rad: f64,
-    /// Base pitch relative to the loaded upright pose in radians.
+    /// Base tilt about the world X axis since the loaded pose, in radians
+    /// (sideways lean while facing world +X).
     pub base_relative_pitch_rad: f64,
-    /// Base roll relative to the loaded upright pose in radians.
+    /// Base tilt about the world Z axis since the loaded pose, in radians
+    /// (fore-aft lean while facing world +X).
     pub base_relative_roll_rad: f64,
     /// Planar displacement during the latest step in meters.
     pub locomotion_delta_m: f64,
@@ -325,9 +328,10 @@ impl Episode for UnitreeGo2Episode {
             let active =
                 self.step_in_episode >= push.step && self.step_in_episode < push.step + duration;
             if active {
-                // Tilt about the body X axis: physically the lateral lean, which this
-                // observation convention reports on `base_relative_pitch_rad`, and
-                // exactly the axis the hip-abduction correction actuates.
+                // Tilt about the body X axis: physically the lateral lean. The Go2
+                // faces world +X, so the y-up observation reports it on
+                // `base_relative_pitch_rad`, and it is exactly the axis the
+                // hip-abduction correction actuates.
                 if let Some(pose) = self.sim.named_transform("base") {
                     let axis = (pose.rotation * rne_math::Vec3::X).normalize_or_zero();
                     let axis_angle = axis * (push.roll_tilt_rad / duration as f64);
@@ -505,15 +509,19 @@ mod tests {
         }
     }
 
-    /// Proportional-derivative posture feedback from the measured base attitude.
+    /// Proportional-derivative posture feedback from the measured lateral lean.
+    ///
+    /// The Go2 faces world +X, so its lateral lean is rotation about world X:
+    /// `base_relative_pitch_rad` in the y-up observation convention, with
+    /// `base_angular_velocity_rad_s[0]` its rate.
     fn posture_feedback_with(
         roll_gain: f64,
     ) -> impl Fn(&UnitreeGo2Observation) -> UnitreeGo2Action {
         move |observation| {
-            let roll = observation.base_relative_roll_rad;
-            let roll_rate = observation.base_angular_velocity_rad_s[0];
+            let lean = observation.base_relative_pitch_rad;
+            let lean_rate = observation.base_angular_velocity_rad_s[0];
             UnitreeGo2Action {
-                roll_correction_rad: roll_gain * (roll + 0.1 * roll_rate),
+                roll_correction_rad: roll_gain * (lean + 0.1 * lean_rate),
                 ..UnitreeGo2Action::default()
             }
         }
@@ -522,30 +530,39 @@ mod tests {
     #[test]
     fn axis_derivation_probe() {
         // Two empirical measurements fix the feedback signs without guessing
-        // conventions: which observation axis a body-forward-axis tilt lands on, and
-        // which way a constant hip correction leans the standing body.
-        let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
-            .expect("load Go2 scene");
-        settle(&mut sim, &UnitreeGo2EpisodeConfig::default());
-        let pose = sim.named_transform("base").expect("base pose");
-        // Empirically, rotation about the body X axis registers as relative PITCH in
-        // this observation convention, so the roll axis is the body Z axis.
-        let roll_axis = (pose.rotation * rne_math::Vec3::Z).normalize_or_zero();
-        assert!(sim.tilt_named_body_rad(
-            "base",
-            [roll_axis.x * 0.15, roll_axis.y * 0.15, roll_axis.z * 0.15]
-        ));
-        sim.step_joint_position_targets(&[]);
-        let tilted = sim.observe();
+        // conventions: which observation axis each body-axis rotation lands on,
+        // and which way a constant hip correction leans the standing body.
+        let rotated_by = |body_axis: rne_math::Vec3| {
+            let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+                .expect("load Go2 scene");
+            settle(&mut sim, &UnitreeGo2EpisodeConfig::default());
+            let pose = sim.named_transform("base").expect("base pose");
+            let axis = (pose.rotation * body_axis).normalize_or_zero() * 0.15;
+            assert!(sim.tilt_named_body_rad("base", [axis.x, axis.y, axis.z]));
+            sim.step_joint_position_targets(&[]);
+            let observed = sim.observe();
+            (
+                observed.base_relative_yaw_rad,
+                observed.base_relative_pitch_rad,
+                observed.base_relative_roll_rad,
+            )
+        };
+        // The URDF is x-forward, z-up and the robot faces world +X, so: body X
+        // (lateral lean) is rotation about world X, relative pitch; body Z (a
+        // heading change) is rotation about world vertical, relative yaw.
+        let lean = rotated_by(rne_math::Vec3::X);
+        let turn = rotated_by(rne_math::Vec3::Z);
         println!(
-            "body-roll tilt +0.15: rel_roll={:.3} rel_pitch={:.3}",
-            tilted.base_relative_roll_rad, tilted.base_relative_pitch_rad
+            "body-X +0.15: yaw={:.3} pitch={:.3} roll={:.3}; body-Z +0.15: yaw={:.3} pitch={:.3} roll={:.3}",
+            lean.0, lean.1, lean.2, turn.0, turn.1, turn.2
         );
-        // A body-forward-axis tilt must land on the relative roll observation.
         assert!(
-            tilted.base_relative_roll_rad.abs() > 0.05,
-            "roll tilt must register on rel_roll, got {:.3}",
-            tilted.base_relative_roll_rad
+            lean.1.abs() > 0.1 && lean.0.abs() < 0.05,
+            "a lateral lean must register on rel_pitch, not yaw: {lean:?}"
+        );
+        assert!(
+            turn.0.abs() > 0.1 && turn.1.hypot(turn.2) < 0.05,
+            "a heading change must register on rel_yaw and not as tilt: {turn:?}"
         );
 
         // Which actuation pattern moves which observation axis? Measure uniform
@@ -638,9 +655,10 @@ mod tests {
         );
 
         // Pin the measured actuation map the feedback pairing relies on: uniform
-        // hip abduction actuates the same axis a body-X tilt disturbs (labelled
-        // relative pitch by this observation), no leg pattern actuates the
-        // orthogonal rel_roll axis, and thigh offsets barely move the attitude.
+        // hip abduction actuates the same axis a body-X tilt disturbs (the
+        // lateral lean, relative pitch), a uniform thigh offset barely moves the
+        // attitude, and a front/back thigh differential pitches the body fore-aft
+        // (relative roll) without leaning it sideways.
         assert!(
             uniform_hip.1.abs() > 0.05,
             "uniform hip must actuate the lean axis, got {:.3}",
@@ -648,7 +666,10 @@ mod tests {
         );
         assert!(uniform_hip.0.abs() < 0.05);
         assert!(uniform_thigh.0.abs() < 0.05 && uniform_thigh.1.abs() < 0.05);
-        assert!(differential_thigh.0.abs() < 0.05 && differential_thigh.1.abs() < 0.05);
+        assert!(
+            differential_thigh.0.abs() > 0.05 && differential_thigh.1.abs() < 0.05,
+            "a front/back thigh differential must pitch fore-aft only: {differential_thigh:?}"
+        );
         // The leg-length channel actuates the same lean axis, independently of the
         // hips — the second authority the two-channel save controller relies on.
         assert!(
@@ -864,6 +885,16 @@ mod tests {
         (window_a, window_b, max_tilt, min_height)
     }
 
+    /// The smaller of two window turns when both share a sign, else zero: the
+    /// magnitude of a turn sustained in one direction through both windows.
+    fn sustained_turn(window_a: f64, window_b: f64) -> f64 {
+        if window_a.signum() == window_b.signum() {
+            window_a.abs().min(window_b.abs())
+        } else {
+            0.0
+        }
+    }
+
     fn fast_walk_command() -> UnitreeGo2GaitCommand {
         UnitreeGo2GaitCommand {
             stride_rad: 0.24,
@@ -889,24 +920,28 @@ mod tests {
         };
         let (nominal_a, nominal_b, _, _) = windowed_yaw(23.7, overlay_targets);
         let (strong_a, strong_b, _, _) = windowed_yaw(120.0, overlay_targets);
-        let nominal = nominal_a.min(nominal_b);
-        let strong = strong_a.min(strong_b);
+        // Linux measures -0.125/-0.211 rad per window at 23.7 N*m and
+        // -0.128/-0.213 at 120: a clockwise turn five times the actuator force
+        // leaves essentially unchanged.
+        let nominal = sustained_turn(nominal_a, nominal_b);
+        let strong = sustained_turn(strong_a, strong_b);
         assert!(
-            nominal > 0.12,
-            "overlay must turn at nominal torque, got {nominal:+.3}"
+            nominal > 0.1,
+            "overlay must turn at nominal torque, got {nominal_a:+.3}/{nominal_b:+.3}"
         );
         assert!(
             strong < 1.5 * nominal,
-            "yaw must not scale with torque: {strong:+.3} at 120 N*m vs {nominal:+.3} at 23.7"
+            "yaw must not scale with torque: {strong:.3} at 120 N*m vs {nominal:.3} at 23.7"
         );
     }
 
     #[test]
-    fn learned_schedule_turn_is_sustained_but_does_not_beat_the_overlay() {
-        // The contact-schedule hypothesis, tested and refuted: the best
-        // schedule the search found sustains a turn but stays below the
-        // fixed-schedule overlay's rate. Pinning the comparison keeps the
-        // negative result from silently rotting.
+    fn learned_schedule_turn_is_sustained_and_edges_past_the_overlay() {
+        // The contact-schedule hypothesis: the best schedule the search found
+        // sustains a clockwise turn and, in its worse window, turns about 1.5x
+        // the fixed-schedule overlay (-0.186/-0.215 against -0.125/-0.211 rad
+        // per window on Linux). Contact re-sequencing buys a modest margin, not
+        // a different regime.
         use super::super::unitree_go2_scheduled_targets;
         use super::super::unitree_go2_trot_targets_with_overlay;
         use super::super::UnitreeGo2GaitOverlay;
@@ -919,8 +954,9 @@ mod tests {
                 &UnitreeGo2GaitSchedule::LEARNED_TURN,
             )
         });
+        let schedule = sustained_turn(schedule_a, schedule_b);
         assert!(
-            schedule_a > 0.06 && schedule_b > 0.06,
+            schedule > 0.1,
             "schedule turn must be sustained: windows {schedule_a:+.3}/{schedule_b:+.3}"
         );
         assert!(
@@ -935,11 +971,10 @@ mod tests {
                 &UnitreeGo2GaitOverlay::LEARNED_TURN,
             )
         });
+        let overlay = sustained_turn(overlay_a, overlay_b);
         assert!(
-            schedule_a.min(schedule_b) < overlay_a.min(overlay_b),
-            "the schedule search did not beat the overlay in these measurements: {:+.3} vs {:+.3}",
-            schedule_a.min(schedule_b),
-            overlay_a.min(overlay_b)
+            schedule > overlay && schedule < 2.0 * overlay,
+            "the schedule must edge past the overlay, not leave its regime: {schedule:.3} vs {overlay:.3}"
         );
 
         // Determinism: bit-identical repeat.
@@ -1088,8 +1123,9 @@ mod tests {
         // the hand-scripted trot at its own job. The zero overlay (the plain
         // torque-PD walk) covers ~1.4-1.9 m per 8 s window; the learned
         // overlay covers ~4 m per window (0.49 m/s total, 2.5x the torque
-        // baseline and 3x the position-servo trot) while staying straight
-        // and upright. The window-displacement metric is anti-cheat: lateral
+        // baseline and 3x the position-servo trot) while staying upright. It
+        // does not stay straight: its heading drifts about -1.2 rad over the
+        // 24 s rollout on Linux, so its path curves. The window-displacement metric is anti-cheat: lateral
         // shimmy scores nothing and a dive scores its bad window.
         let (base_a, base_b, _, _, _) = torque_overlay_transport(&UnitreeGo2TorqueOverlay::ZERO);
         let (sprint_a, sprint_b, sprint_yaw, sprint_tilt, sprint_height) =
@@ -1104,8 +1140,8 @@ mod tests {
             "the learned overlay must out-walk the trot: {sprint_min:.2} m vs {baseline_min:.2} m"
         );
         assert!(
-            sprint_yaw.abs() < 0.4,
-            "the sprint must stay straight, yaw {sprint_yaw:+.2}"
+            sprint_yaw.abs() < 2.0,
+            "the sprint's heading drift must stay bounded, yaw {sprint_yaw:+.2}"
         );
         assert!(
             sprint_tilt < 0.8 && sprint_height > 0.15,
@@ -1155,7 +1191,9 @@ mod tests {
         let (ice_a, ice_b, ice_height) = overlay_turn_with_friction(&ALL, 0.02);
         println!("ice: {ice_a:+.3}/{ice_b:+.3} minH {ice_height:.3}");
         assert!(
-            ice_a > 0.05 && ice_b > 0.05 && ice_height > 0.15,
+            sustained_turn(ice_a, ice_b) > 0.05
+                && ice_a.signum() == low.0.signum()
+                && ice_height > 0.15,
             "the turn must survive near-ice: {ice_a:+.3}/{ice_b:+.3} height {ice_height:.3}"
         );
     }
@@ -1168,8 +1206,8 @@ mod tests {
         // The aerial-duty hypothesis, tested and refuted: with the schedule
         // duty range opened down to 0.30 (flight phases), the search settles
         // every winning leg at duty >= 0.52 — it declines the freedom — and
-        // its turn matches the walkable-schedule plateau instead of beating
-        // the overlay. Both facts pinned here.
+        // its turn (-0.192/-0.167 rad per window on Linux) stays in the same
+        // position-space regime as the walkable schedule and the overlay.
         for leg in UnitreeGo2GaitSchedule::LEARNED_AERIAL_TURN.legs {
             assert!(
                 leg.duty > 0.5,
@@ -1187,14 +1225,14 @@ mod tests {
         println!(
             "aerial schedule: windows {window_a:+.3}/{window_b:+.3} tilt {max_tilt:.2} height {min_height:.3}"
         );
+        let aerial = sustained_turn(window_a, window_b);
         assert!(
-            window_a > 0.06 && window_b > 0.06,
+            aerial > 0.1,
             "aerial winner must sustain its (small) turn: {window_a:+.3}/{window_b:+.3}"
         );
         assert!(
-            window_a.min(window_b) < 0.2,
-            "the plateau must hold: aerial min window {:+.3} stays below the overlay's",
-            window_a.min(window_b)
+            aerial < 0.25,
+            "the plateau must hold: aerial worse window {aerial:.3} stays in the position regime"
         );
         assert!(
             max_tilt < 0.85 && min_height > 0.15,
@@ -1271,9 +1309,10 @@ mod tests {
         };
 
         let (window_a, window_b, max_tilt, min_height) = run(&UnitreeGo2GaitOverlay::LEARNED_TURN);
-        // A sustained turn keeps rotating through both eight-second windows.
+        // A sustained turn keeps rotating one way through both eight-second
+        // windows: -0.125/-0.211 rad on Linux, clockwise seen from above.
         assert!(
-            window_a > 0.12 && window_b > 0.12,
+            sustained_turn(window_a, window_b) > 0.1,
             "learned gait must keep turning: windows {window_a:+.3} / {window_b:+.3}"
         );
         assert!(
@@ -1342,14 +1381,25 @@ mod tests {
         );
 
         // The inverted sign must not save the robot — pins the feedback pairing.
-        let mut inner = two_channel_feedback(2.5, 5.0);
-        let inverted = run_trot(weak_motor_push_config(), move |observation| {
-            let mut action = inner(observation);
-            action.roll_correction_rad = -action.roll_correction_rad;
-            action.lateral_extension_rad = -action.lateral_extension_rad;
-            action
-        });
-        assert!(inverted.fell, "inverted feedback must not save the robot");
+        // It stays just inside the 1.2 rad fall threshold, but peaks at several
+        // times the saved lean and ends propped over instead of standing.
+        let inverted_feedback = || {
+            let mut inner = two_channel_feedback(2.5, 5.0);
+            move |observation: &UnitreeGo2Observation| {
+                let mut action = inner(observation);
+                action.roll_correction_rad = -action.roll_correction_rad;
+                action.lateral_extension_rad = -action.lateral_extension_rad;
+                action
+            }
+        };
+        let inverted = run_to_horizon(weak_motor_push_config(), inverted_feedback(), 480);
+        assert!(
+            inverted.max_tilt_rad > 3.0 * saved.max_tilt_rad && inverted.end_tilt_rad > 0.55,
+            "inverted feedback must not save the robot: peak {:.2} vs saved {:.2}, end tilt {:.2}",
+            inverted.max_tilt_rad,
+            saved.max_tilt_rad,
+            inverted.end_tilt_rad
+        );
 
         // Determinism: the saved run reproduces bit-identically.
         let again = run_to_horizon(weak_motor_push_config(), save_feedback(), 480);
@@ -1778,34 +1828,21 @@ mod tests {
     fn learned_torque_overlay_out_turns_the_position_plateau() {
         use super::super::UnitreeGo2TorqueOverlay;
 
-        // The measurement the torque arc exists for. Three position-space
-        // searches and a five-fold torque scan plateaued at ~0.02 rad/s and
-        // localized the steering boundary in the contact mechanics under hard
-        // position servos. The CEM-found contact-gated torque overlay
-        // (examples/56_go2_torque_turn --train, seed 42) sustains ~0.034 rad/s
-        // — above every position-space result — while the robot keeps walking:
-        // force-level coordination genuinely moves the boundary joint-space
-        // control could not.
+        // The CEM-found contact-gated torque overlay (examples/56_go2_torque_turn
+        // --train, seed 42) turns the torque walk counter-clockwise at roughly
+        // ten times the position-space overlays' rate while it keeps walking.
         let (window_a, window_b, max_tilt, min_height) =
             torque_overlay_run(&UnitreeGo2TorqueOverlay::LEARNED_TURN, 0.0);
         println!(
             "learned torque turn: windows {window_a:+.3}/{window_b:+.3} tilt {max_tilt:.3} height {min_height:.3}"
         );
-        // The robust claim is window A: +0.304 rad per 8 s (0.038 rad/s, 52 %
-        // above the position plateau's like-for-like window) is stable across
-        // coefficient perturbations AND across platforms. A bounded elastic
-        // twist saturates before this window opens at step 480, so a positive
-        // window A is already twist-proof. Window B lies beyond the compliant
-        // walk's ~16 s chaos horizon: single-ulp libm differences swing it by
-        // ±0.3 rad (Linux CI measured -0.07 where Windows measures +0.27), so
-        // it is only pinned against catastrophic reversal.
+        // Linux measures +1.97/+2.37 rad per 8 s window, and +1.08 or more in
+        // every window under 1e-9, 1e-6 and 1e-3 coefficient nudges. The
+        // unsteered torque walk wanders by up to ~0.8 rad per window, so the
+        // bar sits above the position-space turns (~0.2) but below that wander.
         assert!(
-            window_a > 0.25,
-            "torque turn must out-turn the position plateau in the robust window: {window_a:+.3}"
-        );
-        assert!(
-            window_b > -0.35,
-            "beyond the chaos horizon the turn must not reverse catastrophically: {window_b:+.3}"
+            window_a > 0.5 && window_b > 0.5,
+            "torque turn must out-turn the position plateau in both windows: {window_a:+.3}/{window_b:+.3}"
         );
         assert!(
             max_tilt < 0.8 && min_height > 0.1,
@@ -1900,24 +1937,20 @@ mod tests {
         use super::super::UnitreeGo2TorqueOverlay;
 
         // The ensemble-median search's answer to the chaos horizon: a turn
-        // that lives on a locally *contracting* trajectory. Both measurement
-        // windows stay positive — genuinely sustained, unlike the fragile
-        // winner whose second window swings ±0.3 rad under one-ulp noise —
-        // and a 3-ulp-scale coefficient nudge lands on the same windows
-        // instead of diverging. The contraction is what the ensemble
-        // objective bought; parameter-scale (1e-6) sensitivity remains, which
-        // is why the coefficients are pinned at 12 decimals.
+        // that lives on a locally *contracting* trajectory. A 3-ulp-scale
+        // coefficient nudge lands on the same windows instead of diverging.
+        // Parameter-scale (1e-6) nudges change the trajectory but keep the
+        // turn counter-clockwise, which is why the coefficients are pinned at
+        // 12 decimals.
         let (window_a, window_b, max_tilt, min_height) =
             torque_overlay_run(&UnitreeGo2TorqueOverlay::LEARNED_ROBUST_TURN, 0.0);
         println!(
             "robust torque turn: windows {window_a:+.3}/{window_b:+.3} tilt {max_tilt:.3} height {min_height:.3}"
         );
         // Require a sustained turn in both windows, not one positive net
-        // heading change hiding a reversal. After normalized f64 readback and
-        // gain retuning, Linux measures about +0.169/+0.118 rad. Exact rates
-        // can vary across floating-point platforms; retain the existing gates.
+        // heading change hiding a reversal. Linux measures +1.83/+0.71 rad.
         assert!(
-            window_a > 0.08 && window_b > 0.08,
+            window_a > 0.3 && window_b > 0.3,
             "robust turn must sustain both windows: {window_a:+.3}/{window_b:+.3}"
         );
         assert!(
@@ -1941,7 +1974,7 @@ mod tests {
     }
 
     #[test]
-    fn torque_policy_turns_while_walking() {
+    fn torque_policy_keeps_walking_under_feedback() {
         use super::super::{UnitreeGo2TorquePolicy, UrdfJointTorqueTarget};
 
         // The first closed-loop controller of the steering campaign: a linear
@@ -2043,20 +2076,15 @@ mod tests {
         println!(
             "policy turn: windows {window_a:+.3}/{window_b:+.3} fwd {forward:.2} tilt {max_tilt:.3} height {min_height:.3}"
         );
-        // Cross-platform measurement: the policy sustains a *coherent* turn
-        // while walking, but its direction is chaos-selected — Windows
-        // measures +0.226/+0.346 where Linux measures -0.168/-0.380. The
-        // closed loop feeds the chaotic body state back into the control, so
-        // the OS-libm orbit difference selects which turning attractor the
-        // walk settles into. A linear policy with no reference input shapes
-        // the dynamics; it does not encode a turn *command*. The pinned bars
-        // are therefore direction-free: both windows share a sign and clear a
-        // magnitude, and the walk survives.
+        // The policy does not sustain a coherent turn. Linux measures
+        // +0.049/+2.965 rad per window: almost no turn through the first
+        // window, then most of a revolution in the second. The closed loop
+        // feeds the chaotic body state back into the control, and a linear
+        // policy with no reference input shapes the dynamics; it does not
+        // encode a turn. What it holds is the operating point: it keeps walking.
         assert!(
-            window_a.signum() == window_b.signum()
-                && window_a.abs() > 0.08
-                && window_b.abs() > 0.08,
-            "policy must sustain a coherent turn: {window_a:+.3}/{window_b:+.3}"
+            window_a.is_finite() && window_b.is_finite(),
+            "policy windows must be finite: {window_a:+.3}/{window_b:+.3}"
         );
         assert!(
             forward > 1.5,
@@ -2081,17 +2109,16 @@ mod tests {
     }
 
     #[test]
-    fn commanded_yaw_reference_steers_both_ways() {
+    fn commanded_yaw_reference_shifts_the_turn_rate() {
         use super::super::{UnitreeGo2TorquePolicy, UrdfJointTorqueTarget};
 
         // The rung the reference-free policy pointed at: feature 4 is the
         // tracking error against a commanded yaw rate, and the search scored
-        // each candidate by the worse of its two commanded directions. The
-        // pinned claim is command OBEDIENCE — with one set of weights every
-        // measurement window follows the commanded sign, the first
-        // direction-commanded turn on this platform. The magnitude is honest
-        // and modest (~0.013 rad/s, far below the 0.25 rad/s reference):
-        // obedience is the result, rate tracking is not yet.
+        // each candidate by the worse of its two commanded directions, on a
+        // mis-measured yaw. Measured on the world vertical the command does not
+        // choose the direction: +0.25 turns +1.63/+1.34 rad per window on Linux
+        // and -0.25 still turns counter-clockwise, +1.09/+0.82. What it does is
+        // shift the rate the commanded way.
         let run = |yaw_rate_ref: f64| {
             let policy = UnitreeGo2TorquePolicy::LEARNED_COMMANDED_TURN;
             let mut sim = settled_stand();
@@ -2181,15 +2208,9 @@ mod tests {
         println!(
             "commanded +0.25: {positive_a:+.3}/{positive_b:+.3}  -0.25: {negative_a:+.3}/{negative_b:+.3}"
         );
-        // Cross-platform, absolute per-window obedience drowns in the chaos
-        // floor: the achieved windows (~0.1 rad) sit inside the ±0.3 rad
-        // spread that OS-libm orbit differences produce, so Linux measures
-        // sign-inconsistent windows where Windows measures four obedient
-        // ones. What stays above the floor on both platforms is the
-        // *differential* response — commanding + versus − shifts the total
-        // yaw in the commanded direction by 0.23 (Linux) to 0.42 (Windows)
-        // rad — so that separation is the pinned cross-platform claim, and
-        // absolute obedience remains a same-platform observation.
+        // The pinned claim is that separation only: commanding + rather than -
+        // adds counter-clockwise turn (about +1.06 rad over both windows on
+        // Linux). The per-window signs are not obedient.
         let separation = (positive_a + positive_b) - (negative_a + negative_b);
         assert!(
             separation > 0.15,
@@ -2215,13 +2236,9 @@ mod tests {
 
         // The authority hypothesis, tested and refuted: a ±12 N·m
         // feed-forward clamp plus an integral yaw-error feature (a learned
-        // PI structure, example 59) does not lift the commanded turn's
-        // absolute amplitude above the ±0.3 rad cross-platform chaos floor —
-        // its search scored 0.094 against the ±8 winner's 0.188, and the
-        // pinned winner's sign-corrected windows stay far below the floor.
-        // The commanded amplitude is bounded by the platform's turn
-        // capability, which is itself the size of the floor; the remaining
-        // levers are morphological (aerial-duty gaits, foot geometry).
+        // PI structure, example 59) does not make the turn obey the commanded
+        // direction. Linux measures +1.87/+1.66 rad per window told +0.25 and
+        // +0.62/+1.70 told -0.25: both counter-clockwise.
         let run = |yaw_rate_ref: f64| {
             let policy = UnitreeGo2TorquePolicy::LEARNED_AUTHORITY_TURN;
             let mut sim = settled_stand();
@@ -2321,48 +2338,67 @@ mod tests {
     }
 
     #[test]
-    fn contact_gated_hand_torques_do_not_steer_the_torque_walk() {
-        // Force-level steering, hand-designed, measured and refuted — the
-        // torque-space mirror of the six position-space steering nulls. Three
-        // mechanisms position control cannot express at all: contact-gated
-        // diagonal hip twist torque, contact-gated left/right differential
-        // stance thrust, and yaw-rate feedback through the thrust channel.
-        // None sustains an upright turn through both measurement windows in
-        // either direction (0.12 rad per window). With normalized rotations,
-        // yaw-rate feedback 25 can fall; that is a rejected steering candidate,
-        // not evidence of a successful turn. The baseline must still walk, and
-        // the feed-forward thrust asymmetry stalls forward progress instead of
-        // steering — the gait's own propulsion cycle absorbs it.
-        let configs: [(&str, f64, f64, f64); 4] = [
-            ("baseline", 0.0, 0.0, 0.0),
-            ("diag hip twist 4", 4.0, 0.0, 0.0),
-            ("diff thrust 4", 0.0, 4.0, 0.0),
-            ("yaw-rate feedback 25", 0.0, 0.0, 25.0),
-        ];
-        for (label, twist, drive, gain) in configs {
-            let (a, b, tilt, height, distance) = torque_steer_run_with_feedback(twist, drive, gain);
+    fn contact_gated_differential_thrust_steers_the_torque_walk() {
+        // Force-level tank steering, hand-designed and measured: a contact-gated
+        // left/right differential torque on the stance thighs turns the
+        // torque-PD walk in the direction its sign commands, at a rate that grows
+        // with its magnitude, upright throughout. Positive torque on the left
+        // stance thighs turns clockwise seen from above (negative yaw).
+        //
+        // The unsteered walk's heading wanders by up to ~0.8 rad per 8 s window,
+        // so the bar is a turn that clears that wander in both windows with the
+        // commanded sign. At ±4 N*m the walk spins almost in place (under 1 m in
+        // 24 s); at ±1 N*m it turns while still walking 2-4 m.
+        //
+        // The other hand channel, a contact-gated diagonal hip twist, is not a
+        // steering input: on Linux +4 and -4 N*m both turn counter-clockwise and
+        // +2 turns clockwise, so its direction does not follow its sign.
+        let (base_a, base_b, _, _, base_distance) = torque_steer_run_with_feedback(0.0, 0.0, 0.0);
+        println!("steer [baseline]: windows {base_a:+.3}/{base_b:+.3} dist {base_distance:.2}");
+        assert!(
+            base_distance > 3.0,
+            "baseline torque walk must keep walking, got {base_distance:.2} m"
+        );
+        let wander = base_a.abs().max(base_b.abs());
+
+        let mut previous_rate = 0.0;
+        for thrust in [4.0, 8.0] {
+            let (right_a, right_b, right_tilt, right_height, right_distance) =
+                torque_steer_run_with_feedback(0.0, thrust, 0.0);
+            let (left_a, left_b, left_tilt, left_height, left_distance) =
+                torque_steer_run_with_feedback(0.0, -thrust, 0.0);
             println!(
-                "steer [{label}]: windows {a:+.3}/{b:+.3} tilt {tilt:.3} height {height:.3} dist {distance:.2}"
+                "steer [thrust +{thrust}]: {right_a:+.3}/{right_b:+.3} ({right_distance:.2} m)  \
+                 [thrust -{thrust}]: {left_a:+.3}/{left_b:+.3} ({left_distance:.2} m)"
             );
-            assert!([a, b, tilt, height, distance].iter().all(|x| x.is_finite()));
-            let upright = tilt < 0.85 && height > 0.1;
-            let sustained_turn = a.min(b) >= 0.12 || (-a).min(-b) >= 0.12;
             assert!(
-                !(upright && sustained_turn),
-                "[{label}] unexpectedly produced an upright sustained turn: {a:+.3}/{b:+.3}"
+                right_tilt < 0.85 && right_height > 0.1 && left_tilt < 0.85 && left_height > 0.1,
+                "the thrust-{thrust} turns must stay upright"
             );
-            if gain == 0.0 {
-                assert!(
-                    upright,
-                    "[{label}] walk must survive the pattern: tilt {tilt:.3} height {height:.3}"
-                );
-            }
-            if label == "baseline" {
-                assert!(
-                    distance > 3.0,
-                    "baseline torque walk must keep walking, got {distance:.2} m"
-                );
-            }
+            assert!(
+                right_a < 0.0 && right_b < 0.0 && left_a > 0.0 && left_b > 0.0,
+                "thrust {thrust} must turn the commanded way in both windows: \
+                 +{right_a:+.3}/{right_b:+.3} -{left_a:+.3}/{left_b:+.3}"
+            );
+            let rate = (-right_a).min(-right_b).min(left_a).min(left_b);
+            assert!(
+                rate > 2.0 * wander,
+                "thrust {thrust} must clear the unsteered wander {wander:.3}: {rate:.3}"
+            );
+            assert!(
+                rate > previous_rate,
+                "the turn must grow with thrust: {rate:.3} after {previous_rate:.3}"
+            );
+            previous_rate = rate;
+        }
+        // At ±1 N*m the turn (about 0.6-1.4 rad per window on Linux) is the
+        // same size as the wander, so only the preserved walk is pinned.
+        for thrust in [1.0, -1.0] {
+            let (_, _, tilt, height, distance) = torque_steer_run_with_feedback(0.0, thrust, 0.0);
+            assert!(
+                distance > 1.5 && tilt < 0.85 && height > 0.1,
+                "a gentle thrust must keep walking upright: {distance:.2} m tilt {tilt:.2}"
+            );
         }
     }
 }

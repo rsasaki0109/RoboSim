@@ -335,8 +335,9 @@ impl UnitreeG1TorqueOverlay {
     /// The scripted G1 gait is a near-stationary stepper across its entire
     /// stable envelope; this overlay turns it into a slow but real walk —
     /// 0.22 m per 8 s window (over 2× the stepper), 0.66 m per 24 s, at full
-    /// height (0.784 m) and dead straight, with ulp-perturbed replays inside
-    /// a few centimeters of each other. The speed-envelope sweep uses the
+    /// height (0.784 m), with ulp-perturbed replays inside a few centimeters
+    /// of each other. It is not straight: the pelvis heading turns +0.77 to
+    /// +1.33 rad over the 24 s rollout. The speed-envelope sweep uses the
     /// learned search winner at 66% feed-forward strength with a 0.065 rad,
     /// 0.12 rad, 100-step gait command. Pinned at the search state's
     /// 12-decimal precision per the chaos discipline;
@@ -426,8 +427,9 @@ impl UnitreeG1TorqueOverlay {
     ///
     /// 1. Displacement scored along the facing, signed, instead of as
     ///    `hypot(dx, dz)`. Went forwards -- and spun 3 rad in 24 s, because the
-    ///    straightness penalty read `base_relative_yaw_rad`, which on this
-    ///    z-up robot is a rotation about a horizontal axis.
+    ///    straightness penalty read `base_relative_yaw_rad`, which was then
+    ///    computed in the z-up robot's own frame and so measured a rotation
+    ///    about a horizontal axis (since fixed).
     /// 2. Heading measured from the pelvis's facing. Straight and not spinning,
     ///    but travelling 0.86 rad off the way it faced.
     /// 3. Sideways travel penalised at 1.0/m: 0.35 rad off.

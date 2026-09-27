@@ -27,11 +27,15 @@ in PR #311, and the historical campaign notes below remain as experiment logs.
 ## What is done
 
 - **Go2 learning boundary.** The learned turn, sprint, and schedule searches,
-  the torque pathway, and the aerial-duty test are all complete; the walkable
-  schedule plateau is pinned by tests and examples 52–65.
+  the torque pathway, and the aerial-duty test are all complete and pinned by
+  tests and examples 52–65. Their turns were re-measured on 2026-09-27 after a
+  yaw-axis fix: the position-space turns are ~0.02 rad/s, the torque-space
+  ones about ten times that, and a hand-set differential stance thrust steers
+  both ways on command (`docs/GO2_LOCOMOTION.md`).
 - **G1 long-horizon stability (v0.3).** The validated heading candidate walks
   3000 ticks (50 s) without falling, upright, with the correct mean yaw-rate
-  sign and a bounded integrated yaw. Pinned by
+  sign, turning the commanded way (+1.6 / −2.2 rad) without holding its heading
+  target. Pinned by
   `v03_sustained_envelope_walks_50s_without_falling`; hero-captured by example
   92 (`docs/media/unitree-g1-sustained-walk.gif`).
 
@@ -40,8 +44,8 @@ in PR #311, and the historical campaign notes below remain as experiment logs.
 | Goal | Wall | Measurement |
 |---|---|---|
 | Go2 parkour | Foot clearance is kinematic | Swing foot tops out at 2.1 cm for every tested stride/lift/overlay; a 4 cm step topples the walk |
-| Go2 steering | Contact schedule / morphology | Three search spaces and a 5× torque scan plateau at ~0.02 rad/s |
-| G1 sustained turn | Contact schedule | 8-dim schedule CEM (18×40, both directions, 25 s): **no upright candidate**; the best turn 267–811° and fall |
+| Go2 commanded steering | No learned policy obeys the direction yet | The learned policies turn left whichever way they are told; hand differential thrust does steer both ways (measured 2026-09-27, after the yaw-axis fix) |
+| G1 heading hold | Heading gain is zero | v0.3 turns the commanded way for 50 s upright but runs far past its ±0.08 rad target; the old "no upright sustained turn" search scored the faulty yaw signal |
 | G1 higher speed | 60 Hz solver stability | Any forward command above the pinned 0.0276 m/s blows the solver up into NaNs |
 | G1 long-horizon disturbance | 60 Hz solver stability | A pelvis disturbance over a long horizon also blows up |
 
@@ -89,6 +93,10 @@ fixed function of phase. This is the lever Theme A ruled out in favour of.
 Exit: at least one upright sustained turn (both directions, ≥ 0.02 rad/s mean
 for 20 s, bounded height/tilt) or a documented, searched negative; for the Go2,
 a gait that clears a 6 cm step.
+
+Measured after the 2026-09-27 yaw-axis fix, the pinned v0.3 candidate already
+meets the G1 half of this exit: over 50 s it turns +0.029 rad/s left and
+−0.045 rad/s right on command, upright. What it lacks is heading hold.
 
 ### Theme C — Go2 foot-clearance gait
 

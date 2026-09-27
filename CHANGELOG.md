@@ -635,6 +635,22 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- `UrdfSceneObservation::base_relative_{yaw,pitch,roll}_rad` are now the
+  rotation since scene load taken in the world frame (`current · reference⁻¹`)
+  instead of the spawn body's frame (`reference⁻¹ · current`). For any robot
+  not spawned upright in the y-up world — every z-up URDF, the G1 and Go2
+  among them — the old yaw was a rotation about a horizontal axis and a
+  heading change read as roll, so `pitch.hypot(roll)` tilt checks counted
+  turning as tilt. Values change for those robots. Re-measured with the fix:
+  the Go2 torque overlays turn about ten times faster than documented, the
+  position-space ones turn the other way, a hand-set contact-gated
+  differential stance thrust steers the torque walk both ways on command, the
+  commanded and authority policies turn left whichever way they are told, and
+  the G1 v0.3 candidate turns the commanded way for 50 s instead of holding a
+  bounded heading. Tests, example gates, constant docs,
+  `docs/GO2_LOCOMOTION.md` and `docs/G1_LOCOMOTION.md` are rewritten to the
+  measured behaviour; example 52 now starts from the settled reset state.
+
 - `rne_planning` trajectory optimizers no longer return trajectories that are
   less feasible than their seed. `optimize_trajectory` is feasibility-gated
   (`trajectory_is_feasible`), `HybridPlanner` falls back to its collision-free

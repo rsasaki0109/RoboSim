@@ -11,6 +11,13 @@
 //! verifies the sustained turn; `--train` reproduces the search (seed 42);
 //! `--gif` additionally renders the gait. The same pinned overlay is verified
 //! by the `learned_overlay_turns_the_walking_trot` test in `rne_ai`.
+//!
+//! Measurement note: until 2026-09-27 `base_relative_yaw_rad` measured a
+//! rotation about a horizontal axis on this z-up robot, so the turns this
+//! search scored and the claims it was built on were measured on the wrong
+//! axis. `--train` now scores the corrected heading and will not reproduce
+//! the pinned coefficients. What the pinned winner measurably does is in the
+//! correction table at the top of `docs/GO2_LOCOMOTION.md`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -302,17 +309,28 @@ fn train() {
     println!("],");
 }
 
+/// The smaller of two window turns when both share a sign, else zero: the
+/// magnitude of a turn sustained in one direction through both windows.
+fn sustained_turn(window_a: f64, window_b: f64) -> f64 {
+    if window_a.signum() == window_b.signum() {
+        window_a.abs().min(window_b.abs())
+    } else {
+        0.0
+    }
+}
+
 fn main() {
     if std::env::args().any(|argument| argument == "--train") {
         train();
         return;
     }
 
-    // Replay the pinned learned gait and prove the turn is sustained (positive
-    // in both late windows). This runs headless and is the example's default.
+    // Replay the pinned learned gait and prove the turn is sustained (one
+    // direction through both late windows; it turns clockwise, -0.125/-0.211
+    // rad on Linux). This runs headless and is the example's default.
     let outcome = rollout(&learned_overlay(), ROLLOUT_STEPS);
     assert!(
-        outcome.window_a_yaw_rad > 0.12 && outcome.window_b_yaw_rad > 0.12,
+        sustained_turn(outcome.window_a_yaw_rad, outcome.window_b_yaw_rad) > 0.1,
         "learned gait should keep turning, windows {:+.3}/{:+.3}",
         outcome.window_a_yaw_rad,
         outcome.window_b_yaw_rad

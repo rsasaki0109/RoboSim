@@ -156,18 +156,18 @@ Details and the full evidence trail:
 
 Walking is a separate and much weaker claim. Example 68 holds the [v0.3
 sustained envelope](docs/media/unitree-g1-sustained-walk.gif) upright for 3000
-ticks / 50 s, but **that walk goes backwards**: the knees bend toward the way
-the robot faces while the body travels the other way, because the search that
-found its torque overlay scored distance without a direction. Measured along
-the facing, its 8 s windows are -0.16 m and -0.22 m.
+ticks / 50 s, turning the commanded way the whole time (+1.6 / −2.2 rad)
+without holding its heading target, but **that walk goes backwards**: the knees
+bend toward the way the robot faces while the body travels the other way,
+because the search that found its torque overlay scored distance without a
+direction. Measured along the facing, its 8 s windows are -0.16 m and -0.22 m.
 
 [`UnitreeG1TorqueOverlay::FORWARD_STRIDE`](examples/124_g1_forward_stride/main.rs)
 walks forwards, straight and without turning: +0.14 to +0.16 m per window,
 travel within a mean 0.20 rad of the facing. It holds only under the exact
 conditions it was trained in. A constant 1e-6 N·m of extra hip-yaw torque
-tips it over, so it cannot yet be steered or stopped, and a gait-schedule
-search found **no** upright sustained turn on the official contact schedule.
-This is a stability-and-direction claim, not a navigation one. Details:
+tips it over, so it cannot yet be steered or stopped. This is a
+stability-and-direction claim, not a navigation one. Details:
 [docs/G1_LOCOMOTION.md](docs/G1_LOCOMOTION.md).
 
 ## Quickstart

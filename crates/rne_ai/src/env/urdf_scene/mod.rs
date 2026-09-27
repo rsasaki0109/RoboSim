@@ -159,11 +159,14 @@ pub struct UrdfSceneObservation {
     pub base_angular_velocity_y_rad_s: f64,
     /// Base angular velocity about Z in radians per second.
     pub base_angular_velocity_z_rad_s: f64,
-    /// Base yaw relative to its scene-load orientation in radians.
+    /// Rotation about the world vertical since scene load, in radians: the
+    /// change of heading.
     pub base_relative_yaw_rad: f64,
-    /// Base pitch relative to its scene-load orientation in radians.
+    /// Tilt about the world X axis, after the heading change, since scene load
+    /// in radians. For a robot facing world +X this is sideways lean.
     pub base_relative_pitch_rad: f64,
-    /// Base roll relative to its scene-load orientation in radians.
+    /// Tilt about the world Z axis, after the heading change and pitch, since
+    /// scene load in radians. For a robot facing world +X this is fore-aft lean.
     pub base_relative_roll_rad: f64,
     /// Number of revolute / continuous joints with motors in the scene.
     pub actuated_joint_count: usize,
@@ -331,6 +334,21 @@ struct RenderJointProjection {
     initial_position: f64,
     axis: Vec3,
     anchor_parent_m: Vec3,
+}
+
+/// Y-up Euler angles of the rotation from `reference` to `current`, taken in
+/// the world frame.
+///
+/// The rotation between the two is `current * reference⁻¹`, not
+/// `reference⁻¹ * current`. The second expresses it in the *reference* body's
+/// frame, and for any robot not spawned upright in a y-up world -- every
+/// z-up URDF, the G1 and Go2 among them -- that frame's y axis is horizontal.
+/// Decomposed about it, a turn about the world vertical came out as roll and a
+/// sideways lean as yaw: a G1 whose heading changed 1.156 rad read +0.014 rad
+/// of yaw and +1.163 rad of roll, so every `pitch.hypot(roll)` tilt check
+/// counted turning as tipping over.
+pub(crate) fn relative_y_up_euler_rad(reference: Quat, current: Quat) -> (f64, f64, f64) {
+    y_up_euler_rad(current * reference.conjugate())
 }
 
 impl UrdfSceneSim {
@@ -2212,9 +2230,8 @@ impl UrdfSceneSim {
     pub fn observe(&self) -> UrdfSceneObservation {
         let base = world_transform_of(&self.world, self.base_link);
         let (base_yaw_rad, base_pitch_rad, base_roll_rad) = y_up_euler_rad(base.rotation);
-        let relative_rotation = self.base_reference_rotation.conjugate() * base.rotation;
         let (base_relative_yaw_rad, base_relative_pitch_rad, base_relative_roll_rad) =
-            y_up_euler_rad(relative_rotation);
+            relative_y_up_euler_rad(self.base_reference_rotation, base.rotation);
         let body = self
             .world
             .get::<RigidBody>(self.base_link)
@@ -2428,6 +2445,32 @@ mod tests {
         let before = sim.world().iter_entities().count();
         let _ = sim.world_mut().spawn_empty();
         assert!(sim.world().iter_entities().count() > before);
+    }
+
+    #[test]
+    fn a_turn_about_the_world_vertical_reads_as_yaw_for_a_z_up_robot() {
+        // How the G1 and Go2 manifests place their z-up URDFs in the y-up world.
+        let reference = Quat::from_rotation_x(-std::f64::consts::FRAC_PI_2);
+
+        let turned = Quat::from_rotation_y(0.7) * reference;
+        let (yaw, pitch, roll) = relative_y_up_euler_rad(reference, turned);
+        assert!(
+            (yaw - 0.7).abs() < 1.0e-12,
+            "heading change must read as yaw, got {yaw}"
+        );
+        assert!(
+            pitch.abs() < 1.0e-12 && roll.abs() < 1.0e-12,
+            "a pure turn is not a tilt"
+        );
+
+        // And a lean must not read as a turn.
+        let leaning = Quat::from_rotation_z(0.3) * reference;
+        let (yaw, pitch, roll) = relative_y_up_euler_rad(reference, leaning);
+        assert!(
+            yaw.abs() < 1.0e-12,
+            "a lean must not read as a turn, got yaw {yaw}"
+        );
+        assert!(pitch.hypot(roll) > 0.29, "the lean must show up as tilt");
     }
 
     #[test]

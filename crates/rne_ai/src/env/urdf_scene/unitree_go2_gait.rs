@@ -112,14 +112,12 @@ impl UnitreeGo2GaitOverlay {
     /// A turning gait found by deterministic cross-entropy search (seed 42,
     /// `examples/54_go2_learned_turn -- --train`) on the fast walking trot.
     ///
-    /// Every hand-scripted steering mechanism measured in
-    /// `docs/GO2_LOCOMOTION.md` fails to yaw this platform. This overlay is the
-    /// first gait that turns it at a genuinely *sustained* rate — about
-    /// 0.025 rad/s, positive across disjoint measurement windows — while
+    /// It turns the position-servo trot clockwise at a sustained rate —
+    /// -0.125/-0.211 rad per 8 s window on Linux, about 0.02 rad/s — while
     /// staying upright; `learned_overlay_turns_the_walking_trot` pins that
-    /// behavior. The magnitude is also the honest boundary: an order of
-    /// magnitude short of practical steering, because additive joint offsets on
-    /// a fixed contact schedule cannot re-sequence the contacts.
+    /// behavior. The search scored a mis-measured yaw (see
+    /// `docs/GO2_LOCOMOTION.md`), so this turn is what the found overlay does,
+    /// not what the search was optimizing.
     pub const LEARNED_TURN: Self = Self {
         coefficients: [
             [0.129912, -0.217959, 0.002348, -0.189749, 0.064767],
@@ -181,10 +179,11 @@ pub fn unitree_go2_trot_targets_with_overlay(
 /// k₂·cos(π·p)` newton-meters of feed-forward torque on top of the tracking
 /// PD, where `p` is the two-cycle gait phase and the stance gate is the leg's
 /// *measured* foot contact — a coupling to the actual contact state that no
-/// position-space overlay can express. Nine hand-designed steering mechanisms
-/// across both actuation regimes produce no sustained yaw on this platform
-/// (see `docs/GO2_LOCOMOTION.md`); the twelve joints × six coefficients give
-/// the 72-dimensional space the torque-space search runs in.
+/// position-space overlay can express. A hand-set contact-gated left/right
+/// thigh differential alone already steers the torque walk
+/// (`contact_gated_differential_thrust_steers_the_torque_walk`); the twelve
+/// joints × six coefficients give the 72-dimensional space the torque-space
+/// search runs in.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UnitreeGo2TorqueOverlay {
     /// Per-joint `[stance_const, constant, sin, cos, half_sin, half_cos]`
@@ -202,28 +201,21 @@ impl UnitreeGo2TorqueOverlay {
     /// A turning gait found by deterministic cross-entropy search (seed 42,
     /// `examples/56_go2_torque_turn -- --train`) on the torque-PD walking trot.
     ///
-    /// This is the measurement the torque arc exists for: three position-space
-    /// searches and a five-fold torque scan all plateaued at ~0.02 rad/s, which
-    /// localized the steering boundary in the contact mechanics under hard
-    /// position servos. This overlay sustains ~0.034 rad/s — above every
-    /// position-space result — while the robot keeps walking, by shaping
-    /// stance-leg torques the servos could never express;
+    /// It turns the torque walk counter-clockwise at roughly 0.25 rad/s
+    /// (+1.97/+2.37 rad per 8 s window on Linux, positive under every tested
+    /// coefficient perturbation) — about ten times the position-space turns —
+    /// while the robot keeps walking upright.
     /// `learned_torque_overlay_out_turns_the_position_plateau` pins it.
     /// A chaos-robust turning gait found by the *ensemble-median* CEM
     /// (`examples/56_go2_torque_turn -- --train-robust`, seed 42, warm-started
     /// from [`Self::LEARNED_TURN`]).
     ///
-    /// The single-trajectory winner turned out to live on a knife edge: its
-    /// second measurement window swings ±0.3 rad under one-ulp perturbations
-    /// (the ~16 s chaos horizon in `docs/GO2_LOCOMOTION.md`). Scoring the
-    /// median of three perturbed replays instead selects for gaits whose turn
-    /// survives trajectory-level noise — and the winner it found is locally
-    /// *contracting*: its perturbed replays land on the same windows
-    /// (+0.250/+0.274 rad per 8 s, ~0.031 rad/s) instead of diverging.
-    /// The pinned coefficients are scaled by 0.85 from that historical winner
-    /// after normalizing promoted Rapier rotations at the f64 boundary. A
-    /// deterministic gain sweep retains positive turn windows and contraction
-    /// under the same 3e-9 perturbation; the existing test gates are unchanged.
+    /// Scoring the median of three perturbed replays selects for gaits whose
+    /// trajectory is locally *contracting*: a 3e-9 coefficient nudge lands on
+    /// the same windows. It turns counter-clockwise, +1.83/+0.71 rad per 8 s
+    /// window on Linux, and stays positive under 1e-6 and 1e-3 nudges.
+    /// The pinned coefficients are scaled by 0.85 from the historical winner
+    /// after normalizing promoted Rapier rotations at the f64 boundary.
     /// `robust_torque_turn_survives_perturbation` pins that property.
     pub const LEARNED_ROBUST_TURN: Self = Self {
         coefficients: [
@@ -334,8 +326,9 @@ impl UnitreeGo2TorqueOverlay {
     /// On the same torque-PD walk the zero overlay covers 4.65 m per 24 s
     /// (0.19 m/s); this overlay covers **11.79 m (0.49 m/s)** — 2.5× the
     /// torque baseline and 3× the position-servo scripted trot — while
-    /// staying straight (|yaw| ≈ 0.1 rad), upright (tilt ≤ 0.37), and at
-    /// height, with ulp-perturbed replays landing on identical windows.
+    /// staying upright (tilt ≤ 0.37) and at height, with ulp-perturbed replays
+    /// landing on identical windows. It does not hold its heading: it drifts
+    /// about -1.2 rad over the 24 s rollout, so its path curves.
     /// `learned_torques_out_walk_the_scripted_trot` pins the comparison.
     pub const LEARNED_SPRINT: Self = Self {
         coefficients: [
@@ -439,10 +432,9 @@ impl UnitreeGo2TorqueOverlay {
     };
 
     /// Earlier turning overlay, recalibrated by a 0.95 coefficient scale after
-    /// normalized f64 rotations. The first measured window turns +0.304 rad;
-    /// the later orbit-sensitive window is -0.083 rad on the calibration host.
-    /// Existing window, upright and repeat gates are retained. Keep full f64
-    /// precision: rounding the contact-gated coefficients changes the trajectory.
+    /// normalized f64 rotations. Measured on the world vertical it turns
+    /// +1.97/+2.37 rad in its two windows on Linux. Keep full f64 precision:
+    /// rounding the contact-gated coefficients changes the trajectory.
     pub const LEARNED_TURN: Self = Self {
         coefficients: [
             [
@@ -600,12 +592,9 @@ impl UnitreeGo2TorquePolicy {
     ///
     /// Hypothesis: raising the feed-forward clamp to ±12 N·m and giving the
     /// policy an integral of the yaw-rate error (a learned PI structure)
-    /// would lift the commanded turn's absolute amplitude above the ±0.3 rad
-    /// cross-platform chaos floor. Refuted: the best commanded score reached
-    /// 0.094 — *below* the ±8 N·m winner's 0.188 — and its windows stay an
-    /// order of the floor's size too small. Feed-forward authority is not the
-    /// lever; the commanded amplitude is bounded by the platform's turn
-    /// capability, which is itself the size of the chaos floor.
+    /// would make the turn obey the commanded direction. It does not: told
+    /// +0.25 rad/s it turns +1.87/+1.66 rad per window on Linux, told −0.25 it
+    /// still turns counter-clockwise, +0.62/+1.70.
     /// `authority_and_integral_do_not_lift_the_commanded_turn` pins this so
     /// it cannot rot. Feature convention is example 59's (integral in slot 3).
     pub const LEARNED_AUTHORITY_TURN: Self = Self {
@@ -736,16 +725,13 @@ impl UnitreeGo2TorquePolicy {
     /// A commanded yaw-rate tracking policy found by the two-direction CEM
     /// (`examples/58_go2_steered_turn -- --train`, seed 42).
     ///
-    /// The first controller on this platform whose turn *direction obeys a
-    /// command*: feature 4 is the tracking error against a commanded yaw
-    /// rate (see example 58's feature assembly), and the search scored every
-    /// candidate by the worse of its two commanded directions, so no
-    /// chaos-selected one-way orbit could win. With one set of weights the
-    /// commanded sign flips the turn (+0.094/+0.117 rad per window under
-    /// +0.25 rad/s, −0.095/−0.109 under −0.25). The magnitude is honest and
-    /// modest (~0.013 rad/s, far below the reference) — command obedience is
-    /// the result, rate tracking is not yet.
-    /// `commanded_yaw_reference_steers_both_ways` pins it.
+    /// Feature 4 is the tracking error against a commanded yaw rate (see
+    /// example 58's feature assembly). The command changes the turn rate but
+    /// not its direction: told +0.25 rad/s it turns +1.63/+1.34 rad per 8 s
+    /// window on Linux, told −0.25 it still turns counter-clockwise,
+    /// +1.09/+0.82. The search scored a mis-measured yaw (see
+    /// `docs/GO2_LOCOMOTION.md`), so it never saw this.
+    /// `commanded_yaw_reference_shifts_the_turn_rate` pins the rate separation.
     pub const LEARNED_COMMANDED_TURN: Self = Self {
         weights: [
             [
@@ -873,10 +859,11 @@ impl UnitreeGo2TorquePolicy {
 
     /// Feedback turning policy from ensemble-median CEM (example 57, seed 42),
     /// calibrated for normalized f64 rotations by scaling body-lean columns
-    /// zero and one by 0.8. The calibration run turns +0.174/+0.291 rad in its
-    /// two windows while traveling 5.59 m, with maximum tilt 0.678 rad.
-    /// `torque_policy_turns_while_walking` retains the original turn, travel,
-    /// upright, coefficient-perturbation and deterministic-repeat gates.
+    /// zero and one by 0.8. The calibration run travels 5.59 m with maximum
+    /// tilt 0.678 rad; its heading barely moves in the first window and turns
+    /// +2.97 rad in the second (Linux), so it is not a sustained turn.
+    /// `torque_policy_keeps_walking_under_feedback` pins travel, uprightness,
+    /// perturbation contraction and a deterministic repeat.
     /// Keep full f64 precision: rounded weights change the contact trajectory.
     pub const LEARNED_TURN: Self = Self {
         weights: [
@@ -1456,9 +1443,8 @@ fn gait_wave_with_duty(phase: f64, duty: f64) -> (f64, f64) {
 /// This is the search space the fixed trot cannot express: *when* each leg is
 /// on the ground (`phase_offset`, `duty`), how far it strides
 /// (`stride_scale`), and where it is planted laterally (`hip_offset_rad` at
-/// touchdown, swept by `hip_stance_sweep_rad` through stance). Re-sequencing
-/// contacts is what steering requires on a platform without hip-yaw joints
-/// (see `docs/GO2_LOCOMOTION.md`).
+/// touchdown, swept by `hip_stance_sweep_rad` through stance; see
+/// `docs/GO2_LOCOMOTION.md`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UnitreeGo2LegSchedule {
     /// Gait-phase offset of this leg in `[0, 1)`.
@@ -1517,8 +1503,9 @@ impl UnitreeGo2GaitSchedule {
     /// Hypothesis: flight phases (duty < 0.5) change the contact mechanics
     /// enough to unlock the steering the walkable-schedule search could not
     /// find. Given duty freedom down to 0.30, the search *declined it*: every
-    /// winning leg settles at duty ≥ 0.52, and the turn (~0.014 rad/s)
-    /// matches the walkable-schedule plateau instead of beating the overlay.
+    /// winning leg settles at duty ≥ 0.52, and the turn (-0.192/-0.167 rad
+    /// per 8 s window on Linux, ~0.02 rad/s clockwise) stays in the
+    /// position-space regime.
     /// `aerial_duty_freedom_is_declined_by_the_search` pins both facts.
     pub const LEARNED_AERIAL_TURN: Self = Self {
         legs: [
@@ -1556,14 +1543,12 @@ impl UnitreeGo2GaitSchedule {
     /// The best turning contact schedule found by deterministic cross-entropy
     /// search (seed 42, `examples/55_go2_stepped_turn -- --train`).
     ///
-    /// This is a *negative-result pin*: the schedule sustains a turn
-    /// (~0.015 rad/s, positive through disjoint measurement windows) but does
-    /// **not** beat the fixed-schedule joint-offset overlay
-    /// ([`UnitreeGo2GaitOverlay::LEARNED_TURN`], ~0.025 rad/s) — refuting the
-    /// hypothesis that re-sequencing contacts within walkable schedules
-    /// unlocks steering, and, together with the torque-limit scan in
-    /// `docs/GO2_LOCOMOTION.md`, pointing at contact friction and morphology
-    /// as the plateau's cause.
+    /// The schedule sustains a clockwise turn (-0.186/-0.215 rad per 8 s
+    /// window on Linux, ~0.025 rad/s) and edges past the fixed-schedule
+    /// joint-offset overlay ([`UnitreeGo2GaitOverlay::LEARNED_TURN`],
+    /// -0.125/-0.211) by about 1.5x in the worse window: contact
+    /// re-sequencing buys a modest margin under position servos, not a
+    /// different regime.
     pub const LEARNED_TURN: Self = Self {
         legs: [
             UnitreeGo2LegSchedule {

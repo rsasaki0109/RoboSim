@@ -42,9 +42,10 @@ pub const UNITREE_G1_HEADING_ENVELOPE_STEPS_V02: u64 = 240;
 pub const UNITREE_G1_HEADING_ENVELOPE_STEPS_V021: u64 = 480;
 /// v0.3 sustained horizon: the validated heading candidate must keep walking
 /// upright for 50 s (six times the v0.2.1 envelope) with the mean yaw-rate sign
-/// tracking the command. The integrated yaw stays bounded, not accumulated:
-/// this contact schedule cannot sustain net turn over a long horizon, so v0.3
-/// is a long-horizon *stability* claim, not a sustained-turn claim.
+/// tracking the command. Measured about the world vertical the heading keeps
+/// turning the commanded way (about ±1.6–2.2 rad over 50 s) instead of
+/// holding the clamped target, so v0.3 is a long-horizon *stability* and
+/// turn-direction claim, not a heading-hold claim.
 pub const UNITREE_G1_HEADING_ENVELOPE_STEPS_V03: u64 = 3000;
 /// Bounded absolute heading target used by the v0.2 / v0.2.1 heading contract.
 pub const UNITREE_G1_HEADING_TARGET_CLAMP_RAD: f64 = 0.08;
@@ -858,15 +859,19 @@ mod tests {
             );
             assert!(outcome.max_command_nm <= UNITREE_G1_TORQUE_LIMIT_NM);
             assert!(outcome.mean_yaw_rate_rad_s.is_finite());
-            // The integrated yaw is bounded by the target clamp; this plant
-            // cannot accumulate net turn, so v0.3 claims long-horizon
-            // stability, not sustained turning.
-            assert!(
-                outcome.total_yaw_rad.abs() <= UNITREE_G1_HEADING_TARGET_CLAMP_RAD + 0.05,
-                "integrated yaw {:.3} rad exceeded the bounded envelope",
-                outcome.total_yaw_rad
-            );
         }
+        // Measured about the world vertical, the heading is not held at the
+        // clamped target: it keeps turning the commanded way for the whole
+        // 50 s, +1.62 rad left and -2.18 rad right on Linux, far past the
+        // ±0.08 rad target. v0.3 claims long-horizon stability and the turn
+        // direction, not heading hold.
+        assert!(
+            left.total_yaw_rad > UNITREE_G1_HEADING_TARGET_CLAMP_RAD
+                && right.total_yaw_rad < -UNITREE_G1_HEADING_TARGET_CLAMP_RAD,
+            "sustained turns must accumulate the commanded way: left {:+.3} right {:+.3}",
+            left.total_yaw_rad,
+            right.total_yaw_rad
+        );
         assert!(
             left.mean_yaw_rate_rad_s > 0.005,
             "left sustained mean yaw rate {:+.4}",
