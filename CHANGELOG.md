@@ -648,6 +648,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- `rne-asset --control-port` acknowledges `quit` before handing it to the
+  runner. It used to queue the command first and write the ACK after, and the
+  runner could exit the process in between, leaving the client to read EOF
+  (an intermittent `control_tcp_step_and_quit_produce_the_requested_frames`
+  failure on CI).
+
 - The wgpu backend's shared box mesh had five of its six faces wound
   clockwise seen from outside. The pipelines cull back faces with
   counter-clockwise as front, so every box primitive drew the inside of its

@@ -2790,6 +2790,7 @@ fn run_media_smokes() -> anyhow::Result<()> {
     run_step(
         "cargo run --locked -p showcase_captures --example 90_showcase_captures -- --smoke --environment all",
     )?;
+    run_step("cargo run --locked -p warehouse_relay --example 125_warehouse_relay -- --smoke")?;
     Ok(())
 }
 
