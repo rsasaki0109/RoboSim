@@ -124,6 +124,23 @@ A*/DWA/pure-pursuit, multi-robot avoidance, an EKF, 3D ICP, and online 2D
 SLAM with loop closure and AMCL (a ROS 2 adapter maps to Nav2). Details:
 [Navigation](docs/NAVIGATION.md), [SLAM](docs/SLAM.md).
 
+## Logistics across floors
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/media/warehouse-logistics.gif" alt="Forklift AGV lifting a case off a goods-in stand, carrying it into a lift, riding to the upper floor and setting it down on an outbound stand" width="460">
+      <br><b>Goods-in to delivery</b><br>
+      <sub>A forklift AGV takes a case off a stand, calls the lift, rides up with the load and sets it down on the floor above. The mast is a prismatic joint with a position servo and the case is an ordinary dynamic body throughout: it moves 0.038 m on the tines across the whole carry. <a href="examples/123_warehouse_logistics/main.rs">source</a></sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/media/multi-floor-lift.gif" alt="Service robot pressing a lift call button, boarding the car and riding to the floor above" width="460">
+      <br><b>Calling and riding a lift</b><br>
+      <sub>The call button reads solved contact force from the robot's own body, the car and doors are <code>rne_nav::Elevator</code> state, and the car carries the robot by ordinary contact rather than by parenting it. <a href="examples/122_multi_floor_media/main.rs">source</a></sub>
+    </td>
+  </tr>
+</table>
+
 ## G1 locomotion
 
 ![The official Unitree G1 completing a backflip in native RoboSim/Rapier dynamics and landing on its feet](docs/media/unitree-g1-robosim-native-backflip.gif)
@@ -137,11 +154,20 @@ not a learned policy. This is a simulator result; hardware is unvalidated.
 Details and the full evidence trail:
 [docs/G1_CONTACT_BACKFLIP.md](docs/G1_CONTACT_BACKFLIP.md).
 
-Walking is a separate and much weaker claim: example 67 evaluates typed
-commands headlessly and example 68 holds the [v0.3 sustained
-envelope](docs/media/unitree-g1-sustained-walk.gif) for 3000 ticks / 50 s. A
-gait-schedule search found **no** upright sustained turn on the official
-contact schedule, so v0.3 is a stability claim, not a turning claim. Details:
+Walking is a separate and much weaker claim. Example 68 holds the [v0.3
+sustained envelope](docs/media/unitree-g1-sustained-walk.gif) upright for 3000
+ticks / 50 s, but **that walk goes backwards**: the knees bend toward the way
+the robot faces while the body travels the other way, because the search that
+found its torque overlay scored distance without a direction. Measured along
+the facing, its 8 s windows are -0.16 m and -0.22 m.
+
+[`UnitreeG1TorqueOverlay::FORWARD_STRIDE`](examples/124_g1_forward_stride/main.rs)
+walks forwards, straight and without turning: +0.14 to +0.16 m per window,
+travel within a mean 0.20 rad of the facing. It holds only under the exact
+conditions it was trained in. A constant 1e-6 N·m of extra hip-yaw torque
+tips it over, so it cannot yet be steered or stopped, and a gait-schedule
+search found **no** upright sustained turn on the official contact schedule.
+This is a stability-and-direction claim, not a navigation one. Details:
 [docs/G1_LOCOMOTION.md](docs/G1_LOCOMOTION.md).
 
 ## Quickstart
