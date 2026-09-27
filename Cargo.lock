@@ -1405,6 +1405,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "g1_forward_stride"
+version = "0.4.0"
+dependencies = [
+ "rne_ai",
+ "rne_math",
+]
+
+[[package]]
 name = "g1_head_splat_background"
 version = "0.4.0"
 dependencies = [
