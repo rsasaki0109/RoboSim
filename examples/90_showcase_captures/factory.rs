@@ -18,7 +18,7 @@ use std::fs;
 use std::path::Path;
 
 const ENVIRONMENT_ID: &str = "factory";
-const SUBJECT: &str = "Unitree G1 inspection route";
+const SUBJECT: &str = "Unitree G1 point-and-confirm inspection, standing";
 const CAPTURE_STEPS: u64 = 270;
 const CAPTURE_FRAME_COUNT: usize = 54;
 const CAPTURE_STRIDE: u64 = CAPTURE_STEPS / CAPTURE_FRAME_COUNT as u64;
@@ -29,7 +29,12 @@ const CAMERA: CameraEvidence = CameraEvidence {
     distance_m: 2.75,
 };
 
-/// Run the real UnitreeG1InspectionEpisode for the complete three-marker route
+/// Run the real UnitreeG1InspectionEpisode through all three markers. The G1
+/// does not walk between them: it moves 6.4 cm in total, and every marker's
+/// radius (0.50 / 0.62 / 0.85 m) covers the spot it starts on, so the route
+/// completes by gesturing in place. Nothing here should call it a route until
+/// it has a walking controller that makes it one.
+///
 /// (270 fixed steps), then optionally render evenly sampled post-step states
 /// with wgpu.
 pub fn run(repo_root: &Path, capture: bool) -> Result<ShowcaseMetadata> {

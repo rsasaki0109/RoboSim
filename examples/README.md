@@ -29,8 +29,8 @@
 | Quadruped standing | `cargo run -p quadruped_stand --example 36_quadruped_stand` | Headless 12-DoF URDF standing controller with four-foot contact impulses |
 | Humanoid standing | `cargo run -p humanoid_stand --example 37_humanoid_stand` | Headless 12-DoF humanoid balance smoke with left/right foot loads |
 | Unitree Go2 GIF | `cargo run -p unitree_go2_gif --example 38_unitree_go2_gif` | Settles the official dynamic Go2 multibody, steps a diagonal contact trot, and renders README GIF/PNG media |
-| Unitree G1 GIF | `cargo run -p unitree_g1_gif --example 39_unitree_g1_gif` | Renders the official dynamic G1 completing a three-checkpoint factory inspection route |
-| Unitree G1 factory inspection | `cargo run -p unitree_g1_factory_inspection --example 40_unitree_g1_factory_inspection` | Runs a deterministic three-marker factory inspection route with walking and point-and-confirm gestures |
+| Unitree G1 GIF | `cargo run -p unitree_g1_gif --example 39_unitree_g1_gif` | Renders the official dynamic G1 standing at a factory workstation and gesturing at three checkpoints in turn; it does not walk between them (6.9 cm of travel), and the checkpoints light on a timer |
+| Unitree G1 factory inspection | `cargo run -p unitree_g1_factory_inspection --example 40_unitree_g1_factory_inspection` | Runs a deterministic three-marker inspection episode with point-and-confirm gestures. There is no walking: the robot moves 6.4 cm, and every marker's radius covers its start position |
 | Unitree G1 parts pick-and-place | `cargo run -p unitree_g1_parts_pick_place --example 41_unitree_g1_parts_pick_place` | Contact-gated fixed-base G1 grasp, lift, carry, release, and named-zone tray placement; add `-- --gif` to regenerate README media |
 | XPBD deformable cable | `cargo run -p deformable_cable --example 43_deformable_cable -- --render` | Deterministic pinned cable draping over a sphere with backend-neutral contact and wgpu segment rendering |
 | XPBD deformable cloth | `cargo run -p deformable_cloth --example 44_deformable_cloth -- --render` | Deterministic structural/shear/bending cloth draping over a box with dynamic normals and wgpu mesh updates |
