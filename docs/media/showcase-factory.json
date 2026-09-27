@@ -2,7 +2,7 @@
   "kind": "rne_showcase_environment_metadata",
   "schema_version": 1,
   "environment_id": "factory",
-  "subject": "Unitree G1 inspection route",
+  "subject": "Unitree G1 point-and-confirm inspection, standing",
   "visual_state_sync": "Official G1 link meshes are rebuilt from UnitreeG1InspectionEpisode::simulation().world() after each fixed step.",
   "simulation": {
     "scenario": "UnitreeG1InspectionEpisode (270 fixed steps; 3 markers)",
