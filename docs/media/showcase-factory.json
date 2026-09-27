@@ -7,9 +7,9 @@
   "simulation": {
     "scenario": "UnitreeG1InspectionEpisode (270 fixed steps; 3 markers)",
     "steps": 270,
-    "initial_state_digest": 3873543182757425476,
-    "final_state_digest": 3486022339118311219,
-    "replay_final_state_digest": 3486022339118311219,
+    "initial_state_digest": 15943502827051034432,
+    "final_state_digest": 7310794212109662258,
+    "replay_final_state_digest": 7310794212109662258,
     "replay_match": true,
     "outcome": "terminated=true; completed_markers=3/3; official_g1_meshes=35"
   },
@@ -20,11 +20,11 @@
     "frame_count": 54,
     "frame_pattern": "target/rne-showcase-factory/frame-%03d.png",
     "gif_path": "docs/media/showcase-factory.gif",
-    "gif_bytes": 2279227,
-    "gif_sha256": "214a680eeb910249df46ebef4e729442898e1d358eae72fc28c48d0c9659ad0f",
+    "gif_bytes": 2489294,
+    "gif_sha256": "3b533d28f911466980f0f9c936b69967684f4ab69a7a43e9c897ade464e9e7a9",
     "poster_path": "docs/media/showcase-factory.png",
-    "poster_bytes": 61941,
-    "poster_sha256": "2092d651f5acdab59120e6df48ade87e913ac9e7be521a798ae428330b13c70e",
+    "poster_bytes": 82473,
+    "poster_sha256": "1d2b2909c53c8739f09b97a7bd3a05e8b5ab663a7207f36056fa43a9e93c1f4f",
     "poster_frame": 27,
     "sampled_sim_steps": [
       5,
