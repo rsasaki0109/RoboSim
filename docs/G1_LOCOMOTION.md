@@ -129,6 +129,22 @@ The release run currently measures the following on the dynamic official G1:
 | right `(+0.0276, -0.05)` | 0.475 m | −0.362 m | 0.784 m | 0.104 rad | no |
 | forward + 0.02 rad root tilt | 0.272 m | +0.129 m | 0.783 m | 0.111 rad | no |
 
+> **Direction of travel.** None of the displacements on this page say which
+> way the robot went relative to where it faces, and the walk they describe
+> goes backwards: `LEARNED_STRIDE` bends the knees toward the pelvis's local
+> +x, the way the robot faces, while the body travels toward -x. Over 800 ticks
+> that is +0.028 m of knee bulge against 0.345 m of travel the other way, and
+> -0.16 / -0.22 m per 8 s window measured along the facing. Example 62's search
+> scored `hypot(dx, dz)`, a distance with no direction.
+> `FORWARD_STRIDE` (example 124) walks forwards, straight and without turning,
+> but only under its exact training conditions; see that example.
+>
+> **Body yaw.** Accumulated body-yaw figures on this page are integrated from
+> `UrdfSceneObservation::base_relative_yaw_rad`, which on the z-up G1 measures
+> a rotation about a horizontal axis rather than heading: a G1 measured turning
+> 3.0 rad in 24 s read +0.05 rad from it. Treat them as unverified until that
+> field is fixed and they are re-measured.
+
 The signed steering displacement is the world-Z path component produced by the
 current contact schedule. This distinction is intentional: the ±0.05 rad/s
 commands produce opposite signed paths, while measured accumulated body yaw is
