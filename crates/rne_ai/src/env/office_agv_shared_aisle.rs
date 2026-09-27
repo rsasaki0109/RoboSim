@@ -66,6 +66,25 @@ pub struct OfficeAgvSharedAisleCourse {
     pub required_yield_steps: u32,
 }
 
+/// Lane the oncoming AGV drives in outside the shared segment, as a Z offset
+/// from the corridor centre.
+///
+/// The corridor is 2 m wide and each vehicle is 0.4 m across, so outside the
+/// pinch there is room for two abreast. 0.55 m leaves 0.15 m of clearance
+/// against an ego stopped on the centre line.
+pub(crate) const OTHER_LANE_Z_M: f64 = -0.55;
+
+/// Distance inside the shared segment at which the oncoming AGV is fully on
+/// the centre line, in meters.
+const PINCH_FULL_DEPTH_M: f64 = 0.7;
+
+/// Distance inside the shared segment at which it has fully returned to its
+/// own lane, in meters.
+///
+/// It must be back in lane before its footprint can reach an ego waiting at the
+/// segment entrance, or the yield it is waiting out would end in a collision.
+const PINCH_LANE_DEPTH_M: f64 = 0.2;
+
 impl Default for OfficeAgvSharedAisleCourse {
     fn default() -> Self {
         Self {
@@ -77,7 +96,9 @@ impl Default for OfficeAgvSharedAisleCourse {
             other_start_x_m: 6.2,
             other_speed_m_s: 0.55,
             other_departure_delay_s: 4.5,
-            other_clear_x_m: 7.2,
+            // Past the near end of the shared segment and out of the framed
+            // aisle, so the vehicle leaves rather than parking mid-corridor.
+            other_clear_x_m: 0.6,
             required_yield_steps: 12,
         }
     }
@@ -100,6 +121,21 @@ impl OfficeAgvSharedAisleCourse {
     #[must_use]
     pub fn other_blocks_ego(self, other_x_m: f64) -> bool {
         self.other_occupies_shared(other_x_m)
+    }
+
+    /// Lateral position of the oncoming AGV at a given X, in meters.
+    ///
+    /// The shared segment is a single-lane pinch: both vehicles have to take
+    /// the centre line through it, which is the whole reason one of them must
+    /// yield. Outside it the corridor takes two abreast, so the AGV moves back
+    /// into its own lane and passes the waiting ego instead of reversing away
+    /// from it.
+    #[must_use]
+    pub fn other_lane_z_m(self, other_x_m: f64) -> f64 {
+        let depth_m = (other_x_m - self.shared_min_x_m).min(self.shared_max_x_m - other_x_m);
+        let centred = ((depth_m - PINCH_LANE_DEPTH_M) / (PINCH_FULL_DEPTH_M - PINCH_LANE_DEPTH_M))
+            .clamp(0.0, 1.0);
+        OTHER_LANE_Z_M * (1.0 - centred)
     }
 
     /// True when the oncoming footprint still intersects the shared segment.
@@ -278,8 +314,7 @@ enum ScriptPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OtherMotion {
     Waiting,
-    Entering,
-    Exiting,
+    Crossing,
     Cleared,
 }
 
@@ -327,25 +362,22 @@ impl OfficeAgvSharedAisleScenario {
         self.observation
     }
 
+    /// Drives the oncoming AGV down its own lane and out of the aisle.
+    ///
+    /// It travels in one direction throughout, so its heading never has to
+    /// reverse and it passes the yielding ego rather than retreating from it.
     fn advance_other_agv(&mut self) {
         let elapsed_s = self.sim.step_count() as f64 * DT_S;
         let step_m = self.course.other_speed_m_s * DT_S;
-        let turn_x_m = 0.5 * (self.course.shared_min_x_m + self.course.shared_max_x_m);
         match self.other_motion {
             OtherMotion::Waiting => {
                 if elapsed_s >= self.course.other_departure_delay_s {
-                    self.other_motion = OtherMotion::Entering;
+                    self.other_motion = OtherMotion::Crossing;
                 }
             }
-            OtherMotion::Entering => {
+            OtherMotion::Crossing => {
                 self.other_agv_x_m -= step_m;
-                if self.other_agv_x_m <= turn_x_m {
-                    self.other_motion = OtherMotion::Exiting;
-                }
-            }
-            OtherMotion::Exiting => {
-                self.other_agv_x_m += step_m;
-                if self.other_agv_x_m >= self.course.other_clear_x_m {
+                if self.other_agv_x_m <= self.course.other_clear_x_m {
                     self.other_agv_x_m = self.course.other_clear_x_m;
                     self.other_motion = OtherMotion::Cleared;
                 }
@@ -367,7 +399,10 @@ impl OfficeAgvSharedAisleScenario {
             self.course
                 .delivery
                 .robot_aabb(drive.base_x_m, drive.base_z_m, drive.base_yaw_rad);
-        let other = self.course.other_aabb(self.other_agv_x_m, 0.0);
+        let other = self.course.other_aabb(
+            self.other_agv_x_m,
+            self.course.other_lane_z_m(self.other_agv_x_m),
+        );
         let shared_aisle_occupied = self.course.other_occupies_shared(self.other_agv_x_m);
         let other_agv_contact = self.other_agv_contact || aabb.overlaps(other);
         let out_of_corridor = aabb.max_z_m > self.course.delivery.corridor_half_width_m
@@ -406,7 +441,10 @@ impl OfficeAgvSharedAisleScenario {
             observation.base_z_m,
             observation.base_yaw_rad,
         );
-        let other = self.course.other_aabb(self.other_agv_x_m, 0.0);
+        let other = self.course.other_aabb(
+            self.other_agv_x_m,
+            self.course.other_lane_z_m(self.other_agv_x_m),
+        );
         self.other_agv_contact = observation.other_agv_contact || aabb.overlaps(other);
 
         if !self.yielded_for_shared_aisle {
@@ -754,6 +792,44 @@ mod tests {
         )
         .expect("parse task spec");
         assert_eq!(spec, loaded);
+    }
+
+    #[test]
+    fn the_oncoming_agv_crosses_the_pinch_and_keeps_going() {
+        let course = OfficeAgvSharedAisleCourse::default();
+
+        // Centred inside the pinch, where only one vehicle fits.
+        let middle_x_m = 0.5 * (course.shared_min_x_m + course.shared_max_x_m);
+        assert!(
+            course.other_lane_z_m(middle_x_m).abs() < 1.0e-9,
+            "the pinch must put the oncoming AGV on the centre line"
+        );
+
+        // In its own lane before its footprint can reach an ego stopped at the
+        // entrance, so the vehicle it is waiting out never gets hit.
+        let entrance_x_m = course.shared_min_x_m + PINCH_LANE_DEPTH_M;
+        assert!(
+            (course.other_lane_z_m(entrance_x_m) - OTHER_LANE_Z_M).abs() < 1.0e-9,
+            "the oncoming AGV must be back in lane by the pinch exit"
+        );
+        assert!(
+            (course.other_lane_z_m(course.other_start_x_m) - OTHER_LANE_Z_M).abs() < 1.0e-9,
+            "the oncoming AGV must start in its own lane"
+        );
+
+        // Clearance against an ego halted on the centre line.
+        let gap_m = OTHER_LANE_Z_M.abs() - course.other_half_z_m - course.delivery.robot_half_z_m;
+        assert!(
+            gap_m > 0.1,
+            "passing an ego on the centre line needs clearance, got {gap_m:.3} m"
+        );
+
+        // It drives through rather than turning around: the far side is past
+        // the near end of the pinch, not back where it started.
+        assert!(
+            course.other_clear_x_m < course.shared_min_x_m,
+            "the oncoming AGV must leave through the pinch, not reverse out of it"
+        );
     }
 
     #[test]
