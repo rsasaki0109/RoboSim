@@ -5629,6 +5629,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "warehouse_logistics"
+version = "0.4.0"
+dependencies = [
+ "image",
+ "png",
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "rne_nav",
+ "rne_physics",
+ "rne_physics_rapier",
+ "rne_render",
+ "rne_render_wgpu",
+ "rne_world",
+]
+
+[[package]]
 name = "wasi"
 version = "0.11.1+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
