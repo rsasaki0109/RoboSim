@@ -44,6 +44,15 @@ use rne_world::Transform3;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Deck half extents per floor, in meters.
+///
+/// The upper deck is short on purpose: run it the length of the lower one and
+/// it hangs over the goods-in stand, hiding the pick from the only camera this
+/// runs from.
+const DECK_HALF_M: [Vec3; 2] = [Vec3::new(3.9, 0.06, 1.5), Vec3::new(1.65, 0.06, 1.5)];
+/// Deck centre on the world x axis per floor, in meters.
+const DECK_X_M: [f64; 2] = [SHAFT_X_M - 4.8, SHAFT_X_M - 2.55];
+
 /// Physics rate. The car carries the truck through contact and the tines carry
 /// the case the same way, which needs the solver to see platform velocity
 /// rather than a teleport.
@@ -78,10 +87,12 @@ const FORK_MASS_KG: f64 = 8.0;
 /// Fork reach from the chassis centre, in meters.
 ///
 /// Negative: the tines lead along -x, the direction the goods-in stand is in.
-/// Long enough that the chassis stops clear of the stand's legs while the tines
-/// are fully under the load: at `ENGAGED_X_M` the chassis front face is 0.09 m
-/// short of the legs, and a shorter reach simply jammed the truck against them.
-const FORK_REACH_M: f64 = -0.88;
+/// Two clearances set this, and both were measured after getting it wrong:
+/// at `ENGAGED_X_M` the chassis front face must stop short of the stand's legs
+/// (it clears by 0.16 m), and the backrest must sit ahead of the chassis rather
+/// than inside it. At -0.88 m the backrest overlapped the chassis by 5 mm and
+/// the solver pushed the two apart with 1.3 kN for the whole run.
+const FORK_REACH_M: f64 = -0.95;
 /// Mast travel, in meters of joint displacement.
 ///
 /// Zero is the height the tines enter the stand at. The mast has to reach
@@ -129,6 +140,15 @@ const APPROACH_X_M: f64 = ENGAGED_X_M + CASE_HALF_M.x + 0.46;
 /// slows down, which is what happened at every shallower value tried.
 const ENGAGED_X_M: f64 = STAND_X_M - FORK_REACH_M - (FORK_HALF_M.x - CASE_HALF_M.x) - 0.02;
 
+/// Where the truck stands inside the car, in meters.
+///
+/// Not the shaft centreline: the truck is 0.52 m of chassis behind its centre
+/// and 1.29 m of mast and tines ahead of it, so centring the chassis leaves the
+/// tines hanging out of the car. They then catch the upper floor slab on the
+/// way up, which drove the mast 0.14 m through its own lower limit and dropped
+/// the case. Centring the whole assembly leaves 45 mm at each end.
+const BOARD_X_M: f64 = SHAFT_X_M + 0.5 * ((-FORK_REACH_M + FORK_HALF_M.x) - CHASSIS_HALF_M.x);
+
 /// Where the truck stops to press the button, in meters.
 const PRESS_X_M: f64 = -1.45;
 /// Button face centre, in meters: on a stanchion beside the doorway.
@@ -143,15 +163,33 @@ const BUTTON_NORMAL: Vec3 = Vec3::new(0.0, 0.0, -1.0);
 /// Where the truck drives to reach the panel, in meters.
 ///
 /// Slightly past the face: a controller that stops flush leaves no standing
-/// error, so the contact carries no force and the button never actuates.
-const PRESS_Z_M: f64 = BUTTON_CENTER_M.z - CHASSIS_HALF_M.z + 0.05;
+/// error, so the contact carries no force and the button never actuates. Only
+/// slightly, though. A 320 kg chassis under velocity control does not stop when
+/// it touches something, it keeps going: at 50 mm of overshoot it drove 24 kN
+/// into the panel, wedged, and never reached the doorway.
+const PRESS_Z_M: f64 = BUTTON_CENTER_M.z - CHASSIS_HALF_M.z + 0.015;
 /// Button body half extents, in meters.
 const BUTTON_HALF_M: Vec3 = Vec3::new(0.05, 0.05, 0.03);
 
 /// Where the truck sets the case down on the upper floor, in meters.
 const BAY_X_M: f64 = SHAFT_X_M - 2.35;
+/// Outbound stand centre on the upper floor, in meters: under the tines when
+/// the truck is at `BAY_X_M`.
+///
+/// It has legs for the same reason the goods-in stand does. Lowering a flat
+/// tine to the deck leaves the case still sitting on the tine, 0.046 m up,
+/// because the tine itself is in the way -- so backing out drags the load
+/// instead of leaving it. The case has to come to rest on something the tines
+/// can slide out from between.
+const OUTBOUND_X_M: f64 = BAY_X_M + FORK_REACH_M;
+/// Top of the outbound stand's legs, in world meters.
+const OUTBOUND_TOP_Y_M: f64 = FLOOR_HEIGHTS_M[1] + CAR_HALF_M.y + STAND_TOP_Y_M;
 /// Where the truck ends up after backing off the delivered case, in meters.
-const WITHDRAW_X_M: f64 = SHAFT_X_M - 1.25;
+///
+/// Far enough back that the tines are out of the outbound stand, and no
+/// further: at -1.25 m the truck reversed into the doorway and spent the rest
+/// of the run pushing 4 kN into a closed door leaf.
+const WITHDRAW_X_M: f64 = SHAFT_X_M - 1.75;
 
 /// Drive speed, in meters per second.
 const DRIVE_M_S: f64 = 0.62;
@@ -167,7 +205,7 @@ const MAX_SECONDS: f64 = 95.0;
 
 const WIDTH: u32 = 960;
 const HEIGHT: u32 = 540;
-const CLEAR_COLOR: [f32; 4] = [0.11, 0.13, 0.17, 1.0];
+const CLEAR_COLOR: [f32; 4] = [0.62, 0.68, 0.76, 1.0];
 const FRAME_COUNT: usize = 120;
 
 fn elevator_spec() -> ElevatorSpec {
@@ -214,44 +252,14 @@ struct Site {
     button: Entity,
 }
 
-fn spawn_site(world: &mut World) -> Site {
-    // Warehouse decks, one per served floor, stopping short of the shaft so the
-    // camera sees into it.
-    for (index, height_m) in FLOOR_HEIGHTS_M.iter().enumerate() {
-        let slab = spawn_named(world, if index == 0 { "deck_1f" } else { "deck_2f" });
-        world.entity_mut(slab).insert((
-            RigidBody {
-                body_type: RigidBodyType::Fixed,
-                ..RigidBody::default()
-            },
-            Collider {
-                shape: ColliderShape::Cuboid {
-                    half_extents_m: Vec3::new(3.9, 0.06, 1.5),
-                },
-                material: high_friction(),
-                ..Collider::default()
-            },
-            // Flush with the car platform's top rather than 6 cm below it. A
-            // step at the doorway is a trip hazard for a long truck with a
-            // loaded fork out front, and it put the truck on its roof.
-            Transform3::from_translation_rotation(
-                Vec3::new(SHAFT_X_M - 4.8, *height_m, 0.0),
-                Quat::IDENTITY,
-            ),
-        ));
-    }
-
-    // Goods-in stand: two legs with an open middle, which is the only reason a
-    // fork can get under anything. A solid plinth would have to be shoved.
-    for (index, sign) in [(0, -1.0), (1, 1.0)] {
-        let leg = spawn_named(
-            world,
-            if index == 0 {
-                "goods_in_leg_near"
-            } else {
-                "goods_in_leg_far"
-            },
-        );
+/// Spawns one two-legged stand: a pair of fixed legs with a gap between them.
+///
+/// The gap is the whole point. A load resting on a solid plinth cannot be
+/// forked, only pushed, and a load lowered onto a bare deck is still sitting on
+/// the tines that put it there.
+fn spawn_stand(world: &mut World, name: &str, center_x_m: f64, deck_y_m: f64) {
+    for (suffix, sign) in [("near", -1.0), ("far", 1.0)] {
+        let leg = spawn_named(world, format!("{name}_leg_{suffix}"));
         world.entity_mut(leg).insert((
             RigidBody {
                 body_type: RigidBodyType::Fixed,
@@ -266,15 +274,18 @@ fn spawn_site(world: &mut World) -> Site {
             },
             Transform3::from_translation_rotation(
                 Vec3::new(
-                    STAND_X_M,
-                    CAR_HALF_M.y + STAND_LEG_HALF_M.y,
+                    center_x_m,
+                    deck_y_m + STAND_LEG_HALF_M.y,
                     sign * STAND_LEG_Z_M,
                 ),
                 Quat::IDENTITY,
             ),
         ));
     }
+}
 
+/// Spawns the car, its two door leaves and the call button.
+fn spawn_lift(world: &mut World) -> (Entity, Entity, Entity, Entity) {
     let car = spawn_named(world, "elevator_car");
     world.entity_mut(car).insert((
         RigidBody {
@@ -338,6 +349,42 @@ fn spawn_site(world: &mut World) -> Site {
             Quat::IDENTITY,
         ),
     ));
+
+    (car, left_door, right_door, button)
+}
+
+fn spawn_site(world: &mut World) -> Site {
+    // Warehouse decks, one per served floor, stopping short of the shaft so the
+    // camera sees into it.
+    for (index, height_m) in FLOOR_HEIGHTS_M.iter().enumerate() {
+        let slab = spawn_named(world, if index == 0 { "deck_1f" } else { "deck_2f" });
+        world.entity_mut(slab).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider {
+                shape: ColliderShape::Cuboid {
+                    half_extents_m: DECK_HALF_M[index],
+                },
+                material: high_friction(),
+                ..Collider::default()
+            },
+            // Flush with the car platform's top rather than 6 cm below it. A
+            // step at the doorway is a trip hazard for a long truck with a
+            // loaded fork out front, and it put the truck on its roof.
+            Transform3::from_translation_rotation(
+                Vec3::new(DECK_X_M[index], *height_m, 0.0),
+                Quat::IDENTITY,
+            ),
+        ));
+    }
+
+    // Goods-in stand: two legs with an open middle, which is the only reason a
+    // fork can get under anything. A solid plinth would have to be shoved.
+    spawn_stand(world, "goods_in", STAND_X_M, CAR_HALF_M.y);
+
+    let (car, left_door, right_door, button) = spawn_lift(world);
 
     let chassis_y_m = CAR_HALF_M.y + CHASSIS_HALF_M.y + 0.01;
     let chassis = spawn_named(world, "forklift_chassis");
@@ -457,6 +504,14 @@ fn spawn_site(world: &mut World) -> Site {
         },
     ));
 
+    // The outbound stand, the goods-in stand's twin on the upper floor.
+    spawn_stand(
+        world,
+        "outbound",
+        OUTBOUND_X_M,
+        FLOOR_HEIGHTS_M[1] + CAR_HALF_M.y,
+    );
+
     // The case is an ordinary dynamic body from here to the outbound bay.
     let case = spawn_named(world, "inbound_case");
     world.entity_mut(case).insert((
@@ -559,7 +614,10 @@ impl Phase {
     fn mast_target_m(self) -> f64 {
         match self {
             Phase::Approach | Phase::Engage => FORK_ENGAGE_M,
-            Phase::Lower | Phase::Withdraw | Phase::Done => FORK_GROUND_M,
+            // Below the seating height, so the case transfers to the stand's
+            // legs and the tines come out from under it.
+            Phase::Lower | Phase::Withdraw => FORK_ENGAGE_M - 0.05,
+            Phase::Done => FORK_GROUND_M,
             _ => FORK_CARRY_M,
         }
     }
@@ -590,7 +648,89 @@ struct Mission {
     case_final: Vec3,
 }
 
-fn run_mission(capture: bool) -> Mission {
+/// Writes this step's drive command and mast target onto the truck.
+#[allow(clippy::too_many_arguments)] // Each argument is an independent quantity.
+fn drive_truck(
+    world: &mut World,
+    site: &Site,
+    phase: Phase,
+    chassis: Vec3,
+    dt_s: f64,
+    commanded_x_m_s: &mut f64,
+    commanded_z_m_s: &mut f64,
+) {
+    // Drive command for this phase, along x and z only; gravity owns y.
+    let (target_x_m, target_z_m, speed_m_s) = match phase {
+        Phase::Approach => (APPROACH_X_M, 0.0, DRIVE_M_S),
+        Phase::Engage => (ENGAGED_X_M, 0.0, CREEP_M_S),
+        // Hold station while the mast does the work, so the case comes
+        // straight up off the stand instead of being dragged over its lip.
+        Phase::Lift => (ENGAGED_X_M, 0.0, CREEP_M_S),
+        Phase::Haul | Phase::Press => (PRESS_X_M, PRESS_Z_M, DRIVE_M_S),
+        // Back off the panel decisively once the call is registered. A slow
+        // withdrawal lets the contact chatter across the button's release
+        // threshold and register a second press.
+        Phase::WaitForDoors => (PRESS_X_M, 0.0, DRIVE_M_S),
+        Phase::Board | Phase::Ride => (BOARD_X_M, 0.0, DRIVE_M_S),
+        Phase::DriveOut | Phase::Place => (BAY_X_M, 0.0, DRIVE_M_S),
+        Phase::Lower => (BAY_X_M, 0.0, CREEP_M_S),
+        Phase::Withdraw | Phase::Done => (WITHDRAW_X_M, 0.0, CREEP_M_S),
+    };
+    // Tight enough that the drive saturates for most of each leg instead of
+    // creeping in asymptotically; the mission has eleven legs to get through.
+    let gain = |error_m: f64| (error_m / 0.25).clamp(-1.0, 1.0) * speed_m_s;
+    // The command itself is rate-limited, not the measured velocity. The
+    // case is not strapped to anything, and a velocity written straight
+    // onto the body changes inside one step -- an unbounded acceleration
+    // that leaves the case behind where the tines were. Ramping the
+    // *command* keeps the acceleration the case has to follow at
+    // `DRIVE_ACCEL_M_S2`, which needs 0.08 of its weight in friction.
+    // Ramping the measured velocity instead does not work: at this mass
+    // each increment is smaller than the contact's stiction and the solver
+    // arrests it before the next step.
+    let ramp = |current: f64, target: f64| {
+        let step_m_s = DRIVE_ACCEL_M_S2 * dt_s;
+        current + (target - current).clamp(-step_m_s, step_m_s)
+    };
+    // During the ride the wheels are stopped and nothing is commanded: the
+    // car carries the truck through ordinary contact, and overriding its
+    // velocity every step would be staging the thing under test.
+    if !matches!(phase, Phase::Ride) {
+        // Line up before entering. The doorway is only as wide as the car
+        // and the truck arrives off-centre from leaning on the panel; a
+        // truck that corrects its offset while driving forward wedges a
+        // corner against a door leaf and stops there with the load up.
+        let lining_up = matches!(phase, Phase::Board) && (target_z_m - chassis.z).abs() > 0.12;
+        let forward_m_s = if lining_up {
+            0.0
+        } else {
+            gain(target_x_m - chassis.x)
+        };
+        *commanded_x_m_s = ramp(*commanded_x_m_s, forward_m_s);
+        *commanded_z_m_s = ramp(*commanded_z_m_s, gain(target_z_m - chassis.z));
+        if let Some(mut body) = world.get_mut::<RigidBody>(site.chassis) {
+            body.linear_velocity_m_s.x = *commanded_x_m_s;
+            body.linear_velocity_m_s.z = *commanded_z_m_s;
+            // Heading is commanded too. The drive wheels are not modelled,
+            // so nothing steers the truck back once something knocks it
+            // round -- and something does: brushing the panel torqued the
+            // chassis 17 degrees, which put its front corner into the panel
+            // body and wedged it there under 26 kN. A real base holds the
+            // heading it is given.
+            body.angular_velocity_rad_s = Vec3::ZERO;
+        }
+        if let Some(mut transform) = world.get_mut::<Transform3>(site.chassis) {
+            transform.rotation = Quat::IDENTITY;
+        }
+    }
+    for carriage in [site.fork, site.backrest] {
+        if let Some(mut motor) = world.get_mut::<JointMotor>(carriage) {
+            motor.target_position = phase.mast_target_m();
+        }
+    }
+}
+
+fn run_mission(capture: bool, trace: bool) -> Mission {
     let spec = elevator_spec();
     spec.validate().expect("elevator specification");
 
@@ -639,65 +779,15 @@ fn run_mission(capture: bool) -> Mission {
     for step in 0..steps {
         let chassis = translation(&world, site.chassis);
 
-        // Drive command for this phase, along x and z only; gravity owns y.
-        let (target_x_m, target_z_m, speed_m_s) = match phase {
-            Phase::Approach => (APPROACH_X_M, 0.0, DRIVE_M_S),
-            Phase::Engage => (ENGAGED_X_M, 0.0, CREEP_M_S),
-            // Hold station while the mast does the work, so the case comes
-            // straight up off the stand instead of being dragged over its lip.
-            Phase::Lift => (ENGAGED_X_M, 0.0, CREEP_M_S),
-            Phase::Haul | Phase::Press => (PRESS_X_M, PRESS_Z_M, DRIVE_M_S),
-            // Back off the panel decisively once the call is registered. A slow
-            // withdrawal lets the contact chatter across the button's release
-            // threshold and register a second press.
-            Phase::WaitForDoors => (PRESS_X_M, 0.0, DRIVE_M_S),
-            Phase::Board | Phase::Ride => (SHAFT_X_M, 0.0, DRIVE_M_S),
-            Phase::DriveOut | Phase::Place => (BAY_X_M, 0.0, DRIVE_M_S),
-            Phase::Lower => (BAY_X_M, 0.0, CREEP_M_S),
-            Phase::Withdraw | Phase::Done => (WITHDRAW_X_M, 0.0, CREEP_M_S),
-        };
-        // Tight enough that the drive saturates for most of each leg instead of
-        // creeping in asymptotically; the mission has eleven legs to get through.
-        let gain = |error_m: f64| (error_m / 0.25).clamp(-1.0, 1.0) * speed_m_s;
-        // The command itself is rate-limited, not the measured velocity. The
-        // case is not strapped to anything, and a velocity written straight
-        // onto the body changes inside one step -- an unbounded acceleration
-        // that leaves the case behind where the tines were. Ramping the
-        // *command* keeps the acceleration the case has to follow at
-        // `DRIVE_ACCEL_M_S2`, which needs 0.08 of its weight in friction.
-        // Ramping the measured velocity instead does not work: at this mass
-        // each increment is smaller than the contact's stiction and the solver
-        // arrests it before the next step.
-        let ramp = |current: f64, target: f64| {
-            let step_m_s = DRIVE_ACCEL_M_S2 * dt_s;
-            current + (target - current).clamp(-step_m_s, step_m_s)
-        };
-        // During the ride the wheels are stopped and nothing is commanded: the
-        // car carries the truck through ordinary contact, and overriding its
-        // velocity every step would be staging the thing under test.
-        if !matches!(phase, Phase::Ride) {
-            // Line up before entering. The doorway is only as wide as the car
-            // and the truck arrives off-centre from leaning on the panel; a
-            // truck that corrects its offset while driving forward wedges a
-            // corner against a door leaf and stops there with the load up.
-            let lining_up = matches!(phase, Phase::Board) && (target_z_m - chassis.z).abs() > 0.12;
-            let forward_m_s = if lining_up {
-                0.0
-            } else {
-                gain(target_x_m - chassis.x)
-            };
-            commanded_x_m_s = ramp(commanded_x_m_s, forward_m_s);
-            commanded_z_m_s = ramp(commanded_z_m_s, gain(target_z_m - chassis.z));
-            if let Some(mut body) = world.get_mut::<RigidBody>(site.chassis) {
-                body.linear_velocity_m_s.x = commanded_x_m_s;
-                body.linear_velocity_m_s.z = commanded_z_m_s;
-            }
-        }
-        for carriage in [site.fork, site.backrest] {
-            if let Some(mut motor) = world.get_mut::<JointMotor>(carriage) {
-                motor.target_position = phase.mast_target_m();
-            }
-        }
+        drive_truck(
+            &mut world,
+            &site,
+            phase,
+            chassis,
+            dt_s,
+            &mut commanded_x_m_s,
+            &mut commanded_z_m_s,
+        );
 
         // The button reads the solved contact between the truck and the panel.
         let contacts: Vec<ButtonContact> = backend
@@ -748,7 +838,13 @@ fn run_mission(capture: bool) -> Mission {
                 }
             }
         }
-        lift_height_m = lift_height_m.max(case.y - (CAR_HALF_M.y + STAND_TOP_Y_M + CASE_HALF_M.y));
+        // Measured while the load is still over the goods-in stand: once the
+        // truck rides the lift, height above that stand is the building's, not
+        // the mast's.
+        if matches!(phase, Phase::Lift | Phase::Haul) {
+            lift_height_m =
+                lift_height_m.max(case.y - (CAR_HALF_M.y + STAND_TOP_Y_M + CASE_HALF_M.y));
+        }
 
         phase = match phase {
             Phase::Approach if (chassis.x - APPROACH_X_M).abs() < 0.06 => Phase::Engage,
@@ -770,7 +866,7 @@ fn run_mission(capture: bool) -> Mission {
             Phase::WaitForDoors if elevator.is_boardable(0) && chassis.z.abs() < 0.14 => {
                 Phase::Board
             }
-            Phase::Board if (chassis.x - SHAFT_X_M).abs() < 0.10 => {
+            Phase::Board if (chassis.x - BOARD_X_M).abs() < 0.06 => {
                 // Aboard: choose the destination, which is a separate act from
                 // summoning the car.
                 elevator.call(1).expect("select the upper floor");
@@ -779,24 +875,25 @@ fn run_mission(capture: bool) -> Mission {
             Phase::Ride if elevator.is_boardable(1) => Phase::DriveOut,
             Phase::DriveOut if (chassis.x - BAY_X_M).abs() < 0.12 => Phase::Place,
             Phase::Place if (chassis.x - BAY_X_M).abs() < 0.05 => Phase::Lower,
-            // The case is down when it is resting on the upper deck rather than
-            // on the tines.
-            Phase::Lower if case.y < FLOOR_HEIGHTS_M[1] + CAR_HALF_M.y + CASE_HALF_M.y + 0.05 => {
-                Phase::Withdraw
-            }
+            // The case is down when it is resting on the outbound stand rather
+            // than on the tines.
+            Phase::Lower if case.y < OUTBOUND_TOP_Y_M + CASE_HALF_M.y + 0.03 => Phase::Withdraw,
             Phase::Withdraw if chassis.x > WITHDRAW_X_M - 0.08 => Phase::Done,
             other => other,
         };
 
-        if std::env::var("TRACE").is_ok() && step % 120 == 0 {
+        if trace && step % 120 == 0 {
             eprintln!(
-                "t={:5.2} phase={:?} z={:+.3} board={} presses={} vx={:+.4} chassis=({:+.3},{:+.3}) pitch={:+.3} fork=({:+.3},{:+.3}) disp={:+.3} case=({:+.3},{:+.3}) target_x={:+.3}",
-                step as f64 / PHYSICS_HZ, phase, chassis.z, elevator.is_boardable(0), presses,
-                world.get::<RigidBody>(site.chassis).map_or(0.0, |b| b.linear_velocity_m_s.x),
-                chassis.x, chassis.y,
-                world.get::<Transform3>(site.chassis).map_or(0.0, |t| 2.0 * f64::atan2(t.rotation.z, t.rotation.w)),
-                fork.x, fork.y, fork.y - (chassis.y + MAST_ANCHOR_Y_M),
-                case.x, case.y, target_x_m
+                "t={:5.2} {:24} chassis=({:+.3},{:+.3},{:+.3}) mast={:+.3} case=({:+.3},{:+.3},{:+.3})",
+                step as f64 / PHYSICS_HZ,
+                phase.label(),
+                chassis.x,
+                chassis.y,
+                chassis.z,
+                fork.y - (chassis.y + MAST_ANCHOR_Y_M),
+                case.x,
+                case.y,
+                case.z
             );
         }
         if order.last() != Some(&phase) {
@@ -852,8 +949,8 @@ fn run_mission(capture: bool) -> Mission {
 }
 
 fn append_site(scene: &mut RenderScene, frame: &Frame) {
-    const DECK: [f32; 4] = [0.50, 0.53, 0.58, 1.0];
-    const SHAFT: [f32; 4] = [0.26, 0.29, 0.35, 1.0];
+    const DECK: [f32; 4] = [0.68, 0.70, 0.73, 1.0];
+    const SHAFT: [f32; 4] = [0.44, 0.48, 0.55, 1.0];
     const CAR: [f32; 4] = [0.76, 0.79, 0.85, 1.0];
     const DOOR: [f32; 4] = [0.82, 0.86, 0.92, 1.0];
     const BUTTON_IDLE: [f32; 4] = [0.55, 0.57, 0.62, 1.0];
@@ -861,7 +958,7 @@ fn append_site(scene: &mut RenderScene, frame: &Frame) {
     const TRUCK: [f32; 4] = [0.96, 0.62, 0.09, 1.0];
     const MAST: [f32; 4] = [0.20, 0.22, 0.27, 1.0];
     const CASE: [f32; 4] = [0.74, 0.56, 0.33, 1.0];
-    const RACK: [f32; 4] = [0.33, 0.37, 0.44, 1.0];
+    const RACK: [f32; 4] = [0.22, 0.42, 0.62, 1.0];
     const STAND: [f32; 4] = [0.42, 0.45, 0.51, 1.0];
     const BAY: [f32; 4] = [0.16, 0.72, 0.42, 1.0];
 
@@ -876,7 +973,7 @@ fn append_site(scene: &mut RenderScene, frame: &Frame) {
 
     // Shaft walls, so the car reads as travelling inside something rather than
     // floating. Back plus one side; the open side is the camera's cutaway.
-    let shaft_half_height_m = FLOOR_HEIGHTS_M[1] * 0.5 + 1.2;
+    let shaft_half_height_m = FLOOR_HEIGHTS_M[1] * 0.5 + 0.9;
     let shaft_mid_y_m = shaft_half_height_m - 0.6;
     push(
         Vec3::new(SHAFT_X_M + 1.05, shaft_mid_y_m, 0.0),
@@ -891,8 +988,8 @@ fn append_site(scene: &mut RenderScene, frame: &Frame) {
     // Back wall of the aisle, one per floor, and the panel it carries.
     for height_m in FLOOR_HEIGHTS_M {
         push(
-            Vec3::new(SHAFT_X_M - 4.4, height_m + 1.25, -1.18),
-            Vec3::new(4.3, 1.25, 0.05),
+            Vec3::new(SHAFT_X_M - 3.4, height_m + 1.05, -1.30),
+            Vec3::new(3.3, 1.05, 0.05),
             SHAFT,
         );
         push(
@@ -920,14 +1017,21 @@ fn append_site(scene: &mut RenderScene, frame: &Frame) {
             );
         }
     }
-    // Outbound bay marking on the upper deck.
+    // Outbound stand and its bay marking on the upper deck.
+    for sign in [-1.0, 1.0] {
+        push(
+            Vec3::new(
+                OUTBOUND_X_M,
+                FLOOR_HEIGHTS_M[1] + CAR_HALF_M.y + STAND_LEG_HALF_M.y,
+                sign * STAND_LEG_Z_M,
+            ),
+            STAND_LEG_HALF_M,
+            STAND,
+        );
+    }
     push(
-        Vec3::new(
-            BAY_X_M + FORK_REACH_M,
-            FLOOR_HEIGHTS_M[1] + CAR_HALF_M.y + 0.005,
-            0.0,
-        ),
-        Vec3::new(0.34, 0.005, 0.30),
+        Vec3::new(OUTBOUND_X_M, FLOOR_HEIGHTS_M[1] + CAR_HALF_M.y + 0.005, 0.0),
+        Vec3::new(0.34, 0.005, 0.34),
         BAY,
     );
 
@@ -1017,7 +1121,8 @@ fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
 
 fn main() {
     let smoke = std::env::args().any(|argument| argument == "--smoke");
-    let mission = run_mission(!smoke);
+    let trace = std::env::args().any(|argument| argument == "--trace");
+    let mission = run_mission(!smoke, trace);
 
     println!(
         "mission: {} press(es), lifted {:.3} m off the stand, worst carry slip {:.4} m, case delivered to floor {} at ({:.2}, {:.2}, {:.2})",
@@ -1076,10 +1181,14 @@ fn main() {
     // floors, and an orbiting camera both fights the eye and destroys
     // inter-frame compression.
     let orbit = CameraOrbit {
-        focus: Vec3::new(SHAFT_X_M - 2.30, 1.55, 0.0),
-        yaw_rad: 0.34,
-        pitch_rad: 1.36,
-        distance_m: 10.6,
+        focus: Vec3::new(SHAFT_X_M - 2.25, 1.60, 0.0),
+        yaw_rad: 0.42,
+        // Larger pitch is nearer horizontal. At 1.44 the two decks were seen
+        // edge-on and read as lines; a three-quarter view puts the load on a
+        // surface the eye can see.
+        pitch_rad: 1.16,
+        // 10.6 m framed the job as a grey postage stamp in an empty room.
+        distance_m: 6.9,
     };
 
     for (index, frame) in mission.frames.iter().enumerate() {
