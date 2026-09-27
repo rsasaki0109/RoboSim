@@ -94,6 +94,15 @@ car must be at that floor **and** the doors fully open. Being parked with the
 doors still moving is not boardable, which is what keeps a robot from driving
 into a closing door.
 
+`is_boardable` protects a robot that is about to cross; `hold_doors()` protects
+one that is already in the doorway. It is the door-edge or light-curtain input:
+while the doors are open it restarts the dwell, while they are closing it
+reverses them, and otherwise it does nothing. A caller calls it every step its
+own check finds something in the doorway. Example 125 does this for two
+forklifts reaching into the car: a loaded truck lines up for longer than any
+fixed dwell allows, and a tine left across the threshold is exactly what a
+closing leaf would otherwise hit.
+
 ### The car accelerates, because an instant stop throws its passengers
 
 An early version changed speed instantly. Measured on a rider standing on the
