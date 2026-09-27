@@ -70,6 +70,19 @@ All notable changes to Robot Native Engine are documented in this file.
   `rne_nav`. Historical `0.1.0`/`0.2.0` fixtures remain unchanged and readable.
 
 ### Added
+
+- `rne_nav::Elevator::hold_doors`: a door-edge / light-curtain input. While
+  the doors are open it restarts the dwell, while they are closing it reverses
+  them, and otherwise it does nothing.
+- Example 125, `125_warehouse_relay`: two forklift AGVs hand one case across
+  two floors through the lift. The ground-floor truck takes the case off the
+  goods-in stand, presses the call button, turns round and sets the case on a
+  stand inside the car; the car carries the case up alone; the upper-floor
+  truck forks it out, turns round and sets it on the outbound bay. Gated
+  headlessly (`--smoke`): each truck stays on its floor, the car never moves
+  with a truck in it, nothing is in the doorway while the doors are not fully
+  open, and the case ends seated on the outbound stand with the tines out of
+  it. Renders `docs/media/warehouse-relay.gif`.
 - `rne_slam::lio_inertial::LioInertialEkf` extends the tightly-coupled iEKF to a
   15-DoF error state (`[rotation, translation, velocity, gyro_bias,
   accel_bias]`): IMU samples propagate pose, velocity, and biases with the
@@ -634,6 +647,16 @@ All notable changes to Robot Native Engine are documented in this file.
   pipeline, both built-in planners, and a robot-vs-world distance query.
 
 ### Fixed
+
+- The wgpu backend's shared box mesh had five of its six faces wound
+  clockwise seen from outside. The pipelines cull back faces with
+  counter-clockwise as front, so every box primitive drew the inside of its
+  far faces instead of its near ones whenever those faces pointed at the
+  camera; thin boxes hid it, a rotated forklift chassis or case showed up as
+  an open shell. Every face now winds counter-clockwise from outside, pinned
+  by `every_unit_cube_triangle_winds_counter_clockwise_seen_from_outside`.
+  Checked-in media rendered before this fix still shows the old boxes until
+  it is re-rendered.
 
 - `UrdfSceneObservation::base_relative_{yaw,pitch,roll}_rad` are now the
   rotation since scene load taken in the world frame (`current · reference⁻¹`)

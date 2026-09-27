@@ -3052,13 +3052,17 @@ fn unit_cube() -> (Vec<Vertex>, Vec<u16>) {
         [0.5, 0.5, 0.5],
         [-0.5, 0.5, 0.5],
     ];
+    // Each face's corners run counter-clockwise seen from outside, which is
+    // what the pipelines' `FrontFace::Ccw` with back-face culling treats as
+    // facing the camera. Five of these six used to run the other way, so a box
+    // drew the inside of its far faces instead of its near ones.
     let faces: [([usize; 4], [f32; 3]); 6] = [
-        ([0, 1, 2, 3], [0.0, 0.0, -1.0]),
+        ([0, 3, 2, 1], [0.0, 0.0, -1.0]),
         ([4, 5, 6, 7], [0.0, 0.0, 1.0]),
-        ([4, 0, 3, 7], [-1.0, 0.0, 0.0]),
-        ([1, 5, 6, 2], [1.0, 0.0, 0.0]),
-        ([3, 2, 6, 7], [0.0, 1.0, 0.0]),
-        ([4, 5, 1, 0], [0.0, -1.0, 0.0]),
+        ([4, 7, 3, 0], [-1.0, 0.0, 0.0]),
+        ([1, 2, 6, 5], [1.0, 0.0, 0.0]),
+        ([3, 7, 6, 2], [0.0, 1.0, 0.0]),
+        ([0, 1, 5, 4], [0.0, -1.0, 0.0]),
     ];
 
     let mut vertices = Vec::new();
@@ -3191,6 +3195,35 @@ mod mesh_tests {
     };
     use crate::taa::{COPY_SHADER, TAA_SHADER};
     use rne_render::RenderSceneItem;
+
+    #[test]
+    fn every_unit_cube_triangle_winds_counter_clockwise_seen_from_outside() {
+        // The pipelines cull back faces with counter-clockwise as front, so a
+        // triangle's winding normal must agree with the face normal it shades
+        // with, or the face disappears exactly when it faces the camera.
+        let (vertices, indices) = unit_cube();
+        assert_eq!(indices.len(), 36);
+        for triangle in indices.chunks_exact(3) {
+            let [a, b, c] = [0, 1, 2].map(|k| vertices[triangle[k] as usize]);
+            let p = |v: super::Vertex| {
+                let [x, y, z] = v.position;
+                rne_math::Vec3::new(f64::from(x), f64::from(y), f64::from(z))
+            };
+            let winding = (p(b) - p(a)).cross(p(c) - p(a));
+            let normal = {
+                let [x, y, z] = a.normal;
+                rne_math::Vec3::new(f64::from(x), f64::from(y), f64::from(z))
+            };
+            assert!(
+                winding.dot(normal) > 0.0,
+                "triangle {triangle:?} winds against its face normal {normal:?}"
+            );
+            assert!(
+                winding.dot(p(a)) > 0.0,
+                "triangle {triangle:?} faces the cube's inside"
+            );
+        }
+    }
 
     #[test]
     fn a_mirrored_model_matrix_keeps_its_normals_pointing_outward() {

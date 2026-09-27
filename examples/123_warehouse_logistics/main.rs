@@ -237,6 +237,11 @@ fn high_friction() -> PhysicsMaterial {
 /// At deck friction it loses the whole commanded speed to Coulomb drag inside
 /// a single 240 Hz step and never gets anywhere; a wheeled vehicle's
 /// resistance is low, and this is the value that says so.
+///
+/// It is not what the contact ends up with: the solver averages the two
+/// materials, so against this site's 1.4 decks the chassis slides at 0.72.
+/// That is enough for the drive speeds used here; example 125, which needs
+/// slow creeps and turns, gives its decks a low friction instead.
 fn rolling_friction() -> PhysicsMaterial {
     PhysicsMaterial {
         friction: 0.04,

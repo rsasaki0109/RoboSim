@@ -225,6 +225,25 @@ impl Elevator {
         Ok(())
     }
 
+    /// Keeps the doors open for something standing in the doorway, as a door
+    /// edge or light-curtain sensor does.
+    ///
+    /// While the doors are open this restarts the dwell; while they are closing
+    /// it reverses them. Anywhere else it does nothing: it never summons the car
+    /// and never opens doors that were not already open or closing. Call it every
+    /// step the doorway is occupied.
+    pub fn hold_doors(&mut self) {
+        match self.state {
+            ElevatorState::DoorsOpen { .. } => {
+                self.dwell_remaining_s = self.spec.door_hold_s;
+            }
+            ElevatorState::Closing { floor } => {
+                self.state = ElevatorState::Opening { floor };
+            }
+            _ => {}
+        }
+    }
+
     /// Advances the elevator by one integration step.
     ///
     /// The step is in seconds and must be finite and non-negative. Progress is
@@ -434,6 +453,40 @@ mod tests {
         assert!(!elevator.is_boardable(0));
         assert_eq!(elevator.door_opening_m(), 0.0);
         assert!(elevator.pending_calls().is_empty());
+    }
+
+    #[test]
+    fn an_occupied_doorway_holds_and_reopens_the_doors() {
+        let dt_s = 1.0 / 60.0;
+        let mut elevator = Elevator::new(spec(), 0).expect("elevator");
+        // Nothing to hold while the doors are shut: the sensor never calls.
+        elevator.hold_doors();
+        elevator.update(dt_s).expect("step");
+        assert_eq!(elevator.state(), ElevatorState::Idle { floor: 0 });
+
+        elevator.call(0).expect("call floor 0");
+        run_until(&mut elevator, dt_s, 10.0, |e| e.is_boardable(0)).expect("doors open");
+        // Held for three times the 2 s dwell, the doors stay open.
+        for _ in 0..360 {
+            elevator.hold_doors();
+            elevator.update(dt_s).expect("step");
+        }
+        assert!(elevator.is_boardable(0));
+
+        // Released, they start to close; occupied again, they reverse.
+        run_until(&mut elevator, dt_s, 5.0, |e| {
+            matches!(e.state(), ElevatorState::Closing { .. })
+        })
+        .expect("doors start closing");
+        for _ in 0..10 {
+            elevator.update(dt_s).expect("step");
+        }
+        let closing_from_m = elevator.door_opening_m();
+        assert!(closing_from_m < 0.6, "the doors must be part-closed");
+        elevator.hold_doors();
+        assert_eq!(elevator.state(), ElevatorState::Opening { floor: 0 });
+        elevator.update(dt_s).expect("step");
+        assert!(elevator.door_opening_m() > closing_from_m);
     }
 
     #[test]
