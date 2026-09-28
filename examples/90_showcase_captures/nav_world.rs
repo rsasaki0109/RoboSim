@@ -236,15 +236,15 @@ impl Corridor {
     }
 
     /// Stands the Z-up figure on the floor: -z (head) to +y, and its +y (front) to
-/// +z, the way the pedestrian walks.
-const FIGURE_UPRIGHT: Quat = Quat::from_xyzw(
-    std::f64::consts::FRAC_1_SQRT_2,
-    0.0,
-    0.0,
-    std::f64::consts::FRAC_1_SQRT_2,
-);
+    /// +z, the way the pedestrian walks.
+    const FIGURE_UPRIGHT: Quat = Quat::from_xyzw(
+        std::f64::consts::FRAC_1_SQRT_2,
+        0.0,
+        0.0,
+        std::f64::consts::FRAC_1_SQRT_2,
+    );
 
-/// Removes the kinematic bodies' collision boxes from a scene built from the
+    /// Removes the kinematic bodies' collision boxes from a scene built from the
     /// physics world, which draws a collider wherever a body has no visual. The
     /// agents are drawn from their own models instead.
     pub(crate) fn hide_bodies(scene: &mut RenderScene) {
