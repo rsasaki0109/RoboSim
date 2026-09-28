@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Use the exact checklist in docs/EXTERNAL_EVIDENCE_INTAKE.md.
-        Current campaign: v0.4.0 — https://github.com/rsasaki0109/RoboSim/releases/tag/v0.4.0
+        Current campaign: v0.4.0 — https://github.com/rsasaki0109/RobotNativeEngine/releases/tag/v0.4.0
         Do not submit before these assets are published.
         A submitted issue is not acceptance evidence. Maintainers re-download, hash, and replay every retained artifact.
   - type: checkboxes

@@ -3,8 +3,8 @@
 **Robots are not plugins.** RNE is a Rust robot-native game engine for deterministic
 simulation, embodied AI, synthetic sensors, and policy evaluation.
 
-[![Release](https://img.shields.io/github/v/release/rsasaki0109/RoboSim)](https://github.com/rsasaki0109/RoboSim/releases)
-[![CI](https://github.com/rsasaki0109/RoboSim/actions/workflows/ci.yml/badge.svg)](https://github.com/rsasaki0109/RoboSim/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/rsasaki0109/RobotNativeEngine)](https://github.com/rsasaki0109/RobotNativeEngine/releases)
+[![CI](https://github.com/rsasaki0109/RobotNativeEngine/actions/workflows/ci.yml/badge.svg)](https://github.com/rsasaki0109/RobotNativeEngine/actions/workflows/ci.yml)
 
 RNE combines a headless, replayable simulation core with real wgpu rendering.
 Worlds hold robot, sensor, actuator, agent, and episode entities; simulation
@@ -84,14 +84,14 @@ shipped conformance kits (native bundles include the tools; no source
 checkout needed).
 
 Only [v0.4.0 official
-assets](https://github.com/rsasaki0109/RoboSim/releases/tag/v0.4.0) qualify;
+assets](https://github.com/rsasaki0109/RobotNativeEngine/releases/tag/v0.4.0) qualify;
 if that page lacks the native archives and `SHA256SUMS` yet, prepare the
 checklist but do not open an evidence issue (v0.1.0 does not qualify).
 
-- [External project reproduction + Failure Capsule](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-project-evidence.yml)
-- [Installed flagship reproduction](https://github.com/rsasaki0109/RoboSim/issues/new?template=installed-flagship-reproduction.yml)
-- [Third-party plugin conformance](https://github.com/rsasaki0109/RoboSim/issues/new?template=third-party-plugin-evidence.yml)
-- [External physics/simulator/hardware/accelerator conformance](https://github.com/rsasaki0109/RoboSim/issues/new?template=external-system-evidence.yml)
+- [External project reproduction + Failure Capsule](https://github.com/rsasaki0109/RobotNativeEngine/issues/new?template=external-project-evidence.yml)
+- [Installed flagship reproduction](https://github.com/rsasaki0109/RobotNativeEngine/issues/new?template=installed-flagship-reproduction.yml)
+- [Third-party plugin conformance](https://github.com/rsasaki0109/RobotNativeEngine/issues/new?template=third-party-plugin-evidence.yml)
+- [External physics/simulator/hardware/accelerator conformance](https://github.com/rsasaki0109/RobotNativeEngine/issues/new?template=external-system-evidence.yml)
 
 See the [external evidence intake guide](docs/EXTERNAL_EVIDENCE_INTAKE.md).
 Opening an issue is only the start of review: it does not imply acceptance;
@@ -201,7 +201,7 @@ height, speed and yaw rate, swing feet placed by the Raibert heuristic and
 tracked by Cartesian PD. A heading loop steers it; held headings stay within
 0.04 rad RMS (0.15 rad worst) while it covers 8.5 m. This runs on
 `unitree_go2_jump`, the Go2 with its feet attached: the older walking asset
-leaves them on the floor ([#346](https://github.com/rsasaki0109/RoboSim/issues/346)),
+leaves them on the floor ([#346](https://github.com/rsasaki0109/RobotNativeEngine/issues/346)),
 and the results measured on it are marked as such in
 [docs/GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md).
 [source](examples/126_go2_heading_steer/main.rs)
@@ -238,8 +238,8 @@ stability-and-direction claim, not a navigation one. Details:
 ## Quickstart
 
 ```bash
-git clone https://github.com/rsasaki0109/RoboSim.git
-cd RoboSim
+git clone https://github.com/rsasaki0109/RobotNativeEngine.git
+cd RobotNativeEngine
 cargo run -p hello_world --example 00_hello_world
 cargo run -p falling_cube --example 01_falling_cube
 ```

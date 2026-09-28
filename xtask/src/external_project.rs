@@ -467,7 +467,7 @@ fn validate_candidate(candidate: &SubmissionCandidate, revision: &str) -> anyhow
     );
     validate_artifact_shape(&candidate.release.archive, "release archive")?;
     let official_archive_url = format!(
-        "https://github.com/rsasaki0109/RoboSim/releases/download/v{RELEASE_VERSION}/{}",
+        "https://github.com/rsasaki0109/RobotNativeEngine/releases/download/v{RELEASE_VERSION}/{}",
         candidate.release.archive.file_name
     );
     anyhow::ensure!(
@@ -587,7 +587,7 @@ mod tests {
                 tag: format!("v{RELEASE_VERSION}"),
                 target: "x86_64-pc-windows-msvc".to_string(),
                 archive: Artifact {
-                    url: "https://github.com/rsasaki0109/RoboSim/releases/download/v0.4.0/rne-0.4.0-x86_64-pc-windows-msvc.zip".to_string(),
+                    url: "https://github.com/rsasaki0109/RobotNativeEngine/releases/download/v0.4.0/rne-0.4.0-x86_64-pc-windows-msvc.zip".to_string(),
                     file_name: "rne-0.4.0-x86_64-pc-windows-msvc.zip".to_string(),
                     size_bytes: 7,
                     sha256: sha256_bytes(b"archive"),

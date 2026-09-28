@@ -156,7 +156,7 @@ version, OIDC permissions, event condition, local-bundle retention, exact
 workflow certificate identity, source and signer revisions, or
 publish-before-verify ordering.
 Consumers should follow [RELEASE_INSTALL.md](RELEASE_INSTALL.md) and verify the
-downloaded asset against `rsasaki0109/RoboSim` before extraction. GitHub's
+downloaded asset against `rsasaki0109/RobotNativeEngine` before extraction. GitHub's
 [artifact attestation documentation](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)
 describes the underlying Sigstore verification model.
 

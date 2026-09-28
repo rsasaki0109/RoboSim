@@ -4734,7 +4734,7 @@ fn fetch_osm_tile(cache_dir: &Path, zoom: u32, x: u64, y: u64) -> Option<image::
                 "--max-time",
                 "20",
                 "-A",
-                "RoboSim-plateau-example/1.0 (+https://github.com/rsasaki0109/RoboSim)",
+                "RNE-plateau-example/1.0 (+https://github.com/rsasaki0109/RobotNativeEngine)",
                 "-o",
             ])
             .arg(&path)

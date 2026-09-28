@@ -23,6 +23,14 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- The GitHub repository is renamed from `rsasaki0109/RoboSim` to
+  `rsasaki0109/RobotNativeEngine`; GitHub redirects the old URLs. Links, the
+  crate `repository` field, issue templates, and the release attestation
+  identity (`release/artifact-attestation.toml`, `EXPECTED_ATTESTATION_REPOSITORY`)
+  now name the new repository, so releases from v0.4.0 on are verified
+  against it. The only published release, v0.1.0, predates the rename.
+  Recorded evidence under `docs/evidence` keeps the URLs it was captured with.
+
 - `ColliderShape` and `Collider` are no longer `Copy`. Variable-size collider
   data (`ConvexHull`, `TriMesh`, `HeightField`, `Compound`) is stored behind
   `Arc`, so dependents must clone or borrow instead of implicitly copying.

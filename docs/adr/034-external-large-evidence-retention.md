@@ -41,7 +41,7 @@ sidecar with a fixed schema:
   "original_filename": "dropout-004frames-rapier-success-trace.json",
   "sha256": "sha256:<64 lowercase hex characters>",
   "size_bytes": 14563210,
-  "url": "https://github.com/rsasaki0109/RoboSim/releases/download/<tag>/<asset>"
+  "url": "https://github.com/rsasaki0109/RobotNativeEngine/releases/download/<tag>/<asset>"
 }
 ```
 
