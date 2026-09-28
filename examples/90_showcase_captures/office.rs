@@ -647,3 +647,45 @@ pub(crate) fn render_office(
     );
     scene
 }
+
+/// A doorway in the far wall at `x_m`, for the navigation showcase's
+/// pedestrian: a dark opening, a frame and an exit sign. The shelving and
+/// window on that stretch of wall are removed so the doorway is not blocked.
+pub(crate) fn push_doorway(scene: &mut RenderScene, x_m: f64) {
+    scene.items.retain(|item| {
+        // Shelving, windows and light fittings on that stretch of wall; the
+        // wall itself is wider than a meter and stays.
+        let small_box = matches!(item.shape, VisualShape::Box { size_m } if size_m.x < 1.0);
+        let at = item.transform.translation;
+        !(small_box && (at.x - x_m).abs() < 0.5 && at.z < -0.85 && at.y > 0.3)
+    });
+    const FRAME: [f32; 4] = [0.78, 0.80, 0.84, 1.0];
+    push_box(
+        scene,
+        Vec3::new(x_m, 1.0, -1.035),
+        Vec3::new(0.82, 2.0, 0.01),
+        [0.05, 0.06, 0.08, 1.0],
+    );
+    for dx in [-0.45, 0.45] {
+        push_box(
+            scene,
+            Vec3::new(x_m + dx, 1.02, -1.03),
+            Vec3::new(0.08, 2.04, 0.05),
+            FRAME,
+        );
+    }
+    push_box(
+        scene,
+        Vec3::new(x_m, 2.06, -1.03),
+        Vec3::new(0.98, 0.08, 0.05),
+        FRAME,
+    );
+    push_box_material(
+        scene,
+        Vec3::new(x_m, 2.24, -1.03),
+        Vec3::new(0.34, 0.14, 0.03),
+        Quat::IDENTITY,
+        [0.10, 0.80, 0.35, 1.0],
+        PbrMaterial::new([0.10, 0.80, 0.35, 1.0], 0.3, 0.0, [0.12, 0.95, 0.40]),
+    );
+}
