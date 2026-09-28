@@ -1137,7 +1137,6 @@ fn pinch_geometry(sim: &rne_ai::MobileManipulatorSim) -> Option<(f64, f64, f64)>
     Some((vertical, lateral, gap))
 }
 
-
 /// The same gripper position reached with the elbow on the other side of the
 /// arm. The policy's elbow points toward the fixed camera poses of this scan
 /// and hides the gripper behind the elbow drive; mirrored, the gripper and
