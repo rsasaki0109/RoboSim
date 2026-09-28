@@ -71,6 +71,20 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- The warehouse examples (123, 125) are dressed with scanned CC0 props from
+  Poly Haven -- the carried case is a scanned cardboard box of the same size,
+  racks hold boxes and crates, and the site has carts, a hand truck, an
+  extinguisher, a distribution board, fluorescent battens, a steel shelf unit
+  and a shipping shutter, with profiled steel cladding on the walls
+  (`tools/prepare_polyhaven_warehouse.py` fetches and pins them;
+  `assets/props/polyhaven_warehouse/README.md`). The forklifts are redrawn as
+  autonomous forklifts: rounded counterweight, two-stage mast with lift and
+  tilt cylinders and chains, lattice backrest, L-shaped tines, wheels with
+  hubs, a LiDAR tower, corner safety scanners, status lights and the blue
+  floor spot. Stands and the lift car are detailed too. Physics is unchanged.
+- `tools/encode_gif.py`: frame-differenced GIF encoding with one shared
+  palette. The relay GIF is 0.86 MB this way against 7-13 MB through ffmpeg.
+
 - `UrdfSceneSim::set_fixed_delta`: sets the physics step every `step_*` call
   advances by (scenes default to 60 Hz). Torque-level controllers that close a
   force or Cartesian loop per step need 500 Hz to 1 kHz.
@@ -657,6 +671,10 @@ All notable changes to Robot Native Engine are documented in this file.
   pipeline, both built-in planners, and a robot-vs-world distance query.
 
 ### Fixed
+
+- The wgpu backend's shared cylinder side wall and sphere wound inward (48 of
+  96 and 720 of 768 triangles), like the box fixed earlier; back-face culling
+  drew their far side. Both are pinned now.
 
 - `rne-asset --control-port` acknowledges `quit` before handing it to the
   runner. It used to queue the command first and write the ACK after, and the
