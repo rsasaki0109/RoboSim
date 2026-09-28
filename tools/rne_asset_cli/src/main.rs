@@ -1367,25 +1367,37 @@ impl TcpRunnerControl {
                     // the command. Once the receiver observes the command, the
                     // simulation thread may immediately report a status; holding
                     // this lock guarantees the documented ACK-before-status order.
+                    //
+                    // Quit is the exception: the simulation thread may exit the
+                    // process as soon as it sees it, before this thread gets to
+                    // write, and the client then reads EOF instead of its ACK.
+                    // No status follows a quit, so its ACK goes out first.
                     let queued = if let Ok(mut slot) = thread_writer.lock() {
-                        if sender.send(command).is_err() {
+                        let acknowledge =
+                            |slot: &mut Option<std::io::BufWriter<std::net::TcpStream>>| {
+                                let failed = slot.as_mut().is_some_and(|writer| {
+                                    writer
+                                        .write_all(
+                                            format!(
+                                                "ok {}\n",
+                                                if paused { "paused" } else { "running" }
+                                            )
+                                            .as_bytes(),
+                                        )
+                                        .and_then(|()| writer.flush())
+                                        .is_err()
+                                });
+                                if failed {
+                                    *slot = None;
+                                }
+                            };
+                        if quit {
+                            acknowledge(&mut slot);
+                            sender.send(command).is_ok()
+                        } else if sender.send(command).is_err() {
                             false
                         } else {
-                            let failed = slot.as_mut().is_some_and(|writer| {
-                                writer
-                                    .write_all(
-                                        format!(
-                                            "ok {}\n",
-                                            if paused { "paused" } else { "running" }
-                                        )
-                                        .as_bytes(),
-                                    )
-                                    .and_then(|()| writer.flush())
-                                    .is_err()
-                            });
-                            if failed {
-                                *slot = None;
-                            }
+                            acknowledge(&mut slot);
                             true
                         }
                     } else {
