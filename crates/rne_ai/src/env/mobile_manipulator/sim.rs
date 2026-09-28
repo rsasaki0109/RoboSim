@@ -843,6 +843,21 @@ const MOBILE_LIFT_LINEAR_GRASP_ACQUIRE_MAX_FORCE_N: f64 = 5.0;
 const MOBILE_LIFT_LINEAR_GRASP_HOLD_MAX_FORCE_N: f64 = 10.0;
 /// Rubber-pad friction used by the shipped mobile-lift parallel gripper.
 const MOBILE_LIFT_LINEAR_FINGER_FRICTION: f32 = 2.0;
+/// How far past a held object's face each linear pad is aimed, so it presses
+/// on the face (see `MobileManipulatorSim::linear_pad_seat_positions`).
+const LINEAR_PAD_SEAT_PRELOAD_M: f64 = 0.0;
+
+/// An object held rigidly at the pose the pads caught it in, on the link that
+/// carries them (see `MobileManipulatorSim::weld_grasp_in_place`).
+#[derive(Clone, Copy, Debug)]
+struct RigidHold {
+    object: Entity,
+    parent: Entity,
+    translation_m: Vec3,
+    rotation: Quat,
+    parent_before_m: Vec3,
+}
+
 /// Position gain for the force-limited, contact-derived mobile-lift carry aid.
 const MOBILE_LIFT_LINEAR_FRICTION_POSITION_GAIN_HZ: f64 = 4.0;
 /// Temporary torque cap while explicitly opening a friction gripper.
@@ -1047,6 +1062,15 @@ pub struct MobileManipulatorSim {
     dt: SimDuration,
     step_count: u64,
     joint_sequence: u64,
+    /// Whether [`Self::apply_linear_friction_assist`] runs (on by default).
+    linear_friction_assist: bool,
+    /// An object held rigidly where the pads caught it (see
+    /// [`Self::weld_grasp_in_place`]): the object, the link holding it, and
+    /// its position in that link's frame.
+    rigid_hold: Option<RigidHold>,
+    /// Constraint-solver iterations of the physics world (see
+    /// [`Self::set_solver_iterations`]).
+    solver_iterations: usize,
 }
 
 impl MobileManipulatorSim {
@@ -1206,6 +1230,7 @@ impl MobileManipulatorSim {
         self.stabilize_mobile_base();
         self.update_grasp(action);
         self.apply_linear_friction_assist(wrist_before_step_m);
+        self.apply_rigid_hold();
         if let Some(mount) = self.wrist_camera {
             sync_wrist_camera_mounts(&mut self.world, &[mount]);
             let render_scene = build_visual_render_scene(&self.world);
@@ -1224,6 +1249,85 @@ impl MobileManipulatorSim {
         self.observe()
     }
 
+    /// Distance from each linear pad's inner face to the object's face,
+    /// measured along the line between the pads (left, right).
+    fn linear_pad_gaps(&self, object: Entity) -> (f64, f64) {
+        let pad = |finger: Entity| {
+            let tf = world_transform_of(&self.world, finger);
+            let collider = self.world.get::<Collider>(finger);
+            let offset = collider
+                .as_ref()
+                .map_or(Vec3::ZERO, |collider| collider.local_offset.translation);
+            let half_thickness = collider
+                .as_ref()
+                .map_or(0.0, |collider| match collider.shape {
+                    ColliderShape::Cuboid { half_extents_m } => half_extents_m.z,
+                    _ => 0.0,
+                });
+            (tf.translation + tf.rotation * offset, half_thickness)
+        };
+        let left_link = self.robot_links.get("left_finger_link").copied();
+        let (left_finger, right_finger) = if left_link == Some(self.finger_links[0]) {
+            (self.finger_links[0], self.finger_links[1])
+        } else {
+            (self.finger_links[1], self.finger_links[0])
+        };
+        let (left_pad, left_half) = pad(left_finger);
+        let (right_pad, right_half) = pad(right_finger);
+        let axis = (right_pad - left_pad).normalize_or_zero();
+        let center = world_transform_of(&self.world, object).translation;
+        let half_width = object_half_width_m(&self.world, object);
+        (
+            (center - left_pad).dot(axis) - left_half - half_width,
+            (right_pad - center).dot(axis) - right_half - half_width,
+        )
+    }
+
+    /// Linear finger joint positions that put each pad's inner face on the
+    /// object's face, aimed a little past it so the force-capped pad presses
+    /// on the face rather than stopping short.
+    fn linear_pad_seat_positions(&self, object: Entity) -> (f64, f64) {
+        let (left_gap, right_gap) = self.linear_pad_gaps(object);
+        // The left finger closes toward decreasing positions, the right
+        // toward increasing ones.
+        (
+            self.joint_position("left_finger_joint") - (left_gap + LINEAR_PAD_SEAT_PRELOAD_M),
+            self.joint_position("right_finger_joint") + (right_gap + LINEAR_PAD_SEAT_PRELOAD_M),
+        )
+    }
+
+    /// Keeps an object held by [`Self::weld_grasp_in_place`] where the pads
+    /// caught it: after each step it is placed back at that pose on the
+    /// holding link and given the link's velocity, and the backend writes that
+    /// pose into the solver before the next step. This is a rigid weld; the
+    /// backend's fixed joint sags several centimetres under a light payload
+    /// on the lift arm, which would carry it below the pads.
+    fn apply_rigid_hold(&mut self) {
+        let Some(mut hold) = self.rigid_hold else {
+            return;
+        };
+        if self.grasped_object != Some(hold.object) {
+            self.rigid_hold = None;
+            return;
+        }
+        let dt_s = self.dt.as_seconds().value();
+        if !dt_s.is_finite() || dt_s <= 0.0 {
+            return;
+        }
+        let parent_tf = world_transform_of(&self.world, hold.parent);
+        let velocity = (parent_tf.translation - hold.parent_before_m) / dt_s;
+        hold.parent_before_m = parent_tf.translation;
+        self.rigid_hold = Some(hold);
+        if let Some(mut transform) = self.world.get_mut::<Transform3>(hold.object) {
+            transform.translation = parent_tf.translation + parent_tf.rotation * hold.translation_m;
+            transform.rotation = parent_tf.rotation * hold.rotation;
+        }
+        if let Some(mut body) = self.world.get_mut::<RigidBody>(hold.object) {
+            body.linear_velocity_m_s = velocity;
+            body.angular_velocity_rad_s = Vec3::ZERO;
+        }
+    }
+
     /// Applies the tangential part of a linear parallel-jaw friction grasp.
     ///
     /// The compact mobile-lift pads can momentarily lose the solver's tangential
@@ -1236,7 +1340,10 @@ impl MobileManipulatorSim {
     /// manifold impulses so a restored replay does not depend on solver warm-start
     /// cache state.
     fn apply_linear_friction_assist(&mut self, wrist_before_step_m: Vec3) {
-        if self.grasp_mode != GraspMode::Friction || !self.has_linear_gripper() {
+        if !self.linear_friction_assist
+            || self.grasp_mode != GraspMode::Friction
+            || !self.has_linear_gripper()
+        {
             return;
         }
         let Some(object) = self.grasped_object else {
@@ -1846,13 +1953,14 @@ impl MobileManipulatorSim {
         // impulse-joint form uses the raised count like the mm arms.
         let so101 = links.contains_key("moving_jaw_so101_v1_link");
         let rigid_multibody = multibody && so101;
+        let solver_iterations = if rigid_multibody {
+            0
+        } else {
+            LIFT_SOLVER_ITERATIONS
+        };
         let physics_world = backend
             .create_world(PhysicsWorldDesc {
-                solver_iterations: if rigid_multibody {
-                    0
-                } else {
-                    LIFT_SOLVER_ITERATIONS
-                },
+                solver_iterations,
                 ..PhysicsWorldDesc::default()
             })
             .map_err(|error| AssetError::Invalid {
@@ -1908,6 +2016,9 @@ impl MobileManipulatorSim {
             finger_links,
             grasped_object: None,
             grasp_mode: GraspMode::default(),
+            linear_friction_assist: true,
+            rigid_hold: None,
+            solver_iterations,
             grasp_retarget: None,
             grasp_pinch_left_limit_rad: None,
             grasp_pinch_right_limit_rad: None,
@@ -2015,6 +2126,33 @@ impl MobileManipulatorSim {
     /// Returns the current grasp attachment strategy (see [`GraspMode`]).
     pub fn grasp_mode(&self) -> GraspMode {
         self.grasp_mode
+    }
+
+    /// Rebuilds the physics world with `iterations` constraint-solver
+    /// iterations per step (zero for the backend default). More iterations
+    /// hold a long impulse-jointed chain such as the lift arm stiffer, at a
+    /// proportional cost per step. Intended to be set right after reset.
+    pub fn set_solver_iterations(&mut self, iterations: usize) -> Result<(), PhysicsError> {
+        self.solver_iterations = iterations;
+        self.rebuild_physics_from_ecs()
+    }
+
+    /// Whether the linear parallel-jaw friction assist is applied.
+    pub fn linear_friction_assist(&self) -> bool {
+        self.linear_friction_assist
+    }
+
+    /// Turns the linear parallel-jaw friction assist on or off.
+    ///
+    /// The assist nudges a grasped payload toward the midpoint of the two pads
+    /// each step, bounded by the squeeze force times the pad friction. That
+    /// bound is large for a light payload, and it acts whether or not the pads
+    /// are actually pinching it: with the assist on, a payload can be carried
+    /// below pads that do not touch it. With it off, only contacts and welds
+    /// move the payload. It is on by default; it is configuration, not
+    /// snapshot state.
+    pub fn set_linear_friction_assist(&mut self, enabled: bool) {
+        self.linear_friction_assist = enabled;
     }
 
     /// Sets the grasp attachment strategy (see [`GraspMode`]). Switching modes
@@ -2318,6 +2456,79 @@ impl MobileManipulatorSim {
     /// Also establishes the finger pinch-close limits (see
     /// [`GRASP_PINCH_MARGIN_FRACTION`]) so future closing commands stop at the
     /// object's surface instead of driving the fingers through it.
+    /// Welds the named object to the gripper exactly where it is, when each
+    /// linear finger pad is within `max_gap_m` of the object's face along the
+    /// line between the pads.
+    ///
+    /// Unlike the contact-triggered weld of [`GraspMode::Weld`], the object is
+    /// not then drawn toward a canonical seat between the fingers: it is held
+    /// at the position the pads caught it in, so it cannot be carried
+    /// anywhere the pads are not holding it. The pads are then closed onto
+    /// the faces and held there. Switches the grasp mode to
+    /// [`GraspMode::Weld`], so opening the gripper releases the object.
+    /// Returns whether the object is held afterwards.
+    pub fn weld_grasp_in_place(&mut self, object_name: &str, max_gap_m: f64) -> bool {
+        let Some(object) = self.entity_named(object_name) else {
+            return false;
+        };
+        if self.grasped_object == Some(object) && self.rigid_hold.is_some() {
+            return true;
+        }
+        if !self.has_linear_gripper() || self.finger_links.len() != 2 {
+            return false;
+        }
+        let (left_gap, right_gap) = self.linear_pad_gaps(object);
+        if left_gap.abs() > max_gap_m || right_gap.abs() > max_gap_m {
+            return false;
+        }
+        self.set_grasp_mode(GraspMode::Weld);
+        // Hold the pads where they closed on it rather than leaving them on
+        // the weld mode's weak velocity drive.
+        self.configure_friction_grasp_finger_motors();
+        // Hold it on the wrist, the body that carries the finger rails, so it
+        // moves with the pads rather than with a link further up the arm.
+        let parent = self
+            .robot_links
+            .get("wrist_link")
+            .copied()
+            .unwrap_or(self.ee_link);
+        let parent_tf = world_transform_of(&self.world, parent);
+        let obj = world_transform_of(&self.world, object);
+        let parent_inverse = parent_tf.rotation.inverse();
+        self.rigid_hold = Some(RigidHold {
+            object,
+            parent,
+            translation_m: parent_inverse * (obj.translation - parent_tf.translation),
+            rotation: parent_inverse * obj.rotation,
+            parent_before_m: parent_tf.translation,
+        });
+        self.grasped_object = Some(object);
+        self.grasp_retarget = None;
+        if self.has_linear_gripper() {
+            // Bring each pad onto the object's face (the contact gate fires a
+            // few millimetres short of it) and hold it there: closing further
+            // would drive the pads into a body the hold keeps in place.
+            let (left_m, right_m) = self.linear_pad_seat_positions(object);
+            for (name, target) in [
+                ("left_finger_joint", left_m),
+                ("right_finger_joint", right_m),
+            ] {
+                if let Some(index) = self.joint_names.iter().position(|joint| joint == name) {
+                    let link = self.actuated[index].link;
+                    if let Some(mut motor) = self.world.get_mut::<rne_physics::JointMotor>(link) {
+                        motor.target_position = target;
+                        motor.max_force = MOBILE_LIFT_LINEAR_GRASP_HOLD_MAX_FORCE_N;
+                    }
+                }
+            }
+            self.grasp_pinch_left_limit_m = Some(left_m);
+            self.grasp_pinch_right_limit_m = Some(right_m);
+        } else {
+            self.establish_pinch_limits(object);
+        }
+        true
+    }
+
     fn attach_grasp(&mut self, object: Entity) {
         let ee = world_transform_of(&self.world, self.ee_link);
         let obj = world_transform_of(&self.world, object);
@@ -2597,6 +2808,7 @@ impl MobileManipulatorSim {
         if let Some(object) = self.grasped_object.take() {
             self.world.entity_mut(object).remove::<FixedJointDesc>();
         }
+        self.rigid_hold = None;
         self.grasp_retarget = None;
         self.grasp_pinch_left_limit_rad = None;
         self.grasp_pinch_right_limit_rad = None;
@@ -3036,6 +3248,45 @@ impl MobileManipulatorSim {
         motor.max_force = MOBILE_LIFT_ARM_MAX_FORCE;
     }
 
+    /// For a linear parallel-jaw gripper closing with nothing grasped: the
+    /// finger joints whose pad already touches a graspable object while the
+    /// other pad does not. Such a pad holds still until the other arrives, as
+    /// the jaws of a real parallel gripper centre on a part; otherwise the
+    /// first pad pushes a light part aside, or sinks into it.
+    fn linear_pads_waiting(&self) -> Vec<&'static str> {
+        if !self.has_linear_gripper()
+            || self.grasped_object.is_some()
+            || self.finger_links.len() != 2
+        {
+            return Vec::new();
+        }
+        let touching = |finger: Entity| {
+            self.last_contacts().iter().any(|contact| {
+                let other = if contact.entity_a == finger {
+                    contact.entity_b
+                } else if contact.entity_b == finger {
+                    contact.entity_a
+                } else {
+                    return false;
+                };
+                self.is_graspable(other)
+            })
+        };
+        let left = self.robot_links.get("left_finger_link").copied();
+        let mut waiting = Vec::new();
+        let [first, second] = [self.finger_links[0], self.finger_links[1]];
+        for (finger, other) in [(first, second), (second, first)] {
+            if touching(finger) && !touching(other) {
+                waiting.push(if Some(finger) == left {
+                    "left_finger_joint"
+                } else {
+                    "right_finger_joint"
+                });
+            }
+        }
+        waiting
+    }
+
     fn apply_gripper_and_base_velocities(&mut self, action: MobileManipulatorAction) {
         let dt_s = self.dt.as_seconds().value();
         let grasp_mode = self.grasp_mode;
@@ -3045,8 +3296,14 @@ impl MobileManipulatorSim {
         let pinch_left_limit_m = self.grasp_pinch_left_limit_m;
         let pinch_right_limit_m = self.grasp_pinch_right_limit_m;
         let (gripper_command, _) = self.gripper_velocity_command(action);
+        let waiting = self.linear_pads_waiting();
         for (joint, joint_name) in self.actuated.iter().zip(self.joint_names.iter()) {
-            let commanded_velocity = velocity_for_joint(joint_name, joint.axis, action);
+            let mut commanded_velocity = velocity_for_joint(joint_name, joint.axis, action);
+            if waiting.contains(&joint_name.as_str())
+                && closes_finger(joint_name, commanded_velocity)
+            {
+                commanded_velocity = 0.0;
+            }
             let mut velocity = if grasp_mode == GraspMode::Friction {
                 commanded_velocity
             } else {
@@ -3459,7 +3716,7 @@ impl MobileManipulatorSim {
             .create(self.dt)
             .map_err(|_| PhysicsError::InitializationFailed)?;
         let physics_world = backend.create_world(PhysicsWorldDesc {
-            solver_iterations: LIFT_SOLVER_ITERATIONS,
+            solver_iterations: self.solver_iterations,
             ..PhysicsWorldDesc::default()
         })?;
         backend.sync_from_ecs(&mut self.world, physics_world)?;
@@ -3611,6 +3868,16 @@ fn joint_sample(world: &World, joint: &ActuatedJoint) -> JointSample {
     JointSample {
         position_rad,
         velocity_rad_s,
+    }
+}
+
+/// Whether `velocity` closes the named finger joint: the left finger closes
+/// toward decreasing positions and the right toward increasing ones.
+fn closes_finger(joint_name: &str, velocity: f64) -> bool {
+    match joint_name {
+        "left_finger_joint" => velocity < 0.0,
+        "right_finger_joint" => velocity > 0.0,
+        _ => false,
     }
 }
 

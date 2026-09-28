@@ -100,6 +100,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- `MobileManipulatorSim::weld_grasp_in_place` holds an object where a linear
+  gripper's pads caught it, once each pad is within a given distance of its
+  faces, and closes the pads onto the faces;
+  `set_linear_friction_assist` turns the linear friction assist off; and
+  `set_solver_iterations` rebuilds the physics world with a different
+  constraint-solver iteration count. Episode wrappers for all three. A
+  linear gripper's pad that touches a part first now waits for the other.
 - Lifelong SLAM in `rne_slam`: `build_recency_map` rebuilds the occupancy map
   from keyframes at the lifelong graph's current estimates, weighting each
   cell toward the latest session that observed it and reporting per session
@@ -745,6 +752,23 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- The real-3DGS mobile manipulation showcase did not grasp its block. The
+  finger pads stayed 2-9 cm above it for the whole carry, and the block was
+  pulled along beneath them by the linear friction assist, which acts
+  whether or not the pads hold the payload. The pads now close on the block
+  at its centre height, and it is held only once both pads are within 5 mm
+  of its faces; the assist is off. While held, the pads stay level with it
+  and within 1 cm of its faces (measured: 2.4 mm and 8.3 mm), every step,
+  asserted in the smoke run and recorded in the metadata.
+- The same showcase's `--capture` run had been failing since the linear
+  grasp's contact debounce was shortened: the wrist RGB-D estimate placed the
+  block 7 cm too high (half the cube was added toward the camera instead of
+  away from it), and the old debounce had hidden the resulting top-edge
+  grasp. The estimate is now within 5 mm.
+- The mobile-lift visual pack drew the lift carriage floating in front of
+  its rails and sinking into the chassis at pick height. The chassis now has
+  a slot the mast stands in, the carriage rides the mast, and the arm is
+  drawn as a SCARA with joint drives, a wrist camera and padded fingers.
 - The OpenArm v2 showcase blended its keyposes in joint space, so the hands
   swept along arcs between them and the elbows rode up at shoulder height
   (the pick keypose's elbow sat 6 cm below the shoulder). Between keyposes

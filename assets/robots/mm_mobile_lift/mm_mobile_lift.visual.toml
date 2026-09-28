@@ -12,7 +12,7 @@ max_lod0_triangles = 120000
 max_lod1_triangles = 40000
 max_texture_size_px = 2048
 max_texture_bytes = 16777216
-max_materials = 80
+max_materials = 100
 
 [[links]]
 name = "base_link"

@@ -598,6 +598,27 @@ impl MobileManipulatorEpisode {
         self.sim.set_grasp_mode(mode);
     }
 
+    /// Rebuilds the simulation's physics world with `iterations` solver
+    /// iterations (see [`MobileManipulatorSim::set_solver_iterations`]).
+    pub fn set_solver_iterations(
+        &mut self,
+        iterations: usize,
+    ) -> Result<(), rne_physics::PhysicsError> {
+        self.sim.set_solver_iterations(iterations)
+    }
+
+    /// Turns the simulation's linear friction assist on or off (see
+    /// [`MobileManipulatorSim::set_linear_friction_assist`]).
+    pub fn set_linear_friction_assist(&mut self, enabled: bool) {
+        self.sim.set_linear_friction_assist(enabled);
+    }
+
+    /// Welds the named object to the gripper where the pads hold it (see
+    /// [`MobileManipulatorSim::weld_grasp_in_place`]).
+    pub fn weld_grasp_in_place(&mut self, object_name: &str, max_gap_m: f64) -> bool {
+        self.sim.weld_grasp_in_place(object_name, max_gap_m)
+    }
+
     /// Returns cumulative reward for the current episode.
     pub fn total_reward(&self) -> f64 {
         self.total_reward
