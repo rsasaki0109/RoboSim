@@ -103,6 +103,18 @@ in-repo reference implementations do not count as independent evidence.
 
 *Same controller, two plants: the dynamic car's trail turns red once the front axle saturates.* No-slip follows the line; the dynamic car runs wide past tire grip. [Vehicle dynamics](docs/VEHICLE_DYNAMICS.md).
 
+![Four open-wheel cars race on a circuit with kerbs, tyre walls and a grandstand, filmed from trackside camera posts; the faster cars pass on the straights](docs/media/car-race.gif)
+
+*Four cars race three laps on the tire-limited dynamic bicycle model, from a
+grid in reverse order of pace. Each follows a minimum-curvature racing line at
+the speed its own grip and power allow; a faster car catches a slower one,
+takes its tow down the straight and passes beside it, and the car behind
+always leaves room. Four passes, the fastest car wins, the closest two cars
+came was 2.47 m centre to centre, and no car left the track. The cars are
+built from their parts (wings, sidepods, halo, steered and spinning wheels);
+the circuit uses CC0 Poly Haven asphalt, grass, tyres and barriers.
+[source](examples/128_car_race/main.rs)*
+
 ## Navigation, SLAM, and multi-robot
 
 ![Office AGV sharing a corridor with a second AGV, a pedestrian and a hand truck: it swings out to pass the AGV, stops for the pedestrian crossing, and routes around the hand truck to the desk, with its LiDAR returns, tracks and costmap drawn on the floor](docs/media/showcase-nav.gif)
