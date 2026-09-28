@@ -67,6 +67,8 @@ const FLOOR_HEIGHTS_M: [f64; 2] = [0.0, 3.2];
 const CAR_HALF_M: Vec3 = Vec3::new(0.95, 0.06, 0.95);
 /// Door leaf half extents, in meters.
 const DOOR_HALF_M: Vec3 = Vec3::new(0.05, 1.15, 0.46);
+/// The car's landing edge, where its door leaves run, in meters.
+const DOORWAY_X_M: f64 = SHAFT_X_M - CAR_HALF_M.x;
 /// Shaft centre on the world x axis, in meters.
 const SHAFT_X_M: f64 = 0.0;
 
@@ -648,7 +650,16 @@ struct Frame {
     fork: Vec3,
     backrest: Vec3,
     case: Vec3,
+    case_rotation: Quat,
     phase: Phase,
+}
+
+/// A truck's three physical bodies, as the renderer places parts from them.
+/// This truck's heading is held fixed, so its bodies are never rotated.
+struct TruckPose {
+    chassis: (Vec3, Quat),
+    fork: (Vec3, Quat),
+    backrest: (Vec3, Quat),
 }
 
 struct Mission {
@@ -941,6 +952,9 @@ fn run_mission(capture: bool, trace: bool) -> Mission {
                 fork,
                 backrest: translation(&world, site.backrest),
                 case,
+                case_rotation: world
+                    .get::<Transform3>(site.case)
+                    .map_or(Quat::IDENTITY, |transform| transform.rotation),
                 phase,
             });
         }
@@ -1129,6 +1143,23 @@ fn push_concrete_deck(scene: &mut RenderScene, center: Vec3, half: Vec3) {
     );
 }
 
+const CARDBOARD_BOX: &str = "cardboard_box_01/cardboard_box_01_1k.gltf";
+const WOODEN_CRATE: &str = "wooden_crate_01/wooden_crate_01_1k.gltf";
+/// Chassis, fork carriage and backrest are the physical shapes; everything
+/// else -- frame, counterweight, mast, chains, cylinders, wheels, sensors and
+/// lights -- is placed from their poses so it can never disagree with them.
+/// It is an AGV rather than a ride-on truck, so there is no seat or overhead
+/// guard: a sensor tower with a LiDAR, corner safety scanners, a status light
+/// strip and the blue spot such trucks project on the floor ahead of the forks.
+/// Colours shared by the truck's parts.
+const TRUCK_FRAME: [f32; 4] = [0.16, 0.17, 0.19, 1.0];
+const TRUCK_STEEL: [f32; 4] = [0.46, 0.48, 0.52, 1.0];
+const TRUCK_CHROME: [f32; 4] = [0.78, 0.80, 0.84, 1.0];
+const TRUCK_TYRE: [f32; 4] = [0.07, 0.07, 0.08, 1.0];
+const TRUCK_RUBBER: [f32; 4] = [0.10, 0.10, 0.11, 1.0];
+const TRUCK_TINE: [f32; 4] = [0.22, 0.23, 0.25, 1.0];
+const TRUCK_HAZARD: [f32; 4] = [0.95, 0.78, 0.10, 1.0];
+
 /// A box with real surface parameters rather than the default material.
 fn push_pbr(
     scene: &mut RenderScene,
@@ -1139,11 +1170,58 @@ fn push_pbr(
     metallic: f32,
     emissive: [f32; 3],
 ) {
-    // Built through `item_from_visual` rather than by hand: it folds the
-    // shape's size into the transform, and an item assembled directly with a
-    // unit scale draws every box as a 1 m cube whatever `size_m` says.
+    push_pbr_rotated(
+        scene,
+        translation,
+        Quat::IDENTITY,
+        half,
+        color,
+        roughness,
+        metallic,
+        emissive,
+    );
+}
+
+/// Painted steel: the colour the caller asked for, with a sheen.
+///
+/// Metallic stays low. There is no image-based lighting in this shot, so a
+/// surface with nothing to reflect renders as its reflections -- that is, as
+/// black. At 0.65 the whole truck came out a silhouette.
+fn push_steel(
+    scene: &mut RenderScene,
+    translation: Vec3,
+    rotation: Quat,
+    half: Vec3,
+    color: [f32; 4],
+) {
+    push_pbr_rotated(
+        scene,
+        translation,
+        rotation,
+        half,
+        color,
+        0.45,
+        0.08,
+        [0.0; 3],
+    );
+}
+
+/// A box with real surface parameters, at any orientation.
+#[allow(clippy::too_many_arguments)] // Each argument is an independent quantity.
+fn push_pbr_rotated(
+    scene: &mut RenderScene,
+    translation: Vec3,
+    rotation: Quat,
+    half: Vec3,
+    color: [f32; 4],
+    roughness: f32,
+    metallic: f32,
+    emissive: [f32; 3],
+) {
+    // Through `item_from_visual`, which folds the box size into the transform;
+    // a hand-built item with unit scale draws every box as a 1 m cube.
     let mut item = RenderScene::item_from_visual(
-        Transform3::from_translation_rotation(translation, Quat::IDENTITY),
+        Transform3::from_translation_rotation(translation, rotation),
         VisualShape::Box { size_m: half * 2.0 },
         color,
         Transform3::IDENTITY,
@@ -1152,27 +1230,18 @@ fn push_pbr(
     scene.items.push(item);
 }
 
-/// Painted steel: the colour the caller asked for, with a sheen.
-///
-/// Metallic stays low. There is no image-based lighting in this shot, so a
-/// surface with nothing to reflect renders as its reflections -- that is, as
-/// black. At 0.65 the whole truck came out a silhouette.
-fn push_steel(scene: &mut RenderScene, translation: Vec3, half: Vec3, color: [f32; 4]) {
-    push_pbr(scene, translation, half, color, 0.45, 0.08, [0.0; 3]);
-}
-
-/// A stringer pallet: three deck boards on three blocks, drawn under the case.
-///
-/// The physics case is one box; this is what a box of that size is actually
-/// carried on, and without it the load looks like it is floating on the tines.
-fn push_pallet(scene: &mut RenderScene, center: Vec3) {
+/// A stringer pallet drawn under a case, turned with it.
+fn push_pallet(scene: &mut RenderScene, case: (Vec3, Quat)) {
     const WOOD: [f32; 4] = [0.60, 0.45, 0.28, 1.0];
     const BOARD_HALF_Y: f64 = 0.012;
     const BLOCK_HALF_Y: f64 = 0.045;
+    let (center, rotation) = case;
+    let base = center - rotation * Vec3::new(0.0, CASE_HALF_M.y + 0.114, 0.0);
     for offset in [-0.20, 0.0, 0.20] {
-        push_pbr(
+        push_pbr_rotated(
             scene,
-            center + Vec3::new(0.0, BLOCK_HALF_Y, offset),
+            base + rotation * Vec3::new(0.0, BLOCK_HALF_Y, offset),
+            rotation,
             Vec3::new(0.055, BLOCK_HALF_Y, 0.055),
             [0.50, 0.37, 0.22, 1.0],
             0.95,
@@ -1181,9 +1250,10 @@ fn push_pallet(scene: &mut RenderScene, center: Vec3) {
         );
     }
     for offset in [-0.21, 0.0, 0.21] {
-        push_pbr(
+        push_pbr_rotated(
             scene,
-            center + Vec3::new(0.0, 2.0 * BLOCK_HALF_Y + BOARD_HALF_Y, offset),
+            base + rotation * Vec3::new(0.0, 2.0 * BLOCK_HALF_Y + BOARD_HALF_Y, offset),
+            rotation,
             Vec3::new(0.20, BOARD_HALF_Y, 0.055),
             WOOD,
             0.9,
@@ -1193,111 +1263,739 @@ fn push_pallet(scene: &mut RenderScene, center: Vec3) {
     }
 }
 
-/// The truck: counterweight body, mast rails, tines, wheels and guard.
-///
-/// Only the chassis, carriage and backrest exist in physics. The rest is what
-/// those three shapes are part of, and it is drawn from their poses so it can
-/// never disagree with them.
-fn push_truck(scene: &mut RenderScene, frame: &Frame) {
-    const BODYWORK: [f32; 4] = [0.95, 0.56, 0.06, 1.0];
-    const DARK: [f32; 4] = [0.30, 0.32, 0.37, 1.0];
-    const TYRE: [f32; 4] = [0.20, 0.20, 0.22, 1.0];
+/// Scanned CC0 props from Poly Haven, fetched by
+/// `tools/prepare_polyhaven_warehouse.py` (licence and hashes in
+/// `assets/props/polyhaven_warehouse/manifest.json`).
+fn props_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/props/polyhaven_warehouse")
+}
 
-    let chassis = frame.chassis;
-    // Counterweight at the back, cab deck in front of it.
-    push_pbr(
-        scene,
-        chassis + Vec3::new(CHASSIS_HALF_M.x - 0.20, 0.03, 0.0),
-        Vec3::new(0.20, CHASSIS_HALF_M.y - 0.02, CHASSIS_HALF_M.z),
-        [0.88, 0.50, 0.05, 1.0],
-        0.5,
-        0.05,
-        [0.0; 3],
+/// A scanned prop. `path` is relative to [`props_root`]; the prop's own origin
+/// is its base, so `base` is where it stands.
+fn push_prop(scene: &mut RenderScene, path: &str, base: Vec3, yaw_rad: f64, scale: Vec3) {
+    scene.items.push(RenderScene::item_from_visual(
+        Transform3::from_translation_rotation(base, Quat::from_rotation_y(yaw_rad)),
+        VisualShape::Mesh {
+            path: path.to_string(),
+            scale,
+        },
+        [1.0; 4],
+        Transform3::IDENTITY,
+    ));
+}
+
+/// A cylinder with its axis along `axis` (a unit vector in world space).
+#[allow(clippy::too_many_arguments)] // Each argument is an independent quantity.
+fn push_cylinder(
+    scene: &mut RenderScene,
+    center: Vec3,
+    axis: Vec3,
+    radius_m: f64,
+    length_m: f64,
+    color: [f32; 4],
+    roughness: f32,
+    metallic: f32,
+    emissive: [f32; 3],
+) {
+    let mut item = RenderScene::item_from_visual(
+        Transform3::from_translation_rotation(center, Quat::from_rotation_arc(Vec3::Z, axis)),
+        VisualShape::Cylinder { radius_m, length_m },
+        color,
+        Transform3::IDENTITY,
     );
-    push_pbr(
-        scene,
-        chassis,
-        CHASSIS_HALF_M,
-        BODYWORK,
-        0.45,
-        0.05,
-        [0.0; 3],
-    );
-    // Overhead guard: four posts and a roof, the thing that makes a forklift
-    // read as a forklift from any angle.
-    for (dx, dz) in [
-        (CHASSIS_HALF_M.x - 0.06, CHASSIS_HALF_M.z - 0.05),
-        (CHASSIS_HALF_M.x - 0.06, -(CHASSIS_HALF_M.z - 0.05)),
-        (-(CHASSIS_HALF_M.x - 0.10), CHASSIS_HALF_M.z - 0.05),
-        (-(CHASSIS_HALF_M.x - 0.10), -(CHASSIS_HALF_M.z - 0.05)),
-    ] {
-        push_steel(
-            scene,
-            chassis + Vec3::new(dx, CHASSIS_HALF_M.y + 0.40, dz),
-            Vec3::new(0.022, 0.40, 0.022),
-            DARK,
-        );
+    item.material = PbrMaterial::new(color, roughness, metallic, emissive);
+    scene.items.push(item);
+}
+
+/// A truck's chassis frame: where its parts are placed from.
+struct TruckFrame {
+    chassis: Vec3,
+    rotation: Quat,
+    x_axis: Vec3,
+    y_axis: Vec3,
+    z_axis: Vec3,
+    floor_y: f64,
+}
+
+impl TruckFrame {
+    fn of(truck: &TruckPose) -> Self {
+        let (chassis, rotation) = truck.chassis;
+        Self {
+            chassis,
+            rotation,
+            x_axis: rotation * Vec3::X,
+            y_axis: rotation * Vec3::Y,
+            z_axis: rotation * Vec3::Z,
+            floor_y: chassis.y - CHASSIS_HALF_M.y - 0.07,
+        }
     }
-    push_steel(
+
+    fn at(&self, offset: Vec3) -> Vec3 {
+        self.chassis + self.rotation * offset
+    }
+}
+
+fn push_truck(scene: &mut RenderScene, truck: &TruckPose, bodywork: [f32; 4]) {
+    push_truck_body(scene, truck, bodywork);
+    push_truck_mast(scene, truck, bodywork);
+    push_truck_load_handling(scene, truck, bodywork);
+}
+
+/// Frame, body, counterweight, wheels, sensors and lights.
+#[allow(clippy::too_many_lines)] // One part list; splitting it further only scatters it.
+fn push_truck_body(scene: &mut RenderScene, truck: &TruckPose, bodywork: [f32; 4]) {
+    let frame = TruckFrame::of(truck);
+    let at = |offset: Vec3| frame.at(offset);
+    let rotation = frame.rotation;
+    let x_axis = frame.x_axis;
+    let y_axis = frame.y_axis;
+    let z_axis = frame.z_axis;
+    let shade = |factor: f32| {
+        [
+            bodywork[0] * factor,
+            bodywork[1] * factor,
+            bodywork[2] * factor,
+            1.0,
+        ]
+    };
+    // Frame, body and the rounded counterweight at the rear.
+    push_pbr_rotated(
         scene,
-        chassis + Vec3::new(0.0, CHASSIS_HALF_M.y + 0.81, 0.0),
-        Vec3::new(CHASSIS_HALF_M.x - 0.04, 0.018, CHASSIS_HALF_M.z - 0.03),
-        DARK,
+        at(Vec3::new(0.0, -0.19, 0.0)),
+        rotation,
+        Vec3::new(0.50, 0.07, 0.29),
+        TRUCK_FRAME,
+        0.7,
+        0.2,
+        [0.0; 3],
     );
-    // Wheels, as blocks rather than cylinders: at this scale the cylinder
-    // tessellation reads as a lump rather than a wheel, and four lumps under
-    // the chassis read as one.
-    for (dx, dz) in [
-        (CHASSIS_HALF_M.x - 0.16, CHASSIS_HALF_M.z + 0.005),
-        (CHASSIS_HALF_M.x - 0.16, -(CHASSIS_HALF_M.z + 0.005)),
-        (-(CHASSIS_HALF_M.x - 0.14), CHASSIS_HALF_M.z + 0.005),
-        (-(CHASSIS_HALF_M.x - 0.14), -(CHASSIS_HALF_M.z + 0.005)),
-    ] {
-        push_pbr(
+    push_pbr_rotated(
+        scene,
+        at(Vec3::new(-0.04, 0.03, 0.0)),
+        rotation,
+        Vec3::new(0.36, 0.15, 0.30),
+        bodywork,
+        0.38,
+        0.08,
+        [0.0; 3],
+    );
+    push_cylinder(
+        scene,
+        at(Vec3::new(0.28, -0.01, 0.0)),
+        z_axis,
+        0.24,
+        0.60,
+        shade(0.82),
+        0.42,
+        0.08,
+        [0.0; 3],
+    );
+    push_pbr_rotated(
+        scene,
+        at(Vec3::new(0.26, 0.19, 0.0)),
+        rotation,
+        Vec3::new(0.24, 0.01, 0.28),
+        shade(0.82),
+        0.42,
+        0.08,
+        [0.0; 3],
+    );
+    // Yellow-and-black hazard band across the counterweight's face.
+    for stripe in 0..6 {
+        let z = -0.25 + f64::from(stripe) * 0.1;
+        let color = if stripe % 2 == 0 {
+            TRUCK_HAZARD
+        } else {
+            TRUCK_FRAME
+        };
+        push_pbr_rotated(
             scene,
-            chassis + Vec3::new(dx, -CHASSIS_HALF_M.y + 0.005, dz),
-            Vec3::new(0.105, 0.105, 0.035),
-            TYRE,
-            0.95,
+            at(Vec3::new(0.525, -0.08, z)),
+            rotation,
+            Vec3::new(0.005, 0.03, 0.05),
+            color,
+            0.6,
             0.0,
             [0.0; 3],
         );
     }
+    push_pbr_rotated(
+        scene,
+        at(Vec3::new(-0.04, 0.185, 0.0)),
+        rotation,
+        Vec3::new(0.34, 0.006, 0.27),
+        TRUCK_RUBBER,
+        0.95,
+        0.0,
+        [0.0; 3],
+    );
+    // Status light strips along both flanks.
+    for side in [-1.0, 1.0] {
+        push_pbr_rotated(
+            scene,
+            at(Vec3::new(-0.04, 0.12, side * 0.302)),
+            rotation,
+            Vec3::new(0.30, 0.012, 0.004),
+            [0.2, 0.9, 0.5, 1.0],
+            0.3,
+            0.0,
+            [0.25, 1.1, 0.55],
+        );
+    }
+    // Wheels: drive wheels under the counterweight, load wheels under the mast.
+    for (x, radius) in [(0.30, 0.105), (-0.36, 0.085)] {
+        for side in [-1.0, 1.0] {
+            let center = at(Vec3::new(x, -0.26 + radius - 0.035, side * 0.29));
+            push_cylinder(
+                scene, center, z_axis, radius, 0.08, TRUCK_TYRE, 0.9, 0.0, [0.0; 3],
+            );
+            push_cylinder(
+                scene,
+                center + z_axis * (side * 0.004),
+                z_axis,
+                radius * 0.55,
+                0.082,
+                TRUCK_STEEL,
+                0.35,
+                0.6,
+                [0.0; 3],
+            );
+        }
+    }
+    // Corner safety scanners, front and rear.
+    for (x, face) in [(-0.50, -1.0), (0.52, 1.0)] {
+        for side in [-1.0, 1.0] {
+            let center = at(Vec3::new(x, -0.12, side * 0.24));
+            push_pbr_rotated(
+                scene,
+                center,
+                rotation,
+                Vec3::new(0.035, 0.035, 0.045),
+                TRUCK_FRAME,
+                0.5,
+                0.1,
+                [0.0; 3],
+            );
+            push_pbr_rotated(
+                scene,
+                center + x_axis * (face * 0.036),
+                rotation,
+                Vec3::new(0.002, 0.018, 0.03),
+                TRUCK_HAZARD,
+                0.4,
+                0.0,
+                [0.35, 0.28, 0.02],
+            );
+        }
+    }
+    // Sensor tower: post, LiDAR puck with its lit ring, amber beacon.
+    push_cylinder(
+        scene,
+        at(Vec3::new(0.34, 0.45, 0.0)),
+        y_axis,
+        0.028,
+        0.52,
+        TRUCK_STEEL,
+        0.35,
+        0.6,
+        [0.0; 3],
+    );
+    push_cylinder(
+        scene,
+        at(Vec3::new(0.34, 0.74, 0.0)),
+        y_axis,
+        0.062,
+        0.07,
+        TRUCK_FRAME,
+        0.4,
+        0.3,
+        [0.0; 3],
+    );
+    push_cylinder(
+        scene,
+        at(Vec3::new(0.34, 0.735, 0.0)),
+        y_axis,
+        0.064,
+        0.012,
+        [0.3, 0.8, 1.0, 1.0],
+        0.3,
+        0.0,
+        [0.25, 0.8, 1.1],
+    );
+    push_cylinder(
+        scene,
+        at(Vec3::new(0.34, 0.80, 0.0)),
+        y_axis,
+        0.035,
+        0.05,
+        [1.0, 0.62, 0.1, 1.0],
+        0.3,
+        0.0,
+        [1.2, 0.65, 0.08],
+    );
+}
 
-    // Mast: two rails from the chassis front up past the carriage.
-    let mast_x_m = chassis.x + FORK_REACH_M + FORK_HALF_M.x + 0.04;
-    for sign in [-1.0, 1.0] {
-        push_steel(
+/// Mast channels, top tie, lift cylinder, chains and tilt cylinders.
+#[allow(clippy::too_many_lines)] // One part list; splitting it further only scatters it.
+fn push_truck_mast(scene: &mut RenderScene, truck: &TruckPose, _bodywork: [f32; 4]) {
+    let frame = TruckFrame::of(truck);
+    let at = |offset: Vec3| frame.at(offset);
+    let rotation = frame.rotation;
+    let x_axis = frame.x_axis;
+    let y_axis = frame.y_axis;
+    // Mast: outer and inner channels, top tie, lift cylinder, chains.
+    let mast_x = FORK_REACH_M + FORK_HALF_M.x + 0.05;
+    for side in [-1.0, 1.0] {
+        push_pbr_rotated(
+            scene,
+            at(Vec3::new(mast_x, 0.38, side * 0.20)),
+            rotation,
+            Vec3::new(0.04, 0.64, 0.02),
+            TRUCK_STEEL,
+            0.45,
+            0.55,
+            [0.0; 3],
+        );
+        push_pbr_rotated(
+            scene,
+            at(Vec3::new(mast_x - 0.005, 0.38, side * 0.175)),
+            rotation,
+            Vec3::new(0.035, 0.64, 0.006),
+            TRUCK_FRAME,
+            0.6,
+            0.3,
+            [0.0; 3],
+        );
+        push_pbr_rotated(
+            scene,
+            at(Vec3::new(mast_x - 0.03, 0.34, side * 0.15)),
+            rotation,
+            Vec3::new(0.02, 0.60, 0.014),
+            TRUCK_CHROME,
+            0.25,
+            0.8,
+            [0.0; 3],
+        );
+        push_pbr_rotated(
+            scene,
+            at(Vec3::new(mast_x - 0.045, 0.34, side * 0.075)),
+            rotation,
+            Vec3::new(0.006, 0.55, 0.012),
+            TRUCK_FRAME,
+            0.8,
+            0.4,
+            [0.0; 3],
+        );
+        // Tilt cylinders from the body to the mast.
+        push_cylinder(
+            scene,
+            at(Vec3::new(-0.46, 0.08, side * 0.24)),
+            x_axis,
+            0.022,
+            0.16,
+            TRUCK_CHROME,
+            0.25,
+            0.8,
+            [0.0; 3],
+        );
+    }
+    push_pbr_rotated(
+        scene,
+        at(Vec3::new(mast_x, 1.02, 0.0)),
+        rotation,
+        Vec3::new(0.045, 0.03, 0.22),
+        TRUCK_STEEL,
+        0.45,
+        0.55,
+        [0.0; 3],
+    );
+    push_pbr_rotated(
+        scene,
+        at(Vec3::new(mast_x, -0.20, 0.0)),
+        rotation,
+        Vec3::new(0.045, 0.03, 0.22),
+        TRUCK_STEEL,
+        0.45,
+        0.55,
+        [0.0; 3],
+    );
+    push_cylinder(
+        scene,
+        at(Vec3::new(mast_x + 0.02, 0.30, 0.0)),
+        y_axis,
+        0.032,
+        0.95,
+        TRUCK_CHROME,
+        0.2,
+        0.85,
+        [0.0; 3],
+    );
+}
+
+/// Load backrest, tines and the warning spot ahead of them.
+#[allow(clippy::too_many_lines)] // One part list; splitting it further only scatters it.
+fn push_truck_load_handling(scene: &mut RenderScene, truck: &TruckPose, _bodywork: [f32; 4]) {
+    let frame = TruckFrame::of(truck);
+    let x_axis = frame.x_axis;
+    // Carriage: a lattice load backrest where the physical backrest is.
+    let (backrest, backrest_rotation) = truck.backrest;
+    let rest = |offset: Vec3| backrest + backrest_rotation * offset;
+    for bar in 0..5 {
+        let z = -0.20 + f64::from(bar) * 0.1;
+        push_pbr_rotated(
+            scene,
+            rest(Vec3::new(0.0, 0.0, z)),
+            backrest_rotation,
+            Vec3::new(0.012, BACKREST_HALF_M.y, 0.012),
+            TRUCK_TINE,
+            0.5,
+            0.4,
+            [0.0; 3],
+        );
+    }
+    for y in [-BACKREST_HALF_M.y, BACKREST_HALF_M.y, 0.0] {
+        push_pbr_rotated(
+            scene,
+            rest(Vec3::new(0.0, y, 0.0)),
+            backrest_rotation,
+            Vec3::new(0.018, 0.016, BACKREST_HALF_M.z),
+            TRUCK_TINE,
+            0.5,
+            0.4,
+            [0.0; 3],
+        );
+    }
+    // L-shaped tines: the physical blade plus its shank up the carriage.
+    let (fork, fork_rotation) = truck.fork;
+    for side in [-1.0, 1.0] {
+        push_pbr_rotated(
+            scene,
+            fork + fork_rotation * Vec3::new(0.0, 0.0, side * 0.085),
+            fork_rotation,
+            Vec3::new(FORK_HALF_M.x, FORK_HALF_M.y, 0.045),
+            TRUCK_TINE,
+            0.45,
+            0.5,
+            [0.0; 3],
+        );
+        push_pbr_rotated(
+            scene,
+            fork + fork_rotation * Vec3::new(FORK_HALF_M.x - 0.02, 0.18, side * 0.085),
+            fork_rotation,
+            Vec3::new(0.02, 0.18, 0.045),
+            TRUCK_TINE,
+            0.45,
+            0.5,
+            [0.0; 3],
+        );
+    }
+    // The blue warning spot on the floor ahead of the forks.
+    let spot = frame.chassis + x_axis * -1.75;
+    push_cylinder(
+        scene,
+        Vec3::new(spot.x, frame.floor_y + 0.0025, spot.z),
+        Vec3::Y,
+        0.12,
+        0.002,
+        [0.2, 0.45, 1.0, 1.0],
+        0.3,
+        0.0,
+        [0.25, 0.55, 1.4],
+    );
+}
+
+/// A PBR texture set: colour, OpenGL normal and roughness maps.
+struct TextureSet {
+    color: Arc<ImageFrame>,
+    normal: Arc<ImageFrame>,
+    roughness: Arc<ImageFrame>,
+}
+
+fn texture_set(name: &str) -> TextureSet {
+    let root = props_root().join("textures");
+    TextureSet {
+        color: load_texture(&root.join(format!("{name}_diff_1k.jpg"))),
+        normal: load_texture(&root.join(format!("{name}_nor_gl_1k.jpg"))),
+        roughness: load_texture(&root.join(format!("{name}_rough_1k.jpg"))),
+    }
+}
+
+/// Profiled steel cladding for the warehouse walls.
+fn wall_textures() -> &'static TextureSet {
+    static WALLS: OnceLock<TextureSet> = OnceLock::new();
+    WALLS.get_or_init(|| texture_set("box_profile_metal_sheet"))
+}
+
+/// A textured rectangle facing `u x v`, spanning `+-u` and `+-v` about
+/// `center`, one texture repeat every `repeat_m` meters.
+fn push_textured_panel(
+    scene: &mut RenderScene,
+    center: Vec3,
+    u: Vec3,
+    v: Vec3,
+    textures: &TextureSet,
+    repeat_m: f64,
+    tint: [f32; 4],
+) {
+    let (repeat_u, repeat_v) = (
+        (2.0 * u.length() / repeat_m) as f32,
+        (2.0 * v.length() / repeat_m) as f32,
+    );
+    let normal = u.cross(v).normalize();
+    let corner = |a: f64, b: f64| {
+        let point = u * a + v * b;
+        [point.x as f32, point.y as f32, point.z as f32]
+    };
+    let mesh = TriangleMesh {
+        positions: vec![
+            corner(-1.0, -1.0),
+            corner(1.0, -1.0),
+            corner(1.0, 1.0),
+            corner(-1.0, 1.0),
+        ],
+        normals: vec![[normal.x as f32, normal.y as f32, normal.z as f32]; 4],
+        texcoords: vec![
+            [0.0, repeat_v],
+            [repeat_u, repeat_v],
+            [repeat_u, 0.0],
+            [0.0, 0.0],
+        ],
+        // Counter-clockwise seen from the side `normal` points to.
+        indices: vec![0, 1, 2, 0, 2, 3],
+        skinning: None,
+    };
+    scene.items.push(RenderSceneItem {
+        transform: MathTransform {
+            translation: center,
+            rotation: Quat::IDENTITY,
+            scale: Vec3::ONE,
+        },
+        shape: VisualShape::DynamicMesh,
+        color_rgba: tint,
+        mesh: Some(Arc::new(mesh)),
+        base_color_texture: Some(Arc::clone(&textures.color)),
+        material: PbrMaterial::new(tint, 0.7, 0.25, [0.0; 3]).with_texture_maps(
+            Some(Arc::clone(&textures.normal)),
+            Some(Arc::clone(&textures.roughness)),
+        ),
+    });
+}
+
+/// One stand leg, drawn as the welded frame it stands for: two square posts,
+/// cross bracing, and a top plate with a hazard-striped edge. The physics leg
+/// is the solid box this frame fills.
+fn push_stand_leg(scene: &mut RenderScene, center: Vec3) {
+    const POST: [f32; 4] = [0.30, 0.33, 0.38, 1.0];
+    const PLATE: [f32; 4] = [0.52, 0.54, 0.58, 1.0];
+    const HAZARD: [f32; 4] = [0.95, 0.78, 0.10, 1.0];
+    const DARK: [f32; 4] = [0.12, 0.12, 0.13, 1.0];
+    let half = STAND_LEG_HALF_M;
+    for dx in [-1.0, 1.0] {
+        push_pbr(
+            scene,
+            center + Vec3::new(dx * (half.x - 0.02), -0.01, 0.0),
+            Vec3::new(0.02, half.y - 0.01, half.z - 0.01),
+            POST,
+            0.5,
+            0.4,
+            [0.0; 3],
+        );
+    }
+    for y in [-0.6, 0.1] {
+        push_pbr(
+            scene,
+            center + Vec3::new(0.0, y * half.y, 0.0),
+            Vec3::new(half.x - 0.02, 0.012, half.z - 0.02),
+            POST,
+            0.5,
+            0.4,
+            [0.0; 3],
+        );
+    }
+    push_pbr(
+        scene,
+        center + Vec3::new(0.0, half.y - 0.008, 0.0),
+        Vec3::new(half.x, 0.008, half.z),
+        PLATE,
+        0.45,
+        0.5,
+        [0.0; 3],
+    );
+    for stripe in 0..5 {
+        let x = -half.x + 0.02 + f64::from(stripe) * (2.0 * half.x - 0.04) / 4.0;
+        let color = if stripe % 2 == 0 { HAZARD } else { DARK };
+        for dz in [-1.0, 1.0] {
+            push_pbr(
+                scene,
+                center + Vec3::new(x, half.y - 0.03, dz * (half.z + 0.001)),
+                Vec3::new(0.02, 0.02, 0.001),
+                color,
+                0.6,
+                0.0,
+                [0.0; 3],
+            );
+        }
+    }
+}
+
+/// The car's cab: back and side walls in brushed steel, a handrail, and a lit
+/// ceiling panel. The open side faces the camera, as the shaft's does.
+fn push_car_interior(scene: &mut RenderScene, car_y_m: f64, handrail: bool) {
+    const PANEL: [f32; 4] = [0.66, 0.68, 0.72, 1.0];
+    const TRIM: [f32; 4] = [0.30, 0.31, 0.34, 1.0];
+    let floor = car_y_m + CAR_HALF_M.y;
+    let wall_half_y = 1.1;
+    push_pbr(
+        scene,
+        Vec3::new(SHAFT_X_M + CAR_HALF_M.x - 0.02, floor + wall_half_y, 0.0),
+        Vec3::new(0.02, wall_half_y, CAR_HALF_M.z),
+        PANEL,
+        0.3,
+        0.75,
+        [0.0; 3],
+    );
+    push_pbr(
+        scene,
+        Vec3::new(SHAFT_X_M + 0.04, floor + wall_half_y, -CAR_HALF_M.z + 0.02),
+        Vec3::new(CAR_HALF_M.x - 0.04, wall_half_y, 0.02),
+        PANEL,
+        0.3,
+        0.75,
+        [0.0; 3],
+    );
+    for panel in 0..3 {
+        let z = -0.6 + f64::from(panel) * 0.6;
+        push_pbr(
             scene,
             Vec3::new(
-                mast_x_m,
-                chassis.y + MAST_ANCHOR_Y_M + 0.44,
-                chassis.z + sign * (FORK_HALF_M.z + 0.05),
+                SHAFT_X_M + CAR_HALF_M.x - 0.041,
+                floor + wall_half_y,
+                z + 0.3,
             ),
-            Vec3::new(0.035, 0.52, 0.030),
-            DARK,
+            Vec3::new(0.001, wall_half_y - 0.02, 0.004),
+            TRIM,
+            0.5,
+            0.4,
+            [0.0; 3],
         );
     }
-    // Two tines rather than one slab, on the carriage the physics solves.
-    for sign in [-1.0, 1.0] {
-        push_steel(
+    if handrail {
+        push_cylinder(
             scene,
-            frame.fork + Vec3::new(0.0, 0.0, sign * 0.085),
-            Vec3::new(FORK_HALF_M.x, FORK_HALF_M.y, 0.045),
-            [0.72, 0.74, 0.78, 1.0],
+            Vec3::new(SHAFT_X_M + CAR_HALF_M.x - 0.09, floor + 0.9, 0.0),
+            Vec3::Z,
+            0.018,
+            1.6,
+            [0.82, 0.84, 0.88, 1.0],
+            0.2,
+            0.9,
+            [0.0; 3],
         );
     }
-    push_steel(scene, frame.backrest, BACKREST_HALF_M, DARK);
+    push_pbr(
+        scene,
+        Vec3::new(SHAFT_X_M + 0.05, floor + 2.2, -0.2),
+        Vec3::new(0.45, 0.01, 0.35),
+        [0.95, 0.96, 1.0, 1.0],
+        0.3,
+        0.0,
+        [0.8, 0.82, 0.88],
+    );
+    // Hazard edge along the threshold.
+    push_pbr(
+        scene,
+        Vec3::new(DOORWAY_X_M + 0.03, floor + 0.001, 0.0),
+        Vec3::new(0.03, 0.001, CAR_HALF_M.z - 0.05),
+        [0.95, 0.78, 0.10, 1.0],
+        0.6,
+        0.0,
+        [0.0; 3],
+    );
+}
+
+/// Warehouse dressing from the scanned CC0 props, kept clear of both trucks'
+/// routes and turning circles.
+fn push_floor_props(scene: &mut RenderScene) {
+    let ground = CAR_HALF_M.y;
+    let upper = FLOOR_HEIGHTS_M[1] + CAR_HALF_M.y;
+    // Goods-in end of the ground floor.
+    push_prop(
+        scene,
+        "hand_truck/hand_truck_1k.gltf",
+        Vec3::new(-6.3, ground, 1.05),
+        -0.5,
+        Vec3::ONE,
+    );
+    push_prop(
+        scene,
+        "industrial_storage_cart/industrial_storage_cart_1k.gltf",
+        Vec3::new(-7.9, ground, 0.75),
+        1.57,
+        Vec3::ONE,
+    );
+    push_prop(
+        scene,
+        CARDBOARD_BOX,
+        Vec3::new(-7.75, ground + 0.72, 0.62),
+        0.2,
+        Vec3::ONE,
+    );
+    push_prop(
+        scene,
+        "WetFloorSign_01/WetFloorSign_01_1k.gltf",
+        Vec3::new(-5.4, ground, 1.25),
+        0.4,
+        Vec3::ONE,
+    );
+    // By the lift: extinguisher on the floor, the distribution board on the
+    // back wall.
+    push_prop(
+        scene,
+        "korean_fire_extinguisher_01/korean_fire_extinguisher_01_1k.gltf",
+        Vec3::new(-1.45, ground, -1.12),
+        0.3,
+        Vec3::ONE,
+    );
+    push_prop(
+        scene,
+        "power_box_01/power_box_01_1k.gltf",
+        Vec3::new(-2.0, 1.35, -1.24),
+        0.0,
+        Vec3::ONE,
+    );
+    // Upper floor: the shipping door the delivered case is bound for, and a
+    // shelf unit of boxed stock by the lift.
+    push_prop(
+        scene,
+        "rollershutter_door/rollershutter_door_1k.gltf",
+        Vec3::new(-3.3, upper, -1.28),
+        0.0,
+        Vec3::ONE,
+    );
+    push_prop(
+        scene,
+        "steel_frame_shelves_02/steel_frame_shelves_02_1k.gltf",
+        Vec3::new(-1.45, upper, -1.05),
+        0.0,
+        Vec3::new(1.0, 0.72, 1.0),
+    );
+    for (level, y) in [0.0_f64, 0.54, 1.08].iter().enumerate() {
+        push_prop(
+            scene,
+            CARDBOARD_BOX,
+            Vec3::new(-1.45, upper + 0.03 + y * 0.72, -1.05),
+            0.1 * level as f64,
+            Vec3::new(0.8, 0.8, 0.8),
+        );
+    }
 }
 
 /// The parts of the site that never move: shaft, decks, racking, fixtures and
 /// the two stands.
 fn push_building(scene: &mut RenderScene) {
     const SHAFT: [f32; 4] = [0.33, 0.36, 0.42, 1.0];
-    const CASE: [f32; 4] = [0.72, 0.55, 0.34, 1.0];
     const RACK_BEAM: [f32; 4] = [0.92, 0.55, 0.10, 1.0];
     const RACK_UPRIGHT: [f32; 4] = [0.16, 0.36, 0.60, 1.0];
-    const STAND: [f32; 4] = [0.40, 0.43, 0.48, 1.0];
     const BAY: [f32; 4] = [0.14, 0.70, 0.40, 1.0];
     const HAZARD: [f32; 4] = [0.92, 0.78, 0.12, 1.0];
     /// Racking runs along the back of the aisle. On the camera's side it stands
@@ -1337,6 +2035,15 @@ fn push_building(scene: &mut RenderScene) {
             0.05,
             [0.0; 3],
         );
+        push_textured_panel(
+            scene,
+            Vec3::new(DECK_X_M[index], height_m + 1.05, -1.245),
+            Vec3::new(DECK_HALF_M[index].x - 0.6, 0.0, 0.0),
+            Vec3::new(0.0, 1.05, 0.0),
+            wall_textures(),
+            1.6,
+            [1.0, 1.0, 1.0, 1.0],
+        );
         push_concrete_deck(
             scene,
             Vec3::new(DECK_X_M[index], *height_m, 0.0),
@@ -1361,64 +2068,40 @@ fn push_building(scene: &mut RenderScene) {
         }
     }
 
-    // Racking down the ground-floor aisle: uprights, bracing and beam levels,
-    // with pallets on them. Dressing -- the truck's route never crosses it.
-    for bay in 0..4 {
-        let x_m = SHAFT_X_M - 7.4 + f64::from(bay) * 1.62;
-        for level in 0..3 {
-            let y_m = 0.52 + f64::from(level) * 0.88;
-            push_steel(
-                scene,
-                Vec3::new(x_m, y_m, RACK_Z_M),
-                Vec3::new(0.76, 0.045, 0.05),
-                RACK_BEAM,
-            );
-            if level < 2 && bay % 2 == 0 {
-                push_pallet(scene, Vec3::new(x_m, y_m + 0.045, RACK_Z_M));
-                push_pbr(
-                    scene,
-                    Vec3::new(x_m, y_m + 0.30, RACK_Z_M),
-                    Vec3::new(0.24, 0.19, 0.24),
-                    CASE,
-                    0.9,
-                    0.0,
-                    [0.0; 3],
-                );
-            }
-        }
-        for side in [-1.0, 1.0] {
-            push_steel(
-                scene,
-                Vec3::new(x_m + side * 0.76, 1.32, RACK_Z_M),
-                Vec3::new(0.05, 1.32, 0.05),
-                RACK_UPRIGHT,
-            );
-        }
-    }
+    push_racking(scene, RACK_BEAM, RACK_UPRIGHT, RACK_Z_M);
 
-    // Ceiling fixtures, emissive so the shot has a light source in it.
+    // Ceiling fixtures: scanned fluorescent battens, plus the emissive tube
+    // each one holds so the shot has light sources in it.
     for bay in 0..4 {
+        let at = Vec3::new(SHAFT_X_M - 6.6 + f64::from(bay) * 1.7, 2.84, -0.45);
+        push_prop(
+            scene,
+            "mounted_fluorescent_lights/mounted_fluorescent_lights_1k.gltf",
+            at,
+            0.0,
+            Vec3::ONE,
+        );
         push_pbr(
             scene,
-            Vec3::new(SHAFT_X_M - 6.6 + f64::from(bay) * 1.7, 2.78, -0.45),
-            Vec3::new(0.52, 0.04, 0.10),
+            at - Vec3::new(0.0, 0.03, 0.0),
+            Vec3::new(0.44, 0.012, 0.02),
             [0.97, 0.98, 1.0, 1.0],
             0.35,
             0.0,
-            [0.85, 0.87, 0.92],
+            [0.9, 0.92, 0.97],
         );
     }
+
+    push_floor_props(scene);
 
     for (x_m, deck_y_m) in [
         (STAND_X_M, CAR_HALF_M.y),
         (OUTBOUND_X_M, FLOOR_HEIGHTS_M[1] + CAR_HALF_M.y),
     ] {
         for sign in [-1.0, 1.0] {
-            push_steel(
+            push_stand_leg(
                 scene,
                 Vec3::new(x_m, deck_y_m + STAND_LEG_HALF_M.y, sign * STAND_LEG_Z_M),
-                STAND_LEG_HALF_M,
-                STAND,
             );
         }
     }
@@ -1437,12 +2120,127 @@ fn push_building(scene: &mut RenderScene) {
     );
 }
 
+/// Racking down the ground-floor aisle: uprights, beam levels and stock.
+/// Dressing -- the trucks' routes never cross it.
+fn push_racking(
+    scene: &mut RenderScene,
+    rack_beam: [f32; 4],
+    rack_upright: [f32; 4],
+    rack_z_m: f64,
+) {
+    // Racking down the ground-floor aisle: uprights, bracing and beam levels,
+    // with pallets on them. Dressing -- the truck's route never crosses it.
+    for bay in 0..4 {
+        let x_m = SHAFT_X_M - 7.4 + f64::from(bay) * 1.62;
+        for level in 0..3 {
+            let y_m = 0.52 + f64::from(level) * 0.88;
+            push_steel(
+                scene,
+                Vec3::new(x_m, y_m, rack_z_m),
+                Quat::IDENTITY,
+                Vec3::new(0.76, 0.045, 0.05),
+                rack_beam,
+            );
+            // Stock: every level but the top holds goods, scanned boxes on
+            // pallets or crates, varied by bay so the aisle does not repeat.
+            if level < 2 {
+                let top = y_m + 0.045;
+                match (bay + level) % 3 {
+                    0 => {
+                        push_pallet(
+                            scene,
+                            (
+                                Vec3::new(x_m, top + CASE_HALF_M.y + 0.114, rack_z_m),
+                                Quat::IDENTITY,
+                            ),
+                        );
+                        for (dx, yaw) in [(-0.22, 0.05), (0.22, -0.08)] {
+                            push_prop(
+                                scene,
+                                CARDBOARD_BOX,
+                                Vec3::new(x_m + dx, top + 0.114, rack_z_m),
+                                yaw,
+                                Vec3::ONE,
+                            );
+                        }
+                        push_prop(
+                            scene,
+                            CARDBOARD_BOX,
+                            Vec3::new(x_m - 0.05, top + 0.455, rack_z_m),
+                            1.62,
+                            Vec3::ONE,
+                        );
+                    }
+                    1 => {
+                        push_prop(
+                            scene,
+                            WOODEN_CRATE,
+                            Vec3::new(x_m, top, rack_z_m + 0.02),
+                            0.0,
+                            Vec3::ONE,
+                        );
+                        push_prop(
+                            scene,
+                            WOODEN_CRATE,
+                            Vec3::new(x_m + 0.1, top + 0.34, rack_z_m),
+                            0.06,
+                            Vec3::new(0.8, 0.8, 0.8),
+                        );
+                    }
+                    _ => {
+                        push_pallet(
+                            scene,
+                            (
+                                Vec3::new(x_m, top + CASE_HALF_M.y + 0.114, rack_z_m),
+                                Quat::IDENTITY,
+                            ),
+                        );
+                        push_prop(
+                            scene,
+                            CARDBOARD_BOX,
+                            Vec3::new(x_m + 0.15, top + 0.114, rack_z_m),
+                            1.57,
+                            Vec3::ONE,
+                        );
+                    }
+                }
+            }
+        }
+        for side in [-1.0, 1.0] {
+            push_steel(
+                scene,
+                Vec3::new(x_m + side * 0.76, 1.32, rack_z_m),
+                Quat::IDENTITY,
+                Vec3::new(0.05, 1.32, 0.05),
+                rack_upright,
+            );
+        }
+    }
+}
+
+/// Encodes the frames with `tools/encode_gif.py`: a scanned-texture scene
+/// through ffmpeg's encoder came out at 7-13 MB, frame-differenced at under 1.
+fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tools/encode_gif.py");
+    let status = std::process::Command::new("python3")
+        .arg(script)
+        .arg(frames_dir)
+        .arg(gif_path)
+        .args(["--fps", "12", "--colors", "192"])
+        .status()?;
+    if !status.success() {
+        return Err(std::io::Error::other(
+            "encode_gif.py failed to build the gif",
+        ));
+    }
+    Ok(())
+}
+
 fn append_site(scene: &mut RenderScene, frame: &Frame) {
     const CAR: [f32; 4] = [0.74, 0.77, 0.82, 1.0];
     const DOOR: [f32; 4] = [0.80, 0.84, 0.90, 1.0];
     const BUTTON_IDLE: [f32; 4] = [0.45, 0.47, 0.52, 1.0];
     const BUTTON_LIT: [f32; 4] = [0.99, 0.74, 0.20, 1.0];
-    const CASE: [f32; 4] = [0.72, 0.55, 0.34, 1.0];
 
     push_building(scene);
 
@@ -1455,19 +2253,35 @@ fn append_site(scene: &mut RenderScene, frame: &Frame) {
         0.08,
         [0.0; 3],
     );
+    // The truck rides in this car, and its counterweight reaches the back
+    // wall where the handrail would be.
+    push_car_interior(scene, frame.car_y_m, false);
     let doorway_z_m = CAR_HALF_M.z - DOOR_HALF_M.z;
     for sign in [-1.0, 1.0] {
         push_pbr(
             scene,
             Vec3::new(
-                SHAFT_X_M - CAR_HALF_M.x,
+                DOORWAY_X_M,
                 frame.car_y_m + DOOR_HALF_M.y,
                 sign * (doorway_z_m + frame.door_opening_m),
             ),
             DOOR_HALF_M,
             DOOR,
-            0.45,
-            0.08,
+            0.35,
+            0.55,
+            [0.0; 3],
+        );
+        push_pbr(
+            scene,
+            Vec3::new(
+                DOORWAY_X_M - DOOR_HALF_M.x - 0.001,
+                frame.car_y_m + 1.45,
+                sign * (doorway_z_m + frame.door_opening_m),
+            ),
+            Vec3::new(0.001, 0.35, 0.06),
+            [0.10, 0.14, 0.18, 1.0],
+            0.05,
+            0.2,
             [0.0; 3],
         );
     }
@@ -1495,12 +2309,31 @@ fn append_site(scene: &mut RenderScene, frame: &Frame) {
         if lit { [0.55, 0.38, 0.05] } else { [0.0; 3] },
     );
 
-    push_truck(scene, frame);
-    push_pallet(
+    push_truck(
         scene,
-        frame.case - Vec3::new(0.0, CASE_HALF_M.y + 0.114, 0.0),
+        &TruckPose {
+            chassis: (frame.chassis, Quat::IDENTITY),
+            fork: (frame.fork, Quat::IDENTITY),
+            backrest: (frame.backrest, Quat::IDENTITY),
+        },
+        [0.95, 0.56, 0.06, 1.0],
     );
-    push_pbr(scene, frame.case, CASE_HALF_M, CASE, 0.92, 0.0, [0.0; 3]);
+    let case = (frame.case, frame.case_rotation);
+    push_pallet(scene, case);
+    // The scanned box is 0.388 x 0.341 x 0.516 m against the 0.38 x 0.32 x
+    // 0.52 m physics case; its origin is its base, 0.033 m off-centre in z.
+    scene.items.push(RenderScene::item_from_visual(
+        Transform3::from_translation_rotation(
+            case.0 + case.1 * Vec3::new(0.0, -CASE_HALF_M.y, -0.033),
+            case.1,
+        ),
+        VisualShape::Mesh {
+            path: CARDBOARD_BOX.to_string(),
+            scale: Vec3::new(0.38 / 0.388, 0.32 / 0.341, 0.52 / 0.516),
+        },
+        [1.0; 4],
+        Transform3::IDENTITY,
+    ));
 }
 
 fn write_png(path: &Path, rgba: &[u8]) -> std::io::Result<()> {
@@ -1509,29 +2342,6 @@ fn write_png(path: &Path, rgba: &[u8]) -> std::io::Result<()> {
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     encoder.write_header()?.write_image_data(rgba)?;
-    Ok(())
-}
-
-fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
-    let status = std::process::Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-loglevel",
-            "error",
-            "-framerate",
-            "12",
-            "-i",
-        ])
-        .arg(frames_dir.join("frame-%03d.png"))
-        .args([
-            "-vf",
-            "split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4",
-        ])
-        .arg(gif_path)
-        .status()?;
-    if !status.success() {
-        return Err(std::io::Error::other("ffmpeg failed to build the gif"));
-    }
     Ok(())
 }
 
@@ -1612,8 +2422,9 @@ fn main() {
     for (index, frame) in mission.frames.iter().enumerate() {
         let mut scene = RenderScene::default();
         append_site(&mut scene, frame);
+        let root = props_root();
         mesh_cache
-            .resolve_scene(&mut scene, &[])
+            .resolve_scene(&mut scene, &[root.as_path()])
             .expect("resolve scene meshes");
         let output = backend
             .render_scene_camera(&camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)

@@ -1,0 +1,137 @@
+{
+  "files": {
+    "WetFloorSign_01/WetFloorSign_01.bin": "d23cdec8975ac452d64ae97b08f1eecd22e38f052bd5d588d352dbc0f0373af0",
+    "WetFloorSign_01/WetFloorSign_01_1k.gltf": "ba5b10d2de7bb60b77dc3e44a96446181a078e35597947a490a4b6de906059e4",
+    "WetFloorSign_01/textures/WetFloorSign_01_arm_1k.jpg": "6cd1d7c6648c36d2d66a7ddfc620ea78374ac770a5726f879b6914366e133e1a",
+    "WetFloorSign_01/textures/WetFloorSign_01_diff_1k.jpg": "01e18486a858defc0f44a73ec5037c4bee770bae88e7fed5beb6877df120fa90",
+    "WetFloorSign_01/textures/WetFloorSign_01_nor_gl_1k.jpg": "62269358f3b30569783c1872613d1d70d5eda36babe5b5f04fcfd5e92de1af62",
+    "cardboard_box_01/cardboard_box_01.bin": "7212d43b4cb56459e46d31ab34dc7c310fcfbe170f4a588416dea07ae5628a4b",
+    "cardboard_box_01/cardboard_box_01_1k.gltf": "6038bcc5bba5a08a5f6643a265977e37e3d14553e62981e144c33a89f10b78e1",
+    "cardboard_box_01/textures/cardboard_box_01_arm_1k.jpg": "5db63828d0f904c6a8d9c83afc912260b2a27261c15a28d06360519384574d2b",
+    "cardboard_box_01/textures/cardboard_box_01_diff_1k.jpg": "122c7ba8c5935e289804a730b480677a4bffdf74a45c91970cba682df92e171c",
+    "cardboard_box_01/textures/cardboard_box_01_nor_gl_1k.jpg": "d2d1f529a851966b65411b5094510dd9eba03cd5c0a89921f79325c377a8e8eb",
+    "hand_truck/hand_truck.bin": "2a7ca50cdfac207defa68f71600f37e7cdd05d35bc94139df5269ea7d8b7a214",
+    "hand_truck/hand_truck_1k.gltf": "303029ba829f2975ebed80f6f36e38d57cec87379e7214fcfb7d8e6e921c8e58",
+    "hand_truck/textures/hand_truck_arm_1k.jpg": "30ceadb1fa303f36dc0372a5681203e69715546219838e1bc0634c274407204c",
+    "hand_truck/textures/hand_truck_diff_1k.jpg": "a1c528e0c88a03a96b89215eab228083f9dd66a502174936bccc0fe427ce345a",
+    "hand_truck/textures/hand_truck_nor_gl_1k.jpg": "8674bbaa5562c24efceef0ab77f374ffe32fa583ef5dc2a44846305aa0fd8f79",
+    "industrial_storage_cart/industrial_storage_cart.bin": "ae46bc3aceda8234515054b3b4595db14e7eb72148100b5c2cafe1de7393410c",
+    "industrial_storage_cart/industrial_storage_cart_1k.gltf": "f420b66b2e56513542b9598f038eb5f5ce120746735997807e58552049884043",
+    "industrial_storage_cart/textures/industrial_storage_cart_arm_1k.jpg": "956ee8d02021aba0b5fdbf393029b0aaabd7d29076caa3a5678e394f79adcca1",
+    "industrial_storage_cart/textures/industrial_storage_cart_diff_1k.jpg": "7e779d7f7385307ebb332aec41bafff10c21972aaf92382f30cacb16957e7d37",
+    "industrial_storage_cart/textures/industrial_storage_cart_nor_gl_1k.jpg": "a4fcd4309516e6005b5f3636399bd801df72fc75986831fad9cc5c31b737070a",
+    "korean_fire_extinguisher_01/korean_fire_extinguisher_01.bin": "a460dd65b63477bb641196d77393258af0c8a6e2a64728156cb45d92658c86bd",
+    "korean_fire_extinguisher_01/korean_fire_extinguisher_01_1k.gltf": "565f9e41909165c2bead24b722746e29ba55e8eb5e541f61fe0d1ef7e66d2ecf",
+    "korean_fire_extinguisher_01/textures/korean_fire_extinguisher_01_body_arm_1k.jpg": "2c8fa0a85d5acc5f4e784ecefd8bfd16e1aafd112e553bfcece0c81c9b129eea",
+    "korean_fire_extinguisher_01/textures/korean_fire_extinguisher_01_body_diff_1k.jpg": "2d874513cfb6d7485b67e936ee32e7af14992da6a5eedf980dbdfc32a2119987",
+    "korean_fire_extinguisher_01/textures/korean_fire_extinguisher_01_body_nor_gl_1k.jpg": "b6ba7a7cafa04557c93dc63b44260b635863f0a95f8ba1445b75758dac3443d3",
+    "korean_fire_extinguisher_01/textures/korean_fire_extinguisher_01_glass_arm_1k.jpg": "412712fddc3654d801949889f78c9ee92d8855624a1fe1057be29a38e766bda0",
+    "korean_fire_extinguisher_01/textures/korean_fire_extinguisher_01_glass_diff_1k.jpg": "ca7e49959126aa51e2d4ab440aeb9f7ff17a8a6d025b116f6327f2343ee041af",
+    "korean_fire_extinguisher_01/textures/korean_fire_extinguisher_01_glass_nor_gl_1k.jpg": "3b299c54cb9b6f72d4f79e6ecd2f8cfcc618292c87881de1d17892b5ca668896",
+    "korean_fire_extinguisher_01/textures/korean_fire_extinguisher_01_paper_arm_1k.jpg": "542b45184bb0ea66cdd2f180792148c45d45862a12f1ac341f798e53029015b9",
+    "korean_fire_extinguisher_01/textures/korean_fire_extinguisher_01_paper_diff_1k.jpg": "2d56948aa72a9bad6133db3e6b17fa0df1a56cdf25db4b7e21e6ceb21999a038",
+    "korean_fire_extinguisher_01/textures/korean_fire_extinguisher_01_paper_nor_gl_1k.jpg": "caaa26dd438e827e994c69605091d58ecc6a152813ece776cc561e0b24a8433a",
+    "mounted_fluorescent_lights/mounted_fluorescent_lights.bin": "587851c1b4e09e4cf3438f3d8bb084d4591f6be3a7bb1b4324b84af97b3c5f03",
+    "mounted_fluorescent_lights/mounted_fluorescent_lights_1k.gltf": "7a56f167fe7074f4e4d4f314f72c5aa8b01c191394ee5ecb0b3461a240441b4a",
+    "mounted_fluorescent_lights/textures/mounted_fluorescent_lights_arm_1k.jpg": "6bb051b47c5e684f7d981595e7a88c3f41989621dc4b8c9460dba989e6421438",
+    "mounted_fluorescent_lights/textures/mounted_fluorescent_lights_diff_1k.jpg": "8e56f625c04198792d8e9e5551137cbbd399072c26fe27827b37734afd584ea1",
+    "mounted_fluorescent_lights/textures/mounted_fluorescent_lights_emission_1k.jpg": "185aaca71b4c9d908be69440b807769ce9b2a6472d3a8396755394029196ea59",
+    "mounted_fluorescent_lights/textures/mounted_fluorescent_lights_nor_gl_1k.jpg": "3a4504ed0f70061994b37c9ef512e7a2a7e0b7680a977add1643226ae56ea60d",
+    "power_box_01/power_box_01.bin": "b46efdf668ec2d4e04ff51604b5f1486caf20df632f442aab62601718058db05",
+    "power_box_01/power_box_01_1k.gltf": "edb54e68fb1229e9f59906459d782c2ddc576f6bd1141cf09ad864f48d7cb93b",
+    "power_box_01/textures/power_box_01_arm_1k.jpg": "4601e901e2f7c1584ab5ecf65e0e192a99a4be86da505527f1622658e1b1e527",
+    "power_box_01/textures/power_box_01_diff_1k.jpg": "845c425ebc0ded263a7d49909e2c26710dd6160da11c0ca44aebd723f4f6f168",
+    "power_box_01/textures/power_box_01_nor_gl_1k.jpg": "199b6fe93776aa0934f7bc36d8c82f1b4db9be9243e82e0cb3727bbcf25d85f1",
+    "rollershutter_door/rollershutter_door.bin": "155cd44e199d4edd19769503c7ed22b0b4007869166d0193a7e2d5e3134dc38d",
+    "rollershutter_door/rollershutter_door_1k.gltf": "913b2689f88f99cb75f8a6575e315ee90437e59976a2a3ce0b260d5636a14d30",
+    "rollershutter_door/textures/rollershutter_door_arm_1k.jpg": "0a45cf8585a339ae542ef891f3aa697258079b98f1755b2d6716ea542d3de14a",
+    "rollershutter_door/textures/rollershutter_door_diff_1k.jpg": "b8cd7ad14fe5c691484fe240213c379bf18f21336afe6622bfa20c731eca010d",
+    "rollershutter_door/textures/rollershutter_door_graffiti_diff_1k.jpg": "7438bee86fc32e3b6ca23ec694f179576749554dff7c3b281f30acd917c250af",
+    "rollershutter_door/textures/rollershutter_door_nor_gl_1k.jpg": "3eaad465ac23e4b3d5fbf2e315b738f8d3039cd244a69ab8adcc7a0e786cdffb",
+    "steel_frame_shelves_02/steel_frame_shelves_02.bin": "bcfe8e37632961b13f7ac845f7f2505181c394e7bd356c123a0ef7706aabd70d",
+    "steel_frame_shelves_02/steel_frame_shelves_02_1k.gltf": "df103b9fbb08a60e262cc1d8af5cb37f3c1231a8764eeacec23d363be24feca6",
+    "steel_frame_shelves_02/textures/steel_frame_shelves_02_arm_1k.jpg": "7fbcad4858018270eec05cbcdfec886adf4de39a057a8fc15a3c1d1d009f0307",
+    "steel_frame_shelves_02/textures/steel_frame_shelves_02_diff_1k.jpg": "2b41f59f3fbc6464e10ce11ee17c80f35173de8321865e4c4a966c55f5898f15",
+    "steel_frame_shelves_02/textures/steel_frame_shelves_02_nor_gl_1k.jpg": "c0033947364a267d17307943df975bc9d81268b51532c73340dd0bf45d204990",
+    "textures/box_profile_metal_sheet_diff_1k.jpg": "c2c3643bb2e07554f805f56525ec2ffbc23117be95e324af46ac98f56fa7961f",
+    "textures/box_profile_metal_sheet_nor_gl_1k.jpg": "9cc5ca3135164dbc4eef21cf12ea488b02ce7ec252dc2b803be14eb7c3719fcb",
+    "textures/box_profile_metal_sheet_rough_1k.jpg": "bdff53193514473fee81bcab6ef75dd0a4c8ff392ae9de8d603050bb2ac4a8f0",
+    "wooden_crate_01/textures/wooden_crate_01_arm_1k.jpg": "cd0b031c3924905e16ffd78ead062c2cc274148c4104d09635310097738b4679",
+    "wooden_crate_01/textures/wooden_crate_01_diff_1k.jpg": "16653f4abaf4c1d9bca94bde3bd8c54d0ea9a5298d1648abcf57de1f7ecc34cc",
+    "wooden_crate_01/textures/wooden_crate_01_nor_gl_1k.jpg": "f4ea44c7dc1686123d337039cb713d74e8a2dbc6d1bd2beeac276d06f5df3fab",
+    "wooden_crate_01/wooden_crate_01.bin": "85f381f8035f7a6f2f3b848640894c6d3333b261946dd8a338c0fe19e0bea21e",
+    "wooden_crate_01/wooden_crate_01_1k.gltf": "fd9c6073acfc671e12b64666053f2805ae33aff5d3dbbcfe5c97c08c06644927"
+  },
+  "license": "CC0-1.0",
+  "models": {
+    "WetFloorSign_01": {
+      "authors": [
+        "Fran Calvente"
+      ],
+      "name": "Wet Floor Sign 01"
+    },
+    "box_profile_metal_sheet": {
+      "authors": [
+        "Amal Kumar"
+      ],
+      "name": "Box Profile Metal Sheet"
+    },
+    "cardboard_box_01": {
+      "authors": [
+        "Rahul Chaudhary"
+      ],
+      "name": "Cardboard Box 01"
+    },
+    "hand_truck": {
+      "authors": [
+        "Mutanzom3D"
+      ],
+      "name": "Hand Truck"
+    },
+    "industrial_storage_cart": {
+      "authors": [
+        "Jule Bielitz"
+      ],
+      "name": "Industrial Storage Cart"
+    },
+    "korean_fire_extinguisher_01": {
+      "authors": [
+        "UM JOORIN"
+      ],
+      "name": "Korean Fire Extinguisher 01"
+    },
+    "mounted_fluorescent_lights": {
+      "authors": [
+        "Ulan Cabanilla"
+      ],
+      "name": "Mounted Fluorescent Lights"
+    },
+    "power_box_01": {
+      "authors": [
+        "Rico Cilliers",
+        "Yann Kervran"
+      ],
+      "name": "Power Box 01"
+    },
+    "rollershutter_door": {
+      "authors": [
+        "MP"
+      ],
+      "name": "Rollershutter Door"
+    },
+    "steel_frame_shelves_02": {
+      "authors": [
+        "James Ray Cock"
+      ],
+      "name": "Steel Frame Shelves 02"
+    },
+    "wooden_crate_01": {
+      "authors": [
+        "James Ray Cock"
+      ],
+      "name": "Wooden Crate 01"
+    }
+  },
+  "resolution": "1k",
+  "source": "https://polyhaven.com"
+}
