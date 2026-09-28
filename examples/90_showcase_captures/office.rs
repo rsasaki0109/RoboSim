@@ -497,7 +497,41 @@ pub(crate) fn render_scene(
     scenario: &OfficeAgvDeskPlaceScenario,
     observation: OfficeAgvDeskPlaceObservation,
 ) -> RenderScene {
-    let mut scene = build_visual_render_scene(scenario.simulation().world());
+    let (other_agv_x_m, other_agv_z_m) = scenario.other_agv_translation_m();
+    let mut scene = render_office(
+        scenario.simulation().world(),
+        (
+            observation.base_x_m,
+            observation.base_z_m,
+            observation.base_yaw_rad,
+        ),
+        // The oncoming AGV travels in the opposite lane and only ever drives
+        // toward -X, so a fixed heading of PI is the direction it is going.
+        (other_agv_x_m, other_agv_z_m, std::f64::consts::PI),
+    );
+    let (cargo_x_m, cargo_z_m) = scenario.cargo_translation_m();
+    push_box(
+        &mut scene,
+        Vec3::new(cargo_x_m, 0.37, cargo_z_m),
+        Vec3::new(0.20, 0.20, 0.20),
+        if observation.cargo_loaded {
+            [0.95, 0.50, 0.06, 1.0]
+        } else {
+            [0.20, 0.74, 0.82, 1.0]
+        },
+    );
+    scene
+}
+
+/// Renders the office corridor with the ego AGV and the second AGV at the given
+/// `(x, z, yaw)` poses. Both vehicles are drawn from the poses the caller
+/// passes, so any rollout driving the office scene can reuse the set dressing.
+pub(crate) fn render_office(
+    world: &rne_ecs::World,
+    ego: (f64, f64, f64),
+    other: (f64, f64, f64),
+) -> RenderScene {
+    let mut scene = build_visual_render_scene(world);
     // The authored walls and the flat collision-box desk are collision
     // boundaries, but a low eye-level showcase camera would hide every
     // actor behind them, and a bare box desk reads poorly. Drop both render
@@ -541,37 +575,21 @@ pub(crate) fn render_scene(
         -0.006,
         ([0.83, 0.81, 0.76, 1.0], [0.76, 0.74, 0.69, 1.0]),
     );
-    let (cargo_x_m, cargo_z_m) = scenario.cargo_translation_m();
-    let (other_agv_x_m, other_agv_z_m) = scenario.other_agv_translation_m();
     push_agv(
         &mut scene,
-        Vec3::new(observation.base_x_m, 0.24, observation.base_z_m),
-        observation.base_yaw_rad,
+        Vec3::new(ego.0, 0.24, ego.1),
+        ego.2,
         [0.94, 0.33, 0.07, 1.0],
         [0.14, 0.15, 0.17, 1.0],
         [1.0, 0.55, 0.06, 1.0],
     );
-    // The oncoming AGV and cargo are intentionally render-only proxies whose
-    // transforms are copied from the scenario state on every frame. The AGV
-    // travels in the opposite lane and only ever drives toward -X, so a fixed
-    // heading of PI is the direction it is actually going.
     push_agv(
         &mut scene,
-        Vec3::new(other_agv_x_m, 0.24, other_agv_z_m),
-        std::f64::consts::PI,
+        Vec3::new(other.0, 0.24, other.1),
+        other.2,
         [0.10, 0.32, 0.72, 1.0],
         [0.13, 0.14, 0.16, 1.0],
         [0.10, 0.55, 0.92, 1.0],
-    );
-    push_box(
-        &mut scene,
-        Vec3::new(cargo_x_m, 0.37, cargo_z_m),
-        Vec3::new(0.20, 0.20, 0.20),
-        if observation.cargo_loaded {
-            [0.95, 0.50, 0.06, 1.0]
-        } else {
-            [0.20, 0.74, 0.82, 1.0]
-        },
     );
     // Desk shelving, aisle dividers, and a destination halo make the task
     // legible from the single fixed camera without adding physics entities.
