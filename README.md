@@ -114,6 +114,18 @@ came was 2.47 m centre to centre, and no car left the track. The cars are
 built from their parts (wings, sidepods, halo, steered and spinning wheels);
 the circuit uses CC0 Poly Haven asphalt, grass, tyres and barriers.
 [source](examples/128_car_race/main.rs)*
+![Four racing quads fly a night course of LED gates, trailing light in their team colours; the faster drones, started last, pass the slower ones on the final lap](docs/media/uav-race.gif)
+
+*Four racing drones fly three laps of an eight-gate course on the
+`MultirotorFlight` model (position loop, velocity loop, tilt-limited
+acceleration), each chasing a point on the course at the speed its own
+curvature profile allows, in its own lane of the gate opening. A pursuit
+start sends the slowest off first and the fastest last; all six pairs change
+places on the final lap and the fastest wins. All 99 gate crossings are
+inside the opening, the tightest with 0.56 m between props and frame, and
+the closest two drones came was 0.80 m. The quads are built from their parts
+(carbon X frame, motor bells, spinning three-blade props, tilted FPV camera,
+battery, antennas, LED strips). [source](examples/129_uav_race/main.rs)*
 
 ## Navigation, SLAM, and multi-robot
 

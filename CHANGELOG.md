@@ -93,6 +93,13 @@ All notable changes to Robot Native Engine are documented in this file.
   their parts and the circuit is dressed with CC0 Poly Haven asphalt, grass,
   tyres and barriers (`assets/props/polyhaven_racing`, fetched and pinned by
   `tools/prepare_polyhaven_warehouse.py --set racing`).
+- Example 129 flies four racing drones for three laps of an eight-gate night
+  course on `MultirotorFlight`, each chasing a point on the course at its own
+  curvature speed profile in its own lane of the gate opening, from a pursuit
+  start. Every gate crossing is checked against the opening. Measured: 99
+  crossings, none outside, tightest 0.56 m from the frame; drones never
+  closer than 0.80 m; six passes on the final lap; the fastest drone wins.
+  The quads are modelled from their parts and filmed with chase cameras.
 
 - The Navigation showcase (`docs/media/showcase-nav.gif`) is a shared
   corridor. A second AGV comes the other way, a pedestrian crosses from a
