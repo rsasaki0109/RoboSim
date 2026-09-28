@@ -21,16 +21,18 @@
 //! `--smoke` runs the mission headlessly and checks it; without it the run also
 //! renders `docs/media/multi-floor-lift.gif`.
 
+mod dressing;
+
 use rne_core::SimDuration;
 use rne_ecs::{spawn_named, Entity, World};
 use rne_math::{Hertz, Quat, Vec3};
 use rne_nav::{ButtonContact, CallButton, CallButtonSpec, Elevator, ElevatorSpec, ElevatorState};
 use rne_physics::{
     Collider, ColliderShape, CommandedKinematicPose, PhysicsBackend, PhysicsWorldDesc, RigidBody,
-    RigidBodyType,
+    RigidBodyInertia, RigidBodyType,
 };
 use rne_physics_rapier::{step_physics, RapierBackend};
-use rne_render::{Camera, MeshRenderCache, RenderBackend, RenderScene, VisualShape};
+use rne_render::{Camera, MeshRenderCache, RenderBackend, RenderScene};
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 use rne_world::Transform3;
 use std::fs;
@@ -106,6 +108,56 @@ struct Site {
     button: Entity,
 }
 
+/// Bevel on the robot's front and back bottom edges: its run along x and its
+/// rise, in meters.
+const ROBOT_BEVEL_M: (f64, f64) = (0.12, 0.02);
+
+/// The robot's collision shape: its box, with the front and back bottom edges
+/// bevelled the way a bumper is. A square edge sinks a millimetre into its
+/// support and meets the side face of the next slab at a seam; the solver
+/// pushes back on it horizontally, below the centre of mass, and a robot driven
+/// forward pitches over. The bevel meets a seam on a slope instead.
+fn robot_hull() -> ColliderShape {
+    let half = ROBOT_HALF_M;
+    let (run, rise) = ROBOT_BEVEL_M;
+    let mut points = Vec::with_capacity(16);
+    for z in [-half.z, half.z] {
+        for x in [-half.x, half.x] {
+            points.push(Vec3::new(x, half.y, z));
+            points.push(Vec3::new(x, -half.y + rise, z));
+            points.push(Vec3::new(x.signum() * (half.x - run), -half.y, z));
+        }
+    }
+    ColliderShape::ConvexHull {
+        points: points.into(),
+    }
+}
+
+/// Height of the robot's centre of mass above its base, in meters.
+///
+/// A delivery robot carries its batteries and drive in the base, so its mass
+/// sits low. Modelled as a uniform box instead, its centre of mass was at half
+/// height, and driving it with floor friction 0.5 put it at the tipping margin:
+/// it rocked 12 degrees backing out of the car.
+const ROBOT_COM_HEIGHT_M: f64 = 0.18;
+
+/// The robot's mass distribution: centre of mass low in the base, and the
+/// inertia of its box about that point (an overestimate for a bottom-heavy
+/// body, which only makes it harder to turn over).
+fn robot_inertia() -> RigidBodyInertia {
+    let size = ROBOT_HALF_M * 2.0;
+    let m = ROBOT_MASS_KG / 12.0;
+    RigidBodyInertia {
+        center_of_mass_local_m: Vec3::new(0.0, ROBOT_COM_HEIGHT_M - ROBOT_HALF_M.y, 0.0),
+        ixx_kg_m2: m * (size.y * size.y + size.z * size.z),
+        ixy_kg_m2: 0.0,
+        ixz_kg_m2: 0.0,
+        iyy_kg_m2: m * (size.x * size.x + size.z * size.z),
+        iyz_kg_m2: 0.0,
+        izz_kg_m2: m * (size.x * size.x + size.y * size.y),
+    }
+}
+
 fn spawn_site(world: &mut World) -> Site {
     // Lobby floors. Fixed slabs, one per served floor, stopping short of the
     // shaft so the camera sees into it.
@@ -145,7 +197,7 @@ fn spawn_site(world: &mut World) -> Site {
             ..Collider::default()
         },
         Transform3::from_translation_rotation(
-            Vec3::new(SHAFT_X_M, FLOOR_HEIGHTS_M[0], 0.0),
+            Vec3::new(SHAFT_X_M, car_center_y_m(FLOOR_HEIGHTS_M[0]), 0.0),
             Quat::IDENTITY,
         ),
     ));
@@ -198,10 +250,9 @@ fn spawn_site(world: &mut World) -> Site {
             mass_kg: ROBOT_MASS_KG,
             ..RigidBody::default()
         },
+        robot_inertia(),
         Collider {
-            shape: ColliderShape::Cuboid {
-                half_extents_m: ROBOT_HALF_M,
-            },
+            shape: robot_hull(),
             ..Collider::default()
         },
         Transform3::from_translation_rotation(
@@ -220,8 +271,16 @@ fn spawn_site(world: &mut World) -> Site {
 }
 
 /// Writes the state machine's car height and door opening onto the bodies.
+/// Centre height of the car platform for an elevator height. The elevator
+/// reports floor heights, so the platform's top face sits there, flush with the
+/// landing. With the centre there instead, the car floor stood a 6 cm step
+/// above the lobby, and the robot pitched over it and rode the lift on its side.
+fn car_center_y_m(elevator_height_m: f64) -> f64 {
+    elevator_height_m - CAR_HALF_M.y
+}
+
 fn apply_elevator(world: &mut World, site: &Site, elevator: &Elevator) {
-    let car_height_m = elevator.car_height_m();
+    let car_height_m = car_center_y_m(elevator.car_height_m());
     if let Some(mut transform) = world.get_mut::<Transform3>(site.car) {
         transform.translation.y = car_height_m;
     }
@@ -273,8 +332,10 @@ impl Phase {
 /// One captured frame: every pose the renderer needs.
 struct Frame {
     car_y_m: f64,
+    car_velocity_m_s: f64,
     door_opening_m: f64,
     robot: Vec3,
+    robot_rotation: Quat,
     phase: Phase,
 }
 
@@ -284,6 +345,8 @@ struct Mission {
     order: Vec<Phase>,
     presses: u32,
     ride_clearance_error_m: f64,
+    /// Largest angle, in radians, between the robot's up axis and the world's.
+    worst_tilt_rad: f64,
     delivered_floor: usize,
 }
 
@@ -327,6 +390,7 @@ fn run_mission(capture: bool) -> Mission {
     let mut phase = Phase::DriveToButton;
     let mut presses = 0_u32;
     let mut ride_clearance_error_m: f64 = 0.0;
+    let mut worst_tilt_rad: f64 = 0.0;
     let mut frames = Vec::new();
     let mut order = vec![phase];
 
@@ -398,6 +462,10 @@ fn run_mission(capture: bool) -> Mission {
             other => other,
         };
 
+        if let Some(transform) = world.get::<Transform3>(site.robot) {
+            let up = transform.rotation * Vec3::Y;
+            worst_tilt_rad = worst_tilt_rad.max(up.y.clamp(-1.0, 1.0).acos());
+        }
         if order.last() != Some(&phase) {
             order.push(phase);
         }
@@ -409,9 +477,13 @@ fn run_mission(capture: bool) -> Mission {
 
         if capture && step % sample_every == 0 && frames.len() < FRAME_COUNT {
             frames.push(Frame {
-                car_y_m: elevator.car_height_m(),
+                car_y_m: car_center_y_m(elevator.car_height_m()),
+                car_velocity_m_s: elevator.car_velocity_m_s(),
                 door_opening_m: elevator.door_opening_m(),
                 robot,
+                robot_rotation: world
+                    .get::<Transform3>(site.robot)
+                    .map_or(Quat::IDENTITY, |t| t.rotation),
                 phase,
             });
         }
@@ -446,86 +518,9 @@ fn run_mission(capture: bool) -> Mission {
         order,
         presses,
         ride_clearance_error_m,
+        worst_tilt_rad,
         delivered_floor,
     }
-}
-
-fn append_site(scene: &mut RenderScene, frame: &Frame) {
-    const FLOOR: [f32; 4] = [0.52, 0.55, 0.60, 1.0];
-    const SHAFT: [f32; 4] = [0.28, 0.31, 0.38, 1.0];
-    const CAR: [f32; 4] = [0.78, 0.81, 0.86, 1.0];
-    const DOOR: [f32; 4] = [0.82, 0.86, 0.92, 1.0];
-    const BUTTON_IDLE: [f32; 4] = [0.55, 0.57, 0.62, 1.0];
-    const BUTTON_LIT: [f32; 4] = [0.98, 0.72, 0.18, 1.0];
-    const ROBOT: [f32; 4] = [0.20, 0.78, 0.95, 1.0];
-
-    let mut push = |translation: Vec3, half: Vec3, color: [f32; 4]| {
-        scene.items.push(RenderScene::item_from_visual(
-            Transform3::from_translation_rotation(translation, Quat::IDENTITY),
-            VisualShape::Box { size_m: half * 2.0 },
-            color,
-            Transform3::IDENTITY,
-        ));
-    };
-
-    // Shaft walls, so the car reads as travelling inside something rather than
-    // floating. Back plus one side; the open side is the camera's cutaway.
-    let shaft_half_height_m = FLOOR_HEIGHTS_M[1] * 0.5 + 1.1;
-    let shaft_mid_y_m = shaft_half_height_m - 0.6;
-    push(
-        Vec3::new(SHAFT_X_M + 0.95, shaft_mid_y_m, 0.0),
-        Vec3::new(0.06, shaft_half_height_m, 1.05),
-        SHAFT,
-    );
-    push(
-        Vec3::new(SHAFT_X_M, shaft_mid_y_m, -1.02),
-        Vec3::new(0.95, shaft_half_height_m, 0.06),
-        SHAFT,
-    );
-    // Lobby wall the panel is mounted on, one per floor.
-    for height_m in FLOOR_HEIGHTS_M {
-        push(
-            Vec3::new(SHAFT_X_M - 2.4, height_m + 1.1, -1.08),
-            Vec3::new(1.5, 1.1, 0.05),
-            SHAFT,
-        );
-    }
-    // Panel plate, so the button is not a speck on a wall.
-    push(
-        BUTTON_CENTER_M - BUTTON_NORMAL * 0.02,
-        Vec3::new(0.16, 0.26, 0.01),
-        [0.18, 0.20, 0.25, 1.0],
-    );
-    for height_m in FLOOR_HEIGHTS_M {
-        push(
-            Vec3::new(SHAFT_X_M - 3.9, height_m - 0.06, 0.0),
-            Vec3::new(3.0, 0.06, 1.2),
-            FLOOR,
-        );
-    }
-    push(Vec3::new(SHAFT_X_M, frame.car_y_m, 0.0), CAR_HALF_M, CAR);
-    let doorway_z_m = CAR_HALF_M.z - DOOR_HALF_M.z;
-    for sign in [-1.0, 1.0] {
-        push(
-            Vec3::new(
-                SHAFT_X_M - CAR_HALF_M.x,
-                frame.car_y_m + DOOR_HALF_M.y,
-                sign * (doorway_z_m + frame.door_opening_m),
-            ),
-            DOOR_HALF_M,
-            DOOR,
-        );
-    }
-    let lit = !matches!(frame.phase, Phase::DriveToButton);
-    // Drawn larger than the collider on purpose: the physical button is 10 cm
-    // across and would be three pixels at this scale, so the state it reports
-    // would be invisible. The collider, and therefore the press, is unchanged.
-    push(
-        BUTTON_CENTER_M - BUTTON_NORMAL * BUTTON_HALF_M.z,
-        Vec3::new(0.10, 0.10, BUTTON_HALF_M.z),
-        if lit { BUTTON_LIT } else { BUTTON_IDLE },
-    );
-    push(frame.robot, ROBOT_HALF_M, ROBOT);
 }
 
 fn write_png(path: &Path, rgba: &[u8]) -> std::io::Result<()> {
@@ -538,24 +533,19 @@ fn write_png(path: &Path, rgba: &[u8]) -> std::io::Result<()> {
 }
 
 fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
-    let status = std::process::Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-loglevel",
-            "error",
-            "-framerate",
-            "14",
-            "-i",
-            &frames_dir.join("frame-%03d.png").to_string_lossy(),
-            "-vf",
-            "fps=14,scale=860:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=160:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle",
-            &gif_path.to_string_lossy(),
-        ])
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tools/encode_gif.py");
+    let status = std::process::Command::new("python3")
+        .arg(script)
+        .arg(frames_dir)
+        .arg(gif_path)
+        .args(["--fps", "14", "--colors", "192"])
         .status()?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| std::io::Error::other("ffmpeg multi-floor gif encode failed"))
+    if !status.success() {
+        return Err(std::io::Error::other(
+            "encode_gif.py failed to build the gif",
+        ));
+    }
+    Ok(())
 }
 
 fn main() {
@@ -565,6 +555,10 @@ fn main() {
     println!(
         "mission: {} press(es), worst ride clearance error {:.4} m, delivered to floor {}",
         mission.presses, mission.ride_clearance_error_m, mission.delivered_floor
+    );
+    println!(
+        "robot tilt: worst {:.1} deg",
+        mission.worst_tilt_rad.to_degrees()
     );
     println!(
         "sequence: {}",
@@ -587,12 +581,18 @@ fn main() {
         "the robot never actuated the call button"
     );
     assert_eq!(mission.delivered_floor, 1, "the robot must end on 2F");
-    // Measured 0.0197 m. Example 118's rider starts parked on the car and
-    // holds 0.0000 m; this one drives aboard and arrives with the bounce that
-    // costs. The bound is set above that, not around it, so it fails on the
-    // rider being left behind rather than on a millimetre of settling.
     assert!(
-        mission.ride_clearance_error_m < 0.04,
+        // Measured 0.2 deg; it was 90 deg, hidden by a renderer that drew the
+        // robot upright whatever its pose.
+        mission.worst_tilt_rad.to_degrees() < 2.0,
+        "the robot tipped {:.1} deg on the way",
+        mission.worst_tilt_rad.to_degrees()
+    );
+    // Measured 0.0007 m. It was 0.0197 m while the robot tipped onto its side
+    // boarding and rode the car lying down; the bound sits above the upright
+    // ride, so it fails on the rider being left behind or thrown about.
+    assert!(
+        mission.ride_clearance_error_m < 0.01,
         "the robot slipped on the car during the ride: {} m",
         mission.ride_clearance_error_m
     );
@@ -608,24 +608,25 @@ fn main() {
     fs::create_dir_all(&frames_dir).expect("create frame directory");
 
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
+    backend.set_environment(dressing::lobby_environment());
     let camera = Camera::new(WIDTH, HEIGHT, std::f64::consts::FRAC_PI_4);
     let mut mesh_cache = MeshRenderCache::new();
     // A fixed viewpoint, deliberately: the subject is vertical travel, and an
     // orbiting camera both fights the eye and destroys inter-frame compression.
     let orbit = CameraOrbit {
-        focus: Vec3::new(SHAFT_X_M - 1.35, 1.60, 0.0),
+        focus: Vec3::new(SHAFT_X_M - 1.9, 2.05, 0.0),
         // Mostly across the travel axis, with just enough turn to see the
         // doorway open rather than a door edge-on.
         yaw_rad: 0.30,
         pitch_rad: 1.34,
-        distance_m: 8.6,
+        distance_m: 7.4,
     };
 
     for (index, frame) in mission.frames.iter().enumerate() {
         let mut scene = RenderScene::default();
-        append_site(&mut scene, frame);
+        dressing::append_site(&mut scene, frame);
         mesh_cache
-            .resolve_scene(&mut scene, &[])
+            .resolve_scene(&mut scene, &[&dressing::props_root()])
             .expect("resolve scene meshes");
         let output = backend
             .render_scene_camera(&camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)

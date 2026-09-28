@@ -2654,6 +2654,7 @@ dependencies = [
 name = "multi_floor_media"
 version = "0.4.0"
 dependencies = [
+ "image",
  "png",
  "rne_core",
  "rne_ecs",
