@@ -71,6 +71,20 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Lifelong SLAM in `rne_slam`: `build_recency_map` rebuilds the occupancy map
+  from keyframes at the lifelong graph's current estimates, weighting each
+  cell toward the latest session that observed it and reporting per session
+  which cells appeared and vanished; `LifelongPoseGraph::prune_superseded`
+  removes nodes a later session revisited, compounding their edges so the
+  graph stays connected, with `reference_sessions` never pruned;
+  `register_session_densely` registers every keyframe of a session against
+  the prior map from one global recognition; and
+  `LifelongPoseGraph::merge_session_onto_map` merges with the existing map held
+  fixed. Example 127 maps a physics warehouse on four days while pallets move:
+  9 of 9 changed pallets detected, 798 of 828 flagged cells on a changed
+  pallet, the map within 3 cm of the building after rigid alignment, and the
+  graph held at two days' nodes.
+
 - The Navigation showcase (`docs/media/showcase-nav.gif`) is a shared
   corridor. A second AGV comes the other way, a pedestrian crosses from a
   doorway, and a hand truck stands in the aisle. None of them is on the orange
@@ -685,6 +699,14 @@ All notable changes to Robot Native Engine are documented in this file.
   pipeline, both built-in planners, and a robot-vs-world distance query.
 
 ### Fixed
+
+- `Slam2d` recorded raw odometry as the measurement of every sequential edge,
+  so each loop-closure re-optimization pulled the trajectory back toward its
+  drift between closures, and a later merge undid the scan matcher's
+  corrections. A matched step now records the matched relative pose; only an
+  unmatched step falls back to odometry. Example 98's optimized final pose
+  moves from (y 0.04 m, yaw 0.016 rad) to (y 0.02 m, yaw -0.004 rad) off
+  truth.
 
 - Example 122 (`multi-floor-lift.gif`) drew the robot upright whatever its
   pose, and the robot had in fact tipped onto its side boarding the lift and

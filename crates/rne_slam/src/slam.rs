@@ -161,7 +161,16 @@ impl Slam2d {
 
         let node = self.graph.add_node(corrected);
         if let Some(previous_odom) = self.previous_odom {
-            let measurement = previous_odom.inverse().compose(odom_pose);
+            // A matched step records the relative pose the scan matcher found;
+            // only an unmatched step falls back to raw odometry. Recording raw
+            // odometry for every step made each loop-closure re-optimization
+            // pull the trajectory back toward its drift, discarding the
+            // matcher's corrections between closures.
+            let measurement = if matched {
+                self.pose.inverse().compose(corrected)
+            } else {
+                previous_odom.inverse().compose(odom_pose)
+            };
             self.graph
                 .add_edge(PoseGraphEdge::odometry(node - 1, node, measurement));
         }

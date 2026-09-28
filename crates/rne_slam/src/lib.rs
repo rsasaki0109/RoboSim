@@ -14,6 +14,7 @@ pub mod floor_reacquire;
 pub mod graph_io;
 pub mod icp;
 pub mod imu_preintegration;
+pub mod lifelong_map;
 pub mod likelihood;
 pub mod lio;
 pub mod lio_ekf;
@@ -45,6 +46,9 @@ pub use icp::{Icp3d, IcpConfig, IcpError, IcpResult};
 pub use imu_preintegration::{
     ImuBias, ImuPreintegrationError, ImuPreintegrator, ImuSample, PreintegratedDelta,
 };
+pub use lifelong_map::{
+    build_recency_map, MapKeyframe, RecencyMap, RecencyMapConfig, RecencyMapError, SessionChanges,
+};
 pub use likelihood::{LikelihoodConfig, LikelihoodField};
 pub use lio::{LioConfig, LioError, LioOdometry, LioUpdate};
 pub use lio_ekf::{LioEkf, LioEkfConfig, LioEkfError, LioEkfUpdate};
@@ -68,7 +72,8 @@ pub use se3::{
     so3_left_jacobian_inverse, so3_log, Se3,
 };
 pub use session::{
-    discover_session_constraints, DiscoveryConfig, DiscoveryError, LifelongPoseGraph, MergeOptions,
+    discover_session_constraints, register_session_densely, DenseRegistrationConfig,
+    DiscoveryConfig, DiscoveryError, LifelongPoseGraph, MergeOptions, PruneConfig, PruneReport,
     SessionConstraint, SessionError, SessionId, SessionRecognition, SessionScan,
 };
 pub use slam::{closure_consistent, Slam2d, SlamConfig, SlamUpdate};

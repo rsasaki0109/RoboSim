@@ -26,9 +26,10 @@
 //! pruning old nodes, decaying stale structure, reporting per-session drift —
 //! needs to know which visit contributed what.
 
-use crate::likelihood::LikelihoodConfig;
+use crate::likelihood::{LikelihoodConfig, LikelihoodField};
 use crate::pose_graph::{PoseGraph, PoseGraphEdge, PoseGraphError};
 use crate::relocalize::{GlobalRelocalizer, RelocalizationConfig, RelocalizationError};
+use crate::scan_match::{ScanMatchConfig, ScanMatcher};
 use rne_math::Vec3;
 use rne_nav::{OccupancyGrid, Pose2d};
 use serde::{Deserialize, Serialize};
@@ -189,23 +190,7 @@ impl LifelongPoseGraph {
         constraints: &[SessionConstraint],
         options: MergeOptions,
     ) -> Result<f64, SessionError> {
-        if session.node_count() == 0 {
-            return Err(SessionError::EmptySession);
-        }
-        if constraints.is_empty() {
-            return Err(SessionError::NoConstraints);
-        }
-        for constraint in constraints {
-            if constraint.prior_node >= self.graph.node_count() {
-                return Err(SessionError::UnknownPriorNode(constraint.prior_node));
-            }
-            if constraint.session_node >= session.node_count() {
-                return Err(SessionError::UnknownSessionNode(constraint.session_node));
-            }
-            if !constraint.is_valid() {
-                return Err(SessionError::InvalidConstraint);
-            }
-        }
+        self.validate_merge(session, constraints)?;
 
         // Rigid alignment from the first correspondence: the session node should
         // land where the prior node plus the measured offset says it is.
@@ -253,6 +238,307 @@ impl LifelongPoseGraph {
         )?;
         Ok(error)
     }
+}
+
+impl LifelongPoseGraph {
+    /// Merges a session with the existing map held fixed.
+    ///
+    /// [`Self::merge_session`] re-optimizes the whole graph, so every merge
+    /// moves the existing map a little toward the new session: measured on a
+    /// four-day warehouse run, 4 to 10 cm and up to 0.02 rad per merge. Over
+    /// days the map frame creeps, and anything stored in map coordinates
+    /// creeps with it. Here only the new session's nodes are optimized; each
+    /// constraint acts as an absolute target for its session node, the prior
+    /// node's current pose composed with the measurement. The existing nodes,
+    /// and so the map frame, do not move. The session's edges and the
+    /// inter-session edges are added to the graph exactly as `merge_session`
+    /// adds them, so a later full optimization can still use them.
+    ///
+    /// Returns the final mean squared error of the session-only optimization.
+    pub fn merge_session_onto_map(
+        &mut self,
+        session: &PoseGraph,
+        constraints: &[SessionConstraint],
+        options: MergeOptions,
+    ) -> Result<f64, SessionError> {
+        self.validate_merge(session, constraints)?;
+        // Node 0 is the map origin; session node i is node i + 1.
+        let mut local = PoseGraph::new();
+        local.add_node(Pose2d::IDENTITY);
+        let anchor = &constraints[0];
+        let target = |constraint: &SessionConstraint| {
+            self.graph
+                .node(constraint.prior_node)
+                .map(|prior| prior.compose(constraint.measurement))
+                .ok_or(SessionError::UnknownPriorNode(constraint.prior_node))
+        };
+        let session_anchor = session
+            .node(anchor.session_node)
+            .ok_or(SessionError::UnknownSessionNode(anchor.session_node))?;
+        let map_from_session = target(anchor)?.compose(session_anchor.inverse());
+        for pose in session.nodes() {
+            local.add_node(map_from_session.compose(*pose));
+        }
+        for edge in session.edges() {
+            local.add_edge(PoseGraphEdge {
+                from: edge.from + 1,
+                to: edge.to + 1,
+                ..*edge
+            });
+        }
+        for constraint in constraints {
+            local.add_edge(PoseGraphEdge::loop_closure(
+                0,
+                constraint.session_node + 1,
+                target(constraint)?,
+                constraint.information,
+            ));
+        }
+        let error =
+            local.optimize_robust(options.iterations, options.damping, 0, options.huber_delta)?;
+
+        let offset = self.graph.node_count();
+        let session_id = SessionId(self.session_count);
+        for pose in &local.nodes()[1..] {
+            self.graph.add_node(*pose);
+            self.node_sessions.push(session_id);
+        }
+        for edge in session.edges() {
+            self.graph.add_edge(PoseGraphEdge {
+                from: edge.from + offset,
+                to: edge.to + offset,
+                ..*edge
+            });
+        }
+        for constraint in constraints {
+            self.graph.add_edge(PoseGraphEdge::loop_closure(
+                constraint.prior_node,
+                constraint.session_node + offset,
+                constraint.measurement,
+                constraint.information,
+            ));
+        }
+        self.session_count += 1;
+        Ok(error)
+    }
+
+    fn validate_merge(
+        &self,
+        session: &PoseGraph,
+        constraints: &[SessionConstraint],
+    ) -> Result<(), SessionError> {
+        if session.node_count() == 0 {
+            return Err(SessionError::EmptySession);
+        }
+        if constraints.is_empty() {
+            return Err(SessionError::NoConstraints);
+        }
+        for constraint in constraints {
+            if constraint.prior_node >= self.graph.node_count() {
+                return Err(SessionError::UnknownPriorNode(constraint.prior_node));
+            }
+            if constraint.session_node >= session.node_count() {
+                return Err(SessionError::UnknownSessionNode(constraint.session_node));
+            }
+            if !constraint.is_valid() {
+                return Err(SessionError::InvalidConstraint);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Settings for pruning nodes a later session has superseded.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PruneConfig {
+    /// A node is superseded when a node from a later session lies within this
+    /// distance, in meters, and within [`Self::max_yaw_rad`] of its heading.
+    pub radius_m: f64,
+    /// Heading difference, in radians, within which a later node supersedes.
+    pub max_yaw_rad: f64,
+    /// Node that is never pruned: the optimizer's anchor.
+    pub anchor: usize,
+    /// The first this-many sessions are the map's reference and are never
+    /// pruned. Pruning every older session replaces the map a new session is
+    /// registered against with the previous session's copy of it, fitting
+    /// error and all, so the map frame random-walks from day to day; keeping a
+    /// reference holds it in place.
+    pub reference_sessions: usize,
+}
+
+impl Default for PruneConfig {
+    fn default() -> Self {
+        Self {
+            radius_m: 0.4,
+            max_yaw_rad: 0.6,
+            anchor: 0,
+            reference_sessions: 0,
+        }
+    }
+}
+
+/// What [`LifelongPoseGraph::prune_superseded`] did.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PruneReport {
+    /// Number of nodes removed.
+    pub removed: usize,
+    /// For every node before pruning, its index afterwards, or `None` when it
+    /// was removed. Callers holding per-node data (keyframe scans) use this to
+    /// drop and re-index theirs.
+    pub index_map: Vec<Option<usize>>,
+}
+
+impl LifelongPoseGraph {
+    /// Removes nodes that a later session has seen again from nearly the same
+    /// pose, so the graph stops growing with every visit to the same place.
+    ///
+    /// A node is superseded when some node from a later session lies within
+    /// [`PruneConfig::radius_m`] and [`PruneConfig::max_yaw_rad`] of its current
+    /// estimate. Removing a node must not cut the graph, so its constraints are
+    /// compounded onto a surviving neighbour first: the neighbour it shares an
+    /// odometry edge with, or its lowest-indexed neighbour otherwise. Each
+    /// re-attached edge's measurement is the neighbour-to-node measurement
+    /// composed with the original one, and its information is the two edges'
+    /// information combined in series (covariances add), so a compounded edge
+    /// is never more certain than the path it replaces.
+    ///
+    /// Nodes are considered in index order, and a node counts as superseded
+    /// only by nodes that are still present, so the result is deterministic
+    /// and the latest session always survives intact. The anchor and the
+    /// reference sessions are never removed. Estimates are left as they are; no re-optimization is run.
+    pub fn prune_superseded(&mut self, config: PruneConfig) -> PruneReport {
+        let count = self.graph.node_count();
+        let mut alive = vec![true; count];
+        let mut edges: Vec<PoseGraphEdge> = self.graph.edges().to_vec();
+        let nodes = self.graph.nodes().to_vec();
+        let superseded = |node: usize, alive: &[bool]| {
+            let session = self.node_sessions[node];
+            let pose = nodes[node];
+            (0..count).any(|other| {
+                alive[other]
+                    && self.node_sessions[other] > session
+                    && (nodes[other].x_m - pose.x_m).hypot(nodes[other].y_m - pose.y_m)
+                        <= config.radius_m
+                    && wrap_angle(nodes[other].yaw_rad - pose.yaw_rad).abs() <= config.max_yaw_rad
+            })
+        };
+        for node in 0..count {
+            let reference = self.node_sessions[node].0 < config.reference_sessions;
+            if node == config.anchor || reference || !superseded(node, &alive) {
+                continue;
+            }
+            edges = contract_node(&edges, node);
+            alive[node] = false;
+        }
+
+        let mut index_map = Vec::with_capacity(count);
+        let mut graph = PoseGraph::new();
+        let mut node_sessions = Vec::new();
+        for node in 0..count {
+            if alive[node] {
+                index_map.push(Some(graph.add_node(nodes[node])));
+                node_sessions.push(self.node_sessions[node]);
+            } else {
+                index_map.push(None);
+            }
+        }
+        for edge in edges {
+            if let (Some(from), Some(to)) = (index_map[edge.from], index_map[edge.to]) {
+                graph.add_edge(PoseGraphEdge { from, to, ..edge });
+            }
+        }
+        let removed = alive.iter().filter(|kept| !**kept).count();
+        self.graph = graph;
+        self.node_sessions = node_sessions;
+        PruneReport { removed, index_map }
+    }
+}
+
+/// One edge of a node being contracted, seen from that node.
+#[derive(Clone, Copy)]
+struct Incident {
+    neighbour: usize,
+    /// Measurement from the contracted node to the neighbour.
+    node_to_neighbour: Pose2d,
+    information: (f64, f64, f64),
+    loop_closure: bool,
+}
+
+/// Re-attaches every edge of `node` to one surviving neighbour and drops the
+/// edges between them, leaving `node` isolated.
+fn contract_node(edges: &[PoseGraphEdge], node: usize) -> Vec<PoseGraphEdge> {
+    let incident: Vec<Incident> = edges
+        .iter()
+        .filter_map(|edge| {
+            if edge.from == node && edge.to != node {
+                Some(Incident {
+                    neighbour: edge.to,
+                    node_to_neighbour: edge.measurement,
+                    information: edge.information,
+                    loop_closure: edge.loop_closure,
+                })
+            } else if edge.to == node && edge.from != node {
+                Some(Incident {
+                    neighbour: edge.from,
+                    node_to_neighbour: edge.measurement.inverse(),
+                    information: edge.information,
+                    loop_closure: edge.loop_closure,
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+    let mut kept: Vec<PoseGraphEdge> = edges
+        .iter()
+        .filter(|edge| edge.from != node && edge.to != node)
+        .copied()
+        .collect();
+    // Prefer a neighbour along the odometry chain; any neighbour otherwise.
+    let survivor = incident
+        .iter()
+        .filter(|edge| !edge.loop_closure)
+        .map(|edge| edge.neighbour)
+        .min()
+        .or_else(|| incident.iter().map(|edge| edge.neighbour).min());
+    let Some(survivor) = survivor else {
+        return kept;
+    };
+    // The link to the survivor with the strongest yaw information.
+    let link = incident
+        .iter()
+        .filter(|edge| edge.neighbour == survivor)
+        .copied()
+        .reduce(|best, candidate| {
+            if best.information.2 >= candidate.information.2 {
+                best
+            } else {
+                candidate
+            }
+        })
+        .expect("survivor is a neighbour");
+    let survivor_to_node = link.node_to_neighbour.inverse();
+    for edge in incident.iter().filter(|edge| edge.neighbour != survivor) {
+        kept.push(PoseGraphEdge {
+            from: survivor,
+            to: edge.neighbour,
+            measurement: survivor_to_node.compose(edge.node_to_neighbour),
+            information: in_series(link.information, edge.information),
+            loop_closure: edge.loop_closure,
+        });
+    }
+    kept
+}
+
+/// Information of two measurements composed in series: covariances add.
+fn in_series(a: (f64, f64, f64), b: (f64, f64, f64)) -> (f64, f64, f64) {
+    let series = |a: f64, b: f64| 1.0 / (1.0 / a + 1.0 / b);
+    (series(a.0, b.0), series(a.1, b.1), series(a.2, b.2))
+}
+
+fn wrap_angle(angle: f64) -> f64 {
+    let wrapped = (angle + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
+    wrapped - std::f64::consts::PI
 }
 
 /// Optimization settings applied after a session merge.
@@ -452,6 +738,146 @@ pub fn discover_session_constraints(
             prior_distance_m,
         });
     }
+    Ok(recognitions)
+}
+
+/// Settings for [`register_session_densely`].
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DenseRegistrationConfig {
+    /// Likelihood field built from the prior map.
+    pub likelihood: LikelihoodConfig,
+    /// Local scan matcher; its windows bound how far a keyframe may sit from
+    /// where the running correction predicts it.
+    pub matcher: ScanMatchConfig,
+    /// Mean likelihood a match must reach to become a constraint.
+    pub min_score: f64,
+    /// Maximum distance from the matched pose to the prior node it is attached
+    /// to, in meters.
+    pub max_prior_distance_m: f64,
+    /// Information weight applied at a score of 1.0, scaled linearly by score.
+    pub information_scale: (f64, f64, f64),
+}
+
+impl Default for DenseRegistrationConfig {
+    fn default() -> Self {
+        Self {
+            likelihood: LikelihoodConfig::default(),
+            matcher: ScanMatchConfig::default(),
+            min_score: 0.6,
+            max_prior_distance_m: 1.0,
+            information_scale: (100.0, 100.0, 100.0),
+        }
+    }
+}
+
+/// Registers every keyframe of a session against the prior map, starting from
+/// one global recognition.
+///
+/// [`discover_session_constraints`] searches the whole map for each scan it is
+/// given, which is too expensive to do for every keyframe, and a handful of
+/// recognitions cannot reconcile two trajectories that each carry their own
+/// few-centimetre distortions: the maps they produce disagree locally, and
+/// every disagreement reads as a change. This walks the session outward from
+/// `seed` in both directions, predicting each keyframe from the previous
+/// match's session-to-map correction and refining it with a local scan match,
+/// so slowly varying distortion is tracked rather than accumulated. A match
+/// that scores below [`DenseRegistrationConfig::min_score`] contributes no
+/// constraint and does not update the correction.
+///
+/// The result is ordered by session node and has the same form as
+/// [`discover_session_constraints`]'s, ready for
+/// [`LifelongPoseGraph::merge_session`].
+pub fn register_session_densely(
+    prior_map: &OccupancyGrid,
+    lifelong: &LifelongPoseGraph,
+    session: &PoseGraph,
+    scans: &[SessionScan],
+    seed: &SessionRecognition,
+    config: &DenseRegistrationConfig,
+) -> Result<Vec<SessionRecognition>, DiscoveryError> {
+    let valid_weights = [
+        config.information_scale.0,
+        config.information_scale.1,
+        config.information_scale.2,
+    ]
+    .into_iter()
+    .all(|weight| weight.is_finite() && weight > 0.0);
+    if !(config.min_score.is_finite()
+        && config.min_score > 0.0
+        && config.max_prior_distance_m.is_finite()
+        && config.max_prior_distance_m > 0.0
+        && valid_weights)
+    {
+        return Err(DiscoveryError::InvalidConfig);
+    }
+    let seed_node = seed.constraint.session_node;
+    let seed_pose = session
+        .node(seed_node)
+        .ok_or(DiscoveryError::UnknownSessionNode(seed_node))?;
+    for scan in scans {
+        if scan.node >= session.node_count() {
+            return Err(DiscoveryError::UnknownSessionNode(scan.node));
+        }
+    }
+    let field = LikelihoodField::from_occupancy(prior_map, &config.likelihood)
+        .map_err(|_| DiscoveryError::InvalidConfig)?;
+    let matcher = ScanMatcher::new(config.matcher);
+    let mut ordered: Vec<&SessionScan> = scans.iter().collect();
+    ordered.sort_by_key(|scan| scan.node);
+    let split = ordered.partition_point(|scan| scan.node < seed_node);
+    let seed_correction = seed.recognized_pose.compose(seed_pose.inverse());
+
+    let mut recognitions = Vec::new();
+    let forward = ordered[split..].iter();
+    let backward = ordered[..split].iter().rev();
+    for walk in [forward.collect::<Vec<_>>(), backward.collect::<Vec<_>>()] {
+        let mut correction = seed_correction;
+        for scan in walk {
+            let session_pose = session
+                .node(scan.node)
+                .ok_or(DiscoveryError::UnknownSessionNode(scan.node))?;
+            let Some(result) = matcher.match_scan(
+                &field,
+                &scan.points_sensor_m,
+                scan.sensor_from_base,
+                correction.compose(session_pose),
+            ) else {
+                continue;
+            };
+            if result.score < config.min_score {
+                continue;
+            }
+            correction = result.pose.compose(session_pose.inverse());
+            let Some((prior_node, prior_pose, prior_distance_m)) =
+                nearest_prior_node(lifelong, result.pose)
+            else {
+                continue;
+            };
+            if prior_distance_m > config.max_prior_distance_m {
+                continue;
+            }
+            let weight = result.score.clamp(0.0, 1.0);
+            let constraint = SessionConstraint::new(
+                prior_node,
+                scan.node,
+                prior_pose.inverse().compose(result.pose),
+                (
+                    config.information_scale.0 * weight,
+                    config.information_scale.1 * weight,
+                    config.information_scale.2 * weight,
+                ),
+            );
+            if constraint.is_valid() {
+                recognitions.push(SessionRecognition {
+                    constraint,
+                    recognized_pose: result.pose,
+                    score: result.score,
+                    prior_distance_m,
+                });
+            }
+        }
+    }
+    recognitions.sort_by_key(|recognition| recognition.constraint.session_node);
     Ok(recognitions)
 }
 
@@ -985,5 +1411,123 @@ mod tests {
                 "node {index}: {merged:?} should coincide with {original:?}"
             );
         }
+    }
+    /// Two visits along the same corridor, the second merged against the first
+    /// at its start and end.
+    fn two_visits(node_count: usize) -> LifelongPoseGraph {
+        let mut lifelong = LifelongPoseGraph::from_first_session(drifting_session(node_count, 0.0));
+        let second = drifting_session(node_count, 0.0);
+        let last = node_count - 1;
+        lifelong
+            .merge_session(
+                &second,
+                &[
+                    SessionConstraint::new(0, 0, Pose2d::IDENTITY, (100.0, 100.0, 100.0)),
+                    SessionConstraint::new(last, last, Pose2d::IDENTITY, (100.0, 100.0, 100.0)),
+                ],
+                MergeOptions::default(),
+            )
+            .expect("merge");
+        lifelong
+    }
+
+    #[test]
+    fn pruning_drops_the_superseded_visit_and_keeps_the_map_connected() {
+        let mut lifelong = two_visits(6);
+        assert_eq!(lifelong.graph().node_count(), 12);
+        let report = lifelong.prune_superseded(PruneConfig::default());
+        // Every first-visit node but the anchor sits under a second-visit node.
+        assert_eq!(report.removed, 5);
+        assert_eq!(lifelong.graph().node_count(), 7);
+        assert!(lifelong.is_connected());
+        assert_eq!(lifelong.session_nodes(SessionId(1)).len(), 6);
+        assert_eq!(report.index_map[0], Some(0));
+        assert!(report.index_map[1..6].iter().all(Option::is_none));
+        assert_eq!(report.index_map[6], Some(1));
+    }
+
+    #[test]
+    fn pruning_preserves_the_solution_it_compounds() {
+        let mut lifelong = two_visits(6);
+        let before: Vec<Pose2d> = lifelong.graph().nodes()[6..].to_vec();
+        lifelong.prune_superseded(PruneConfig::default());
+        let mut graph = lifelong.graph().clone();
+        graph.optimize_robust(20, 1.0e-6, 0, 0.3).expect("optimize");
+        // The surviving second visit does not move: compounded edges encode
+        // the same relative geometry as the chains they replaced.
+        let after = &graph.nodes()[1..];
+        assert!(
+            mean_error_m(after, &before) < 1.0e-6,
+            "moved {}",
+            mean_error_m(after, &before)
+        );
+    }
+
+    #[test]
+    fn pruning_keeps_nodes_no_later_session_revisited() {
+        let mut lifelong = LifelongPoseGraph::from_first_session(drifting_session(6, 0.0));
+        let mut far = PoseGraph::new();
+        far.add_node(Pose2d::new(0.0, 0.0, 0.0));
+        far.add_node(Pose2d::new(1.0, 0.0, 0.0));
+        far.add_edge(PoseGraphEdge::odometry(0, 1, Pose2d::new(1.0, 0.0, 0.0)));
+        // The second session is recognized 3 m to the side of the corridor.
+        lifelong
+            .merge_session(
+                &far,
+                &[SessionConstraint::new(
+                    0,
+                    0,
+                    Pose2d::new(0.0, 3.0, 0.0),
+                    (100.0, 100.0, 100.0),
+                )],
+                MergeOptions::default(),
+            )
+            .expect("merge");
+        let report = lifelong.prune_superseded(PruneConfig::default());
+        assert_eq!(report.removed, 0);
+        assert_eq!(lifelong.graph().node_count(), 8);
+    }
+
+    #[test]
+    fn a_compounded_edge_is_never_more_certain_than_its_parts() {
+        let combined = in_series((100.0, 100.0, 50.0), (100.0, 25.0, 50.0));
+        assert!((combined.0 - 50.0).abs() < 1e-9);
+        assert!((combined.1 - 20.0).abs() < 1e-9);
+        assert!((combined.2 - 25.0).abs() < 1e-9);
+    }
+    #[test]
+    fn merging_onto_the_map_leaves_the_map_where_it_was() {
+        let mut full = LifelongPoseGraph::from_first_session(drifting_session(6, 0.0));
+        let mut fixed = full.clone();
+        let prior: Vec<Pose2d> = full.graph().nodes().to_vec();
+        // The second visit's odometry over-reports each step by 5 cm.
+        let second = drifting_session(6, 0.05);
+        let constraints = [
+            SessionConstraint::new(0, 0, Pose2d::IDENTITY, (100.0, 100.0, 100.0)),
+            SessionConstraint::new(5, 5, Pose2d::IDENTITY, (100.0, 100.0, 100.0)),
+        ];
+        full.merge_session(&second, &constraints, MergeOptions::default())
+            .expect("merge");
+        fixed
+            .merge_session_onto_map(&second, &constraints, MergeOptions::default())
+            .expect("merge onto map");
+        // The full merge drags the first visit toward the second's drift...
+        assert!(mean_error_m(&full.graph().nodes()[..6], &prior) > 1e-3);
+        // ...merging onto the map does not move it at all,
+        assert_eq!(&fixed.graph().nodes()[..6], prior.as_slice());
+        // and fits the second visit to it instead.
+        assert!(mean_error_m(&fixed.graph().nodes()[6..], &truth(6)) < 0.03);
+        assert_eq!(fixed.graph().edge_count(), full.graph().edge_count());
+        assert!(fixed.is_connected());
+    }
+    #[test]
+    fn reference_sessions_are_never_pruned() {
+        let mut lifelong = two_visits(6);
+        let report = lifelong.prune_superseded(PruneConfig {
+            reference_sessions: 1,
+            ..PruneConfig::default()
+        });
+        assert_eq!(report.removed, 0);
+        assert_eq!(lifelong.graph().node_count(), 12);
     }
 }

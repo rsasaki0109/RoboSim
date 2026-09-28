@@ -181,11 +181,62 @@ the first. Merging the same session against two correspondences reduces that to
 **0.0715 m** and yields one connected map. A session recorded in a rotated,
 translated frame is aligned onto the prior trajectory to within 1e-6 m.
 
-Still open for lifelong operation: the correspondences are supplied by the
-caller rather than discovered by relocalizing the new session against the prior
-map; occupancy fusion has no notion of time, so structure that moved between
-visits accumulates in both places instead of decaying; and the graph is never
-pruned, so it grows without bound across sessions.
+### Places, changes and a bounded graph
+
+The pieces around the merge turn it into a map that stays current:
+
+- **Recognition.** `discover_session_constraints` relocalizes chosen keyframe
+  scans against the prior map with the global relocalizer, so a session that
+  starts anywhere in the building is placed without being told where.
+  `register_session_densely` then registers *every* keyframe with a local scan
+  match, walking outward from the best recognition and carrying the
+  session-to-map correction along, so slowly varying distortion is tracked
+  rather than averaged away by a handful of constraints.
+- **A map that stays put.** `merge_session` re-optimizes the whole graph, so
+  each merge moves the existing map toward the new session (4 to 10 cm and up
+  to 0.02 rad per merge on the example below). `merge_session_onto_map` holds
+  the existing nodes fixed and fits only the new session, so the map frame, and
+  anything stored in it, does not creep.
+- **Recency.** `build_recency_map` rebuilds the occupancy grid from keyframes at
+  the graph's current estimates and, before a later session adds evidence to a
+  cell it observed, scales what the cell already held by `retain` (0.25 by
+  default). A place that changed is described by its latest visit; a place the
+  latest visit did not see keeps its state. It reports, per session, the cells
+  that appeared and vanished, ignoring flips within `change_clearance_m` of an
+  unchanged obstacle so a wall registered a cell off is not a change.
+- **Pruning.** `LifelongPoseGraph::prune_superseded` removes nodes that a later
+  session revisited from nearly the same pose, compounding their edges onto a
+  surviving neighbour (information combined in series) so the graph stays
+  connected. `reference_sessions` keeps the first sessions as the map's
+  reference: pruning every older session made each day register against the
+  previous day's copy of the building, and the frame random-walked by about
+  7 cm a day.
+
+`Slam2d` records the scan-matched relative pose on a matched step, and raw
+odometry only on an unmatched one. It used to record raw odometry for every
+step, so each loop-closure re-optimization, and any later merge, pulled the
+trajectory back toward its drift between closures.
+
+Example 127 (`examples/127_lifelong_slam`) maps a physics warehouse on four
+days while pallets arrive, leave and move, starting each day somewhere else
+with 0.6 to 1.6 m of odometry drift over its loop. Measured against ground truth:
+
+| day | changed pallets detected | flagged cells on a changed pallet | error vs day-0 frame | error, rigidly aligned | nodes after pruning |
+|---|---|---|---|---|---|
+| 0 | - | - | 0.131 m | 0.032 m | 119 |
+| 1 | 4 / 4 | 350 / 365 | 0.152 m | 0.026 m | 238 |
+| 2 | 2 / 2 | 173 / 173 | 0.142 m | 0.025 m | 238 |
+| 3 | 3 / 3 | 275 / 290 | 0.150 m | 0.025 m | 238 |
+
+The 0.13 to 0.15 m against the first day's frame is that frame's own offset
+from truth (the first day's start pose as the robot believed it), held rather
+than accumulated; after rigid alignment the map and every day's trajectory
+agree with the building to about 3 cm.
+
+Still open: sessions are merged one at a time against a reference that never
+updates, so a building that changes its walls needs the reference refreshed by
+hand; the relocalizer searches the whole prior map by brute force; and
+`build_recency_map` re-integrates every keyframe on each call.
 
 ## Limits
 
