@@ -111,15 +111,20 @@ in-repo reference implementations do not count as independent evidence.
 
 ## Navigation, SLAM, and multi-robot
 
-![Office AGV following a replanned route past a second AGV coming down the corridor, with the costmap inflation it was charged for drawn on the floor](docs/media/showcase-nav.gif)
+![Office AGV sharing a corridor with a second AGV, a pedestrian and a hand truck: it swings out to pass the AGV, stops for the pedestrian crossing, and routes around the hand truck to the desk, with its LiDAR returns, tracks and costmap drawn on the floor](docs/media/showcase-nav.gif)
 
-*The light AGV is the office scene's physics diff-drive robot, and its wheel
-speeds come from pure pursuit on the magenta route `plan_path` returns. The
-dark AGV drives the other way down its own side of the corridor; its footprint,
-swept 2 s ahead, goes into the costmap, and the route is replanned five times a
-second. The light AGV swings 0.52 m off the centre line, keeps at least 0.19 m
-between the two footprints, and docks 0.05 m from the goal. The dark AGV is a
-planner input, not a physics body.*
+*Nothing but the walls and the desk is on the orange AGV's map. The second AGV,
+the pedestrian and the hand truck are bodies in the physics world, so its LiDAR
+hits them: red dots are the returns the map does not explain, and yellow rings
+are the tracks `ObstacleTracker` makes of them. The route (magenta) is
+`plan_path` over a costmap with each track written in, moving ones swept 2 s
+ahead, and replanned five times a second. Pure pursuit drives the wheels, and
+`avoid_velocities` gives way to the moving tracks. The AGV swings out past the
+second AGV (footprints at least 0.32 m apart), stops for 2.2 s while the
+pedestrian crosses (0.23 m clear), and docks 0.05 m from the goal. The second
+AGV keeps its lane and never needs to brake. It has no simulated sensors: it
+gets the orange AGV's pose over the fleet link and the pedestrian's true
+position.*
 
 `rne_nav`/`rne_slam`: deterministic, ROS-free costmaps, a transform tree,
 A*/DWA/pure-pursuit, multi-robot avoidance, an EKF, 3D ICP, and online 2D

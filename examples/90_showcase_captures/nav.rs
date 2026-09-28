@@ -1,21 +1,28 @@
-//! Office AGV navigation showcase: the AGV follows the route `plan_path`
-//! returns with pure pursuit, and replans around a second AGV coming the other
-//! way down the corridor.
+//! Office AGV navigation showcase: the AGV drives to the desk through a corridor
+//! it shares with a second AGV, a pedestrian crossing, and a hand truck left in
+//! the aisle. None of them is on its map. It sees them with its LiDAR, tracks
+//! them, replans its `plan_path` route around what the tracks predict, follows
+//! it with pure pursuit, and gives way with reciprocal velocity avoidance.
 
 use super::media::{
     capture_frames, push_box, push_sphere, CameraEvidence, CaptureFrame, ShowcaseMetadata,
     SimulationEvidence, FRAME_COUNT,
+};
+use super::nav_world::{
+    avoidance_config, densify_lidar, detect, push_hand_truck, Corridor, PlanarPose, AGV_HALF_M,
+    AGV_RADIUS_M, HAND_TRUCK,
 };
 use super::office;
 use anyhow::{Context, Result};
 use rne_ai::{office_agv_delivery_scene_path, DiffDriveAction, DiffDriveSim};
 use rne_math::Vec3;
 use rne_nav::{
-    plan_path, pure_pursuit_follow, Costmap, CostmapConfig, FollowResult, GlobalPlannerConfig,
-    GridCoord, OccupancyGrid, Path2d, Pose2d, PurePursuitConfig, VelocityCommand2d, COST_LETHAL,
+    avoid_velocities, plan_path, pure_pursuit_follow, CircularObstacle, Costmap, CostmapConfig,
+    FollowResult, GlobalPlannerConfig, GridCoord, ObstacleTracker, ObstacleTrackerConfig,
+    OccupancyGrid, Path2d, Pose2d, PurePursuitConfig, Track, VelocityCommand2d, COST_LETHAL,
 };
 use rne_physics::hash_physics_state;
-use rne_render::{grid_mesh, GridMeshSpec, RenderScene};
+use rne_render::{grid_mesh, GridMeshSpec, MeshRenderCache, RenderScene};
 use rne_render_wgpu::CameraOrbit;
 use serde_json::to_vec_pretty;
 use std::fs;
@@ -23,7 +30,7 @@ use std::path::Path;
 
 const ENVIRONMENT_ID: &str = "nav";
 const SUBJECT: &str =
-    "office AGV navigation: pure pursuit on a replanned route past an oncoming AGV";
+    "office AGV navigation: LiDAR tracking, replanning and reciprocal avoidance in a shared corridor";
 const CAMERA: CameraEvidence = CameraEvidence {
     fov_y_rad: std::f64::consts::FRAC_PI_4,
     yaw_rad: 0.32,
@@ -34,8 +41,8 @@ const CAMERA: CameraEvidence = CameraEvidence {
 /// Drives the office AGV to the desk along replanned routes and captures it
 /// with navigation overlays.
 pub fn run(repo_root: &Path, capture: bool) -> Result<ShowcaseMetadata> {
-    let first = rollout(false, None)?;
-    let replay = rollout(false, Some(first.steps))?;
+    let first = rollout(repo_root, false, None)?;
+    let replay = rollout(repo_root, false, Some(first.steps))?;
     anyhow::ensure!(
         first.final_digest == replay.final_digest,
         "Nav replay digest mismatch: {:#x} != {:#x}",
@@ -52,7 +59,7 @@ pub fn run(repo_root: &Path, capture: bool) -> Result<ShowcaseMetadata> {
         outcome: first.outcome.clone(),
     };
     let capture_evidence = if capture {
-        let captured = rollout(true, Some(first.steps))?;
+        let captured = rollout(repo_root, true, Some(first.steps))?;
         let orbit = CameraOrbit {
             focus: Vec3::new(4.65, 0.55, 0.0),
             yaw_rad: CAMERA.yaw_rad,
@@ -75,15 +82,20 @@ pub fn run(repo_root: &Path, capture: bool) -> Result<ShowcaseMetadata> {
         schema_version: 1,
         environment_id: ENVIRONMENT_ID,
         subject: SUBJECT,
-        visual_state_sync: "The orange AGV is the physics-driven diff-drive robot of the office scene, steered by wheel speeds from pure pursuit. The blue AGV is a kinematic proxy that is not in the physics world; its footprint is written into the costmap the route is planned on. Route, costmap, trail, and goal are the planner's own state drawn as overlays.",
+        visual_state_sync: "The orange AGV is the office scene's physics diff-drive robot, driven by wheel speeds. The blue AGV, the pedestrian and the hand truck are kinematic bodies in the same physics world, so the orange AGV's LiDAR hits them; red dots are that scan's returns the static map does not explain, and rings are the tracker's tracks. Route, costmap and trails are the planner's own state drawn as overlays.",
         simulation: evidence,
         capture: capture_evidence,
         camera: CAMERA,
         provenance: vec![
             "assets/scenes/office_agv_delivery.rne.scene.toml",
+            "assets/fixtures/rigged_figure/RiggedFigure.glb",
+            "assets/props/polyhaven_warehouse/hand_truck",
             "crates/rne_nav/src/planner.rs",
             "crates/rne_nav/src/control.rs",
+            "crates/rne_nav/src/dynamic.rs",
+            "crates/rne_nav/src/avoidance.rs",
             "examples/90_showcase_captures/nav.rs",
+            "examples/90_showcase_captures/nav_world.rs",
         ],
         reproduce_smoke: "cargo run --locked -p showcase_captures --example 90_showcase_captures -- --smoke --environment nav",
         reproduce_capture: "cargo run --release --locked -p showcase_captures --example 90_showcase_captures -- --capture --environment nav",
@@ -110,31 +122,28 @@ const GOAL_XZ_M: (f64, f64) = (6.5, 0.0);
 const WHEEL_RADIUS_M: f64 = 0.1;
 const TRACK_WIDTH_M: f64 = 0.45;
 const MAX_WHEEL_RAD_S: f64 = 10.0;
-/// Planar half extents of either AGV (x along its heading, z across it).
-const AGV_HALF_M: (f64, f64) = (0.25, 0.2);
-/// The oncoming AGV keeps to its own side of the corridor centre line, which
-/// still leaves half of it in the ego's straight-line path.
-const ONCOMING_LANE_Z_M: f64 = -0.2;
-const ONCOMING_START_X_M: f64 = 5.8;
-const ONCOMING_END_X_M: f64 = -1.8;
-const ONCOMING_SPEED_M_S: f64 = 0.45;
-const ONCOMING_DEPARTURE_S: f64 = 3.0;
-/// How far ahead the oncoming AGV's footprint is swept into the costmap.
-const ONCOMING_PREDICTION_S: f64 = 2.0;
-/// Replan rate, as a step interval.
+/// How far ahead a moving track's footprint is swept into the costmap.
+const PREDICTION_S: f64 = 2.0;
+/// Tracks slower than this are treated as standing still.
+const MOVING_M_S: f64 = 0.15;
+/// Perception rate (the LiDAR's) and replan rate, as step intervals at 60 Hz.
+const PERCEIVE_EVERY_STEPS: u64 = 6;
 const REPLAN_EVERY_STEPS: u64 = 12;
 /// Heading error at which the docked AGV counts as facing the desk.
 const DOCKED_YAW_RAD: f64 = 0.02;
 /// Steps held stopped at the goal before the episode ends.
 const SETTLE_STEPS: u64 = 30;
-const MAX_STEPS: u64 = 3_000;
+const MAX_STEPS: u64 = 4_000;
 
-/// The static corridor and the latest route planned across it.
+/// The static corridor, the ego's tracks, and the latest route.
 struct Navigator {
     corridor: OccupancyGrid,
     grid: OccupancyGrid,
     costmap: Costmap,
     path: Path2d,
+    tracker: ObstacleTracker,
+    /// Returns from the latest scan that the static map does not explain.
+    unexplained: Vec<Vec3>,
     replans: u32,
 }
 
@@ -147,45 +156,77 @@ impl Navigator {
             corridor,
             costmap,
             path,
+            tracker: ObstacleTracker::new(ObstacleTrackerConfig {
+                gate_m: 0.6,
+                max_missed: 4,
+                velocity_gain: 0.4,
+            })
+            .context("obstacle tracker")?,
+            unexplained: Vec::new(),
             replans: 0,
         })
     }
 
-    /// Writes the oncoming AGV's footprint, swept over the prediction horizon,
-    /// into a copy of the corridor map and plans again from `start`. A failed
-    /// plan keeps the previous route.
-    fn replan(&mut self, start: Vec3, oncoming_x_m: f64, oncoming_moving: bool) -> Result<()> {
-        let mut grid = self.corridor.clone();
-        let sweep_m = if oncoming_moving {
-            ONCOMING_SPEED_M_S * ONCOMING_PREDICTION_S
-        } else {
-            0.0
+    /// Segments the latest scan and updates the tracks.
+    fn perceive(&mut self, sim: &DiffDriveSim, dt_s: f64) -> Result<()> {
+        let Some(cloud) = sim.latest_lidar_cloud() else {
+            return Ok(());
         };
-        mark_rect(
-            &mut grid,
-            (
-                oncoming_x_m - AGV_HALF_M.0 - sweep_m,
-                ONCOMING_LANE_Z_M - AGV_HALF_M.1,
-            ),
-            (
-                oncoming_x_m + AGV_HALF_M.0,
-                ONCOMING_LANE_Z_M + AGV_HALF_M.1,
-            ),
-        );
+        let explained = |x: f64, z: f64| explained_by_map(x, z);
+        self.unexplained = cloud
+            .points_m
+            .iter()
+            .copied()
+            .filter(|point| !explained(point.x, point.z))
+            .collect();
+        let detections = detect(&cloud.points_m, explained);
+        self.tracker
+            .update(&detections, dt_s)
+            .context("track update")?;
+        Ok(())
+    }
+
+    /// Writes every track into a copy of the corridor map, a moving one swept
+    /// over the prediction horizon, and plans again from `start`. A failed plan
+    /// keeps the previous route.
+    fn replan(&mut self, start: Vec3) {
+        let mut grid = self.corridor.clone();
+        for track in self.tracker.tracks() {
+            let velocity = track.velocity_m_s;
+            let moving = velocity.length() > MOVING_M_S;
+            let horizon_s = if moving { PREDICTION_S } else { 0.0 };
+            let samples = (horizon_s / 0.2).ceil() as usize;
+            for sample in 0..=samples {
+                let ahead = velocity * (sample as f64 * 0.2).min(horizon_s);
+                mark_disk(
+                    &mut grid,
+                    track.position_m.x + ahead.x,
+                    track.position_m.y + ahead.y,
+                    track.radius_m,
+                );
+            }
+        }
         if let Ok((costmap, path)) = plan_route(&grid, start) {
             self.costmap = costmap;
             self.path = path;
         }
         self.grid = grid;
         self.replans += 1;
-        Ok(())
     }
-}
 
-fn oncoming_x_m(time_s: f64) -> (f64, bool) {
-    let travelled_m = ((time_s - ONCOMING_DEPARTURE_S) * ONCOMING_SPEED_M_S).max(0.0);
-    let x_m = (ONCOMING_START_X_M - travelled_m).max(ONCOMING_END_X_M);
-    (x_m, x_m > ONCOMING_END_X_M && time_s > ONCOMING_DEPARTURE_S)
+    /// The moving tracks, as avoidance obstacles.
+    fn moving_obstacles(&self) -> Vec<CircularObstacle> {
+        self.tracker
+            .tracks()
+            .iter()
+            .filter(|track| track.velocity_m_s.length() > MOVING_M_S)
+            .map(|track: &Track| CircularObstacle {
+                center_m: track.position_m,
+                velocity_m_s: track.velocity_m_s,
+                radius_m: track.radius_m,
+            })
+            .collect()
+    }
 }
 
 /// Keeps the curvature pure pursuit chose but not its turn slowdown, which
@@ -203,15 +244,20 @@ fn regulated(follow: FollowResult, config: &PurePursuitConfig) -> VelocityComman
     VelocityCommand2d::new(linear, linear * curvature)
 }
 
-/// Gap between two axis-aligned AGV footprints; zero or less means contact.
-/// The ego's footprint is rotated to its heading and bounded, so this errs on
-/// the small side.
-fn footprint_gap_m(ego: (f64, f64, f64), other: (f64, f64)) -> f64 {
-    let (sin, cos) = ego.2.sin_cos();
-    let ego_half_x = AGV_HALF_M.0 * cos.abs() + AGV_HALF_M.1 * sin.abs();
-    let ego_half_z = AGV_HALF_M.0 * sin.abs() + AGV_HALF_M.1 * cos.abs();
-    let gap_x = (ego.0 - other.0).abs() - ego_half_x - AGV_HALF_M.0;
-    let gap_z = (ego.1 - other.1).abs() - ego_half_z - AGV_HALF_M.1;
+/// Gap between two AGV footprints, each bounded by the box around it at its
+/// heading; zero or less means contact. Errs on the small side.
+fn footprint_gap_m(a: (f64, f64, f64), b: (f64, f64, f64)) -> f64 {
+    let bound = |heading: f64| {
+        let (sin, cos) = heading.sin_cos();
+        (
+            AGV_HALF_M.0 * cos.abs() + AGV_HALF_M.1 * sin.abs(),
+            AGV_HALF_M.0 * sin.abs() + AGV_HALF_M.1 * cos.abs(),
+        )
+    };
+    let (ax, az) = bound(a.2);
+    let (bx, bz) = bound(b.2);
+    let gap_x = (a.0 - b.0).abs() - ax - bx;
+    let gap_z = (a.1 - b.1).abs() - az - bz;
     if gap_x > 0.0 && gap_z > 0.0 {
         gap_x.hypot(gap_z)
     } else {
@@ -219,9 +265,33 @@ fn footprint_gap_m(ego: (f64, f64, f64), other: (f64, f64)) -> f64 {
     }
 }
 
-fn rollout(capture: bool, expected_steps: Option<u64>) -> Result<Rollout> {
+/// What the rollout measured.
+#[derive(Default)]
+struct Tally {
+    min_agv_gap_m: f64,
+    min_pedestrian_gap_m: f64,
+    yield_steps: u32,
+    max_tracks: usize,
+    truck_route_clearance_m: f64,
+}
+
+/// Converts a command in the planner's (x, z) plane to wheel speeds. There the
+/// AGV's heading is `-yaw`, so a positive turn is a negative yaw rate.
+fn wheel_action(command: VelocityCommand2d) -> DiffDriveAction {
+    let half_track = -command.angular_rad_s * TRACK_WIDTH_M / 2.0;
+    DiffDriveAction {
+        left_velocity_rad_s: ((command.linear_m_s - half_track) / WHEEL_RADIUS_M)
+            .clamp(-MAX_WHEEL_RAD_S, MAX_WHEEL_RAD_S),
+        right_velocity_rad_s: ((command.linear_m_s + half_track) / WHEEL_RADIUS_M)
+            .clamp(-MAX_WHEEL_RAD_S, MAX_WHEEL_RAD_S),
+    }
+}
+
+fn rollout(repo_root: &Path, capture: bool, expected_steps: Option<u64>) -> Result<Rollout> {
     let mut sim =
         DiffDriveSim::from_scene_path(&office_agv_delivery_scene_path()).context("office scene")?;
+    densify_lidar(&mut sim)?;
+    let mut corridor = Corridor::spawn(&mut sim, repo_root)?;
     let dt_s = sim.fixed_delta().as_seconds().value();
     let mut navigator = Navigator::new()?;
     let pursuit = PurePursuitConfig {
@@ -232,8 +302,6 @@ fn rollout(capture: bool, expected_steps: Option<u64>) -> Result<Rollout> {
         slow_radius_m: 0.6,
     };
     let initial_digest = hash_physics_state(sim.world());
-    let mut frames = Vec::new();
-    let mut trajectory: Vec<(f64, f64)> = Vec::new();
     let sample_steps: Vec<u64> = match (capture, expected_steps) {
         (true, Some(total)) => (1..=FRAME_COUNT)
             .map(|index| ((index as u64 * total).div_ceil(FRAME_COUNT as u64)).max(1))
@@ -241,83 +309,106 @@ fn rollout(capture: bool, expected_steps: Option<u64>) -> Result<Rollout> {
         (true, None) => anyhow::bail!("nav capture needs discovered step count"),
         _ => Vec::new(),
     };
-    let mut sample_index = 0;
-    let mut min_gap_m = f64::INFINITY;
-    let mut max_offset_m: f64 = 0.0;
-    let mut max_tracking_error_m: f64 = 0.0;
-    let mut settled = 0;
-    let mut docked = false;
-    let mut step = 0;
+    let mut frames = Vec::new();
+    let mut mesh_cache = MeshRenderCache::new();
+    let props_root = repo_root.join("assets/props/polyhaven_warehouse");
+    let mut trails = Trails::default();
+    let mut tally = Tally {
+        min_agv_gap_m: f64::INFINITY,
+        min_pedestrian_gap_m: f64::INFINITY,
+        truck_route_clearance_m: f64::INFINITY,
+        ..Tally::default()
+    };
+    let mut command = VelocityCommand2d::ZERO;
+    let (mut settled, mut docked, mut step) = (0, false, 0_u64);
     while settled < SETTLE_STEPS {
         anyhow::ensure!(step < MAX_STEPS, "nav AGV did not reach the desk");
-        let pose = sim.observe();
-        let time_s = step as f64 * dt_s;
-        let (other_x_m, other_moving) = oncoming_x_m(time_s);
-        if step % REPLAN_EVERY_STEPS == 0 {
-            navigator.replan(
-                Vec3::new(pose.base_x_m, pose.base_z_m, 0.0),
-                other_x_m,
-                other_moving,
-            )?;
+        let observed = sim.observe();
+        let pose = PlanarPose {
+            x_m: observed.base_x_m,
+            z_m: observed.base_z_m,
+            heading_rad: -observed.base_yaw_rad,
+        };
+        corridor.advance(&mut sim, step as f64 * dt_s, dt_s, (pose, command));
+        if step.is_multiple_of(PERCEIVE_EVERY_STEPS) {
+            navigator.perceive(&sim, PERCEIVE_EVERY_STEPS as f64 * dt_s)?;
+            tally.max_tracks = tally.max_tracks.max(navigator.tracker.len());
         }
-        let follow = pure_pursuit_follow(
-            &navigator.path,
-            Pose2d::new(pose.base_x_m, pose.base_z_m, -pose.base_yaw_rad),
-            &pursuit,
-        )
-        .context("pure pursuit")?;
+        if step.is_multiple_of(REPLAN_EVERY_STEPS) {
+            navigator.replan(Vec3::new(pose.x_m, pose.z_m, 0.0));
+        }
+        let plane_pose = Pose2d::new(pose.x_m, pose.z_m, pose.heading_rad);
+        let follow =
+            pure_pursuit_follow(&navigator.path, plane_pose, &pursuit).context("pure pursuit")?;
         docked |= follow.reached;
-        // Pure pursuit stops on position only; once there, the AGV turns in
-        // place to face the desk.
-        let command = if docked {
-            VelocityCommand2d::new(0.0, (2.0 * pose.base_yaw_rad).clamp(-0.6, 0.6))
+        command = if docked {
+            // Pure pursuit stops on position only; once there, the AGV turns
+            // in place to face the desk.
+            VelocityCommand2d::new(0.0, (-2.0 * pose.heading_rad).clamp(-0.6, 0.6))
         } else {
-            regulated(follow, &pursuit)
+            let desired = regulated(follow, &pursuit);
+            let safe = avoid_velocities(
+                plane_pose,
+                AGV_RADIUS_M,
+                &navigator.moving_obstacles(),
+                desired,
+                pursuit.max_linear_m_s,
+                pursuit.max_angular_rad_s,
+                &avoidance_config(),
+            );
+            if safe.linear_m_s < 0.5 * desired.linear_m_s {
+                tally.yield_steps += 1;
+            }
+            safe
         };
-        // The planner works in the (x, z) plane, where the AGV's heading is
-        // `(cos yaw, -sin yaw)`: its heading angle there is `-yaw`, so a
-        // positive turn in the plane is a negative yaw rate.
-        let half_track = -command.angular_rad_s * TRACK_WIDTH_M / 2.0;
-        let action = DiffDriveAction {
-            left_velocity_rad_s: ((command.linear_m_s - half_track) / WHEEL_RADIUS_M)
-                .clamp(-MAX_WHEEL_RAD_S, MAX_WHEEL_RAD_S),
-            right_velocity_rad_s: ((command.linear_m_s + half_track) / WHEEL_RADIUS_M)
-                .clamp(-MAX_WHEEL_RAD_S, MAX_WHEEL_RAD_S),
-        };
-        let pose = sim.step_action(action);
+        let observed = sim.step_action(wheel_action(command));
         step += 1;
-        if docked && pose.base_yaw_rad.abs() < DOCKED_YAW_RAD {
+        if docked && observed.base_yaw_rad.abs() < DOCKED_YAW_RAD {
             settled += 1;
         }
-        let ego = (pose.base_x_m, pose.base_z_m, pose.base_yaw_rad);
-        min_gap_m = min_gap_m.min(footprint_gap_m(ego, (other_x_m, ONCOMING_LANE_Z_M)));
-        max_offset_m = max_offset_m.max(pose.base_z_m.abs());
-        max_tracking_error_m = max_tracking_error_m.max(follow.closest.distance_m);
-        trajectory.push((pose.base_x_m, pose.base_z_m));
-        if sample_index < sample_steps.len() && step >= sample_steps[sample_index] {
+        let ego = (observed.base_x_m, observed.base_z_m, -observed.base_yaw_rad);
+        measure(&mut tally, ego, &corridor, &navigator);
+        trails.push(ego, &corridor);
+        if sample_steps
+            .get(frames.len())
+            .is_some_and(|sample| step >= *sample)
+        {
             let mut scene = office::render_office(
                 sim.world(),
-                ego,
-                (other_x_m, ONCOMING_LANE_Z_M, std::f64::consts::PI),
+                (ego.0, ego.1, observed.base_yaw_rad),
+                (
+                    corridor.oncoming.pose.x_m,
+                    corridor.oncoming.pose.z_m,
+                    corridor.oncoming.pose.sim_yaw_rad(),
+                ),
             );
-            append_navigation_overlays(&mut scene, &navigator, &trajectory, pose.base_yaw_rad);
+            Corridor::hide_bodies(&mut scene);
+            office::push_doorway(&mut scene, super::nav_world::DOORWAY_X_M);
+            push_hand_truck(&mut scene);
+            super::nav_world::push_totes(&mut scene, corridor.oncoming.pose);
+            corridor.push_pedestrian(&mut scene)?;
+            append_navigation_overlays(&mut scene, &navigator, &trails, ego);
+            mesh_cache
+                .resolve_scene(&mut scene, &[props_root.as_path()])
+                .context("resolve nav props")?;
             frames.push(CaptureFrame {
                 step,
-                phase: if docked {
-                    "docked".into()
-                } else {
-                    "following".into()
-                },
+                phase: if docked { "docked" } else { "driving" }.into(),
                 scene,
             });
-            sample_index += 1;
         }
     }
-    let pose = sim.observe();
-    let goal_error_m = (pose.base_x_m - GOAL_XZ_M.0).hypot(pose.base_z_m - GOAL_XZ_M.1);
+    let observed = sim.observe();
+    let goal_error_m = (observed.base_x_m - GOAL_XZ_M.0).hypot(observed.base_z_m - GOAL_XZ_M.1);
     anyhow::ensure!(
-        min_gap_m > 0.0,
-        "nav AGV touched the oncoming AGV: gap {min_gap_m:.3} m"
+        tally.min_agv_gap_m > 0.0,
+        "the AGVs touched: gap {:.3} m",
+        tally.min_agv_gap_m
+    );
+    anyhow::ensure!(
+        tally.min_pedestrian_gap_m > 0.0,
+        "the AGV touched the pedestrian: gap {:.3} m",
+        tally.min_pedestrian_gap_m
     );
     anyhow::ensure!(
         !capture || frames.len() == FRAME_COUNT,
@@ -326,7 +417,13 @@ fn rollout(capture: bool, expected_steps: Option<u64>) -> Result<Rollout> {
         FRAME_COUNT
     );
     let outcome = format!(
-        "goal_error_m={goal_error_m:.3}; min_footprint_gap_m={min_gap_m:.3}; max_lateral_offset_m={max_offset_m:.3}; max_tracking_error_m={max_tracking_error_m:.3}; replans={}; replay deterministic",
+        "goal_error_m={goal_error_m:.3}; min_agv_footprint_gap_m={:.3}; min_pedestrian_gap_m={:.3}; min_hand_truck_gap_m={:.3}; ego_yield_s={:.2}; oncoming_yield_s={:.2}; max_tracks={}; replans={}; replay deterministic",
+        tally.min_agv_gap_m,
+        tally.min_pedestrian_gap_m,
+        tally.truck_route_clearance_m,
+        f64::from(tally.yield_steps) * dt_s,
+        f64::from(corridor.oncoming.yielded_steps) * dt_s,
+        tally.max_tracks,
         navigator.replans
     );
     Ok(Rollout {
@@ -336,6 +433,76 @@ fn rollout(capture: bool, expected_steps: Option<u64>) -> Result<Rollout> {
         outcome,
         frames,
     })
+}
+
+/// Records the closest approaches this step.
+fn measure(tally: &mut Tally, ego: (f64, f64, f64), corridor: &Corridor, _navigator: &Navigator) {
+    let agv = corridor.oncoming.pose;
+    tally.min_agv_gap_m = tally
+        .min_agv_gap_m
+        .min(footprint_gap_m(ego, (agv.x_m, agv.z_m, agv.heading_rad)));
+    // Pedestrian: a 0.4 x 0.32 m body against the ego's bounding circle.
+    let walker = &corridor.pedestrian;
+    let to_walker = (ego.0 - walker.x_m).hypot(ego.1 - walker.z_m);
+    tally.min_pedestrian_gap_m = tally
+        .min_pedestrian_gap_m
+        .min(to_walker - AGV_RADIUS_M - 0.26);
+    let (truck_x, truck_z, _) = HAND_TRUCK;
+    tally.truck_route_clearance_m = tally
+        .truck_route_clearance_m
+        .min((ego.0 - truck_x).hypot(ego.1 - truck_z) - AGV_RADIUS_M - 0.36);
+}
+
+/// Where each vehicle has been.
+#[derive(Default)]
+struct Trails {
+    ego: Vec<(f64, f64)>,
+    oncoming: Vec<(f64, f64)>,
+    ticks: u64,
+}
+
+impl Trails {
+    fn push(&mut self, ego: (f64, f64, f64), corridor: &Corridor) {
+        self.ticks += 1;
+        if self.ticks.is_multiple_of(6) {
+            self.ego.push((ego.0, ego.1));
+            self.oncoming
+                .push((corridor.oncoming.pose.x_m, corridor.oncoming.pose.z_m));
+        }
+    }
+}
+
+/// Whether the static map explains a return at `(x, z)`: it lies on a wall or
+/// the desk, give or take the scan's own error.
+fn explained_by_map(x: f64, z: f64) -> bool {
+    const TOLERANCE_M: f64 = 0.12;
+    CORRIDOR_OBSTACLES.iter().any(|(min, max)| {
+        x >= min.0 - TOLERANCE_M
+            && x <= max.0 + TOLERANCE_M
+            && z >= min.1 - TOLERANCE_M
+            && z <= max.1 + TOLERANCE_M
+    }) || z.abs() > 1.1
+}
+
+/// Marks every cell within `radius` (plus the footprint pad) of `(x, z)`.
+fn mark_disk(grid: &mut OccupancyGrid, x: f64, z: f64, radius_m: f64) {
+    let reach = radius_m + FOOTPRINT_PAD_M;
+    let min = grid.world_to_grid(Vec3::new(x - reach, z - reach, 0.0));
+    let max = grid.world_to_grid(Vec3::new(x + reach, z + reach, 0.0));
+    let (Some(min), Some(max)) = (min, max) else {
+        return;
+    };
+    for row in min.y..=max.y {
+        for column in min.x..=max.x {
+            let coord = GridCoord { x: column, y: row };
+            let centre = grid.grid_to_world(coord);
+            if (centre.x - x).hypot(centre.y - z) <= reach {
+                for _ in 0..16 {
+                    grid.mark_occupied(coord);
+                }
+            }
+        }
+    }
 }
 
 /// The corridor walls and the desk, taken from
@@ -420,19 +587,23 @@ fn plan_route(grid: &OccupancyGrid, start: Vec3) -> Result<(Costmap, Path2d)> {
     Ok((costmap, path))
 }
 
-/// Adds the map, the planned route, the driven trajectory, a heading arrow, and
-/// the docking goal to the office scene.
+/// Adds the costmap, the planned route, both vehicles' trails, the scan
+/// returns the map does not explain, the tracks, a heading arrow, and the
+/// docking goal to the office scene.
 fn append_navigation_overlays(
     scene: &mut RenderScene,
     map: &Navigator,
-    trajectory: &[(f64, f64)],
-    base_yaw_rad: f64,
+    trails: &Trails,
+    ego: (f64, f64, f64),
 ) {
     const ROUTE: [f32; 4] = [0.92, 0.25, 0.85, 1.0];
     const TRAIL: [f32; 4] = [0.10, 0.85, 0.95, 1.0];
+    const ONCOMING_TRAIL: [f32; 4] = [0.35, 0.55, 1.0, 1.0];
     const GOAL: [f32; 4] = [0.15, 0.95, 0.45, 1.0];
     const ARROW: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
     const INFLATION: [f32; 4] = [0.98, 0.72, 0.22, 0.55];
+    const SCAN: [f32; 4] = [1.0, 0.18, 0.12, 1.0];
+    const TRACK: [f32; 4] = [1.0, 0.85, 0.20, 1.0];
 
     // The costs the planner charged for, drawn where it charged them.
     let spec = GridMeshSpec {
@@ -455,42 +626,68 @@ fn append_navigation_overlays(
             if centre.y.abs() > 1.1 {
                 return false;
             }
-            let occupied = map
-                .grid
-                .probability(coord)
-                .is_some_and(|probability| probability >= 0.6);
-            !occupied
-                && map
-                    .costmap
-                    .cost_at(coord)
-                    .is_some_and(|cost| cost > 0 && cost < COST_LETHAL)
+            map.costmap
+                .cost_at(coord)
+                .is_some_and(|cost| cost > 0 && cost < COST_LETHAL)
         }),
         INFLATION,
     ));
-
     // Planned route: what `plan_path` returned, not a line drawn along the aisle.
     for waypoint in map.path.waypoints().iter().step_by(3) {
         push_sphere(
             scene,
             Vec3::new(waypoint.x_m, 0.07, waypoint.y_m),
-            0.065,
+            0.055,
             ROUTE,
         );
     }
-    // Docking goal ring at the desk.
     for (dx, dz) in [(-0.45, 0.0), (0.45, 0.0), (0.0, -0.45), (0.0, 0.45)] {
-        push_sphere(scene, Vec3::new(6.5 + dx, 0.09, dz), 0.06, GOAL);
+        push_sphere(
+            scene,
+            Vec3::new(GOAL_XZ_M.0 + dx, 0.09, GOAL_XZ_M.1 + dz),
+            0.06,
+            GOAL,
+        );
     }
-    // Driven trajectory history.
-    for (index, (x, z)) in trajectory.iter().enumerate() {
-        if index % 6 == 0 {
-            push_sphere(scene, Vec3::new(*x, 0.34, *z), 0.05, TRAIL);
+    for (trail, color) in [(&trails.ego, TRAIL), (&trails.oncoming, ONCOMING_TRAIL)] {
+        for (x, z) in trail.iter().step_by(2) {
+            push_sphere(scene, Vec3::new(*x, 0.03, *z), 0.035, color);
         }
     }
-    // Heading arrow in front of the AGV.
-    if let Some((x, z)) = trajectory.last() {
-        let forward = Vec3::new(base_yaw_rad.cos(), 0.0, -base_yaw_rad.sin());
-        let tip = Vec3::new(*x, 0.34, *z) + forward * 0.55;
-        push_box(scene, tip, Vec3::new(0.18, 0.06, 0.08), ARROW);
+    // What the LiDAR saw that the map does not explain, where it saw it.
+    for point in &map.unexplained {
+        push_sphere(scene, *point, 0.035, SCAN);
     }
+    // Tracks: a ring at the tracked radius and a marker 1 s ahead.
+    for track in map.tracker.tracks() {
+        let centre = Vec3::new(track.position_m.x, 0.05, track.position_m.y);
+        for index in 0..16 {
+            let angle = f64::from(index) * std::f64::consts::TAU / 16.0;
+            push_sphere(
+                scene,
+                centre + Vec3::new(angle.cos(), 0.0, angle.sin()) * track.radius_m,
+                0.022,
+                TRACK,
+            );
+        }
+        let velocity = track.velocity_m_s;
+        if velocity.length() > MOVING_M_S {
+            for step in 1..=4 {
+                let ahead = f64::from(step) * 0.25;
+                push_sphere(
+                    scene,
+                    centre + Vec3::new(velocity.x, 0.0, velocity.y) * ahead,
+                    0.03,
+                    TRACK,
+                );
+            }
+        }
+    }
+    let forward = Vec3::new(ego.2.cos(), 0.0, ego.2.sin());
+    push_box(
+        scene,
+        Vec3::new(ego.0, 0.42, ego.1) + forward * 0.5,
+        Vec3::new(0.14, 0.05, 0.06),
+        ARROW,
+    );
 }

@@ -71,6 +71,20 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- The Navigation showcase (`docs/media/showcase-nav.gif`) is a shared
+  corridor. A second AGV comes the other way, a pedestrian crosses from a
+  doorway, and a hand truck stands in the aisle. None of them is on the orange
+  AGV's map; all are kinematic bodies its LiDAR hits (raised to 360 rays for
+  this). It segments the returns the static map does not explain, tracks them
+  with `ObstacleTracker`, writes the tracks into the costmap (moving ones swept
+  2 s ahead) for `plan_path` at 5 Hz, follows the route with pure pursuit, and
+  gives way through `avoid_velocities`. The second AGV follows its lane with the
+  same avoidance, given the other agents' true positions. Measured: footprints
+  at least 0.32 m apart, 0.23 m clear of the pedestrian after a 2.2 s stop,
+  0.05 m docking error. The pedestrian is the Khronos Rigged Figure walking;
+  the hand truck is the scanned Poly Haven prop; the second AGV carries a tote
+  stack, which is also what brings it up into the scan plane.
+
 - The warehouse examples (123, 125) are dressed with scanned CC0 props from
   Poly Haven -- the carried case is a scanned cardboard box of the same size,
   racks hold boxes and crates, and the site has carts, a hand truck, an
