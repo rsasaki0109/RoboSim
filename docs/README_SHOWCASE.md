@@ -33,7 +33,7 @@ observation state.
 | Office AGV delivery | `showcase-office.gif` / `.png` | 1,078,053 | 96,581 | 960 x 540 |
 | PLATEAU UAV RGB-D flight | `showcase-uav.gif` / `.png` | 4,329,461 | 439,474 | 960 x 540 |
 
-The current GIF total is **11,176,879 bytes**, below the 12,000,000-byte
+The current GIF total is **11,092,892 bytes**, below the 12,000,000-byte
 combined ceiling. `showcase-media-check` verifies the exact total; regeneration
 must update the manifest's sizes and hashes in the same change.
 
