@@ -55,10 +55,10 @@ gif = "docs/media/showcase-factory.gif"
 poster = "docs/media/showcase-factory.png"
 readme_gif = "docs/media/showcase-factory.gif"
 readme_poster = "docs/media/showcase-factory.png"
-gif_bytes = 2489294
-poster_bytes = 82473
-gif_sha256 = "sha256:3b533d28f911466980f0f9c936b69967684f4ab69a7a43e9c897ade464e9e7a9"
-poster_sha256 = "sha256:1d2b2909c53c8739f09b97a7bd3a05e8b5ab663a7207f36056fa43a9e93c1f4f"
+gif_bytes = 2991405
+poster_bytes = 86240
+gif_sha256 = "sha256:de171fd6bbb79fa0174f6f1aa1ec9b361394b394ed95b8a9af4de8d621cb322d"
+poster_sha256 = "sha256:37c2f91a66c35fb1821d621b1cc67a6446c495c8a6d1a745a0eeb54aa89faa2c"
 poster_width = 960
 poster_height = 540
 smoke_command = "cargo run --locked -p showcase_captures --example 90_showcase_captures -- --smoke --environment factory"
@@ -67,7 +67,7 @@ metadata = "docs/media/showcase-factory.json"
 regenerate = "examples/90_showcase_captures/factory.rs"
 license = "BSD-3-Clause AND (MIT OR Apache-2.0)"
 license_files = ["assets/robots/g1_description/LICENSE.unitree_ros", "LICENSE-MIT", "LICENSE-APACHE"]
-provenance = ["assets/scenes/unitree_g1_factory.rne.scene.toml", "assets/robots/unitree_g1_dynamic.rne.robot.toml", "crates/rne_ai/src/env/urdf_scene/unitree_g1_inspection_episode.rs"]
+provenance = ["assets/scenes/unitree_g1_factory.rne.scene.toml", "assets/robots/unitree_g1_dynamic.rne.robot.toml", "crates/rne_ai/src/env/urdf_scene/unitree_g1_commanded_gait.rs", "examples/90_showcase_captures/factory.rs"]
 
 [[media]]
 id = "office"

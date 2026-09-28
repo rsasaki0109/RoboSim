@@ -39,10 +39,10 @@ camera state; gates and regeneration commands are in
     <td width="50%" align="center">
       <picture>
         <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-factory.png">
-        <img src="docs/media/showcase-factory.gif" alt="Unitree G1 humanoid standing in place at a factory workstation, performing point-and-confirm inspection gestures" width="460">
+        <img src="docs/media/showcase-factory.gif" alt="Unitree G1 humanoid standing at a factory workstation, raising one arm at a time to point at three gauges, each lamp turning green once the pointing is confirmed" width="460">
       </picture>
       <br><b>Factory inspection</b><br>
-      <sub>Official G1 link meshes, point-and-confirm gestures and deterministic replay. The robot does not walk: it stays within 6.4 cm of where it starts, and all three markers are placed within reach of that spot. <a href="docs/media/showcase-factory.json">metadata</a></sub>
+      <sub>Official G1 link meshes. The G1 stands and points at three gauges in turn, the arm aimed on its own kinematic chain; a lamp turns green only when the simulated arm points within 5° of it. The gauges are drawn only. <a href="docs/media/showcase-factory.json">metadata</a></sub>
     </td>
   </tr>
   <tr>
