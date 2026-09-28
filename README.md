@@ -12,12 +12,6 @@ needs no renderer, and ROS 2 is an optional adapter, not a core dependency.
 
 ## Real simulation showcase
 
-Hands-on joint sliders, scene editing, and RGB/depth/LiDAR views: start the
-[Robot workbench](docs/ROBOT_WORKBENCH.md) with
-`cargo run --release --locked -p robot_workbench`.
-
-[![Robot workbench showing SO-101 joint controls, scene editing, RGB, depth and LiDAR views](docs/media/robot-workbench.png)](docs/ROBOT_WORKBENCH.md)
-
 Every frame below is rendered by wgpu from deterministic simulation or pinned
 camera state; gates and regeneration commands are in
 [README showcase acceptance](docs/README_SHOWCASE.md).
@@ -216,6 +210,13 @@ smoke gate splits into `manipulator`/`locomotion`/`assets`/`media`
 partitions, e.g. `cargo run -p xtask -- ci-smoke media`). The headless asset
 CLI, replay, and determinism-check commands, and the full example index, are
 in [examples/README.md](examples/README.md).
+
+To poke at a robot by hand, the [Robot workbench](docs/ROBOT_WORKBENCH.md)
+puts joint sliders, a floor/obstacle editor, and RGB/depth/LiDAR views for a
+URDF or MJCF model in one browser window:
+`cargo run --release --locked -p robot_workbench`.
+
+<img src="docs/media/robot-workbench.png" alt="Robot workbench showing SO-101 joint controls, scene editing, RGB, depth and LiDAR views" width="460">
 
 ## Independent integrations
 
