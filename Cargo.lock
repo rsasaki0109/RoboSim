@@ -594,6 +594,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "car_race"
+version = "0.4.0"
+dependencies = [
+ "image",
+ "png",
+ "rne_core",
+ "rne_ecs",
+ "rne_math",
+ "rne_physics",
+ "rne_render",
+ "rne_render_wgpu",
+ "rne_robot",
+ "rne_world",
+]
+
+[[package]]
 name = "cargo-platform"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

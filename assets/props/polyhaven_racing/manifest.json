@@ -1,0 +1,49 @@
+{
+  "files": {
+    "concrete_road_barrier/concrete_road_barrier.bin": "64a4f9bc6e4af64d714a252c3c13428c430a60569deba3d52ca6b7dd3aa70d8c",
+    "concrete_road_barrier/concrete_road_barrier_1k.gltf": "c371e87d303fff3f0c9fbe88520f7837514364e5c66aac3244e115ffa673d061",
+    "concrete_road_barrier/textures/concrete_road_barrier_arm_1k.jpg": "b940847648012f2db8c24b16e07ad1e39b3bd33ea493203364deca209606e4b4",
+    "concrete_road_barrier/textures/concrete_road_barrier_diff_1k.jpg": "88b2d79829ffec7b11ac4d9c8554328f30b665d2c17f634197fde4f1ca8696fe",
+    "concrete_road_barrier/textures/concrete_road_barrier_nor_gl_1k.jpg": "c1072f51ff5c3d7158f0fbb0aa26e82b816b745b9f03639c4816832af2b37c52",
+    "old_tyre/old_tyre.bin": "659e7982c2de92ca1d13194c97bf112b6dec22d91daecc88e3912d37ce1b7252",
+    "old_tyre/old_tyre_1k.gltf": "ba7b417eb3dc747c356ac3cd1f125754755684eb664737a9f1fc9e490c0b766e",
+    "old_tyre/textures/old_tyre_arm_1k.jpg": "3bcf192f5b99a7a574f9e21e75927043e6726c601a5da15e3210a31db05e12d4",
+    "old_tyre/textures/old_tyre_diff_1k.jpg": "0e34ce658c0844c0c94022233226d495930d514c917a5fa15ffee4760567439e",
+    "old_tyre/textures/old_tyre_nor_gl_1k.jpg": "34b716e140408985ddbab7d4bf1d8d430edf834cd2fd4639d82b14cb393fa73e",
+    "textures/asphalt_track_diff_1k.jpg": "05c4e79cd99160075969d37bfc6ef72be262153a410bb45510b2c23f7303894c",
+    "textures/asphalt_track_nor_gl_1k.jpg": "18caf02427a7cd9cd577ceae5aa9daa7bb3ffba60598e2df8aaf75d1925a8a94",
+    "textures/asphalt_track_rough_1k.jpg": "0646d0cfbe6bf9ea4a8a9e43aec826e7ec32a10b8aff61bf5a4ec02b1bc3c363",
+    "textures/leafy_grass_diff_1k.jpg": "cfa40bc9d9417d1852db8753a8d5917f110c40101179f63543c382e39bc05e4a",
+    "textures/leafy_grass_nor_gl_1k.jpg": "832328216adc0a7e1f70a31d5ee48c9ab7f2152d83816122736cf42ac4b2ebd6",
+    "textures/leafy_grass_rough_1k.jpg": "0c2a1d91aacb8e54a496051b59854e51e456fe858abeade778e308359ef16463"
+  },
+  "license": "CC0-1.0",
+  "models": {
+    "asphalt_track": {
+      "authors": [
+        "Dimitrios Savva"
+      ],
+      "name": "Asphalt Track"
+    },
+    "concrete_road_barrier": {
+      "authors": [
+        "Amal Kumar"
+      ],
+      "name": "Concrete Road Barrier"
+    },
+    "leafy_grass": {
+      "authors": [
+        "Charlotte Baglioni"
+      ],
+      "name": "Leafy Grass"
+    },
+    "old_tyre": {
+      "authors": [
+        "MP"
+      ],
+      "name": "Old Tyre"
+    }
+  },
+  "resolution": "1k",
+  "source": "https://polyhaven.com"
+}

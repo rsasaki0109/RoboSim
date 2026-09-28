@@ -1,9 +1,10 @@
-"""Download the Poly Haven (CC0) warehouse props the logistics examples use.
+"""Download the Poly Haven (CC0) props and textures the examples use.
 
 Each model is fetched at 1k texture resolution in glTF form through the Poly
-Haven public API and written under assets/props/polyhaven_warehouse/<id>/.
-`--pin` rewrites the SHA-256 manifest from what was downloaded; without it,
-every file must match the manifest.
+Haven public API and written under assets/props/polyhaven_<set>/<id>/.
+`--set` chooses the collection (`warehouse` for the logistics examples,
+`racing` for the race circuit); `--pin` rewrites that set's SHA-256 manifest
+from what was downloaded; without it, every file must match the manifest.
 """
 
 from __future__ import annotations
@@ -14,28 +15,36 @@ import json
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1] / "assets" / "props" / "polyhaven_warehouse"
-MANIFEST = ROOT / "manifest.json"
-MODELS = [
-    "cardboard_box_01",
-    "wooden_crate_01",
-    "hand_truck",
-    "industrial_storage_cart",
-    "mounted_fluorescent_lights",
-    "korean_fire_extinguisher_01",
-    "WetFloorSign_01",
-    "power_box_01",
-    "rollershutter_door",
-    "steel_frame_shelves_02",
-]
+PROPS = Path(__file__).resolve().parents[1] / "assets" / "props"
+SETS = {
+    "warehouse": {
+        "models": [
+            "cardboard_box_01",
+            "wooden_crate_01",
+            "hand_truck",
+            "industrial_storage_cart",
+            "mounted_fluorescent_lights",
+            "korean_fire_extinguisher_01",
+            "WetFloorSign_01",
+            "power_box_01",
+            "rollershutter_door",
+            "steel_frame_shelves_02",
+        ],
+        "textures": ["box_profile_metal_sheet"],
+        # Nodes removed from a model's scene after download (the pinned hashes
+        # are of the downloaded files). The shutter ships with a graffiti
+        # variant two meters to its side.
+        "drop_nodes": {"rollershutter_door": ["rollershutter_door_graffiti"]},
+    },
+    "racing": {
+        "models": ["old_tyre", "concrete_road_barrier"],
+        "textures": ["asphalt_track", "leafy_grass"],
+        "drop_nodes": {},
+    },
+}
 # Surface textures, fetched as colour, OpenGL normal and roughness maps.
-TEXTURES = ["box_profile_metal_sheet"]
 TEXTURE_MAPS = {"Diffuse": "diff", "nor_gl": "nor_gl", "Rough": "rough"}
 RESOLUTION = "1k"
-# Nodes removed from a model's scene after download (the pinned hashes are of
-# the downloaded files). The shutter ships with a graffiti variant two meters
-# to its side.
-DROP_NODES = {"rollershutter_door": ["rollershutter_door_graffiti"]}
 
 
 def fetch(url: str) -> bytes:
@@ -47,11 +56,17 @@ def fetch(url: str) -> bytes:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pin", action="store_true", help="rewrite the manifest")
+    parser.add_argument("--set", default="warehouse", choices=sorted(SETS))
     args = parser.parse_args()
-    expected = {} if args.pin else json.loads(MANIFEST.read_text())["files"]
+    chosen = SETS[args.set]
+    models, textures = chosen["models"], chosen["textures"]
+    drop_nodes = chosen["drop_nodes"]
+    root = PROPS / f"polyhaven_{args.set}"
+    manifest = root / "manifest.json"
+    expected = {} if args.pin else json.loads(manifest.read_text())["files"]
     pinned: dict[str, str] = {}
     authors: dict[str, dict] = {}
-    for model in MODELS:
+    for model in models:
         files = json.loads(fetch(f"https://api.polyhaven.com/files/{model}"))
         info = json.loads(fetch(f"https://api.polyhaven.com/info/{model}"))
         authors[model] = {"name": info["name"], "authors": sorted(info["authors"])}
@@ -64,21 +79,21 @@ def main() -> None:
             key = f"{model}/{relative}"
             if not args.pin and expected.get(key) != digest:
                 raise SystemExit(f"unexpected SHA-256 for {key}: {digest}")
-            target = ROOT / model / relative
+            target = root / model / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            if relative.endswith(".gltf") and model in DROP_NODES:
+            if relative.endswith(".gltf") and model in drop_nodes:
                 document = json.loads(data)
                 drop = {
                     index
                     for index, node in enumerate(document["nodes"])
-                    if node.get("name") in DROP_NODES[model]
+                    if node.get("name") in drop_nodes[model]
                 }
                 for scene in document["scenes"]:
                     scene["nodes"] = [n for n in scene["nodes"] if n not in drop]
                 data = (json.dumps(document, indent=2) + "\n").encode()
             target.write_bytes(data)
             pinned[key] = digest
-    for texture in TEXTURES:
+    for texture in textures:
         files = json.loads(fetch(f"https://api.polyhaven.com/files/{texture}"))
         info = json.loads(fetch(f"https://api.polyhaven.com/info/{texture}"))
         authors[texture] = {"name": info["name"], "authors": sorted(info["authors"])}
@@ -89,12 +104,12 @@ def main() -> None:
             key = f"textures/{texture}_{suffix}_{RESOLUTION}.jpg"
             if not args.pin and expected.get(key) != digest:
                 raise SystemExit(f"unexpected SHA-256 for {key}: {digest}")
-            target = ROOT / key
+            target = root / key
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
             pinned[key] = digest
     if args.pin:
-        MANIFEST.write_text(
+        manifest.write_text(
             json.dumps(
                 {"source": "https://polyhaven.com", "license": "CC0-1.0",
                  "resolution": RESOLUTION, "models": authors, "files": pinned},
@@ -102,7 +117,7 @@ def main() -> None:
             )
             + "\n"
         )
-    print(f"prepared {len(pinned)} files for {len(MODELS)} models and {len(TEXTURES)} textures")
+    print(f"prepared {len(pinned)} files for {len(models)} models and {len(textures)} textures")
 
 
 if __name__ == "__main__":

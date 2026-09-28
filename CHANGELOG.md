@@ -84,6 +84,15 @@ All notable changes to Robot Native Engine are documented in this file.
   9 of 9 changed pallets detected, 798 of 828 flagged cells on a changed
   pallet, the map within 3 cm of the building after rigid alignment, and the
   graph held at two days' nodes.
+- Example 128 races four open-wheel cars for three laps on the tire-limited
+  `VehicleDynamics` model from a reverse grid. Each car follows a
+  minimum-curvature racing line at a friction-circle speed profile of its own
+  grip and power, passes on the straights with a tow, and gives room as the
+  car behind. Measured: four passes, the fastest car wins, cars never closer
+  than 2.47 m centre to centre, none off the track. The cars are modelled from
+  their parts and the circuit is dressed with CC0 Poly Haven asphalt, grass,
+  tyres and barriers (`assets/props/polyhaven_racing`, fetched and pinned by
+  `tools/prepare_polyhaven_warehouse.py --set racing`).
 
 - The Navigation showcase (`docs/media/showcase-nav.gif`) is a shared
   corridor. A second AGV comes the other way, a pedestrian crosses from a
