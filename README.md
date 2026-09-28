@@ -77,7 +77,7 @@ camera state; gates and regeneration commands are in
 | --- | --- | --- |
 | City simulation | PLATEAU import, traffic, LiDAR, RGB-D, OSM HUD | [docs](docs/PLATEAU_IMPORT.md), ex. 46–47 |
 | Vehicle dynamics | Bicycle/Ackermann, tire saturation, suspension, road excitation | [docs](docs/VEHICLE_DYNAMICS.md), ex. 49–51 |
-| Quadruped locomotion | Official Go2, torque control, disturbances, steering | [docs](docs/GO2_LOCOMOTION.md), ex. 52–65 |
+| Quadruped locomotion | Official Go2, model-based trot and heading control, torque control, disturbances | [docs](docs/GO2_LOCOMOTION.md), ex. 52–65, 126 |
 | Humanoid locomotion | Official G1 23-DoF, balance, learned stride, CEM eval | [docs](docs/G1_LOCOMOTION.md), ex. 39, 63, 67, 68 |
 | Manipulation | PBR/3DGS mobile manipulator, friction grasp, Dex3 hands | [docs](docs/README_SHOWCASE.md), ex. 32, 40–42, 89 |
 | Deformables | XPBD cable and cloth, deterministic headless replay | ex. 43–45 |
@@ -147,6 +147,24 @@ SLAM with loop closure and AMCL (a ROS 2 adapter maps to Nav2). Details:
     </td>
   </tr>
 </table>
+
+## Go2 locomotion
+
+<p align="center">
+  <img src="docs/media/go2-heading-steer.gif" alt="The official Go2 trotting head first along an S: straight, a left 90-degree turn, straight, a right 90-degree turn, straight, with its path drawn on the floor coloured by the commanded heading and a yellow arrow showing the heading it is steering to" width="820">
+</p>
+
+The official Go2 walks head first through an S on a model-based trot of the
+kind Pinocchio-based quadruped stacks run: 500 Hz joint torques, foot
+Jacobians from the link frames, stance legs pushing `tau = -J^T f` for weight,
+height, speed and yaw rate, swing feet placed by the Raibert heuristic and
+tracked by Cartesian PD. A heading loop steers it; held headings stay within
+0.04 rad RMS (0.15 rad worst) while it covers 8.5 m. This runs on
+`unitree_go2_jump`, the Go2 with its feet attached: the older walking asset
+leaves them on the floor ([#346](https://github.com/rsasaki0109/RoboSim/issues/346)),
+and the results measured on it are marked as such in
+[docs/GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md).
+[source](examples/126_go2_heading_steer/main.rs)
 
 ## G1 locomotion
 

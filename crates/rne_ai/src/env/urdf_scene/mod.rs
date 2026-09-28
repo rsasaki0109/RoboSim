@@ -645,6 +645,15 @@ impl UrdfSceneSim {
         self.dt
     }
 
+    /// Sets the fixed step every `step_*` call advances physics by.
+    ///
+    /// Scenes step at 60 Hz by default. Torque-level controllers that close a
+    /// Cartesian or force loop per step -- the way legged robots are actually
+    /// run, at 500 Hz to 1 kHz -- need a shorter step than that to be stable.
+    pub fn set_fixed_delta(&mut self, delta: SimDuration) {
+        self.dt = delta;
+    }
+
     /// Attaches a typed joint-feedback sensor by resolving URDF child-link names.
     ///
     /// Resolution is atomic: no sensor entity is created when any name or
@@ -2445,6 +2454,18 @@ mod tests {
         let before = sim.world().iter_entities().count();
         let _ = sim.world_mut().spawn_empty();
         assert!(sim.world().iter_entities().count() > before);
+    }
+
+    #[test]
+    fn a_shorter_fixed_delta_advances_sim_time_by_that_step() {
+        let mut sim = UrdfSceneSim::from_scene_path(&unitree_go2_dynamic_scene_path())
+            .expect("load Go2 scene");
+        assert_eq!(sim.fixed_delta(), SimDuration::from_hertz(Hertz::new(60.0)));
+        let step = SimDuration::from_hertz(Hertz::new(500.0));
+        sim.set_fixed_delta(step);
+        let before = sim.sim_time();
+        sim.step_joint_torques(&[]);
+        assert_eq!(sim.sim_time(), before + step);
     }
 
     #[test]
