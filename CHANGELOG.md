@@ -757,6 +757,14 @@ All notable changes to Robot Native Engine are documented in this file.
   G1's own kinematic chain, and a gauge's lamp turns green only when the
   simulated shoulder-to-hand line points within 5° of it (measured 1.5°,
   0.8° and 0.5°). The gauges are drawn by the renderer only.
+- In the Navigation showcase the pedestrian walked out of the doorway through
+  a shelf panel, then stood in the void past the floor edge for the rest of
+  the clip; the second AGV drove off the end of the corridor behind a shelf.
+  The doorway now clears the panel (its size check read the unit box size,
+  not the scaled one), the floor on the camera side is drawn above the ground
+  plane so the pedestrian walks off frame across it, and the second AGV stops
+  in its lane at x = 1.3 m. The orange AGV's run and every measured gap are
+  unchanged.
 - `Slam2d` recorded raw odometry as the measurement of every sequential edge,
   so each loop-closure re-optimization pulled the trajectory back toward its
   drift between closures, and a later merge undid the scan matcher's

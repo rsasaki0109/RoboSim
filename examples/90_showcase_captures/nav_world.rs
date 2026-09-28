@@ -28,14 +28,17 @@ pub(crate) const AGV_HALF_M: (f64, f64) = (0.25, 0.2);
 /// The second AGV's lane and speed. It keeps right, which still leaves part of
 /// it in the ego's straight path down the centre line.
 const ONCOMING_START: (f64, f64) = (5.9, -0.45);
-const ONCOMING_END: (f64, f64) = (-1.8, -0.45);
+/// The second AGV stops in its lane short of the shelf by the corridor end,
+/// which would otherwise hide it from the camera.
+const ONCOMING_END: (f64, f64) = (1.3, -0.45);
 const ONCOMING_SPEED_M_S: f64 = 0.42;
 const ONCOMING_DEPARTURE_S: f64 = 0.0;
 
 /// The pedestrian walks across the corridor from the far wall's doorway.
 pub(crate) const DOORWAY_X_M: f64 = 4.4;
 const PEDESTRIAN_START_Z_M: f64 = -1.35;
-const PEDESTRIAN_END_Z_M: f64 = 2.2;
+/// Past the bottom of the frame, on the floor drawn toward the camera.
+const PEDESTRIAN_END_Z_M: f64 = 4.2;
 const PEDESTRIAN_SPEED_M_S: f64 = 0.9;
 const PEDESTRIAN_DEPARTURE_S: f64 = 6.0;
 /// Radius of the circle bounding the pedestrian's body.
@@ -439,6 +442,30 @@ pub(crate) fn detect(points: &[Vec3], explained: impl Fn(f64, f64) -> bool) -> V
 }
 
 /// Renders the hand truck prop where its body stands.
+/// The floor on the camera's side of the corridor, where the pedestrian walks
+/// off to. The office render's own extension sits below the ground plane and
+/// does not show, so the pedestrian appeared to stand in the void.
+pub(crate) fn push_near_floor(scene: &mut RenderScene) {
+    for (index, x_m) in [-0.05, 1.75, 3.55, 5.35, 7.15, 8.95]
+        .into_iter()
+        .enumerate()
+    {
+        for (row, z_m) in [1.55, 2.95, 4.35].into_iter().enumerate() {
+            let tone = if (index + row) % 2 == 0 {
+                [0.80, 0.78, 0.73, 1.0]
+            } else {
+                [0.74, 0.72, 0.67, 1.0]
+            };
+            super::media::push_box(
+                scene,
+                Vec3::new(x_m, 0.006, z_m),
+                Vec3::new(1.78, 0.012, 1.38),
+                tone,
+            );
+        }
+    }
+}
+
 pub(crate) fn push_hand_truck(scene: &mut RenderScene) {
     let (x, z, heading) = HAND_TRUCK;
     scene.items.push(RenderScene::item_from_visual(
