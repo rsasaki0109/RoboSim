@@ -148,9 +148,15 @@ cargo run --release -p vehicle_dynamics_compare --example 49_vehicle_dynamics
 RNE_SKIP_GPU=1 cargo run -p vehicle_dynamics_compare --example 49_vehicle_dynamics
 ```
 
-The first command reruns the headless comparison, renders procedural cars with their
-recorded body headings and front-wheel steering, overlays live speed, slip-angle,
-yaw-rate, and grip-state telemetry, and replaces both committed media files. The
+The first command reruns the headless comparison and films it from a fixed post
+outside the sweeper. Both cars are GT coupés built from parts at their recorded
+poses: the front wheels turn with each car's recorded steering angle, all four spin
+with the distance it has covered, and the tail lights brighten when its recorded
+speed falls. The circuit around them is render-only: an asphalt road with kerbs on
+the sweeper, blue-painted runoff where the dynamic car runs wide, and tyre walls
+that the run asserts both cars pass more than 3 m clear of (closest: 3.62 m). It
+overlays live speed, slip-angle, yaw-rate, and grip-state telemetry, and replaces
+both committed media files. The
 second command exercises the exact simulation and assertions without requiring a
 renderer. Temporary full-resolution frames live under `target/vehicle-dynamics` and
 are removed after a successful encode; the committed GIF has a 4 MiB size budget.

@@ -30,6 +30,15 @@ All notable changes to Robot Native Engine are documented in this file.
   now name the new repository, so releases from v0.4.0 on are verified
   against it. The only published release, v0.1.0, predates the rename.
   Recorded evidence under `docs/evidence` keeps the URLs it was captured with.
+- The vehicle dynamics GIF (example 49) is filmed from a fixed post outside
+  the sweeper instead of from 72 m overhead. Both cars are GT coupés built
+  from parts (body, glass, wing, lights, five-spoke wheels with discs and
+  calipers) whose front wheels steer with the recorded steering angle and
+  whose wheels spin with the distance covered; the kinematic car's steering
+  is now recorded too, where it used to be drawn straight. The circuit is
+  textured asphalt with kerbs, blue runoff and tyre walls; the run asserts
+  both cars stay over 3 m from the drawn walls (closest 3.62 m). Trails are
+  ribbons on the road. The simulation and its numbers are unchanged.
 
 - `ColliderShape` and `Collider` are no longer `Copy`. Variable-size collider
   data (`ConvexHull`, `TriMesh`, `HeightField`, `Compound`) is stored behind

@@ -13,13 +13,15 @@
 //! RNE_SKIP_GPU=1 cargo run -p vehicle_dynamics_compare --example 49_vehicle_dynamics
 //! ```
 
+mod render;
+
 use png::{BitDepth, ColorType, Encoder};
 use rne_core::SimDuration;
 use rne_ecs::{spawn_named, World};
-use rne_math::{Quat, Seconds, Vec3};
+use rne_math::{Seconds, Vec3};
 use rne_physics::RigidBody;
-use rne_render::{Camera, RenderBackend, RenderScene, RenderSceneItem, VisualShape};
-use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
+use rne_render::{Camera, MeshRenderCache, RenderBackend};
+use rne_render_wgpu::WgpuRenderBackend;
 use rne_robot::{
     ackermann_kinematics, pure_pursuit_steering, vehicle_dynamics, AckermannDrive, VehicleDynamics,
 };
@@ -34,7 +36,7 @@ const RENDER_HZ: usize = 12;
 const SIM_HZ: usize = 240;
 const SIM_STEPS_PER_FRAME: usize = SIM_HZ / RENDER_HZ;
 const _: () = assert!(SIM_HZ.is_multiple_of(RENDER_HZ));
-const CLEAR_COLOR: [f32; 4] = [0.06, 0.07, 0.10, 1.0];
+const CLEAR_COLOR: [f32; 4] = [0.55, 0.72, 0.92, 1.0];
 const GIF_MAX_BYTE_SIZE: u64 = 4 * 1024 * 1024;
 
 /// Course speed on the straights and through the fast corner, in meters per second.
@@ -53,6 +55,7 @@ struct ComparisonSample {
     dynamic_transform: Transform3,
     kinematic_speed_m_s: f64,
     dynamic_speed_m_s: f64,
+    kinematic_steering_rad: f64,
     dynamic_steering_rad: f64,
     dynamic_front_slip_rad: f64,
     dynamic_yaw_rate_rad_s: f64,
@@ -99,6 +102,24 @@ fn main() {
         run.dynamic_course_error_m,
     );
 
+    // The drawn tyre walls must stand clear of where either car actually went.
+    let wall_clearance_m = render::Circuit::build_props_only()
+        .wall_positions()
+        .flat_map(|wall| {
+            run.samples.iter().flat_map(move |sample| {
+                [sample.kinematic_transform, sample.dynamic_transform].map(|pose| {
+                    let offset = pose.translation - wall;
+                    offset.x.hypot(offset.z)
+                })
+            })
+        })
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        wall_clearance_m > 3.0,
+        "a car ran within {wall_clearance_m:.2} m of a drawn tyre wall"
+    );
+    println!("closest approach to a drawn barrier: {wall_clearance_m:.2} m");
+
     if std::env::var("RNE_SKIP_GPU").is_ok() {
         println!("RNE_SKIP_GPU set; headless vehicle dynamics comparison completed");
         return;
@@ -120,11 +141,28 @@ fn main() {
             return;
         }
     };
-    let camera = Camera::new(WIDTH, HEIGHT, 0.9);
-    let orbit = overview_camera();
+    backend.set_environment(render::sky());
+    let mut camera = Camera::new(WIDTH, HEIGHT, 0.9);
+    // The far end of the approach is beyond the default 100 m.
+    camera.far_m = 400.0;
+    let orbit = render::camera();
+    let circuit = render::Circuit::build();
+    let mut cache = MeshRenderCache::new();
+    let props_root = render::Circuit::props_root();
 
+    // `RNE_VD_STILL=N` renders frame N alone and keeps it, for looking at the
+    // models without re-encoding the GIF.
+    let still: Option<usize> = std::env::var("RNE_VD_STILL")
+        .ok()
+        .and_then(|value| value.parse().ok());
     for frame in 0..FRAME_COUNT {
-        let scene = comparison_scene(&course, &run, frame);
+        if still.is_some_and(|wanted| wanted != frame) {
+            continue;
+        }
+        let mut scene = circuit.scene(&run, frame + 1);
+        cache
+            .resolve_scene(&mut scene, &[props_root.as_path()])
+            .expect("resolve racing props");
         let output = backend
             .render_scene_camera(&camera, &orbit.camera_transform(), &scene, CLEAR_COLOR)
             .expect("render vehicle dynamics frame");
@@ -144,11 +182,17 @@ fn main() {
         .expect("write vehicle dynamics frame");
     }
 
+    if still.is_some() {
+        println!("kept the still frame in {}", frames_dir.display());
+        return;
+    }
     let gif_path = media_dir.join("vehicle-dynamics.gif");
     build_gif(&frames_dir, &gif_path).expect("encode vehicle dynamics GIF");
     let poster_frame = FRAME_COUNT - 1;
     image::open(frames_dir.join(format!("frame-{poster_frame:03}.png")))
         .expect("read vehicle dynamics poster frame")
+        // The GIF's width; the grass texture makes a full-size PNG heavy.
+        .resize(960, 540, image::imageops::FilterType::Lanczos3)
         .save(media_dir.join("vehicle-dynamics.png"))
         .expect("write vehicle dynamics poster");
     fs::remove_dir_all(&frames_dir).expect("remove vehicle dynamics frame directory");
@@ -260,6 +304,7 @@ fn run_comparison(course: &[Vec3]) -> ComparisonRun {
             dynamic_transform: *world.get::<Transform3>(dynamic).expect("dynamic transform"),
             kinematic_speed_m_s: kinematic_drive.speed_m_s,
             dynamic_speed_m_s: dynamic_drive.speed_m_s,
+            kinematic_steering_rad: kinematic_drive.steering_rad,
             dynamic_steering_rad: dynamic_drive.steering_rad,
             dynamic_front_slip_rad: dynamics.front_slip_rad,
             dynamic_yaw_rate_rad_s: dynamics.yaw_rate_rad_s,
@@ -342,163 +387,6 @@ fn run_comparison(course: &[Vec3]) -> ComparisonRun {
         kinematic_course_error_m,
         dynamic_course_error_m,
     }
-}
-
-fn overview_camera() -> CameraOrbit {
-    CameraOrbit {
-        focus: Vec3::new(34.0, 0.0, -24.0),
-        yaw_rad: 0.25,
-        pitch_rad: 0.58,
-        distance_m: 72.0,
-    }
-}
-
-/// Builds the scene for one frame: course line, both trails, and current poses.
-fn comparison_scene(course: &[Vec3], run: &ComparisonRun, frame: usize) -> RenderScene {
-    const ROAD_COLOR: [f32; 4] = [0.20, 0.22, 0.27, 1.0];
-    const LANE_COLOR: [f32; 4] = [0.72, 0.74, 0.76, 1.0];
-    const KINEMATIC_COLOR: [f32; 4] = [0.10, 0.85, 0.55, 1.0];
-    const DYNAMIC_COLOR: [f32; 4] = [1.0, 0.55, 0.10, 1.0];
-    const SATURATED_COLOR: [f32; 4] = [0.95, 0.20, 0.30, 1.0];
-    const GROUND_COLOR: [f32; 4] = [0.09, 0.11, 0.14, 1.0];
-
-    let mut scene = RenderScene::new();
-    scene.items.push(box_item(
-        Vec3::new(34.0, -0.35, -24.0),
-        Vec3::new(420.0, 0.2, 420.0),
-        GROUND_COLOR,
-    ));
-    for segment in course.windows(2) {
-        let delta = segment[1] - segment[0];
-        let center = (segment[0] + segment[1]) * 0.5 + Vec3::new(0.0, 0.01, 0.0);
-        let rotation = Quat::from_rotation_y((-delta.z).atan2(delta.x));
-        scene.items.push(oriented_box_item(
-            center,
-            rotation,
-            Vec3::new(delta.length() + 0.5, 0.10, 6.0),
-            ROAD_COLOR,
-        ));
-    }
-    for waypoint in course.iter().step_by(2) {
-        scene.items.push(box_item(
-            *waypoint + Vec3::new(0.0, 0.08, 0.0),
-            Vec3::new(1.5, 0.035, 0.10),
-            LANE_COLOR,
-        ));
-    }
-
-    let visible = frame.min(run.samples.len().saturating_sub(1));
-    for sample in run.samples[..=visible].iter().step_by(2) {
-        scene.items.push(box_item(
-            sample.kinematic_transform.translation + Vec3::new(0.0, 0.16, 0.0),
-            Vec3::splat(0.34),
-            KINEMATIC_COLOR,
-        ));
-        // The dynamic trail turns red wherever the front axle is beyond its grip.
-        let trail_color = if sample.front_saturated {
-            SATURATED_COLOR
-        } else {
-            DYNAMIC_COLOR
-        };
-        scene.items.push(box_item(
-            sample.dynamic_transform.translation + Vec3::new(0.0, 0.16, 0.0),
-            Vec3::splat(0.34),
-            trail_color,
-        ));
-    }
-
-    if let Some(current) = run.samples.get(visible) {
-        append_car(
-            &mut scene,
-            current.kinematic_transform,
-            0.0,
-            KINEMATIC_COLOR,
-        );
-        append_car(
-            &mut scene,
-            current.dynamic_transform,
-            current.dynamic_steering_rad,
-            if current.front_saturated {
-                SATURATED_COLOR
-            } else {
-                DYNAMIC_COLOR
-            },
-        );
-    }
-
-    scene
-}
-
-fn append_car(
-    scene: &mut RenderScene,
-    transform: Transform3,
-    front_steering_rad: f64,
-    color: [f32; 4],
-) {
-    const TIRE_COLOR: [f32; 4] = [0.025, 0.03, 0.04, 1.0];
-    const GLASS_COLOR: [f32; 4] = [0.10, 0.18, 0.24, 1.0];
-    const LIGHT_COLOR: [f32; 4] = [1.0, 0.92, 0.55, 1.0];
-    let rotation = transform.rotation;
-    let position = transform.translation;
-
-    scene.items.push(oriented_box_item(
-        position + rotation * Vec3::new(0.0, 0.62, 0.0),
-        rotation,
-        Vec3::new(4.5, 0.62, 1.9),
-        color,
-    ));
-    scene.items.push(oriented_box_item(
-        position + rotation * Vec3::new(-0.35, 1.15, 0.0),
-        rotation,
-        Vec3::new(2.05, 0.72, 1.55),
-        GLASS_COLOR,
-    ));
-    scene.items.push(oriented_box_item(
-        position + rotation * Vec3::new(2.27, 0.64, 0.0),
-        rotation,
-        Vec3::new(0.10, 0.22, 1.25),
-        LIGHT_COLOR,
-    ));
-
-    for (x_m, z_m, steerable) in [
-        (-1.35, -1.00, false),
-        (-1.35, 1.00, false),
-        (1.35, -1.00, true),
-        (1.35, 1.00, true),
-    ] {
-        let steering = if steerable { front_steering_rad } else { 0.0 };
-        let wheel_transform = Transform3::from_translation_rotation(
-            position + rotation * Vec3::new(x_m, 0.42, z_m),
-            rotation * Quat::from_rotation_y(steering),
-        );
-        scene.items.push(RenderScene::item_from_visual(
-            wheel_transform,
-            VisualShape::Cylinder {
-                radius_m: 0.43,
-                length_m: 0.28,
-            },
-            TIRE_COLOR,
-            Transform3::IDENTITY,
-        ));
-    }
-}
-
-fn box_item(center_m: Vec3, size_m: Vec3, color: [f32; 4]) -> RenderSceneItem {
-    oriented_box_item(center_m, Quat::IDENTITY, size_m, color)
-}
-
-fn oriented_box_item(
-    center_m: Vec3,
-    rotation: Quat,
-    size_m: Vec3,
-    color: [f32; 4],
-) -> RenderSceneItem {
-    RenderScene::item_from_visual(
-        Transform3::from_translation_rotation(center_m, rotation),
-        VisualShape::Box { size_m },
-        color,
-        Transform3::IDENTITY,
-    )
 }
 
 fn annotate_frame(rgba8: &mut [u8], width: u32, height: u32, sample: &ComparisonSample) {
@@ -762,6 +650,7 @@ fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rne_math::Quat;
 
     #[test]
     fn course_is_continuous_and_bends_left() {
@@ -800,17 +689,21 @@ mod tests {
         let course = course_waypoints();
         let run = run_comparison(&course);
         assert!(run.samples.iter().any(|sample| sample.front_saturated));
-        let scene = comparison_scene(&course, &run, FRAME_COUNT);
-        assert!(scene.items.len() > course.len() + 2);
-        assert_eq!(
-            scene
-                .items
-                .iter()
-                .filter(|item| matches!(item.shape, VisualShape::Cylinder { .. }))
-                .count(),
-            8,
-            "both procedural cars must expose four visible wheels"
-        );
+        let scene = render::Circuit::build().scene(&run, FRAME_COUNT);
+        let tyres = scene
+            .items
+            .iter()
+            .filter(|item| {
+                matches!(item.shape, rne_render::VisualShape::Cylinder { .. })
+                    && item.color_rgba == render::TYRE
+            })
+            .count();
+        assert_eq!(tyres, 8, "both cars must expose four visible wheels");
+        // The saturated stretch is drawn in its own colour.
+        assert!(scene
+            .items
+            .iter()
+            .any(|item| item.color_rgba == render::SATURATED));
     }
 
     #[test]

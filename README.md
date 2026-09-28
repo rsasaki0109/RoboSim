@@ -99,7 +99,7 @@ in-repo reference implementations do not count as independent evidence.
 
 ## Vehicle dynamics at the grip limit
 
-![Pure-pursuit controller driving kinematic and tire-limited dynamic vehicle models through a fast corner](docs/media/vehicle-dynamics.gif)
+![Two GT coupés, green kinematic and orange tire-limited dynamic, take the same fast left-hand sweeper under the same pure-pursuit controller; the green car holds the line while the orange one runs wide across the blue runoff, its trail turning red where the front axle saturates](docs/media/vehicle-dynamics.gif)
 
 *Same controller, two plants: the dynamic car's trail turns red once the front axle saturates.* No-slip follows the line; the dynamic car runs wide past tire grip. [Vehicle dynamics](docs/VEHICLE_DYNAMICS.md).
 
