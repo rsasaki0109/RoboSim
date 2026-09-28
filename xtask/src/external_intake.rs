@@ -564,8 +564,9 @@ fn validate_readme_discovery(readme: &str, registry: &IntakeRegistry) -> Result<
             .rsplit('/')
             .next()
             .context("external intake issue template is missing its file name")?;
-        let issue_url =
-            format!("https://github.com/rsasaki0109/RobotNativeEngine/issues/new?template={template}");
+        let issue_url = format!(
+            "https://github.com/rsasaki0109/RobotNativeEngine/issues/new?template={template}"
+        );
         anyhow::ensure!(
             readme.contains(&issue_url),
             "README does not expose the public issue URL for {}",
