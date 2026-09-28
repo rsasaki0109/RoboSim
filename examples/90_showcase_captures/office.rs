@@ -809,7 +809,12 @@ pub(crate) fn push_doorway(scene: &mut RenderScene, x_m: f64) {
     scene.items.retain(|item| {
         // Shelving, windows and light fittings on that stretch of wall; the
         // wall itself is wider than a meter and stays.
-        let small_box = matches!(item.shape, VisualShape::Box { size_m } if size_m.x < 1.0);
+        // Box items carry their extent in the transform's scale; `size_m` is
+        // the unit box.
+        let small_box = matches!(
+            item.shape,
+            VisualShape::Box { size_m } if size_m.x * item.transform.scale.x < 1.0
+        );
         let at = item.transform.translation;
         !(small_box && (at.x - x_m).abs() < 0.5 && at.z < -0.85 && at.y > 0.3)
     });

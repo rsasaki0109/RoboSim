@@ -384,6 +384,7 @@ fn rollout(repo_root: &Path, capture: bool, expected_steps: Option<u64>) -> Resu
             );
             Corridor::hide_bodies(&mut scene);
             office::push_doorway(&mut scene, super::nav_world::DOORWAY_X_M);
+            super::nav_world::push_near_floor(&mut scene);
             push_hand_truck(&mut scene);
             super::nav_world::push_totes(&mut scene, corridor.oncoming.pose);
             corridor.push_pedestrian(&mut scene)?;
