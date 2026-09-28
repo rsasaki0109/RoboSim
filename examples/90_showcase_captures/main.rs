@@ -18,6 +18,7 @@ mod nav;
 mod nav_world;
 mod office;
 mod openarm;
+mod openarm_path;
 mod ssl;
 mod tsukuba;
 

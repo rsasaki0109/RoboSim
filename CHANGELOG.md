@@ -716,6 +716,16 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- The OpenArm v2 showcase blended its keyposes in joint space, so the hands
+  swept along arcs between them and the elbows rode up at shoulder height
+  (the pick keypose's elbow sat 6 cm below the shoulder). Between keyposes
+  each gripper now moves in a straight line with a slerped orientation, solved
+  by damped least squares every control step, warm-started and with the
+  seventh degree of freedom pulled toward the hanging ready posture; for the
+  same pick the elbow sits 13 cm below the shoulder. The keyposes, the
+  contact-gated grasps, the relay drop and the placement are unchanged, and
+  the capture is 70 frames instead of 38.
+
 - `Slam2d` recorded raw odometry as the measurement of every sequential edge,
   so each loop-closure re-optimization pulled the trajectory back toward its
   drift between closures, and a later merge undid the scan matcher's

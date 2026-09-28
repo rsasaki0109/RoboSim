@@ -7,9 +7,12 @@
 //! close on the same block, lift it, carry it to a marked target pad, and
 //! set it down. Every keypose below is an inverse-kinematics solution
 //! (solved offline against the real URDF chain, see
-//! `docs/media/showcase-openarm.json` provenance) so the commanded
-//! end-effector path actually reaches the block, the relay point, and the
-//! pad instead of an arbitrary joint-space sweep. The block is a real
+//! `docs/media/showcase-openarm.json` provenance) placing the gripper on the
+//! block, the relay point or the pad. Between keyposes the gripper moves in a
+//! straight line, solved by IK every control step with the arm's spare degree
+//! of freedom pulled toward a hanging posture (see `openarm_path`); blending
+//! the keyposes in joint space had the hands sweep along arcs with the elbows
+//! thrown up at shoulder height. The block is a real
 //! dynamic Rapier body throughout: each contact-gated grasp (two distinct
 //! fingertip contacts on the block, see
 //! [`rne_ai::UrdfSceneSim::named_child_has_distinct_dual_contact`]) switches
@@ -21,6 +24,7 @@ use super::media::{
     capture_frames, push_box, push_box_material, CameraEvidence, CaptureFrame, ShowcaseMetadata,
     SimulationEvidence,
 };
+use super::openarm_path::{plan_arm, ArmSolver, ARM_JOINTS};
 use anyhow::{Context, Result};
 use rne_ai::{
     build_visual_render_scene, UrdfJointFeedbackSensorConfig, UrdfJointPdEffortTarget,
@@ -42,7 +46,7 @@ use std::path::{Path, PathBuf};
 const ENVIRONMENT_ID: &str = "openarm";
 const SUBJECT: &str = "Official OpenArm v2 bimanual pick, relay, and place";
 const CAPTURE_STEPS: u64 = 1_400;
-const CAPTURE_FRAME_COUNT: usize = 38;
+const CAPTURE_FRAME_COUNT: usize = 70;
 const CAPTURE_STRIDE: u64 = CAPTURE_STEPS / CAPTURE_FRAME_COUNT as u64;
 const PHYSICS_SUBSTEPS_PER_CONTROL_STEP: usize = 19;
 const JOINT_FEEDBACK_STREAM: StreamId = StreamId::new(9_090);
@@ -378,28 +382,6 @@ const LEFT_KEYFRAMES: &[(u64, ArmPose)] = &[
     (CAPTURE_STEPS, READY_L),
 ];
 
-/// Evaluates a per-arm keyframe schedule at `step` with quintic-smoothed
-/// blending between the surrounding keyframes.
-fn arm_pose_at(schedule: &[(u64, ArmPose)], step: u64) -> ArmPose {
-    for window in schedule.windows(2) {
-        let (start_step, start_pose) = window[0];
-        let (end_step, end_pose) = window[1];
-        if step <= end_step {
-            let alpha = if end_step > start_step {
-                (step - start_step) as f64 / (end_step - start_step) as f64
-            } else {
-                1.0
-            };
-            return blend_arm_pose(start_pose, end_pose, smooth(alpha));
-        }
-    }
-    schedule.last().map_or(READY_R, |(_, pose)| *pose)
-}
-
-fn blend_arm_pose(from: ArmPose, to: ArmPose, alpha: f64) -> ArmPose {
-    std::array::from_fn(|i| from[i] + (to[i] - from[i]) * alpha)
-}
-
 /// Runs a force-limited OpenArm bimanual joint-space cycle and optionally
 /// renders evenly sampled post-step states using the same Rapier rollout.
 pub fn run(repo_root: &Path, capture: bool) -> Result<ShowcaseMetadata> {
@@ -618,6 +600,21 @@ fn rollout(repo_root: &Path, capture: bool) -> Result<Rollout> {
     .context("install OpenArm bimanual joint-feedback sensor")?;
     let observation = sim.observe();
     let initial_digest = hash_physics_state(sim.world());
+    // Each arm's gripper glides in straight lines between the keyposes'
+    // gripper poses, solved by IK every step (see `openarm_path`).
+    let rest = |ready: ArmPose| -> [f64; ARM_JOINTS] { std::array::from_fn(|k| ready[k]) };
+    let right_plan = plan_arm(
+        &ArmSolver::new(&sim, "openarm_v2_right", RIGHT_PALM, rest(READY_R))?,
+        RIGHT_KEYFRAMES,
+        CAPTURE_STEPS,
+        smooth,
+    )?;
+    let left_plan = plan_arm(
+        &ArmSolver::new(&sim, "openarm_v2_left", LEFT_PALM, rest(READY_L))?,
+        LEFT_KEYFRAMES,
+        CAPTURE_STEPS,
+        smooth,
+    )?;
     let left_start = link_position(&sim, "openarm_left_ee_base_link")?;
     let right_start = link_position(&sim, "openarm_right_ee_base_link")?;
     let mut left_travel_m: f64 = 0.0;
@@ -640,7 +637,10 @@ fn rollout(repo_root: &Path, capture: bool) -> Result<Rollout> {
     let mut regrasp_step = None;
     let mut released = false;
     for step in 1..=CAPTURE_STEPS {
-        let pose = commanded_pose(step);
+        let pose = BimanualPose {
+            left: left_plan[step as usize],
+            right: right_plan[step as usize],
+        };
         let reference_targets = targets_for_pose(&pose);
         let visible_feedback =
             bus.latest_available::<JointFeedback>(JOINT_FEEDBACK_STREAM, sim.sim_time());
@@ -1029,18 +1029,6 @@ fn feedback_adjusted_targets(
         adjusted,
         consumed_at_ticks.saturating_sub(feedback.capture_time.ticks()),
     ))
-}
-
-/// Independently evaluates each arm's own keyframe schedule at `step`. The
-/// two arms are not required to share phase boundaries: the left arm holds
-/// at `READY_L` while the right arm picks the block up and relays it to the
-/// mid-table point, then the right arm withdraws home while the left arm
-/// reaches in, re-grasps it, and carries it on to the pad.
-fn commanded_pose(step: u64) -> BimanualPose {
-    BimanualPose {
-        left: arm_pose_at(LEFT_KEYFRAMES, step),
-        right: arm_pose_at(RIGHT_KEYFRAMES, step),
-    }
 }
 
 /// Quintic ("smootherstep") ease: zero first *and* second derivative at both

@@ -4965,6 +4965,7 @@ dependencies = [
  "rne_plateau",
  "rne_render",
  "rne_render_wgpu",
+ "rne_robot",
  "rne_sensor",
  "rne_world",
  "serde",
