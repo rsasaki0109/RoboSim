@@ -136,9 +136,9 @@ SLAM with loop closure and AMCL (a ROS 2 adapter maps to Nav2). Details:
       <sub>A forklift AGV takes a case off a stand, calls the lift, rides up with the load and sets it down on the floor above. The mast is a prismatic joint with a position servo and the case is an ordinary dynamic body throughout: it moves 0.038 m on the tines across the whole carry. <a href="examples/123_warehouse_logistics/main.rs">source</a></sub>
     </td>
     <td width="50%" align="center">
-      <img src="docs/media/multi-floor-lift.gif" alt="Service robot pressing a lift call button, boarding the car and riding to the floor above" width="460">
+      <img src="docs/media/multi-floor-lift.gif" alt="Delivery robot pressing a lift call button, boarding the car and riding to the floor above, with the hoist ropes and counterweight moving in the shaft" width="460">
       <br><b>Calling and riding a lift</b><br>
-      <sub>The call button reads solved contact force from the robot's own body, the car and doors are <code>rne_nav::Elevator</code> state, and the car carries the robot by ordinary contact rather than by parenting it. <a href="examples/122_multi_floor_media/main.rs">source</a></sub>
+      <sub>The call button reads solved contact force from the robot's own body, the car and doors are <code>rne_nav::Elevator</code> state, and the car carries the robot by ordinary contact rather than by parenting it. The robot is drawn at its solved pose and stays within 0.2° of upright; its height on the car moves 0.7 mm during the ride. <a href="examples/122_multi_floor_media/main.rs">source</a></sub>
     </td>
   </tr>
   <tr>

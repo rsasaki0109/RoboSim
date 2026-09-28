@@ -672,6 +672,21 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- Example 122 (`multi-floor-lift.gif`) drew the robot upright whatever its
+  pose, and the robot had in fact tipped onto its side boarding the lift and
+  ridden it lying down (90 degrees). Three causes: the car platform's centre,
+  not its top, sat at the floor height, leaving a 6 cm step; the box robot's
+  square bottom edge caught the seam between slab and car, and with its drive
+  velocity re-imposed every step the sloped contact pitched it over; and as a
+  uniform box its centre of mass sat at half height, at the tipping margin for
+  floor friction 0.5. The car is now flush with the landing, the robot's
+  bottom edges are bevelled like a bumper and its mass sits low in the base,
+  and the example asserts it stays within 2 degrees of upright (measured 0.2).
+  The ride clearance error drops from 0.0197 m to 0.0007 m, and its bound from
+  0.04 m to 0.01 m. The scene is redrawn with a delivery robot, lift machinery
+  (sheave, ropes, counterweight, rails), landing fittings with a position
+  indicator and lit buttons, and scanned props.
+
 - The wgpu backend's shared cylinder side wall and sphere wound inward (48 of
   96 and 720 of 768 triangles), like the box fixed earlier; back-face culling
   drew their far side. Both are pinned now.
