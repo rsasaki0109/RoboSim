@@ -18,6 +18,7 @@ mod unitree_g1_parts_episode;
 mod unitree_g1_workbench_mission;
 mod unitree_go2_episode;
 mod unitree_go2_gait;
+mod unitree_go2_trot;
 mod vectorized;
 
 pub use humanoid_episode::{
@@ -95,6 +96,9 @@ pub use unitree_go2_gait::{
     UnitreeGo2PureTorquePolicy, UnitreeGo2TerrainObservation, UnitreeGo2TorqueOverlay,
     UnitreeGo2TorquePolicy, UnitreeGo2VelocityCommand, UnitreeGo2VelocityPolicyConfig,
     UnitreeGo2VelocityPolicyInput, UNITREE_GO2_POLICY_FEATURES, UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
+};
+pub use unitree_go2_trot::{
+    UnitreeGo2Trot, UnitreeGo2TrotCommand, UnitreeGo2TrotGains, UNITREE_GO2_TROT_CONTROL_HZ,
 };
 pub use vectorized::{
     VectorizedUnitreeG1GaitCheckpoint, VectorizedUnitreeG1GaitConfig, VectorizedUnitreeG1GaitEnv,
@@ -2411,6 +2415,15 @@ pub fn unitree_go2_scene_path() -> PathBuf {
 /// Vendored official Unitree Go2 dynamic multibody scene path.
 pub fn unitree_go2_dynamic_scene_path() -> PathBuf {
     assets_scene_path("unitree_go2_dynamic.rne.scene.toml")
+}
+
+/// Official Unitree Go2 with its fixed-joint children (feet, head) welded and
+/// its declared masses: the model [`UnitreeGo2Trot`] walks.
+///
+/// [`unitree_go2_dynamic_scene_path`] leaves those children as loose bodies on
+/// the floor.
+pub fn unitree_go2_jump_scene_path() -> PathBuf {
+    assets_scene_path("unitree_go2_jump.rne.scene.toml")
 }
 
 /// Built-in official Unitree Go2 scene with a fixed sloped terrain patch.
