@@ -742,6 +742,12 @@ All notable changes to Robot Native Engine are documented in this file.
   stack, and faces along its lane. The simulation is unchanged (same final
   digest).
 
+- The factory inspection showcase no longer marches on the spot and jabs
+  at nothing. The G1 now stands (measured drift 8 mm, tilt 0.4°) and points
+  at three gauges in turn, one arm at a time. Each aim is searched on the
+  G1's own kinematic chain, and a gauge's lamp turns green only when the
+  simulated shoulder-to-hand line points within 5° of it (measured 1.5°,
+  0.8° and 0.5°). The gauges are drawn by the renderer only.
 - `Slam2d` recorded raw odometry as the measurement of every sequential edge,
   so each loop-closure re-optimization pulled the trajectory back toward its
   drift between closures, and a later merge undid the scan matcher's

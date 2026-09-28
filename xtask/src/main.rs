@@ -3450,12 +3450,9 @@ fn validate_showcase_metadata(
             .get("outcome")
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
-        let completed_markers = simulation
-            .get("inspection_markers_completed")
-            .and_then(serde_json::Value::as_u64);
         anyhow::ensure!(
-            outcome.contains("completed_markers=3/3") || completed_markers == Some(3),
-            "factory metadata must record completion of all three inspection markers"
+            outcome.contains("confirmed_gauges=3/3"),
+            "factory metadata must record that all three gauges were confirmed"
         );
     }
     for (field, expected) in [
