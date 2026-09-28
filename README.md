@@ -111,13 +111,15 @@ in-repo reference implementations do not count as independent evidence.
 
 ## Navigation, SLAM, and multi-robot
 
-![Office AGV following a planned route around the dock and desk, with the costmap inflation it was charged for drawn on the floor](docs/media/showcase-nav.gif)
+![Office AGV following a replanned route past a second AGV coming down the corridor, with the costmap inflation it was charged for drawn on the floor](docs/media/showcase-nav.gif)
 
-*The magenta route is what `plan_path` returned over the corridor's own
-collision geometry, and the amber band is the costmap inflation that pushed it
-off the centre line: the dock and the desk stand in a 2.3 m corridor, so the
-6.63 m plan swings 0.82 m wide where a straight line would be 5.95 m and
-impassable.*
+*The light AGV is the office scene's physics diff-drive robot, and its wheel
+speeds come from pure pursuit on the magenta route `plan_path` returns. The
+dark AGV drives the other way down its own side of the corridor; its footprint,
+swept 2 s ahead, goes into the costmap, and the route is replanned five times a
+second. The light AGV swings 0.52 m off the centre line, keeps at least 0.19 m
+between the two footprints, and docks 0.05 m from the goal. The dark AGV is a
+planner input, not a physics body.*
 
 `rne_nav`/`rne_slam`: deterministic, ROS-free costmaps, a transform tree,
 A*/DWA/pure-pursuit, multi-robot avoidance, an EKF, 3D ICP, and online 2D

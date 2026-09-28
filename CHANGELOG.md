@@ -675,6 +675,15 @@ All notable changes to Robot Native Engine are documented in this file.
 - The wgpu backend's shared cylinder side wall and sphere wound inward (48 of
   96 and 720 of 768 triangles), like the box fixed earlier; back-face culling
   drew their far side. Both are pinned now.
+- The Navigation showcase (`docs/media/showcase-nav.gif`) drew a route the AGV
+  never drove: the route went around the pickup dock, which is a platform the
+  AGV drives over, while the AGV ran the desk-place script straight down the
+  centre. The oncoming AGV from that script also parked beside the goal, cut
+  past the ego, and stopped by the pillar. The capture now drives the office
+  scene's diff-drive robot with pure pursuit on the `plan_path` route, writes the
+  oncoming AGV's footprint (swept 2 s ahead) into the costmap, and replans at
+  5 Hz. The ego swings 0.52 m off the centre line, keeps at least 0.19 m between
+  footprints, and docks 0.05 m from the goal.
 
 - `rne-asset --control-port` acknowledges `quit` before handing it to the
   runner. It used to queue the command first and write the ACK after, and the
