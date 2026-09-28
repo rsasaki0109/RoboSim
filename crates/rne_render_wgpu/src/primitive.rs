@@ -3111,7 +3111,9 @@ fn unit_cylinder() -> (Vec<Vertex>, Vec<u16>) {
         let bottom_next = next as u16;
         let top = (SEGMENTS + segment) as u16;
         let top_next = (SEGMENTS + next) as u16;
-        indices.extend_from_slice(&[bottom, top, bottom_next, bottom_next, top, top_next]);
+        // Counter-clockwise from outside, like the cube's faces: the side wall
+        // used to wind inward and draw only from inside.
+        indices.extend_from_slice(&[bottom, bottom_next, top, bottom_next, top_next, top]);
     }
 
     let bottom_center = vertices.len() as u16;
@@ -3179,7 +3181,7 @@ fn unit_sphere() -> (Vec<Vertex>, Vec<u16>) {
             let next = current + 1;
             let below = current + stride as u16;
             let below_next = below + 1;
-            indices.extend_from_slice(&[current, below, next, next, below, below_next]);
+            indices.extend_from_slice(&[current, next, below, next, below_next, below]);
         }
     }
 
@@ -3195,6 +3197,36 @@ mod mesh_tests {
     };
     use crate::taa::{COPY_SHADER, TAA_SHADER};
     use rne_render::RenderSceneItem;
+
+    #[test]
+    fn every_unit_cylinder_and_sphere_triangle_faces_outward() {
+        // Same contract as the cube: winding normal outward, or back-face
+        // culling removes the near side and shows the inside of the far side.
+        let point = |v: super::Vertex| {
+            let [x, y, z] = v.position;
+            rne_math::Vec3::new(f64::from(x), f64::from(y), f64::from(z))
+        };
+        for (name, (vertices, indices)) in
+            [("cylinder", unit_cylinder()), ("sphere", unit_sphere())]
+        {
+            let mut inward = 0;
+            for triangle in indices.chunks_exact(3) {
+                let [a, b, c] = [0, 1, 2].map(|k| vertices[triangle[k] as usize]);
+                let winding = (point(b) - point(a)).cross(point(c) - point(a));
+                let centroid = (point(a) + point(b) + point(c)) / 3.0;
+                // Pole triangles collapse to slivers whose direction is rounding noise.
+                if winding.length() > 1.0e-6 && winding.dot(centroid) <= 0.0 {
+                    inward += 1;
+                }
+            }
+            assert_eq!(
+                inward,
+                0,
+                "{name}: {inward} of {} triangles face inward",
+                indices.len() / 3
+            );
+        }
+    }
 
     #[test]
     fn every_unit_cube_triangle_winds_counter_clockwise_seen_from_outside() {
