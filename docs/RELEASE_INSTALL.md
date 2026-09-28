@@ -12,7 +12,7 @@ anything, first verify that the archive itself has GitHub/Sigstore provenance
 bound to this repository, then verify every extracted entry in `SHA256SUMS`:
 
 ```bash
-gh release download v0.4.0 -R rsasaki0109/RoboSim \
+gh release download v0.4.0 -R rsasaki0109/RobotNativeEngine \
   --pattern SHA256SUMS \
   --pattern 'rne-0.4.0-x86_64-unknown-linux-gnu.tar.gz'
 sha256sum --ignore-missing --check SHA256SUMS
@@ -24,10 +24,10 @@ manifest checks downloaded asset identity before extraction; the separate
 `SHA256SUMS` inside the archive checks every extracted member.
 
 ```bash
-REVISION="$(gh api repos/rsasaki0109/RoboSim/commits/v0.4.0 --jq .sha)"
+REVISION="$(gh api repos/rsasaki0109/RobotNativeEngine/commits/v0.4.0 --jq .sha)"
 gh attestation verify rne-0.4.0-x86_64-unknown-linux-gnu.tar.gz \
-  -R rsasaki0109/RoboSim \
-  --cert-identity https://github.com/rsasaki0109/RoboSim/.github/workflows/release.yml@refs/tags/v0.4.0 \
+  -R rsasaki0109/RobotNativeEngine \
+  --cert-identity https://github.com/rsasaki0109/RobotNativeEngine/.github/workflows/release.yml@refs/tags/v0.4.0 \
   --source-ref refs/tags/v0.4.0 \
   --source-digest "$REVISION" \
   --signer-digest "$REVISION" \
@@ -35,8 +35,8 @@ gh attestation verify rne-0.4.0-x86_64-unknown-linux-gnu.tar.gz \
   --predicate-type https://slsa.dev/provenance/v1 \
   --deny-self-hosted-runners
 gh attestation verify rne_py-0.4.0-cp39-abi3-manylinux_2_*.whl \
-  -R rsasaki0109/RoboSim \
-  --cert-identity https://github.com/rsasaki0109/RoboSim/.github/workflows/release.yml@refs/tags/v0.4.0 \
+  -R rsasaki0109/RobotNativeEngine \
+  --cert-identity https://github.com/rsasaki0109/RobotNativeEngine/.github/workflows/release.yml@refs/tags/v0.4.0 \
   --source-ref refs/tags/v0.4.0 \
   --source-digest "$REVISION" \
   --signer-digest "$REVISION" \

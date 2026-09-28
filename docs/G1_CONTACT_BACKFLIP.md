@@ -26,7 +26,7 @@ playback physics ticks. This is a simulator result; hardware is unvalidated.
 [Candidate, complete recordings, hashes, combined verifier and reproduction](evidence/g1-contact-backflip/native-transfer/selected005-long-validation/README.md)
 are retained. The Rust probe's raw diagnostic qualification flag is preserved;
 the independent combined audit verifies the three-step result. Repository-wide
-CI remains tracked in [PR #311](https://github.com/rsasaki0109/RoboSim/pull/311).
+CI remains tracked in [PR #311](https://github.com/rsasaki0109/RobotNativeEngine/pull/311).
 
 The following sections retain the external MuJoCo benchmark and earlier
 native transfer experiments. Their failed or pending statements refer to those
@@ -691,7 +691,7 @@ joint speed is 1.190973x at 500 µs and 1.171478x at 125 µs; both exceed the
 unchanged 1.05 gate. Full-body/self-collision is still disabled. This is a
 coarse-step held-motion result, not a timestep-converged or qualified backflip.
 
-[Historical 500 µs foot-contact diagnostic GIF with failed limits](https://github.com/rsasaki0109/RoboSim/blob/021d40d4c39105c824c7339b0c9d713a775024e8/docs/media/unitree-g1-robosim-native-backflip.gif). The current GIF at the top of this document uses the successful full-contact 62.5 µs recording.
+[Historical 500 µs foot-contact diagnostic GIF with failed limits](https://github.com/rsasaki0109/RobotNativeEngine/blob/021d40d4c39105c824c7339b0c9d713a775024e8/docs/media/unitree-g1-robosim-native-backflip.gif). The current GIF at the top of this document uses the successful full-contact 62.5 µs recording.
 
 Unlike the earlier external-state replay, this GIF displays states generated
 by native Rapier dynamics. Rendering itself only applies the recorded native

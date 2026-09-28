@@ -149,7 +149,7 @@ fn handle(stream: &mut TcpStream, host_name: &str, host: &mut Host) -> Result<()
 pub(crate) fn serve(mut host: Host, port: u16) -> Result<()> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
     let host_name = listener.local_addr()?.to_string();
-    println!("RoboSim workbench: http://{host_name}");
+    println!("RNE workbench: http://{host_name}");
     std::io::stdout().flush()?;
     for stream in listener.incoming() {
         let mut stream = stream?;

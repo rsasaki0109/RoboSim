@@ -10,7 +10,7 @@ use std::path::{Component, Path, PathBuf};
 const DEFAULT_REGISTRY: &str = "release/external-evidence-intake.toml";
 const REGISTRY_SCHEMA_VERSION: u32 = 10;
 const MAX_INTAKE_FILE_BYTES: u64 = 128 * 1024;
-const RELEASE_URL_PREFIX: &str = "https://github.com/rsasaki0109/RoboSim/releases/tag/";
+const RELEASE_URL_PREFIX: &str = "https://github.com/rsasaki0109/RobotNativeEngine/releases/tag/";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -565,7 +565,7 @@ fn validate_readme_discovery(readme: &str, registry: &IntakeRegistry) -> Result<
             .next()
             .context("external intake issue template is missing its file name")?;
         let issue_url =
-            format!("https://github.com/rsasaki0109/RoboSim/issues/new?template={template}");
+            format!("https://github.com/rsasaki0109/RobotNativeEngine/issues/new?template={template}");
         anyhow::ensure!(
             readme.contains(&issue_url),
             "README does not expose the public issue URL for {}",
@@ -876,7 +876,7 @@ mod tests {
             conditional_requirements: Vec::new(),
             form_fields: vec!["one".to_string(), "two".to_string()],
         };
-        let valid = "name: Test\ndescription: Test\ntitle: Test\nbody:\n  - type: input\n    id: one\n    validations:\n      required: true\n  - type: input\n    id: two\n    validations:\n      required: true\n# Current campaign: v0.4.0 — https://github.com/rsasaki0109/RoboSim/releases/tag/v0.4.0\n# Do not submit before these assets are published.\n# A submitted issue is not acceptance evidence\n";
+        let valid = "name: Test\ndescription: Test\ntitle: Test\nbody:\n  - type: input\n    id: one\n    validations:\n      required: true\n  - type: input\n    id: two\n    validations:\n      required: true\n# Current campaign: v0.4.0 — https://github.com/rsasaki0109/RobotNativeEngine/releases/tag/v0.4.0\n# Do not submit before these assets are published.\n# A submitted issue is not acceptance evidence\n";
         validate_issue_form(valid, &route).unwrap();
         assert!(
             validate_issue_form(&valid.replace("required: true", "required: false"), &route)

@@ -5,7 +5,7 @@ cannot do, on the dynamic multibody under RNE physics. Everything here was
 measured on the plant; the numbers that matter are pinned by tests in
 `unitree_go2_episode.rs`.
 
-> **The robot measured here has no feet ([#346](https://github.com/rsasaki0109/RoboSim/issues/346)).**
+> **The robot measured here has no feet ([#346](https://github.com/rsasaki0109/RobotNativeEngine/issues/346)).**
 > `unitree_go2_dynamic.rne.robot.toml` does not set `weld_fixed_children`, so
 > the importer leaves the fixed-joint children -- the four `*_foot` links and
 > `Head_upper`/`Head_lower` -- as loose bodies at their spawn poses on the
@@ -328,7 +328,7 @@ from that channel, and scores the corrected heading, is the obvious next step.
 
 ## The feet are not slipping
 
-> **Invalid ([#346](https://github.com/rsasaki0109/RoboSim/issues/346)).** The
+> **Invalid ([#346](https://github.com/rsasaki0109/RobotNativeEngine/issues/346)).** The
 > `*_foot` colliders this section changes are loose bodies lying at the spawn
 > point, not part of the walking robot, so identical trajectories under
 > different foot friction say nothing about slip. Kept as the log of what was
@@ -441,7 +441,7 @@ flight phases cost stability and buy no extra turn.
 
 ## Foot clearance and the parkour boundary
 
-> **Almost certainly an artifact ([#346](https://github.com/rsasaki0109/RoboSim/issues/346)).**
+> **Almost certainly an artifact ([#346](https://github.com/rsasaki0109/RobotNativeEngine/issues/346)).**
 > The loose `*_foot` bodies rest on the floor at y = 0.021 m, which is exactly
 > the "fixed" 2.1 cm clearance below. The measurement was not pinned in code,
 > so which link it read cannot be checked, but a swing-foot height that no

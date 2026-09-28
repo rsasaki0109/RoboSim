@@ -87,7 +87,7 @@ See `docs/ROS2_NAV2.md`.
 For live simulation via Python bindings:
 ```bash
 # optional: live simulation via Python bindings
-cd /path/to/RoboSim
+cd /path/to/RobotNativeEngine
 python3 -m venv .venv
 .venv/bin/pip install maturin
 .venv/bin/maturin develop -m crates/rne_py/Cargo.toml

@@ -48,7 +48,7 @@ RESOLUTION = "1k"
 
 
 def fetch(url: str) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": "RoboSim asset prep"})
+    request = urllib.request.Request(url, headers={"User-Agent": "RNE asset prep"})
     with urllib.request.urlopen(request, timeout=60) as response:
         return response.read()
 
