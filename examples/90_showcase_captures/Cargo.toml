@@ -25,6 +25,7 @@ rne_physics = { workspace = true }
 rne_physics_mujoco = { workspace = true, optional = true }
 rne_render = { workspace = true }
 rne_render_wgpu = { workspace = true }
+rne_robot = { workspace = true }
 rne_sensor = { workspace = true }
 rne_world = { workspace = true }
 serde = { workspace = true }
