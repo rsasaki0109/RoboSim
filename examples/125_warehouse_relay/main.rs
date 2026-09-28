@@ -2124,17 +2124,17 @@ fn push_car_interior(scene: &mut RenderScene, car_y_m: f64, handrail: bool) {
         );
     }
     if handrail {
-    push_cylinder(
-        scene,
-        Vec3::new(SHAFT_X_M + CAR_HALF_M.x - 0.09, floor + 0.9, 0.0),
-        Vec3::Z,
-        0.018,
-        1.6,
-        [0.82, 0.84, 0.88, 1.0],
-        0.2,
-        0.9,
-        [0.0; 3],
-    );
+        push_cylinder(
+            scene,
+            Vec3::new(SHAFT_X_M + CAR_HALF_M.x - 0.09, floor + 0.9, 0.0),
+            Vec3::Z,
+            0.018,
+            1.6,
+            [0.82, 0.84, 0.88, 1.0],
+            0.2,
+            0.9,
+            [0.0; 3],
+        );
     }
     push_pbr(
         scene,
@@ -2734,7 +2734,9 @@ fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
         .args(["--fps", "12", "--colors", "192"])
         .status()?;
     if !status.success() {
-        return Err(std::io::Error::other("encode_gif.py failed to build the gif"));
+        return Err(std::io::Error::other(
+            "encode_gif.py failed to build the gif",
+        ));
     }
     Ok(())
 }
