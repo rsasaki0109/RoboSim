@@ -52,7 +52,7 @@ camera state; gates and regeneration commands are in
         <img src="docs/media/showcase-office.gif" alt="Office AGV yielding to an oncoming robot before delivering cargo to a desk" width="460">
       </picture>
       <br><b>Office AGV</b><br>
-      <sub>Shared-aisle yield, dock pickup, cargo transport, and desk placement without contact or early drop. <a href="docs/media/showcase-office.json">metadata</a></sub>
+      <sub>Shelving narrows the aisle to one lane, so the delivery AGV waits at the yield line while the other AGV leaves its charging bay and comes through, then picks up at the dock and places the cargo on the desk: no contact, no early drop. The shelving marks the single-lane rule the scenario enforces; it is drawn, not collided with. <a href="docs/media/showcase-office.json">metadata</a></sub>
     </td>
     <td width="50%" align="center">
       <picture>

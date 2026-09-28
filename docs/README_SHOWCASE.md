@@ -30,7 +30,7 @@ observation state.
 | Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 414,735 | 749,240 | 960 x 540 |
 | OpenArm v2 bimanual control | `showcase-openarm.gif` / `.png` | 1,983,788 | 56,163 | 960 x 540 |
 | Factory inspection | `showcase-factory.gif` / `.png` | 2,279,227 | 61,941 | 960 x 540 |
-| Office AGV delivery | `showcase-office.gif` / `.png` | 1,812,046 | 47,795 | 960 x 540 |
+| Office AGV delivery | `showcase-office.gif` / `.png` | 1,078,053 | 96,581 | 960 x 540 |
 | PLATEAU UAV RGB-D flight | `showcase-uav.gif` / `.png` | 4,329,461 | 439,474 | 960 x 540 |
 
 The current GIF total is **11,176,879 bytes**, below the 12,000,000-byte

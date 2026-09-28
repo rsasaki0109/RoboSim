@@ -725,6 +725,14 @@ All notable changes to Robot Native Engine are documented in this file.
   same pick the elbow sits 13 cm below the shoulder. The keyposes, the
   contact-gated grasps, the relay drop and the placement are unchanged, and
   the capture is 70 frames instead of 38.
+- The Office AGV showcase gave no reason for its motion: the second AGV sat
+  beside the goal, slid sideways through the single-lane section with a fixed
+  heading, and parked by the pillar, while the delivery AGV stopped for no
+  visible cause. The single-lane section the scenario enforces is now drawn as
+  deep shelving narrowing the aisle, with hatched floor at both ends; the
+  second AGV has charging bays where it starts and stops, carries a tote
+  stack, and faces along its lane. The simulation is unchanged (same final
+  digest).
 
 - `Slam2d` recorded raw odometry as the measurement of every sequential edge,
   so each loop-closure re-optimization pulled the trajectory back toward its

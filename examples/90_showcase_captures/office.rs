@@ -7,7 +7,7 @@ use super::media::{
 use anyhow::{Context, Result};
 use rne_ai::{
     build_visual_render_scene, BehaviorScenario, OfficeAgvDeskPlaceObservation,
-    OfficeAgvDeskPlaceScenario,
+    OfficeAgvDeskPlaceScenario, OfficeAgvSharedAisleCourse,
 };
 use rne_math::{Quat, Vec3};
 use rne_physics::hash_physics_state;
@@ -505,9 +505,24 @@ pub(crate) fn render_scene(
             observation.base_z_m,
             observation.base_yaw_rad,
         ),
-        // The oncoming AGV travels in the opposite lane and only ever drives
-        // toward -X, so a fixed heading of PI is the direction it is going.
-        (other_agv_x_m, other_agv_z_m, std::f64::consts::PI),
+        (other_agv_x_m, other_agv_z_m, oncoming_yaw(other_agv_x_m)),
+    );
+    // The shared renderer's thin desk shelving stands where the single-lane
+    // section's deep units and the far charging bay go.
+    scene.items.retain(|item| {
+        !matches!(
+            item.shape,
+            VisualShape::Box { size_m }
+                if (size_m.x - 0.72).abs() < 1e-6 && (size_m.y - 1.3).abs() < 1e-6
+        )
+    });
+    push_single_lane_section(&mut scene);
+    push_charging_bays(&mut scene);
+    push_totes(
+        &mut scene,
+        other_agv_x_m,
+        other_agv_z_m,
+        oncoming_yaw(other_agv_x_m),
     );
     let (cargo_x_m, cargo_z_m) = scenario.cargo_translation_m();
     push_box(
@@ -521,6 +536,145 @@ pub(crate) fn render_scene(
         },
     );
     scene
+}
+
+/// Heading of the oncoming AGV at `x`: it drives toward -X along its lane,
+/// which bends onto the centre line through the single-lane section, so it
+/// faces along the lane's slope there. (A fixed heading of PI had it sliding
+/// sideways through the bend.)
+fn oncoming_yaw(x_m: f64) -> f64 {
+    let course = OfficeAgvSharedAisleCourse::default();
+    let step = 0.05;
+    let dx = -2.0 * step;
+    let dz = course.other_lane_z_m(x_m - step) - course.other_lane_z_m(x_m + step);
+    // Yaw about +Y turns the AGV's +X toward (cos yaw, -sin yaw) in (x, z).
+    (-dz).atan2(dx)
+}
+
+/// The single-lane section the scenario enforces (x 3.5 to 5.5 m), drawn as
+/// deep shelving units that narrow the far side of the aisle to one lane,
+/// with hatched floor at both ends. They are drawn only: the scenario's rule,
+/// not a collider, is what makes the oncoming AGV take the centre line there
+/// and the delivery AGV wait at the yield line.
+fn push_single_lane_section(scene: &mut RenderScene) {
+    let course = OfficeAgvSharedAisleCourse::default();
+    let (x0, x1) = (course.shared_min_x_m, course.shared_max_x_m);
+    let depth_m = 0.62;
+    let back_z = -1.04;
+    let carcass = [0.30, 0.36, 0.44, 1.0];
+    let units = 3;
+    let unit_m = (x1 - x0) / f64::from(units);
+    for unit in 0..units {
+        let x = x0 + (f64::from(unit) + 0.5) * unit_m;
+        push_box(
+            scene,
+            Vec3::new(x, 0.75, back_z + 0.5 * depth_m),
+            Vec3::new(unit_m - 0.04, 1.5, depth_m),
+            carcass,
+        );
+        for shelf in 0..4 {
+            let y = 0.18 + 0.36 * f64::from(shelf);
+            push_box(
+                scene,
+                Vec3::new(x, y, back_z + depth_m + 0.005),
+                Vec3::new(unit_m - 0.1, 0.03, 0.01),
+                [0.92, 0.62, 0.14, 1.0],
+            );
+            // Archive boxes on each shelf, facing the aisle.
+            for slot in 0..3 {
+                let bx = x - 0.5 * unit_m + 0.2 + f64::from(slot) * (unit_m - 0.4) / 2.0;
+                push_box(
+                    scene,
+                    Vec3::new(bx, y + 0.13, back_z + depth_m - 0.12),
+                    Vec3::new(0.24, 0.22, 0.2),
+                    if (unit + shelf + slot) % 3 == 0 {
+                        [0.85, 0.82, 0.74, 1.0]
+                    } else {
+                        [0.62, 0.48, 0.32, 1.0]
+                    },
+                );
+            }
+        }
+    }
+    // Hatched floor marking both ends of the section.
+    for x in [x0, x1] {
+        for stripe in 0..5 {
+            push_box(
+                scene,
+                Vec3::new(x + 0.06 * f64::from(stripe) - 0.12, 0.031, -0.1),
+                Vec3::new(0.03, 0.004, 1.8),
+                if stripe % 2 == 0 {
+                    [0.96, 0.78, 0.10, 1.0]
+                } else {
+                    [0.12, 0.12, 0.13, 1.0]
+                },
+            );
+        }
+    }
+}
+
+/// Charging bays at both ends of the oncoming AGV's run: it charges at the
+/// far bay until it departs and parks at the near one once clear.
+fn push_charging_bays(scene: &mut RenderScene) {
+    let course = OfficeAgvSharedAisleCourse::default();
+    for x in [course.other_start_x_m, course.other_clear_x_m] {
+        let z = course.other_lane_z_m(x);
+        push_box(
+            scene,
+            Vec3::new(x, 0.03, z),
+            Vec3::new(0.72, 0.006, 0.56),
+            [0.10, 0.45, 0.85, 1.0],
+        );
+        push_box(
+            scene,
+            Vec3::new(x, 0.032, z),
+            Vec3::new(0.62, 0.006, 0.46),
+            [0.16, 0.18, 0.22, 1.0],
+        );
+        push_box_material(
+            scene,
+            Vec3::new(x, 0.25, -1.02),
+            Vec3::new(0.3, 0.5, 0.08),
+            Quat::IDENTITY,
+            [0.85, 0.87, 0.9, 1.0],
+            PbrMaterial::new([0.85, 0.87, 0.9, 1.0], 0.35, 0.2, [0.0; 3]),
+        );
+        push_box_material(
+            scene,
+            Vec3::new(x, 0.4, -0.975),
+            Vec3::new(0.12, 0.05, 0.01),
+            Quat::IDENTITY,
+            [0.2, 0.95, 0.45, 1.0],
+            PbrMaterial::new([0.2, 0.95, 0.45, 1.0], 0.3, 0.0, [0.2, 0.95, 0.45]),
+        );
+    }
+}
+
+/// A stack of two lidded totes on the oncoming AGV's deck.
+fn push_totes(scene: &mut RenderScene, x_m: f64, z_m: f64, yaw: f64) {
+    let rotation = Quat::from_rotation_y(yaw);
+    for (level, color) in [
+        (0.0, [0.12, 0.42, 0.78, 1.0]),
+        (1.0, [0.95, 0.60, 0.10, 1.0]),
+    ] {
+        let centre = Vec3::new(x_m, 0.42 + 0.2 * level, z_m);
+        push_box_material(
+            scene,
+            centre,
+            Vec3::new(0.4, 0.18, 0.3),
+            rotation,
+            color,
+            PbrMaterial::new(color, 0.55, 0.0, [0.0; 3]),
+        );
+        push_box_material(
+            scene,
+            centre + Vec3::new(0.0, 0.1, 0.0),
+            Vec3::new(0.42, 0.02, 0.32),
+            rotation,
+            [0.2, 0.2, 0.22, 1.0],
+            PbrMaterial::new([0.2, 0.2, 0.22, 1.0], 0.5, 0.0, [0.0; 3]),
+        );
+    }
 }
 
 /// Renders the office corridor with the ego AGV and the second AGV at the given
