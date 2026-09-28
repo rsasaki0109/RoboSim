@@ -24,6 +24,42 @@ measured on the plant; the numbers that matter are pinned by tests in
 > the walking asset is fixed and re-measured, treat the results here as
 > results for this footless robot.
 
+## Walking with feet: a model-based trot
+
+`examples/126_go2_heading_steer` runs `unitree_go2_jump` -- the same URDF with
+its fixed children welded and its declared masses (16.1 kg) -- and walks it
+head first through an S (straight, left 90°, straight, right 90°, straight)
+over 46 s. Nothing below this section carries over to that model:
+
+* The library trot (`unitree_go2_trot_targets`) walks it **tail first** at
+  about 0.25 m/s. On the Go2 a higher thigh angle puts the foot further back
+  (0.6 rad: +0.048 m, 1.0 rad: −0.075 m from the hip, measured), and the
+  trot lowers the thigh angle through stance, so the planted foot slides
+  forward and pushes the body backward. Mirroring the sweep, or planning foot
+  trajectories and servoing them through inverse kinematics, walks forward
+  only slowly: the position servos lag their targets by about ten 60 Hz steps.
+* Contact-gated differential thigh torque turns it by at most 0.3 rad even at
+  12 N·m.
+
+What does walk it is a controller of the kind Pinocchio-based quadruped
+stacks run, at 500 Hz on joint torques (`UrdfSceneSim::set_fixed_delta`):
+
+* foot linear Jacobians from the simulated link frames, column `axis × (foot
+  − joint)` per revolute joint;
+* stance legs take their share of the weight plus a spring-damper on their
+  own hip height, which levels pitch and roll leg by leg, and push toward the
+  commanded speed and yaw rate: `τ = −Jᵀf`;
+* swing feet land where the Raibert heuristic puts them (under the hip, plus
+  half a stance of body velocity, plus velocity-error and yaw terms), along a
+  lifted arc tracked by Cartesian PD, `τ = Jᵀ(Kp·e − Kd·v)`;
+* a heading loop turns heading error into the yaw-rate command.
+
+Measured: held headings 0.037 rad RMS, worst 0.149 rad; every segment ends
+within 0.01 rad of its command; 8.5 m walked along the facing; the body never
+below 0.263 m. It holds within 0.050 rad RMS with the assumed mass ±10 %, the
+speed command ±20 %, the heading gain −20 % or the gait period −10 %.
+`-- --smoke` gates all of it and runs in CI.
+
 ## Speed
 
 Forward speed follows stride amplitude and cadence

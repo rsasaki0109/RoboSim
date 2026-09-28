@@ -71,6 +71,16 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- `UrdfSceneSim::set_fixed_delta`: sets the physics step every `step_*` call
+  advances by (scenes default to 60 Hz). Torque-level controllers that close a
+  force or Cartesian loop per step need 500 Hz to 1 kHz.
+- Example 126, `126_go2_heading_steer`: the Go2 with its feet attached
+  (`unitree_go2_jump`) walks head first through an S on a 500 Hz model-based
+  trot -- foot Jacobians from the link frames, stance `τ = −Jᵀf` for weight,
+  height, speed and yaw rate, Raibert swing placement with Cartesian PD -- and
+  a heading loop. Held headings 0.037 rad RMS over 8.5 m; gated by `--smoke`
+  in the locomotion smoke partition. Renders `docs/media/go2-heading-steer.gif`.
+
 - `rne_nav::Elevator::hold_doors`: a door-edge / light-curtain input. While
   the doors are open it restarts the dwell, while they are closing it reverses
   them, and otherwise it does nothing.
