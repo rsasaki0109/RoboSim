@@ -770,6 +770,23 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- The G1 + Dex3 robot (`unitree_g1_29dof_dex3_fixed`) ignored the URDF's
+  masses: every link spawned at 1.0 kg with no declared inertia, so a Dex3
+  finger (0.02 kg, 1.5e-6 kg·m² in the URDF) behaved like ~1 kg·m² and its
+  1.4 N·m motor accelerated it at ~1.4 rad/s². Fingers lagged the closure
+  command by seconds and then overshot to their joint limits. The asset now
+  sets `use_declared_inertial_masses`. With real fingers:
+  - The cloth example's pinch holds: both probes stay on the cloth for all
+    136 held steps (previously the index probe drifted up to 19 mm off it,
+    leaving the cloth pinned to the palm), asserted every step.
+  - The Dex3 pick had only worked because the thumb overshot to its limit;
+    with correct fingers its base rested on the pick stand and the pinch sat
+    3 cm beside the part. `UnitreeG1Dex3EpisodeConfig` now enables the live
+    Jacobian correction by default (gain 0.5, up to 0.5 rad per arm joint),
+    which centres the pinch on the part. Example 42 asserts both pads stay
+    within 5 mm of the part while it is held (measured 0 mm over 134 steps)
+    and that it is not lifted before the hold.
+
 - The real-3DGS mobile manipulation showcase did not grasp its block. The
   finger pads stayed 2-9 cm above it for the whole carry, and the block was
   pulled along beneath them by the linear friction assist, which acts

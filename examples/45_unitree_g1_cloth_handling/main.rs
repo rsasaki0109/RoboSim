@@ -51,6 +51,10 @@ struct ClothHandlingDemo {
     max_center_y_m: f64,
     initial_left_palm_m: Vec3,
     max_left_palm_drift_m: f64,
+    /// Largest gap between each probe and the cloth while it is attached:
+    /// thumb, index.
+    max_pad_gap_m: [f64; 2],
+    attached_steps: u64,
 }
 
 impl ClothHandlingDemo {
@@ -98,6 +102,8 @@ impl ClothHandlingDemo {
             max_center_y_m: initial_center_m.y,
             initial_left_palm_m,
             max_left_palm_drift_m: 0.0,
+            max_pad_gap_m: [0.0; 2],
+            attached_steps: 0,
         }
     }
 
@@ -122,6 +128,12 @@ impl ClothHandlingDemo {
                 )
                 .expect("valid Dex3 cloth contact grasp");
         }
+        if self.sim.named_deformable_is_attached(CLOTH_NAME) {
+            self.attached_steps += 1;
+            for (gap, (name, half)) in self.max_pad_gap_m.iter_mut().zip(PROBES) {
+                *gap = gap.max(probe_cloth_gap_m(&self.sim, name, half));
+            }
+        }
         self.step += 1;
         self.max_center_y_m = self.max_center_y_m.max(cloth_center_m(&self.sim).y);
         self.max_left_palm_drift_m = self
@@ -145,12 +157,49 @@ impl ClothHandlingDemo {
             final_center.y,
             self.max_center_y_m
         );
+        println!(
+            "pads on the cloth while held: steps={} max_gap thumb={:.4}m index={:.4}m",
+            self.attached_steps, self.max_pad_gap_m[0], self.max_pad_gap_m[1]
+        );
+        assert!(
+            self.max_pad_gap_m.iter().all(|gap| *gap <= MAX_PAD_GAP_M),
+            "a pad left the cloth it holds: thumb={:.4}m index={:.4}m",
+            self.max_pad_gap_m[0],
+            self.max_pad_gap_m[1]
+        );
         assert!(
             self.max_left_palm_drift_m <= 0.06,
             "inactive left hand must remain still: drift={:.4}m",
             self.max_left_palm_drift_m
         );
     }
+}
+
+/// The probes and their half extents in their own frames.
+const PROBES: [(&str, [f64; 3]); 2] = [
+    (THUMB_SENSOR_NAME, [0.013, 0.025, 0.013]),
+    (INDEX_SENSOR_NAME, [0.025, 0.013, 0.013]),
+];
+/// A held cloth must stay within this distance of both probes, every step.
+const MAX_PAD_GAP_M: f64 = 0.005;
+
+/// Distance from a probe box to the nearest cloth particle's surface.
+fn probe_cloth_gap_m(sim: &UrdfSceneSim, probe_name: &str, half_m: [f64; 3]) -> f64 {
+    let probe = sim.named_transform(probe_name).expect("Dex3 cloth probe");
+    let body = sim.named_deformable_body(CLOTH_NAME).expect("cloth");
+    let radius_m = body.material.collision_radius_m;
+    body.particles
+        .iter()
+        .map(|particle| {
+            let local = probe.rotation.inverse() * (particle.position_m - probe.translation);
+            let outside = Vec3::new(
+                (local.x.abs() - half_m[0]).max(0.0),
+                (local.y.abs() - half_m[1]).max(0.0),
+                (local.z.abs() - half_m[2]).max(0.0),
+            );
+            (outside.length() - radius_m).max(0.0)
+        })
+        .fold(f64::INFINITY, f64::min)
 }
 
 fn configure_dex3(sim: &mut UrdfSceneSim) {
