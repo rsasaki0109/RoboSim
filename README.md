@@ -49,10 +49,10 @@ camera state; gates and regeneration commands are in
     <td width="50%" align="center">
       <picture>
         <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-office.png">
-        <img src="docs/media/showcase-office.gif" alt="Office AGV yielding to an oncoming robot before delivering cargo to a desk" width="460">
+        <img src="docs/media/showcase-office.gif" alt="Office AGV taking a tote pushed onto its deck at the dock, waiting at the yield line while an oncoming robot passes, then pushing the tote onto a tray at the desk" width="460">
       </picture>
       <br><b>Office AGV</b><br>
-      <sub>Shelving narrows the aisle to one lane, so the delivery AGV waits at the yield line while the other AGV leaves its charging bay and comes through, then picks up at the dock and places the cargo on the desk: no contact, no early drop. The shelving marks the single-lane rule the scenario enforces; it is drawn, not collided with. <a href="docs/media/showcase-office.json">metadata</a></sub>
+      <sub>The tote is a dynamic body moved only by contact: the dock's pusher slides it onto the AGV's deck, friction carries it (8 mm of slip), and the AGV's own pusher slides it onto the tray at the desk. On the way the AGV waits at the yield line while the oncoming AGV comes through the single-lane section, which is drawn, not collided with. <a href="docs/media/showcase-office.json">metadata</a></sub>
     </td>
     <td width="50%" align="center">
       <picture>
