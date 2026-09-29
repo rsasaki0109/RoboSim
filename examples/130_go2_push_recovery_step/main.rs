@@ -9,6 +9,8 @@ use rne_core::SimDuration;
 use rne_math::{Hertz, Vec3};
 use std::path::PathBuf;
 
+mod mpc;
+
 const CONTROL_HZ: f64 = 500.0;
 const GRAVITY_M_S2: f64 = 9.81;
 const MASS_KG: f64 = 16.1;
@@ -52,11 +54,48 @@ fn step_trigger_speed_m_s() -> f64 { std::env::var("STEP_TRIGGER_SPEED_M_S").ok(
 const STEP_RELEASE_SPEED_M_S: f64 = 0.08;
 const STEP_RELEASE_HOLD_S: f64 = 0.6;
 
+const MPC_DT_S: f64 = 0.02;
+const MPC_HORIZON: usize = 10;
+fn mpc_every_steps() -> u64 { std::env::var("MPC_EVERY").ok().and_then(|v| v.parse().ok()).unwrap_or(10) }
+
+fn env_f64(name: &str, default: f64) -> f64 {
+    std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
+fn mpc_params() -> mpc::MpcParams {
+    mpc::MpcParams {
+        dt_s: MPC_DT_S,
+        horizon: MPC_HORIZON,
+        mass_kg: MASS_KG,
+        // Whole-body inertia about the forward (x), vertical (y), and
+        // lateral (z) axes.
+        inertia_kg_m2: Vec3::new(env_f64("IXX", 0.1), env_f64("IYY", 0.3), env_f64("IZZ", 0.25)),
+        friction: env_f64("MPC_MU", 0.45),
+        max_normal_n: 250.0,
+        state_weights: [
+            env_f64("W_ROT", 25.0),
+            env_f64("W_YAW", 10.0),
+            env_f64("W_ROT", 25.0),
+            env_f64("W_POS", 5.0),
+            env_f64("W_HEIGHT", 100.0),
+            env_f64("W_POS", 5.0),
+            env_f64("W_OMEGA", 0.3),
+            env_f64("W_OMEGA", 0.3),
+            env_f64("W_OMEGA", 0.3),
+            env_f64("W_VEL", 2.0),
+            env_f64("W_VEL", 2.0),
+            env_f64("W_VEL", 2.0),
+        ],
+        force_weight: env_f64("W_FORCE", 1.0e-5),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
     Passive,
     Balance,
     Step,
+    Mpc,
 }
 
 fn scene_path() -> PathBuf {
@@ -129,6 +168,8 @@ struct Robot {
     height_integral: f64,
     /// Whether each swing leg has left the ground in its current swing.
     lifted: [bool; 4],
+    home_rotation: rne_math::Quat,
+    mpc_reactions: [Vec3; 4],
 }
 
 impl Robot {
@@ -150,6 +191,7 @@ impl Robot {
         let (com, _) = sim.dynamic_center_of_mass_m().expect("Go2 mass");
         let yaw_home_rad = sim.observe().base_relative_yaw_rad;
         let up_local = sim.named_transform("base").expect("base pose").rotation.inverse() * Vec3::Y;
+        let sim_home_rotation = sim.named_transform("base").expect("base pose").rotation;
         Self {
             sim,
             mode,
@@ -166,6 +208,8 @@ impl Robot {
             up_local,
             height_integral: 0.0,
             lifted: [false; 4],
+            home_rotation: sim_home_rotation,
+            mpc_reactions: [Vec3::ZERO; 4],
         }
     }
 
@@ -199,7 +243,7 @@ impl Robot {
         let flat_velocity = Vec3::new(body_velocity.x, 0.0, body_velocity.z);
         let speed = flat_velocity.length();
 
-        if self.mode == Mode::Step {
+        if matches!(self.mode, Mode::Step | Mode::Mpc) && std::env::var("MPC_NO_STEP").is_err() {
             match self.gait_start_s {
                 None if self.needs_step(com, flat_velocity) => self.gait_start_s = Some(t_s),
                 Some(start) => {
@@ -291,7 +335,22 @@ impl Robot {
                 * (YAW_STIFFNESS_NM_PER_RAD * yaw_error
                     - YAW_DAMPING_NM_S_PER_RAD * angular_velocity.y);
         let levers: Vec<Vec3> = stance.iter().map(|&i| legs[i].foot - com).collect();
-        let reactions = distribute_wrench(&levers, force, moment);
+        let reactions = if self.mode == Mode::Mpc {
+            if self.step.is_multiple_of(mpc_every_steps()) {
+                self.mpc_reactions = self.solve_mpc(t_s, com, &legs, &stance, flat_velocity, &observed);
+            }
+            if std::env::var("MPC_TRACE").is_ok() && self.step % 25 == 0 && (self.step < 120 || std::env::var("MPC_TRACE_ALL").is_ok()) {
+                let sum = self.mpc_reactions.iter().fold(Vec3::ZERO, |a, f| a + *f);
+                let base = self.sim.named_transform("base").expect("base pose");
+                let rv = (base.rotation * self.home_rotation.inverse()).to_scaled_axis();
+                eprintln!("  omega=({:.3},{:.3},{:.3}) v=({:.3},{:.3},{:.3})", observed.base_angular_velocity_x_rad_s, observed.base_angular_velocity_y_rad_s, observed.base_angular_velocity_z_rad_s, observed.base_linear_velocity_x_m_s, observed.base_linear_velocity_y_m_s, observed.base_linear_velocity_z_m_s);
+                eprintln!("t={t_s:.3} com=({:.3},{:.3},{:.3}) rot=({:.3},{:.3},{:.3}) sumF=({:.1},{:.1},{:.1}) f=[{}]", com.x, com.y, com.z, rv.x, rv.y, rv.z, sum.x, sum.y, sum.z,
+                    self.mpc_reactions.iter().map(|f| format!("({:.0},{:.0},{:.0})", f.x, f.y, f.z)).collect::<Vec<_>>().join(" "));
+            }
+            stance.iter().map(|&i| self.mpc_reactions[i]).collect()
+        } else {
+            distribute_wrench(&levers, force, moment)
+        };
         if std::env::var("TRACE").is_ok() && self.step % 10 == 0 && self.step < 200 {
             let sum = reactions.iter().fold(Vec3::ZERO, |a, f| a + *f);
             eprintln!(
@@ -330,18 +389,7 @@ impl Robot {
                     self.in_stance[index] = false;
                 }
                 let swing = ((phase - DUTY) / (1.0 - DUTY)).clamp(0.0, 1.0);
-                let hip_ground = Vec3::new(hip.x, 0.0, hip.z);
-                let offset = flat_velocity * (stance_s * 0.5)
-                    + flat_velocity * raibert_gain_s()
-                    + flat_velocity * (capture_gain() * (self.height_m / GRAVITY_M_S2).sqrt());
-                // Keep the touchdown inside the leg's reach.
-                let reach = max_reach_m();
-                let offset = if offset.length() > reach {
-                    offset.normalize_or_zero() * reach
-                } else {
-                    offset
-                };
-                let touchdown = hip_ground + offset;
+                let touchdown = self.touchdown(leg, flat_velocity);
                 let blend = 0.5 - 0.5 * (std::f64::consts::PI * swing).cos();
                 let liftoff = self.liftoff[index];
                 let target = Vec3::new(
@@ -363,6 +411,88 @@ impl Robot {
         }
         self.sim.step_joint_torques(&torques);
         self.step += 1;
+    }
+
+    /// Ground reactions from the model-predictive controller over the next
+    /// gait cycle, given which feet the schedule plants at each step.
+    fn solve_mpc(
+        &self,
+        t_s: f64,
+        com: Vec3,
+        legs: &[Leg],
+        stance: &[usize],
+        flat_velocity: Vec3,
+        observed: &rne_ai::env::urdf_scene::UrdfSceneObservation,
+    ) -> [Vec3; 4] {
+        let base = self.sim.named_transform("base").expect("base pose");
+        let rotation = (base.rotation * self.home_rotation.inverse()).to_scaled_axis();
+        let reference_xz = if self.gait_start_s.is_some() {
+            Vec3::new(com.x, 0.0, com.z)
+        } else {
+            let centroid = stance.iter().fold(Vec3::ZERO, |sum, &i| sum + legs[i].foot)
+                / stance.len().max(1) as f64;
+            Vec3::new(centroid.x, 0.0, centroid.z)
+        };
+        let contacts = (0..MPC_HORIZON)
+            .map(|k| {
+                std::array::from_fn(|i| {
+                    let planted = if k == 0 {
+                        stance.contains(&i)
+                    } else {
+                        self.gait_start_s.is_none_or(|start| {
+                            let t = t_s + k as f64 * MPC_DT_S;
+                            ((t - start) / gait_period_s() + PHASE_OFFSETS[i]) % 1.0 < DUTY
+                        })
+                    };
+                    planted.then(|| {
+                        if stance.contains(&i) && k == 0 || self.gait_start_s.is_none() {
+                            legs[i].foot
+                        } else if stance.contains(&i) && self.in_stance[i] {
+                            // Still planted where it is unless it swings first.
+                            legs[i].foot
+                        } else {
+                            let landing = self.touchdown(&legs[i], flat_velocity);
+                            Vec3::new(landing.x, FOOT_GROUND_Y_M, landing.z)
+                        }
+                    })
+                })
+            })
+            .collect();
+        let problem = mpc::MpcProblem {
+            rotation,
+            position_m: com,
+            angular_velocity: Vec3::new(
+                observed.base_angular_velocity_x_rad_s,
+                observed.base_angular_velocity_y_rad_s,
+                observed.base_angular_velocity_z_rad_s,
+            ),
+            velocity_m_s: Vec3::new(
+                observed.base_linear_velocity_x_m_s,
+                observed.base_linear_velocity_y_m_s,
+                observed.base_linear_velocity_z_m_s,
+            ),
+            reference_position_m: Vec3::new(reference_xz.x, self.height_m, reference_xz.z),
+            reference_velocity_m_s: Vec3::ZERO,
+            contacts,
+        };
+        mpc::solve_mpc(&mpc_params(), &problem)
+    }
+
+    /// Where a swinging foot lands: under its hip, plus half a stance of the
+    /// body velocity and a capture-point correction, within the leg's reach.
+    fn touchdown(&self, leg: &Leg, flat_velocity: Vec3) -> Vec3 {
+        let hip = leg.origins[1];
+        let stance_s = gait_period_s() * DUTY;
+        let offset = flat_velocity * (stance_s * 0.5)
+            + flat_velocity * raibert_gain_s()
+            + flat_velocity * (capture_gain() * (self.height_m / GRAVITY_M_S2).sqrt());
+        let reach = max_reach_m();
+        let offset = if offset.length() > reach {
+            offset.normalize_or_zero() * reach
+        } else {
+            offset
+        };
+        Vec3::new(hip.x, 0.0, hip.z) + offset
     }
 
     /// Normal load under each foot, from the solved ground contacts nearest
@@ -581,6 +711,7 @@ fn mode_from_env() -> Mode {
     match std::env::var("MODE").as_deref() {
         Ok("passive") => Mode::Passive,
         Ok("balance") => Mode::Balance,
+        Ok("mpc") => Mode::Mpc,
         _ => Mode::Step,
     }
 }
@@ -599,12 +730,7 @@ fn main() {
         return;
     }
     if let Ok(force) = std::env::var("ONE") {
-        let mode = match std::env::var("MODE").as_deref() {
-            Ok("passive") => Mode::Passive,
-            Ok("step") => Mode::Step,
-            _ => Mode::Balance,
-        };
-        let o = run(mode, axis * force.parse::<f64>().unwrap());
+        let o = run(mode_from_env(), axis * force.parse::<f64>().unwrap());
         println!("{o:?}");
         return;
     }
