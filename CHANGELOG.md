@@ -27,6 +27,19 @@ All notable changes to Robot Native Engine are documented in this file.
   returns at each drawn pose (not the nearest keyframe), as rays from the
   LiDAR head, an outline joining adjacent returns, and the returns
   themselves. The mapping results are unchanged.
+- The PLATEAU UAV showcase draws the imported LOD1 buildings with windowed
+  facades (curtain-wall glass, concrete office, and residential fronts, one
+  texture repeat per 2.4 m bay and 3.2 m storey counted from the ground) and
+  textured roofs. The imported building triangles are unchanged; only
+  texture coordinates are added. The glass strips and roof caps that followed
+  collision boxes rather than building outlines, and floated beside the
+  rotated LOD2 building, are no longer drawn in the UAV view. The quadrotor is
+  drawn as a shelled body with battery, GNSS mast, folding arms, motor bells,
+  spinning two-blade propellers, navigation lights, landing skids, and the
+  camera gimbal the onboard RGB-D camera looks from. The README caption and
+  metadata now report the flight the current code measures (56.0 m, 2.55 m
+  minimum building clearance, zero collisions) instead of an older 76.6 m
+  flight.
 
 - The factory inspection showcase is a touch inspection at a belt conveyor.
   The belt is a kinematic body carrying three free dynamic parts by friction;
@@ -785,6 +798,11 @@ All notable changes to Robot Native Engine are documented in this file.
   than through `OfficeAgvDeskPlaceScenario`, whose six-step dock hold leaves
   no time for a transfer; the AGV still waits at the yield line for the
   oncoming AGV, now a kinematic body in the same world.
+- The wgpu renderer keyed its mesh and texture caches by `Arc` address
+  without holding the `Arc`. Once a mesh or texture was dropped, a new one
+  allocated at the same address drew with the stale upload, so a scene could
+  show another object's geometry or texture. The cache now keeps each source
+  alive for as long as its entry.
 - The OpenArm v2 showcase blended its keyposes in joint space, so the hands
   swept along arcs between them and the elbows rode up at shoulder height
   (the pick keypose's elbow sat 6 cm below the shoulder). Between keyposes

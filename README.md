@@ -60,7 +60,7 @@ camera state; gates and regeneration commands are in
         <img src="docs/media/showcase-uav.gif" alt="Controlled quadrotor flying over a PLATEAU city model with onboard RGB and depth camera views" width="460">
       </picture>
       <br><b>PLATEAU UAV · RGB-D flight</b><br>
-      <sub>A visible multirotor flies 76.6 m over imported city geometry with 12.21 m building clearance, zero collisions, and synchronized onboard RGB-D. <a href="docs/media/showcase-uav.json">metadata</a> · <a href="examples/46_plateau_drone_gif/main.rs">source</a></sub>
+      <sub>A detailed multirotor flies 56.0 m over imported PLATEAU LOD1 buildings with textured facades, 2.55 m minimum building clearance, zero collisions, and synchronized onboard RGB-D. <a href="docs/media/showcase-uav.json">metadata</a> · <a href="examples/46_plateau_drone_gif/main.rs">source</a></sub>
     </td>
   </tr>
 </table>
