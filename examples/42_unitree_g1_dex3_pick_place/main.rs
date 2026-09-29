@@ -15,7 +15,7 @@ const HEIGHT: u32 = 480;
 const INSET_WIDTH: u32 = 300;
 const INSET_HEIGHT: u32 = 225;
 const INSET_BORDER: u32 = 4;
-const FRAME_COUNT: usize = 58;
+const FRAME_COUNT: usize = 66;
 const STEPS_PER_FRAME: usize = 4;
 const CLEAR_COLOR: [f32; 4] = [0.025, 0.04, 0.07, 1.0];
 
@@ -29,6 +29,45 @@ fn main() {
     run_headless(randomized);
 }
 
+/// The contact pads (box sensors on the thumb and index tips) and their half
+/// extents in their own frames, as the episode configures them.
+const PADS: [(&str, [f64; 3]); 2] = [
+    ("right_dex3_thumb_contact_sensor", [0.013, 0.025, 0.013]),
+    ("right_dex3_index_contact_sensor", [0.025, 0.013, 0.013]),
+];
+/// Half extent of the cubic part.
+const PART_HALF_M: f64 = 0.015;
+/// A held part must stay within this distance of both pads, every step.
+const MAX_PAD_GAP_M: f64 = 0.005;
+/// The part may rise this much before the hold begins: a pinch can lift it
+/// slightly by friction, but it must not be carried off before it is held.
+const MAX_PRE_HOLD_LIFT_M: f64 = 0.01;
+
+/// Distance from a pad box to the part cube: the point of the pad nearest the
+/// cube's centre, measured to the cube's surface. This never understates the
+/// true separation of the two boxes.
+fn pad_part_gap_m(sim: &rne_ai::UrdfSceneSim, (pad, half_m): (&str, [f64; 3])) -> f64 {
+    let part = sim
+        .named_transform("dex3_inspection_part")
+        .expect("Dex3 part");
+    let pad = sim.named_transform(pad).expect("Dex3 contact pad");
+    let toward_part = pad.rotation.inverse() * (part.translation - pad.translation);
+    let nearest_on_pad = pad.translation
+        + pad.rotation
+            * Vec3::new(
+                toward_part.x.clamp(-half_m[0], half_m[0]),
+                toward_part.y.clamp(-half_m[1], half_m[1]),
+                toward_part.z.clamp(-half_m[2], half_m[2]),
+            );
+    let local = part.rotation.inverse() * (nearest_on_pad - part.translation);
+    Vec3::new(
+        (local.x.abs() - PART_HALF_M).max(0.0),
+        (local.y.abs() - PART_HALF_M).max(0.0),
+        (local.z.abs() - PART_HALF_M).max(0.0),
+    )
+    .length()
+}
+
 fn run_headless(randomized: bool) {
     let config = if randomized {
         rne_ai::UnitreeG1Dex3EpisodeConfig::randomized(4)
@@ -38,9 +77,27 @@ fn run_headless(randomized: bool) {
     let mut episode = UnitreeG1Dex3Episode::new(config).expect("load G1 Dex3 episode");
     let mut total_reward = 0.0;
     let mut last_phase = None;
+    // Largest gap between each contact pad (thumb, index) and the part while
+    // it is held, and the part's height when the hold began.
+    let mut max_pad_gap_m = [0.0_f64; 2];
+    let mut held_steps = 0_u64;
+    let mut grasp_height_m = None;
+    let rest_height_m = episode
+        .simulation()
+        .named_transform("dex3_inspection_part")
+        .expect("Dex3 part")
+        .translation
+        .y;
     loop {
         let step = episode.step(UnitreeG1Dex3Action { advance: true });
         total_reward += step.reward;
+        if step.observation.grasped {
+            held_steps += 1;
+            grasp_height_m.get_or_insert(step.observation.part_position_m[1]);
+            for (gap, pad) in max_pad_gap_m.iter_mut().zip(PADS) {
+                *gap = gap.max(pad_part_gap_m(episode.simulation(), pad));
+            }
+        }
         if last_phase != Some(step.observation.phase) || step.is_done() {
             println!(
                 "step {:3}: phase={:?} attempt={} offset={:?} height={:.3}m gap={:.3}m span={:.3}m center={:.3}m opposition={:.2} stable={} dual={} grasped={} placed={}",
@@ -62,6 +119,24 @@ fn run_headless(randomized: bool) {
         }
         if step.is_done() {
             assert!(step.terminated, "Dex3 task must succeed before truncation");
+            let grasp_height_m = grasp_height_m.expect("the part was held");
+            println!(
+                "pads on the part while held: steps={held_steps} max_gap thumb={:.4}m index={:.4}m, lifted {:.4}m before the hold",
+                max_pad_gap_m[0],
+                max_pad_gap_m[1],
+                grasp_height_m - rest_height_m
+            );
+            assert!(
+                max_pad_gap_m.iter().all(|gap| *gap <= MAX_PAD_GAP_M),
+                "a pad left the part it holds: thumb={:.4}m index={:.4}m",
+                max_pad_gap_m[0],
+                max_pad_gap_m[1]
+            );
+            assert!(
+                grasp_height_m - rest_height_m <= MAX_PRE_HOLD_LIFT_M,
+                "the part rose {:.4}m before both pads held it",
+                grasp_height_m - rest_height_m
+            );
             if randomized {
                 println!(
                     "G1 Dex3 randomized grasp acquired: total_reward={total_reward:.3}, attempt={}, offset={:?}",

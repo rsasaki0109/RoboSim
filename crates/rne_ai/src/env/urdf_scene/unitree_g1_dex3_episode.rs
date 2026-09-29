@@ -27,6 +27,11 @@ const DEFAULT_CARRY_STEPS: u64 = 40;
 /// Minimum place-distance reduction (m) while lifted+grasped to count as carry.
 const MIN_CARRY_PROGRESS_M: f64 = 0.04;
 const MIN_GRASP_CLOSURE: f64 = 0.8;
+/// Largest total and per-step correction the live Jacobian loop may add to
+/// each of the four arm joints. The scripted pose leaves the closed pinch
+/// about 3 cm off the part, which the loop has to be allowed to take up.
+const MAX_ARM_CORRECTION_RAD: f64 = 0.5;
+const MAX_ARM_CORRECTION_STEP_RAD: f64 = 0.03;
 const MIN_LIFT_HEIGHT_M: f64 = 0.98;
 const MIN_PLACED_HEIGHT_M: f64 = 0.75;
 const MAX_PLACED_SPEED_M_S: f64 = 0.05;
@@ -140,7 +145,7 @@ impl Default for UnitreeG1Dex3EpisodeConfig {
             part_position_override_m: None,
             random_seed: 2042,
             max_grasp_attempts: 1,
-            cartesian_tracking_gain: 0.0,
+            cartesian_tracking_gain: 0.5,
             use_pose_follow_grasp: false,
             terminate_on_grasp: false,
         }
@@ -155,7 +160,7 @@ impl UnitreeG1Dex3EpisodeConfig {
             part_position_jitter_m: [0.010, 0.0, 0.010],
             random_seed,
             max_grasp_attempts,
-            cartesian_tracking_gain: 0.15,
+            cartesian_tracking_gain: 0.5,
             use_pose_follow_grasp: true,
             terminate_on_grasp: true,
             max_steps: LIFT_START_STEP * u64::from(max_grasp_attempts) + 8,
@@ -848,9 +853,10 @@ fn update_cartesian_arm_correction(
         return;
     };
     for (correction, column) in correction_rad.iter_mut().zip(jacobian) {
-        let delta_rad =
-            (config.cartesian_tracking_gain * column.dot(task_step)).clamp(-0.008, 0.008);
-        *correction = (*correction + delta_rad).clamp(-0.10, 0.10);
+        let delta_rad = (config.cartesian_tracking_gain * column.dot(task_step))
+            .clamp(-MAX_ARM_CORRECTION_STEP_RAD, MAX_ARM_CORRECTION_STEP_RAD);
+        *correction =
+            (*correction + delta_rad).clamp(-MAX_ARM_CORRECTION_RAD, MAX_ARM_CORRECTION_RAD);
     }
 }
 
