@@ -144,7 +144,7 @@ AGV keeps its lane and never needs to brake. It has no simulated sensors: it
 gets the orange AGV's pose over the fleet link and the pedestrian's true
 position.*
 
-![A robot maps the same warehouse on four days while pallets move; the lifelong map on the board above the far wall updates each evening, with vanished pallets in red and new ones in green](docs/media/lifelong-slam.gif)
+![A robot maps the same warehouse on four days while pallets move, its LiDAR rays and returns drawn live around it; the lifelong map on the board above the far wall updates each evening, with vanished pallets in red and new ones in green](docs/media/lifelong-slam.gif)
 
 *Lifelong SLAM: the robot maps this warehouse on four days, starting somewhere
 new each time with 0.6 to 1.6 m of odometry drift over its loop, while pallets
@@ -154,8 +154,9 @@ red where a pallet left, green where one arrived. Every pallet that changed was
 detected on every day (9 of 9), and 798 of the 828 cells flagged as changed
 lie on a pallet that really changed. The map stays within 3 cm of the building
 after rigid alignment, its frame holds where the first day put it, and pruning
-keeps the pose graph at the first day plus the latest. The board and floor
-marks are drawn from the lifelong map itself.
+keeps the pose graph at the first day plus the latest. The cyan rays, the red
+outline and the yellow returns are the scan the robot's LiDAR returns at that
+moment. The board and floor marks are drawn from the lifelong map itself.
 [Lifelong mapping](docs/SLAM.md#lifelong-mapping-across-sessions),
 [source](examples/127_lifelong_slam/main.rs).*
 

@@ -23,6 +23,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- The lifelong SLAM GIF shows the robot's LiDAR as it drives: the scan it
+  returns at each drawn pose (not the nearest keyframe), as rays from the
+  LiDAR head, an outline joining adjacent returns, and the returns
+  themselves. The mapping results are unchanged.
+
 - The factory inspection showcase is a touch inspection at a belt conveyor.
   The belt is a kinematic body carrying three free dynamic parts by friction;
   it stops each within 1 mm of the inspection point, and the G1 lowers its
