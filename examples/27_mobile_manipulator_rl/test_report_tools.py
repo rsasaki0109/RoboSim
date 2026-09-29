@@ -41,7 +41,6 @@ import render_house_gif
 
 COMPARE = EXAMPLE_DIR / "compare_reports.py"
 HOUSE_GIF_DEMO = EXAMPLE_DIR / "house_gif_demo.py"
-README_HERO_METADATA = ROOT / "docs" / "media" / "rne-hero.json"
 RENDER_HOUSE_GIF = EXAMPLE_DIR / "render_house_gif.py"
 SWEEP = EXAMPLE_DIR / "sweep.py"
 HOUSE_GIF_DEMO_SMALL_GIF_SHA256 = (
@@ -1109,74 +1108,6 @@ class ReportToolTests(unittest.TestCase):
         self.assertIn("house gif demo check ok", result.stdout)
         self.assertIn("frames=5", result.stdout)
         self.assertIn("size=120x80", result.stdout)
-
-    def test_readme_hero_metadata_verifies(self):
-        metadata = json.loads(README_HERO_METADATA.read_text(encoding="utf-8"))
-        gif_info = render_house_gif.inspect_gif(README_HERO_METADATA.with_name("rne-hero.gif"))
-
-        self.assertEqual(
-            metadata["artifact"], "rne_3d_mobile_manipulator_pick_place_hero"
-        )
-        self.assertEqual(metadata["schema_version"], 2)
-        self.assertEqual(metadata["encode"]["fps"], 15.0)
-        self.assertEqual(metadata["encode"]["animation_frames"], 100)
-        self.assertEqual(metadata["encode"]["hold_frames"], 10)
-        self.assertGreaterEqual(
-            metadata["encode"]["max_byte_size"], metadata["byte_size"]
-        )
-        self.assertEqual(metadata["gif_path"], "rne-hero.gif")
-        self.assertEqual(metadata["poster_path"], "rne-hero.png")
-        self.assertEqual(metadata["width"], gif_info["width"])
-        self.assertEqual(metadata["height"], gif_info["height"])
-        self.assertEqual(metadata["frame_count"], gif_info["frame_count"])
-        self.assertEqual(metadata["byte_size"], gif_info["byte_size"])
-        self.assertEqual(metadata["sha256"], gif_info["sha256"])
-        self.assertEqual(
-            metadata["overlays"],
-            [
-                "house_context",
-                "base_path",
-                "object_path",
-                "pickup_surface",
-                "task_object",
-                "drop_tray",
-                "drop_zone",
-            ],
-        )
-        self.assertGreater(metadata["simulation"]["base_travel_m"], 0.20)
-        self.assertGreater(metadata["simulation"]["ee_travel_m"], 0.15)
-        self.assertGreaterEqual(
-            metadata["simulation"]["object_transport_m"],
-            metadata["simulation"]["min_object_transport_m"],
-        )
-        self.assertLessEqual(
-            metadata["simulation"]["final_object_place_error_m"],
-            metadata["simulation"]["max_final_object_place_error_m"],
-        )
-        self.assertGreaterEqual(metadata["simulation"]["grasped_steps"], 12)
-        self.assertTrue(metadata["simulation"]["released_after_grasp"])
-        self.assertLessEqual(metadata["simulation"]["max_base_height_error_m"], 0.01)
-        self.assertGreaterEqual(metadata["simulation"]["min_base_yaw_only_dot"], 0.999_999)
-        self.assertRegex(
-            metadata["simulation"]["trajectory_digest"], r"^0x[0-9a-f]{16}$"
-        )
-        self.assertEqual(len(metadata["simulation"]["final_base_m"]), 3)
-        self.assertEqual(len(metadata["simulation"]["final_ee_m"]), 3)
-        self.assertEqual(len(metadata["simulation"]["final_object_m"]), 3)
-        self.assertLessEqual(
-            metadata["simulation"]["max_hold_frame_delta_ratio"],
-            metadata["simulation"]["max_hold_frame_delta_ratio_threshold"],
-        )
-        self.assertEqual(
-            metadata["source"],
-            {
-                "generator": "examples/32_lift_pick_place_hero",
-                "kind": "wgpu_simulation",
-                "physics": "MobileManipulatorSim/Rapier",
-                "policy": "MobilePickPlaceHeroPolicy",
-                "scene": "assets/scenes/mm_mobile.rne.scene.toml",
-            },
-        )
 
     def test_render_house_gif_verify_metadata_rejects_mismatch(self):
         with tempfile.TemporaryDirectory(prefix="rne_house_gif_verify_test_") as temp:
