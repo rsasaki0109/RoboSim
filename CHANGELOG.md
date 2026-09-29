@@ -769,6 +769,17 @@ All notable changes to Robot Native Engine are documented in this file.
   its rails and sinking into the chassis at pick height. The chassis now has
   a slot the mast stands in, the carriage rides the mast, and the arm is
   drawn as a SCARA with joint drives, a wrist camera and padded fingers.
+- The office AGV showcase moved its cargo by assignment: once the AGV had
+  stood at the dock for six steps the cargo was set to the AGV's position,
+  and at the desk it was set to the desk's, as a drawn proxy. The tote is now
+  a dynamic body moved only by contact. A pusher beside the dock slides it
+  onto the AGV's deck (2.6 cm from the deck's centre), the deck (a kinematic
+  plate commanded to follow the AGV, with fences) carries it by friction
+  (8 mm of slip), and a pusher on the AGV slides it onto a tray at the desk,
+  where it ends upright. The showcase drives the office AGV itself rather
+  than through `OfficeAgvDeskPlaceScenario`, whose six-step dock hold leaves
+  no time for a transfer; the AGV still waits at the yield line for the
+  oncoming AGV, now a kinematic body in the same world.
 - The OpenArm v2 showcase blended its keyposes in joint space, so the hands
   swept along arcs between them and the elbows rode up at shoulder height
   (the pick keypose's elbow sat 6 cm below the shoulder). Between keyposes

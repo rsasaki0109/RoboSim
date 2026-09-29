@@ -76,10 +76,10 @@ gif = "docs/media/showcase-office.gif"
 poster = "docs/media/showcase-office.png"
 readme_gif = "docs/media/showcase-office.gif"
 readme_poster = "docs/media/showcase-office.png"
-gif_bytes = 1078053
-poster_bytes = 96581
-gif_sha256 = "sha256:518014f1a6104436102c66e57803574d8344310d8d7988f145bcf2b516237953"
-poster_sha256 = "sha256:96a282f1fc3d283868cd89c56a173c7a9074d5a26ce37b86e6fbbb037e3a2cb5"
+gif_bytes = 1235807
+poster_bytes = 100373
+gif_sha256 = "sha256:45ee21fbd4ec3476d3efeaa826c42f1376470691d6f25f9d7abe94562f30ea24"
+poster_sha256 = "sha256:10c9b8f8de0db8f4a0233e401d1622d9c564787335e3a319b819395be2651f52"
 poster_width = 960
 poster_height = 540
 smoke_command = "cargo run --locked -p showcase_captures --example 90_showcase_captures -- --smoke --environment office"
@@ -88,7 +88,7 @@ metadata = "docs/media/showcase-office.json"
 regenerate = "examples/90_showcase_captures/office.rs"
 license = "MIT OR Apache-2.0"
 license_files = ["LICENSE-MIT", "LICENSE-APACHE"]
-provenance = ["assets/scenes/office_agv_delivery.rne.scene.toml", "assets/robots/office_agv_delivery.rne.robot.toml", "crates/rne_ai/src/env/office_agv_desk_place.rs"]
+provenance = ["assets/scenes/office_agv_delivery.rne.scene.toml", "assets/robots/office_agv_delivery.rne.robot.toml", "crates/rne_ai/src/env/office_agv_shared_aisle.rs", "examples/90_showcase_captures/office.rs"]
 
 [[media]]
 id = "uav"

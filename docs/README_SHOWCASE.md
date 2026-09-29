@@ -30,10 +30,10 @@ observation state.
 | Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 1,158,109 | 737,087 | 960 x 540 |
 | OpenArm v2 bimanual control | `showcase-openarm.gif` / `.png` | 1,983,788 | 56,163 | 960 x 540 |
 | Factory inspection | `showcase-factory.gif` / `.png` | 2,638,709 | 88,762 | 960 x 540 |
-| Office AGV delivery | `showcase-office.gif` / `.png` | 1,078,053 | 96,581 | 960 x 540 |
+| Office AGV delivery | `showcase-office.gif` / `.png` | 1,235,807 | 100,373 | 960 x 540 |
 | PLATEAU UAV RGB-D flight | `showcase-uav.gif` / `.png` | 4,329,461 | 439,474 | 960 x 540 |
 
-The current GIF total is **11,483,570 bytes**, below the 12,000,000-byte
+The current GIF total is **11,641,324 bytes**, below the 12,000,000-byte
 combined ceiling. `showcase-media-check` verifies the exact total; regeneration
 must update the manifest's sizes and hashes in the same change.
 
@@ -44,7 +44,7 @@ must update the manifest's sizes and hashes in the same change.
 | Real indoor 3DGS mobile manipulation | Both finger pads closed on the block (each face within 5 mm, level with its centre) before it is held, with the friction assist off; while held, the pads stay within 1 cm of its faces and level with its centre, measured every step; terminated without truncation; lift clearance at least 0.20 m; payload transport at least 1.5 m; placement error at most 0.10 m; all ten authored PBR links synchronized with zero recorded transform error; no synthetic room furniture is rendered; rendered wrist RGB-D performs known-robot self masking, payload segmentation, depth back-projection, and analytic-IK correction without payload-truth controller inputs; all 45 post-physics samples show the detected reticle; task telemetry and the 2D trace use the same samples. |
 | OpenArm v2 bimanual control | Both official seven-axis arms and two-finger grippers expose 18 force-limited actuators and declared URDF inertias; a typed 18-axis sensor publishes every control step with exactly one-period latency; delayed state feedback drives explicit PD effort targets over 19 physics substeps; every commanded keypose is an inverse-kinematics solution against the real URDF chain, and between keyposes each gripper moves in a straight line solved by IK every control step with the spare degree of freedom pulled toward a hanging posture; the right gripper closes on a real dynamic block only once two distinct fingertip contacts gate the grasp, then the left gripper receives the same contact-gated handoff and places the block on a marked pad, releasing it back to ordinary dynamics; each end effector travels at least 0.16 m; each gripper changes aperture by at least 0.015 m; proximal final tracking error is at most 0.13 rad; at least 45 official visual mesh parts resolve; headless and capture replay digests match. |
 | Factory inspection | The belt stops each of three dynamic parts within 3 cm of the inspection point; the G1's right fingertips (a contact box over the hand mesh's fingertip vertices, on the forearm) meet each part within 2 cm of its top-face centre and 5 mm of its height, with contact reported for at least 80% of the hold and the part moved under 5 mm; no part leaves the belt; the G1 drifts under 5 cm and tilts under 8°; at least 20 mesh items are rendered; replay digest matches. |
-| Office AGV delivery | Yield, dock pickup, desk delivery, and desk placement complete; no contact, corridor exit, or early drop; replay digest matches. |
+| Office AGV delivery | The dynamic tote is pushed onto the AGV's deck at the dock (within 5 cm of its centre), carried with under 2 cm of slip, and pushed onto the desk tray, ending upright on it; it never drops below 0.3 m; the AGV waits at the yield line while the oncoming AGV is in the single-lane section, and the two never touch; replay digest matches. |
 | PLATEAU UAV RGB-D flight | Visible `MultirotorFlight` entity travels at least 60 m; RMS position error at most 1.0 m; altitude error at most 0.6 m; building clearance at least 2.0 m; zero collisions; onboard RGB-D and replay hashes are deterministic. |
 
 The indoor hero uses the photo-derived Voxel51/Graphdeco Dr Johnson capture
