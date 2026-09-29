@@ -7,9 +7,17 @@ README hero and a lower-cost LOD1 for interactive/runtime use:
 
 | Link group | Authored detail |
 | --- | --- |
-| Base and wheels | Layered curved chassis shell, continuous elastomer bumper, twin lift rails, status light, tire tread, rim and hub rings |
-| Carriage and arm | Rounded carriage, twin arm rails, actuator housings/gears, bearing collars, cable channels, and fasteners |
-| Wrist and gripper | Stacked joint housings, electronics palm, cyan status lamp, knuckles, replaceable friction pads and ribs |
+| Base and wheels | U-shaped chassis (rear body and two side cheeks with a full-height slot between them), white top covers, bumpers, caster wheels, lidar, status strip; tire tread, rim and hub rings |
+| Mast and carriage | 70 mm T-slot aluminium mast standing in the chassis slot with a top cap and cable duct; a carriage that wraps the mast on guide rollers and cantilevers forward to the shoulder drive |
+| SCARA arm | Inner link between shoulder and elbow drives, outer link stacked above it at the elbow, wrist drive and spline quill, white covers, fasteners and cable |
+| Wrist and gripper | Rotary wrist actuator, parallel-jaw body on finger rails, wrist RGB-D camera on a bracket at the camera frame, aluminium finger blades with ribbed rubber pads |
+
+The lift joint sits 0.15 m ahead of the base origin, and for a floor pick the
+carriage travels below the top of the chassis. The mast and the chassis slot
+are placed so the carriage rides the mast through that travel rather than
+passing through the shell. The outer arm link is drawn 0.055 m above the
+inner one, as a SCARA stacks them; the joints and the tool frame are the
+URDF's.
 
 Every generated GLB has multiple material-homogeneous parts and embedded
 metallic-roughness PBR maps (base color, normal, metallic-roughness, emissive,

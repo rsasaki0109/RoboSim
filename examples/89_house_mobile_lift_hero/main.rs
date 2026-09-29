@@ -64,8 +64,26 @@ const WRIST_FOV_Y_RAD: f64 = std::f64::consts::FRAC_PI_3;
 const RGBD_CONTROL_INTERVAL_STEPS: u64 = 12;
 const RGBD_MIN_TARGET_DEPTH_M: f32 = 0.06;
 const PAYLOAD_HALF_EXTENT_M: f64 = 0.035;
-const GRIPPER_CENTER_CLEARANCE_M: f64 = 0.145;
+/// Height of the gripper frame above the payload centre to descend to: the
+/// finger joints sit 0.02 m below the gripper frame and the pad boxes 0.14 m
+/// below the joints, so 0.16 m centres the pads on the payload; the extra
+/// 5 mm allows for the arm settling under the descent.
+const GRIPPER_CENTER_CLEARANCE_M: f64 = 0.165;
 const LIFT_TARGET_STEP_M: f64 = 0.00025;
+/// The weld is made only when the pads hold the payload this squarely: pad
+/// centres within this height of the payload centre, the payload centre
+/// within this distance of the line between the pads, and each pad face
+/// within this gap of the payload.
+const PINCH_MAX_VERTICAL_M: f64 = 0.012;
+const PINCH_MAX_LATERAL_M: f64 = 0.015;
+const PINCH_MAX_GAP_M: f64 = 0.005;
+/// While the payload is held, the pad faces stay within this distance of the
+/// payload's faces on average. They sit within about a millimetre of them;
+/// the arm's accelerations at the start of the lift and of the transport
+/// knock them a few millimetres off for a few steps.
+const HOLD_MAX_GAP_M: f64 = 0.01;
+/// Physics solver iterations for this episode (the lift arm's default is 16).
+const HOLD_SOLVER_ITERATIONS: usize = 48;
 const ARM_TARGET_STEP_RAD: f64 = 0.015;
 const LINK_NAMES: [&str; 10] = [
     "base_link",
@@ -134,6 +152,21 @@ struct SimulationEvidence {
     wrist_camera_enabled: bool,
     wrist_rgbd_observed: bool,
     rgbd_closed_loop: RgbdClosedLoopEvidence,
+    pinch: PinchEvidence,
+}
+
+/// How the pads held the payload from the weld to the release, measured every
+/// step: pad centres against the payload centre, and pad faces against the
+/// payload's faces.
+#[derive(Clone, Debug, Default, Serialize)]
+struct PinchEvidence {
+    welded_at_step: Option<u64>,
+    held_steps: u64,
+    max_vertical_offset_m: f64,
+    max_lateral_offset_m: f64,
+    max_face_gap_m: f64,
+    min_face_gap_m: f64,
+    friction_assist: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -572,7 +605,20 @@ fn rollout(
     };
     let mut episode = MobileManipulatorEpisode::new(config);
     let mut step = episode.reset();
+    // The jaws open, straddle and close under the force-limited position
+    // control of the friction mode; the payload is welded to the gripper only
+    // once both pads are measured touching it (see `weld_on_two_pad_contact`).
     episode.set_grasp_mode(GraspMode::Friction);
+    // Nothing may move the payload but contacts and the weld: the friction
+    // assist can tow a payload below pads that are not holding it.
+    episode.set_linear_friction_assist(false);
+    // The pads are held on the payload's faces through the arm's impulse
+    // joints; at the default iteration count those flex enough under the
+    // arm's accelerations to knock the pads a centimetre off the faces.
+    episode
+        .set_solver_iterations(HOLD_SOLVER_ITERATIONS)
+        .map_err(|error| anyhow::anyhow!("raise the solver iterations: {error:?}"))?;
+
     for proxy in DRJOHNSON_COLLISION_PROXIES {
         anyhow::ensure!(
             episode.simulation().entity_named(proxy).is_some(),
@@ -629,6 +675,7 @@ fn rollout(
     let mut wrist_rgbd_observed = false;
     let mut latest_detection = None;
     let mut control_render_count = 0_usize;
+    let mut pinch = PinchEvidence::default();
     let mut detection_count = 0_usize;
     let mut correction_count = 0_usize;
     let mut max_target_samples = 0_usize;
@@ -644,6 +691,12 @@ fn rollout(
     for action_step in 0..total_policy_steps {
         let mut action = policy.act(&step.observation);
         let phase = policy.phase();
+        if matches!(
+            phase,
+            MobileLiftPickPlacePhase::Approach | MobileLiftPickPlacePhase::LowerToPick
+        ) {
+            action = with_mirrored_elbow(action, &step.observation);
+        }
         phases.insert(format!("{phase:?}"));
         if let (MobileLiftPickPlacePhase::LowerToPick, Some(perception_house)) =
             (phase, perception_house)
@@ -716,8 +769,56 @@ fn rollout(
             }
         } else {
             latest_detection = None;
+            if phase == MobileLiftPickPlacePhase::LowerToPick {
+                // Headless: the same descent, guided by the payload's true
+                // centre instead of the wrist RGB-D estimate.
+                let truth = episode
+                    .simulation()
+                    .named_translation_m(PAYLOAD_NAME)
+                    .context("payload for the headless descent")?;
+                if let Some(corrected) = lower_to_pick_toward(
+                    action,
+                    &step.observation,
+                    Vec3::new(truth.0, truth.1, truth.2),
+                ) {
+                    action = corrected;
+                }
+            }
+        }
+        if episode.simulation().grasp_mode() == GraspMode::Weld
+            && episode.simulation().is_grasping()
+            && action.gripper_velocity_m_s < 0.0
+        {
+            // Held: the pads stay where they closed on the payload.
+            action.gripper_velocity_m_s = 0.0;
+        }
+        if phase == MobileLiftPickPlacePhase::Grasp
+            && episode.simulation().grasp_mode() == GraspMode::Friction
+            && pinch_geometry(episode.simulation()).is_some_and(|(vertical, lateral, _)| {
+                vertical.abs() <= PINCH_MAX_VERTICAL_M && lateral <= PINCH_MAX_LATERAL_M
+            })
+            && episode.weld_grasp_in_place(PAYLOAD_NAME, PINCH_MAX_GAP_M)
+        {
+            // Both pads have closed to within a few millimetres of the
+            // payload's faces, level with its centre: hold it where they are.
+            pinch.welded_at_step.get_or_insert(action_step);
+            action.gripper_velocity_m_s = 0.0;
         }
         step = episode.step(action);
+        if episode.simulation().grasp_mode() == GraspMode::Weld
+            && episode.simulation().is_grasping()
+        {
+            let (vertical, lateral, gap) =
+                pinch_geometry(episode.simulation()).context("pinch geometry while held")?;
+            if pinch.held_steps == 0 {
+                pinch.min_face_gap_m = gap;
+            }
+            pinch.held_steps += 1;
+            pinch.max_vertical_offset_m = pinch.max_vertical_offset_m.max(vertical.abs());
+            pinch.max_lateral_offset_m = pinch.max_lateral_offset_m.max(lateral);
+            pinch.max_face_gap_m = pinch.max_face_gap_m.max(gap);
+            pinch.min_face_gap_m = pinch.min_face_gap_m.min(gap);
+        }
         grasped |= episode.simulation().is_grasping();
         terminated |= step.terminated;
         truncated |= step.truncated;
@@ -865,11 +966,17 @@ fn rollout(
             control_render_count,
             detection_count,
             correction_count,
-            controller_truth_inputs: false,
+            // Without the wrist RGB-D loop the descent is steered to the
+            // payload's true centre.
+            controller_truth_inputs: perception_house.is_none(),
             max_target_samples,
             last_perception_error_m,
             last_control_gripper_xz_error_m,
             last_control_gripper_height_error_m,
+        },
+        pinch: PinchEvidence {
+            friction_assist: episode.simulation().linear_friction_assist(),
+            ..pinch
         },
     };
     Ok(Rollout {
@@ -950,6 +1057,17 @@ fn rgbd_lower_to_pick_action(
 ) -> Option<MobileManipulatorAction> {
     let perceived_center_world_m =
         perceived_payload_center_world(camera_translation, camera_rotation, detection)?;
+    lower_to_pick_toward(action, observation, perceived_center_world_m)
+}
+
+/// Steers the lift and arm toward the pose that centres the finger pads on a
+/// payload whose centre is at `center_world_m`.
+fn lower_to_pick_toward(
+    action: MobileManipulatorAction,
+    observation: &rne_ai::MobileManipulatorObservation,
+    center_world_m: Vec3,
+) -> Option<MobileManipulatorAction> {
+    let perceived_center_world_m = center_world_m;
     let target = MmLiftKinematics::mm_mobile_lift()
         .inverse_kinematics_at_base(
             observation.base_x_m,
@@ -963,6 +1081,7 @@ fn rgbd_lower_to_pick_action(
             ),
         )
         .ok()?;
+    let target = mirrored_elbow(target, observation).unwrap_or(target);
     Some(action.with_lift_joint_target(MmLiftJointTarget {
         lift_m: rate_limited(
             observation.lift_position_m,
@@ -987,9 +1106,102 @@ fn perceived_payload_center_world(
     camera_rotation: Quat,
     detection: RgbdDetection,
 ) -> Option<Vec3> {
+    // The detected surface is the face toward the camera; the centre is half
+    // the cube further along the viewing ray, away from the camera.
     let viewing_ray = detection.camera_point_m.try_normalize()?;
-    let perceived_center_camera_m = detection.camera_point_m - viewing_ray * PAYLOAD_HALF_EXTENT_M;
+    let perceived_center_camera_m = detection.camera_point_m + viewing_ray * PAYLOAD_HALF_EXTENT_M;
     Some(camera_translation + camera_rotation * perceived_center_camera_m)
+}
+
+/// How the payload sits in the jaws: the pad centres' height above or below
+/// the payload centre, the payload centre's distance off the line between
+/// the pad centres, and the worst gap between a pad face and the payload.
+fn pinch_geometry(sim: &rne_ai::MobileManipulatorSim) -> Option<(f64, f64, f64)> {
+    let payload = sim.entity_named(PAYLOAD_NAME)?;
+    let world = sim.world();
+    let center = world_transform_of(world, payload).translation;
+    let mut pads = Vec::new();
+    for name in ["left_finger_link", "right_finger_link"] {
+        let pad = sim.entity_named(name)?;
+        let collider = world.get::<rne_physics::Collider>(pad)?;
+        let t = world_transform_of(world, pad);
+        pads.push(t.translation + t.rotation * collider.local_offset.translation);
+    }
+    let axis = (pads[1] - pads[0]).normalize();
+    let mid = (pads[0] + pads[1]) * 0.5;
+    let offset = center - mid;
+    let vertical = offset.y;
+    let lateral = (offset - axis * offset.dot(axis)).length();
+    // Pad half thickness 0.01 m, payload half extent 0.035 m.
+    let gap = ((pads[1] - pads[0]).length() - 2.0 * 0.01 - 2.0 * PAYLOAD_HALF_EXTENT_M) / 2.0;
+    Some((vertical, lateral, gap))
+}
+
+/// The same gripper position reached with the elbow on the other side of the
+/// arm. The policy's elbow points toward the fixed camera poses of this scan
+/// and hides the gripper behind the elbow drive; mirrored, the gripper and
+/// what it holds face the camera.
+fn with_mirrored_elbow(
+    action: MobileManipulatorAction,
+    observation: &rne_ai::MobileManipulatorObservation,
+) -> MobileManipulatorAction {
+    match action
+        .lift_joint_target
+        .and_then(|target| mirrored_elbow(target, observation))
+    {
+        Some(mirrored) => action.with_lift_joint_target(mirrored),
+        None => action,
+    }
+}
+
+fn mirrored_elbow(
+    target: MmLiftJointTarget,
+    observation: &rne_ai::MobileManipulatorObservation,
+) -> Option<MmLiftJointTarget> {
+    if target.elbow_rad.abs() < 1e-3 {
+        return None;
+    }
+    let kinematics = MmLiftKinematics::mm_mobile_lift();
+    let at = |joints: MmLiftJointTarget| {
+        kinematics.forward_kinematics_at_base(
+            observation.base_x_m,
+            observation.base_y_m,
+            observation.base_z_m,
+            observation.base_yaw_rad,
+            joints,
+        )
+    };
+    let tip = at(target);
+    let error = |shoulder_rad: f64| {
+        let reached = at(MmLiftJointTarget {
+            shoulder_rad,
+            elbow_rad: -target.elbow_rad,
+            ..target
+        });
+        (reached.x_m - tip.x_m).hypot(reached.z_m - tip.z_m)
+    };
+    // Coarse sweep of the shoulder, then a fine one around the best.
+    let mut best = (f64::INFINITY, target.shoulder_rad);
+    for index in 0..=720 {
+        let shoulder = -std::f64::consts::PI + f64::from(index) * std::f64::consts::TAU / 720.0;
+        let e = error(shoulder);
+        if e < best.0 {
+            best = (e, shoulder);
+        }
+    }
+    let centre = best.1;
+    for index in 0..=200 {
+        let shoulder = centre - 0.01 + f64::from(index) * 0.0001;
+        let e = error(shoulder);
+        if e < best.0 {
+            best = (e, shoulder);
+        }
+    }
+    (best.0 <= 1e-3).then_some(MmLiftJointTarget {
+        shoulder_rad: best.1,
+        elbow_rad: -target.elbow_rad,
+        ..target
+    })
 }
 
 fn rate_limited(current: f64, target: f64, max_step: f64) -> f64 {
@@ -1011,9 +1223,18 @@ fn assert_success(rollout: &Rollout) -> Result<()> {
         evidence.rgbd_closed_loop,
     );
     anyhow::ensure!(!evidence.truncated, "hero rollout was truncated");
+    anyhow::ensure!(evidence.grasped, "hero rollout never established a grasp");
+    let pinch = &evidence.pinch;
     anyhow::ensure!(
-        evidence.grasped,
-        "hero rollout never established a friction grasp"
+        pinch.welded_at_step.is_some() && pinch.held_steps > 0 && !pinch.friction_assist,
+        "the payload was not held by a two-pad weld: {pinch:?}"
+    );
+    anyhow::ensure!(
+        pinch.max_vertical_offset_m <= PINCH_MAX_VERTICAL_M
+            && pinch.max_lateral_offset_m <= PINCH_MAX_LATERAL_M
+            && pinch.max_face_gap_m <= HOLD_MAX_GAP_M
+            && pinch.min_face_gap_m >= -HOLD_MAX_GAP_M,
+        "the pads did not hold the payload squarely while carrying it: {pinch:?}"
     );
     anyhow::ensure!(
         evidence.lift_clearance_m > 0.12,
@@ -1784,7 +2005,9 @@ fn draw_camera_brackets(rgba: &mut [u8], width: i32, height: i32) {
 }
 
 fn draw_map(rgba: &mut [u8], frame: &RolloutFrame) {
-    const X: i32 = 18;
+    // Bottom right: the robot works in the left half of both cameras, and a
+    // bottom-left panel covered its base.
+    const X: i32 = 660;
     const Y: i32 = 374;
     const W: i32 = 282;
     const H: i32 = 148;

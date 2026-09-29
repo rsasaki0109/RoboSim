@@ -55,6 +55,8 @@ MATERIALS: tuple[MaterialSpec, ...] = (
     MaterialSpec("machined_aluminum", (0.54, 0.62, 0.70, 1.0), 0.88, 0.22, (0.0, 0.0, 0.0)),
     MaterialSpec("elastomer", (0.018, 0.024, 0.035, 1.0), 0.02, 0.80, (0.0, 0.0, 0.0)),
     MaterialSpec("status_cyan", (0.02, 0.30, 0.55, 1.0), 0.16, 0.20, (0.0, 0.09, 0.34)),
+    MaterialSpec("cover_white", (0.84, 0.86, 0.87, 1.0), 0.05, 0.38, (0.0, 0.0, 0.0)),
+    MaterialSpec("graphite", (0.085, 0.09, 0.10, 1.0), 0.35, 0.45, (0.0, 0.0, 0.0)),
 )
 
 
@@ -364,37 +366,53 @@ def build_link(name: str, lod: int) -> dict[int, MeshBuilder]:
     rubber = builders[3]
     cyan = builders[4]
 
+    white = builders[5]
+    graphite = builders[6]
+
     if name == "base_link":
-        # The outer shell is deliberately layered around the existing URDF
-        # envelope: the visual reads as a fabricated mobile base instead of a
-        # single box, while collision and inertial data remain exclusively in
-        # the physics asset.
-        primary.add_rounded_box((0.0, 0.0, 0.0), (0.50, 0.30, 0.40), 0.035, smooth)
-        primary.add_rounded_box((0.0, -0.115, 0.0), (0.47, 0.050, 0.34), 0.018, smooth)
-        primary.add_rounded_box((0.0, 0.165, 0.0), (0.43, 0.026, 0.34), 0.008, smooth)
-        rubber.add_rounded_box((0.0, -0.145, 0.0), (0.45, 0.026, 0.29), 0.010, smooth)
-        rubber.add_rounded_box((-0.235, -0.020, 0.0), (0.022, 0.235, 0.29), 0.008, smooth)
-        rubber.add_rounded_box((0.235, -0.020, 0.0), (0.022, 0.235, 0.29), 0.008, smooth)
-        orange.add_rounded_box((-0.242, 0.015, 0.0), (0.025, 0.19, 0.35), 0.009, smooth)
-        # Open lift tower: two spaced rails in local z, with visible upper
-        # and lower crossmembers.  This keeps the visual mechanism legible in
-        # the 3DGS capture instead of collapsing into one grey slab.
-        for z in (-0.052, 0.052):
-            aluminum.add_rounded_box((0.0, 0.45, z), (0.034, 0.70, 0.022), 0.006, smooth)
-        aluminum.add_rounded_box((0.0, 0.125, 0.0), (0.10, 0.035, 0.14), 0.008, smooth)
-        aluminum.add_rounded_box((0.0, 0.775, 0.0), (0.10, 0.035, 0.14), 0.008, smooth)
-        rubber.add_rounded_box((0.028, 0.45, 0.0), (0.010, 0.62, 0.010), 0.003, smooth)
-        orange.add_cylinder((0.028, 0.145, 0.0), 0.012, 0.030, "y", radial)
-        orange.add_cylinder((0.028, 0.755, 0.0), 0.012, 0.030, "y", radial)
-        aluminum.add_rounded_box((0.0, 0.265, 0.0), (0.16, 0.060, 0.15), 0.014, smooth)
-        orange.add_rounded_box((0.0, 0.235, 0.0), (0.13, 0.018, 0.12), 0.004, smooth)
-        cyan.add_rounded_box((-0.258, 0.05, 0.0), (0.008, 0.10, 0.20), 0.002, smooth)
-        cyan.add_uv_sphere((-0.18, 0.18, 0.0), 0.018, radial, max(6, radial // 2))
-        for z in (-0.13, 0.13):
-            aluminum.add_cylinder((0.0, -0.025, z), 0.025, 0.010, "z", radial)
-            orange.add_cylinder((0.0, -0.025, z), 0.010, 0.013, "z", radial)
-        for x in (-0.13, -0.08, -0.03, 0.02, 0.07, 0.12):
-            rubber.add_box((x, 0.181, 0.0), (0.018, 0.006, 0.23))
+        # Base frame: y up, x forward; the wheels' axles sit at y = -0.15 and
+        # the floor at y = -0.25.  The lift joint is at x = 0.15, and for a
+        # floor pick the carriage travels down to y ~ -0.12, below the top of
+        # the chassis.  The chassis is therefore a U in plan: a rear body and
+        # two side cheeks with a full-height slot between them, and the mast
+        # stands in that slot, so the carriage rides the mast instead of
+        # passing through the shell.  (The collision box is the unchanged
+        # 0.5 x 0.2 x 0.4 m URDF box.)
+        primary.add_rounded_box((-0.105, 0.0, 0.0), (0.29, 0.30, 0.40), 0.03, smooth)
+        for z in (-0.1425, 0.1425):
+            primary.add_rounded_box((0.1375, 0.0, z), (0.195, 0.30, 0.115), 0.025, smooth)
+            white.add_rounded_box((0.1375, 0.153, z), (0.175, 0.012, 0.095), 0.005, smooth)
+            rubber.add_rounded_box((0.238, -0.08, z), (0.014, 0.09, 0.105), 0.005, smooth)
+            aluminum.add_rounded_box((0.18, 0.02, z), (0.07, 0.12, 0.118), 0.004, smooth)
+        white.add_rounded_box((-0.105, 0.153, 0.0), (0.26, 0.012, 0.37), 0.006, smooth)
+        rubber.add_rounded_box((-0.254, -0.08, 0.0), (0.014, 0.09, 0.38), 0.006, smooth)
+        rubber.add_rounded_box((-0.105, -0.145, 0.0), (0.27, 0.012, 0.37), 0.004, smooth)
+        # The slot floor the mast is bolted to.
+        aluminum.add_rounded_box((0.1375, -0.145, 0.0), (0.195, 0.02, 0.17), 0.004, smooth)
+        # Mast: a 70 mm aluminium extrusion with T-slots on each face, a top
+        # cap with a status light, and a cable duct down its back.
+        aluminum.add_rounded_box((0.085, 0.36, 0.0), (0.07, 0.99, 0.07), 0.006, smooth)
+        for x, z, size in (
+            (0.1205, 0.0, (0.004, 0.97, 0.012)),
+            (0.085, 0.0355, (0.012, 0.97, 0.004)),
+            (0.085, -0.0355, (0.012, 0.97, 0.004)),
+        ):
+            graphite.add_box((x, 0.36, z), size)
+        graphite.add_rounded_box((0.043, 0.36, 0.0), (0.016, 0.95, 0.04), 0.004, smooth)
+        primary.add_rounded_box((0.085, 0.87, 0.0), (0.09, 0.035, 0.09), 0.008, smooth)
+        cyan.add_cylinder((0.085, 0.894, 0.0), 0.018, 0.012, "y", radial)
+        # Lidar on the rear body, and a status strip across the back.
+        graphite.add_cylinder((-0.15, 0.185, 0.0), 0.045, 0.05, "y", radial)
+        cyan.add_cylinder((-0.15, 0.212, 0.0), 0.046, 0.006, "y", radial)
+        graphite.add_cylinder((-0.15, 0.222, 0.0), 0.038, 0.016, "y", radial)
+        cyan.add_rounded_box((-0.2565, 0.05, 0.0), (0.006, 0.02, 0.24), 0.002, smooth)
+        # Caster wheels that carry the chassis ahead of and behind the axle.
+        for x, z in ((-0.20, 0.0), (0.19, 0.1425), (0.19, -0.1425)):
+            aluminum.add_rounded_box((x, -0.175, z), (0.05, 0.03, 0.03), 0.004, smooth)
+            rubber.add_cylinder((x, -0.215, z), 0.035, 0.022, "z", radial)
+        # Hub caps on the drive axles, inside the wheels.
+        for z in (-0.18, 0.18):
+            aluminum.add_cylinder((0.0, -0.15, z), 0.03, 0.02, "z", radial)
     elif name in ("left_wheel", "right_wheel"):
         rubber.add_cylinder((0.0, 0.0, 0.0), 0.100, 0.050, "z", radial)
         rubber.add_torus((0.0, 0.0, 0.0), 0.084, 0.012, radial, max(5, radial // 6))
@@ -406,68 +424,75 @@ def build_link(name: str, lod: int) -> dict[int, MeshBuilder]:
             x, y = 0.068 * math.cos(angle), 0.068 * math.sin(angle)
             rubber.add_box((x, y, 0.0), (0.010, 0.024, 0.055))
     elif name == "torso_link":
-        primary.add_rounded_box((0.0, 0.0, 0.0), (0.14, 0.14, 0.14), 0.018, smooth)
-        aluminum.add_rounded_box((0.0, 0.073, 0.0), (0.105, 0.018, 0.105), 0.004, smooth)
-        orange.add_box((-0.073, 0.0, 0.0), (0.008, 0.09, 0.085))
-        cyan.add_cylinder((0.0, 0.0, 0.0), 0.035, 0.152, "z", radial)
-        aluminum.add_cylinder((0.0, 0.0, 0.0), 0.019, 0.17, "z", radial)
-        for z in (-0.055, 0.055):
-            orange.add_cylinder((0.0, 0.035, z), 0.010, 0.012, "x", radial)
+        # Carriage frame: origin 0.15 m ahead of the base origin, so the mast
+        # is at x -0.10..-0.03.  The carriage wraps the mast and cantilevers
+        # forward to the shoulder axis at x = 0.16.
+        primary.add_rounded_box((-0.065, 0.0, 0.0), (0.11, 0.15, 0.11), 0.014, smooth)
+        white.add_rounded_box((-0.065, 0.0, 0.0561), (0.09, 0.12, 0.004), 0.002, smooth)
+        white.add_rounded_box((-0.065, 0.0, -0.0561), (0.09, 0.12, 0.004), 0.002, smooth)
+        for y in (-0.06, 0.06):
+            aluminum.add_cylinder((-0.022, y, 0.0), 0.012, 0.09, "z", radial)
+        primary.add_rounded_box((0.07, 0.0, 0.0), (0.17, 0.065, 0.10), 0.014, smooth)
+        white.add_rounded_box((0.07, 0.034, 0.0), (0.15, 0.006, 0.08), 0.003, smooth)
+        aluminum.add_cylinder((0.16, -0.045, 0.0), 0.066, 0.02, "y", radial)
+        graphite.add_cylinder((0.16, -0.02, 0.0), 0.06, 0.03, "y", radial)
+        orange.add_rounded_box((-0.121, 0.03, 0.0), (0.004, 0.05, 0.06), 0.001, smooth)
     elif name == "upper_arm_link":
-        orange.add_rounded_box((0.25, 0.0, 0.0), (0.50, 0.070, 0.070), 0.015, smooth)
-        aluminum.add_rounded_box((0.25, 0.0, 0.038), (0.43, 0.022, 0.026), 0.006, smooth)
-        aluminum.add_rounded_box((0.25, 0.0, -0.038), (0.43, 0.022, 0.026), 0.006, smooth)
-        orange.add_rounded_box((0.25, 0.0, 0.052), (0.42, 0.016, 0.022), 0.004, smooth)
-        primary.add_rounded_box((0.0, 0.0, 0.0), (0.13, 0.095, 0.105), 0.018, smooth)
-        primary.add_rounded_box((0.50, 0.0, 0.0), (0.11, 0.088, 0.098), 0.016, smooth)
-        aluminum.add_cylinder((0.0, 0.0, 0.0), 0.071, 0.10, "y", radial)
-        aluminum.add_cylinder((0.50, 0.0, 0.0), 0.054, 0.085, "y", radial)
-        add_gear(aluminum, (0.0, 0.0, 0.0), 0.069, 0.09, "y", 2, radial)
-        cyan.add_box((0.25, -0.040, 0.0), (0.22, 0.008, 0.022))
-        for x in (0.12, 0.22, 0.32, 0.42):
-            aluminum.add_cylinder((x, 0.0, -0.040), 0.006, 0.008, "z", max(8, radial // 2))
+        # SCARA inner link: shoulder drive at x = 0, elbow drive at x = 0.5,
+        # joined by a cast body with a white top cover.
+        graphite.add_cylinder((0.0, 0.0, 0.0), 0.07, 0.10, "y", radial)
+        white.add_cylinder((0.0, 0.052, 0.0), 0.064, 0.006, "y", radial)
+        aluminum.add_torus((0.0, -0.05, 0.0), 0.066, 0.005, radial, max(4, radial // 6))
+        primary.add_rounded_box((0.25, 0.0, 0.0), (0.46, 0.075, 0.11), 0.02, smooth)
+        white.add_rounded_box((0.25, 0.039, 0.0), (0.36, 0.006, 0.085), 0.003, smooth)
+        for z in (-0.056, 0.056):
+            orange.add_box((0.25, 0.012, z), (0.30, 0.01, 0.003))
+        graphite.add_cylinder((0.5, -0.012, 0.0), 0.058, 0.07, "y", radial)
+        aluminum.add_torus((0.5, -0.047, 0.0), 0.054, 0.004, radial, max(4, radial // 6))
+        for x in (0.14, 0.36):
+            aluminum.add_cylinder((x, 0.043, 0.03), 0.006, 0.004, "y", max(8, radial // 2))
+            aluminum.add_cylinder((x, 0.043, -0.03), 0.006, 0.004, "y", max(8, radial // 2))
     elif name == "forearm_link":
-        orange.add_rounded_box((0.20, 0.0, 0.0), (0.40, 0.055, 0.055), 0.012, smooth)
-        aluminum.add_rounded_box((0.20, 0.0, 0.031), (0.34, 0.018, 0.020), 0.005, smooth)
-        aluminum.add_rounded_box((0.20, 0.0, -0.031), (0.34, 0.018, 0.020), 0.005, smooth)
-        orange.add_rounded_box((0.21, 0.0, 0.039), (0.30, 0.012, 0.016), 0.003, smooth)
-        primary.add_rounded_box((0.0, 0.0, 0.0), (0.11, 0.080, 0.090), 0.015, smooth)
-        primary.add_rounded_box((0.40, 0.0, 0.0), (0.10, 0.074, 0.084), 0.014, smooth)
-        aluminum.add_cylinder((0.0, 0.0, 0.0), 0.057, 0.080, "y", radial)
-        aluminum.add_cylinder((0.40, 0.0, 0.0), 0.047, 0.073, "y", radial)
-        add_gear(aluminum, (0.0, 0.0, 0.0), 0.055, 0.075, "y", 2, radial)
-        rubber.add_cylinder((0.20, 0.0, 0.0), 0.014, 0.34, "x", radial)
-        cyan.add_box((0.20, -0.032, 0.0), (0.18, 0.007, 0.014))
+        # SCARA outer link, stacked above the inner one at the elbow, with
+        # the wrist drive and the spline quill that carries the tool down to
+        # the wrist at its far end.
+        graphite.add_cylinder((0.0, 0.055, 0.0), 0.056, 0.06, "y", radial)
+        white.add_cylinder((0.0, 0.087, 0.0), 0.05, 0.006, "y", radial)
+        primary.add_rounded_box((0.20, 0.055, 0.0), (0.36, 0.06, 0.09), 0.018, smooth)
+        white.add_rounded_box((0.20, 0.086, 0.0), (0.28, 0.006, 0.07), 0.003, smooth)
+        graphite.add_cylinder((0.40, 0.058, 0.0), 0.046, 0.07, "y", radial)
+        white.add_cylinder((0.40, 0.094, 0.0), 0.04, 0.006, "y", radial)
+        aluminum.add_cylinder((0.40, 0.005, 0.0), 0.016, 0.09, "y", radial)
+        rubber.add_cylinder((0.20, 0.098, 0.028), 0.008, 0.30, "x", radial)
+        cyan.add_uv_sphere((0.40, 0.098, 0.0), 0.009, radial, max(6, radial // 2))
     elif name == "wrist_link":
-        aluminum.add_cylinder((0.0, 0.0, 0.0), 0.035, 0.040, "z", radial)
-        aluminum.add_torus((0.0, 0.0, -0.018), 0.030, 0.004, radial, max(4, radial // 8))
-        aluminum.add_torus((0.0, 0.0, 0.018), 0.030, 0.004, radial, max(4, radial // 8))
-        primary.add_rounded_box((0.0, 0.0, 0.0), (0.068, 0.058, 0.060), 0.010, smooth)
-        primary.add_rounded_box((0.0, 0.0, 0.040), (0.082, 0.050, 0.032), 0.008, smooth)
-        primary.add_rounded_box((0.0, 0.0, -0.040), (0.082, 0.050, 0.032), 0.008, smooth)
-        orange.add_cylinder((0.0, 0.0, 0.0), 0.012, 0.048, "z", radial)
-        cyan.add_uv_sphere((0.0, 0.031, 0.0), 0.008, radial, max(6, radial // 2))
+        graphite.add_cylinder((0.0, -0.01, 0.0), 0.034, 0.04, "y", radial)
+        aluminum.add_cylinder((0.0, -0.034, 0.0), 0.04, 0.008, "y", radial)
     elif name == "gripper_base_link":
-        primary.add_rounded_box((0.0, 0.0, 0.0), (0.060, 0.040, 0.120), 0.009, smooth)
-        primary.add_rounded_box((0.0, -0.020, 0.0), (0.086, 0.050, 0.104), 0.012, smooth)
-        aluminum.add_rounded_box((0.0, 0.024, 0.0), (0.043, 0.012, 0.094), 0.003, smooth)
-        aluminum.add_rounded_box((0.0, -0.050, 0.0), (0.070, 0.018, 0.090), 0.005, smooth)
-        aluminum.add_cylinder((0.0, -0.002, -0.052), 0.013, 0.048, "z", radial)
-        aluminum.add_cylinder((0.0, -0.002, 0.052), 0.013, 0.048, "z", radial)
-        orange.add_box((0.0, -0.022, 0.0), (0.045, 0.007, 0.076))
-        cyan.add_box((-0.032, 0.002, 0.0), (0.005, 0.014, 0.050))
+        # Parallel-jaw gripper: a body under the wrist flange with the finger
+        # rails across it, and the wrist RGB-D camera on a bracket ahead of
+        # it (the camera frame is at x 0.10, y 0.06).
+        primary.add_rounded_box((0.0, -0.058, 0.0), (0.075, 0.045, 0.16), 0.01, smooth)
+        white.add_rounded_box((0.0, -0.058, 0.0), (0.077, 0.02, 0.12), 0.004, smooth)
+        aluminum.add_rounded_box((0.0, -0.085, 0.0), (0.05, 0.012, 0.17), 0.003, smooth)
+        aluminum.add_rounded_box((0.07, 0.01, 0.0), (0.012, 0.14, 0.035), 0.003, smooth)
+        aluminum.add_rounded_box((0.035, -0.05, 0.0), (0.07, 0.012, 0.035), 0.003, smooth)
+        graphite.add_rounded_box((0.10, 0.06, 0.0), (0.03, 0.032, 0.085), 0.005, smooth)
+        rubber.add_cylinder((0.117, 0.06, -0.022), 0.009, 0.006, "x", radial)
+        rubber.add_cylinder((0.117, 0.06, 0.022), 0.009, 0.006, "x", radial)
+        cyan.add_cylinder((0.117, 0.06, 0.0), 0.004, 0.006, "x", radial)
     elif name in ("left_finger_link", "right_finger_link"):
-        # The URDF visual origin is y=-0.14 in each finger link frame.  Keep
-        # that offset inside the authored mesh so the manifest can attach the
-        # GLB at the identity transform and preserve joint synchronization.
-        rubber.add_rounded_box((0.0, -0.14, 0.0), (0.10, 0.070, 0.020), 0.006, smooth)
-        rubber.add_rounded_box((0.0, -0.178, 0.0), (0.086, 0.018, 0.026), 0.006, smooth)
-        orange.add_rounded_box((0.0, -0.092, 0.0), (0.075, 0.018, 0.030), 0.005, smooth)
-        aluminum.add_cylinder((0.0, -0.067, 0.0), 0.012, 0.052, "z", radial)
-        for index in range(4 if coarse else 6):
-            y = -0.168 + index * 0.014
-            rubber.add_box((0.0, y, 0.011), (0.072, 0.004, 0.003))
-        cyan.add_box((0.0, -0.141, 0.012), (0.050, 0.003, 0.002))
+        # Finger frames sit 0.02 m under the wrist and 0.065 m to each side;
+        # the URDF finger box is centred 0.14 m below.  Each finger is a
+        # carriage on the rail, an aluminium blade and a rubber pad on the
+        # face toward the other finger.
+        inward = 1.0 if name == "left_finger_link" else -1.0
+        aluminum.add_rounded_box((0.0, -0.075, 0.0), (0.05, 0.05, 0.03), 0.004, smooth)
+        aluminum.add_rounded_box((0.0, -0.14, 0.0), (0.10, 0.08, 0.014), 0.004, smooth)
+        rubber.add_rounded_box((0.0, -0.15, inward * 0.0095), (0.088, 0.06, 0.005), 0.002, smooth)
+        for index in range(3 if coarse else 5):
+            y = -0.172 + index * 0.011
+            graphite.add_box((0.0, y, inward * 0.0125), (0.08, 0.003, 0.002))
     else:
         raise ValueError(f"unknown mm_mobile_lift link: {name}")
 

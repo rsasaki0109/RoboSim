@@ -13,9 +13,9 @@ path = "../robots/mm_mobile_lift_drjohnson.rne.robot.toml"
 [[obstacles]]
 name = "mobile_lift_pick_support"
 translation_m = [-0.593675032775816, 0.015, -4.025096749341726]
-half_extents_m = [0.35, 0.015, 0.005]
+half_extents_m = [0.35, 0.015, 0.025]
 body_type = "fixed"
-friction = 0.0
+friction = 0.5
 
 [[obstacles]]
 name = "mobile_lift_cube"
