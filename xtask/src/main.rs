@@ -3451,8 +3451,8 @@ fn validate_showcase_metadata(
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default();
         anyhow::ensure!(
-            outcome.contains("confirmed_gauges=3/3"),
-            "factory metadata must record that all three gauges were confirmed"
+            outcome.contains("touched_parts=3/3"),
+            "factory metadata must record that the hand touched all three parts"
         );
     }
     for (field, expected) in [
