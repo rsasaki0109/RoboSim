@@ -30,8 +30,8 @@ pub(crate) struct DayVisual {
     pub day: usize,
     /// The day's true path, one pose per scan.
     pub path: Vec<Pose2d>,
-    /// Keyframe scans in the base frame and the true pose each was taken at.
-    pub keyframes: Vec<(Pose2d, LaserScan2d)>,
+    /// The LiDAR scan at each pose of `path`, in the base frame.
+    pub live: Vec<LaserScan2d>,
     /// The map the robot woke up with; `None` on the first day.
     pub prior: Option<OccupancyGrid>,
     /// The map after the day was merged and pruned.
@@ -94,7 +94,7 @@ pub(crate) fn render_week(
             } else {
                 visual.path.len() - 1
             };
-            push_drive(&mut scene, visual, step, frame < DRIVE_FRAMES);
+            push_drive(&mut scene, visual, step);
             cache
                 .resolve_scene(&mut scene, &[props.as_path()])
                 .map_err(std::io::Error::other)?;
@@ -498,9 +498,10 @@ fn push_changes(
     }
 }
 
-/// The robot at `step` of its path, its trail so far, and, while driving, the
-/// returns of its latest keyframe scan.
-fn push_drive(scene: &mut RenderScene, visual: &DayVisual, step: usize, driving: bool) {
+/// The robot at `step` of its path, its trail so far, and the scan its LiDAR
+/// returns there: a beam from the LiDAR head to every return, and the return
+/// itself marked where it struck.
+fn push_drive(scene: &mut RenderScene, visual: &DayVisual, step: usize) {
     const TRAIL: [f32; 4] = [0.15, 0.80, 0.95, 1.0];
     for pose in visual.path[..=step].iter().step_by(5) {
         push_sphere(
@@ -513,30 +514,170 @@ fn push_drive(scene: &mut RenderScene, visual: &DayVisual, step: usize, driving:
     }
     let pose = visual.path[step];
     push_robot(scene, pose);
-    if !driving {
-        return;
-    }
-    let nearest = visual.keyframes.iter().min_by(|a, b| {
-        let da = (a.0.x_m - pose.x_m).hypot(a.0.y_m - pose.y_m);
-        let db = (b.0.x_m - pose.x_m).hypot(b.0.y_m - pose.y_m);
-        da.total_cmp(&db)
-    });
-    if let Some((taken_at, scan)) = nearest {
-        for (beam, range) in scan.ranges_m.iter().enumerate().step_by(2) {
-            if !range.is_finite() || *range > scan.range_max_m {
-                continue;
-            }
+    push_scan(scene, pose, &visual.live[step]);
+}
+
+/// Height of the drawn scan plane: the LiDAR head on the robot.
+const SCAN_HEIGHT_M: f64 = 0.46;
+/// Every how many of the scan's 360 beams is drawn as a ray.
+const RAY_STRIDE: usize = 6;
+/// Distance from the LiDAR at which a drawn ray starts: just outside the
+/// robot's body.
+const RAY_START_M: f64 = 0.38;
+/// Adjacent returns closer than this are joined into the scan's outline.
+const OUTLINE_GAP_M: f64 = 0.35;
+
+fn push_scan(scene: &mut RenderScene, pose: Pose2d, scan: &LaserScan2d) {
+    const RAY: [f32; 4] = [0.30, 0.80, 1.0, 1.0];
+    const OUTLINE: [f32; 4] = [1.0, 0.22, 0.10, 1.0];
+    const HIT: [f32; 4] = [1.0, 0.85, 0.20, 1.0];
+    let world = |x: f64, y: f64| {
+        let point = pose.transform_point(Vec3::new(x, y, 0.0));
+        Vec3::new(point.x, SCAN_HEIGHT_M, point.y)
+    };
+    let returns: Vec<Option<Vec3>> = scan
+        .ranges_m
+        .iter()
+        .enumerate()
+        .map(|(beam, range)| {
+            (range.is_finite() && *range <= scan.range_max_m).then(|| {
+                let angle = scan.angle_min_rad + scan.angle_increment_rad * beam as f64;
+                world(range * angle.cos(), range * angle.sin())
+            })
+        })
+        .collect();
+    let mut rays = SolidMesh::default();
+    let mut outline = SolidMesh::default();
+    let mut hits = SolidMesh::default();
+    for (beam, hit) in returns.iter().enumerate() {
+        let Some(hit) = *hit else { continue };
+        if beam.is_multiple_of(RAY_STRIDE) {
+            // Rays start at the edge of the robot's body so they do not
+            // paint over it.
             let angle = scan.angle_min_rad + scan.angle_increment_rad * beam as f64;
-            let local = Vec3::new(range * angle.cos(), range * angle.sin(), 0.0);
-            let world = taken_at.transform_point(local);
-            push_sphere(
-                scene,
-                Vec3::new(world.x, 0.5, world.y),
-                0.03,
-                [1.0, 0.25, 0.15, 1.0],
-                true,
+            let start = world(RAY_START_M * angle.cos(), RAY_START_M * angle.sin());
+            if (hit - start).dot(start - world(0.0, 0.0)) > 0.0 {
+                rays.ribbon(start, hit, 0.018);
+            }
+            hits.cube(hit, 0.07);
+        }
+        if let Some(next) = returns[(beam + 1) % returns.len()] {
+            if (next - hit).length() < OUTLINE_GAP_M {
+                outline.bar(hit, next, 0.05);
+            }
+        }
+    }
+    for (mesh, color, glow) in [(rays, RAY, 0.55), (outline, OUTLINE, 1.0), (hits, HIT, 1.0)] {
+        if let Some(mesh) = mesh.build() {
+            let mut item = RenderScene::item_from_dynamic_mesh(mesh, color);
+            let emissive = [color[0] * glow, color[1] * glow, color[2] * glow];
+            item.material = PbrMaterial::new(color, 0.5, 0.0, emissive);
+            scene.items.push(item);
+        }
+    }
+}
+
+/// Quads in the world frame gathered into one mesh, so a scan is a few
+/// draws rather than hundreds of scene items.
+#[derive(Default)]
+struct SolidMesh {
+    positions: Vec<[f32; 3]>,
+    normals: Vec<[f32; 3]>,
+    indices: Vec<u32>,
+}
+
+impl SolidMesh {
+    fn quad(&mut self, corners: [Vec3; 4], normal: Vec3) {
+        let base = self.positions.len() as u32;
+        for corner in corners {
+            self.positions
+                .push([corner.x as f32, corner.y as f32, corner.z as f32]);
+            self.normals
+                .push([normal.x as f32, normal.y as f32, normal.z as f32]);
+        }
+        let facing = (corners[1] - corners[0]).cross(corners[2] - corners[0]);
+        if facing.dot(normal) >= 0.0 {
+            self.indices
+                .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        } else {
+            self.indices
+                .extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+        }
+    }
+
+    /// A thin strip from `from` to `to`, lying in the scan plane.
+    fn ribbon(&mut self, from: Vec3, to: Vec3, width_m: f64) {
+        let along = to - from;
+        let side = Vec3::new(-along.z, 0.0, along.x).normalize_or_zero() * (width_m * 0.5);
+        self.quad([from - side, to - side, to + side, from + side], Vec3::Y);
+    }
+
+    /// A square bar from `from` to `to`.
+    fn bar(&mut self, from: Vec3, to: Vec3, size_m: f64) {
+        let along = to - from;
+        let side = Vec3::new(-along.z, 0.0, along.x).normalize_or_zero() * (size_m * 0.5);
+        let up = Vec3::Y * (size_m * 0.5);
+        self.quad(
+            [
+                from - side + up,
+                to - side + up,
+                to + side + up,
+                from + side + up,
+            ],
+            Vec3::Y,
+        );
+        self.quad(
+            [
+                from - side - up,
+                to - side - up,
+                to - side + up,
+                from - side + up,
+            ],
+            -side,
+        );
+        self.quad(
+            [
+                from + side - up,
+                to + side - up,
+                to + side + up,
+                from + side + up,
+            ],
+            side,
+        );
+    }
+
+    /// A cube centered on `at`.
+    fn cube(&mut self, at: Vec3, size_m: f64) {
+        let h = size_m * 0.5;
+        for normal in [Vec3::X, -Vec3::X, Vec3::Y, -Vec3::Y, Vec3::Z, -Vec3::Z] {
+            let (u, v) = if normal.y.abs() > 0.5 {
+                (Vec3::X, Vec3::Z)
+            } else if normal.x.abs() > 0.5 {
+                (Vec3::Y, Vec3::Z)
+            } else {
+                (Vec3::X, Vec3::Y)
+            };
+            let c = at + normal * h;
+            self.quad(
+                [
+                    c - u * h - v * h,
+                    c + u * h - v * h,
+                    c + u * h + v * h,
+                    c - u * h + v * h,
+                ],
+                normal,
             );
         }
+    }
+
+    fn build(self) -> Option<TriangleMesh> {
+        (!self.indices.is_empty()).then(|| TriangleMesh {
+            texcoords: vec![[0.0, 0.0]; self.positions.len()],
+            positions: self.positions,
+            normals: self.normals,
+            indices: self.indices,
+            skinning: None,
+        })
     }
 }
 

@@ -60,6 +60,9 @@ struct DayRun {
     scans: Vec<LaserScan2d>,
     /// True world pose at each session node.
     truth: Vec<Pose2d>,
+    /// The scan the robot's LiDAR returns at every pose of its path, for the
+    /// picture: SLAM only consumes the keyframes.
+    live: Vec<LaserScan2d>,
     /// Final odometry error against truth, in meters.
     odometry_error_m: f64,
     loop_closures: usize,
@@ -229,7 +232,7 @@ fn run_week(day_count: usize) -> Week {
         visuals.push(render::DayVisual {
             day,
             path: truth_path(day),
-            keyframes: run.truth.iter().copied().zip(run.scans).collect(),
+            live: run.live,
             prior: map.take().map(|previous| previous.grid),
             after: rebuilt.grid.clone(),
             appeared,
@@ -450,10 +453,12 @@ fn drive_day(day: usize, template: &OccupancyGrid) -> DayRun {
     let mut odom = Pose2d::IDENTITY;
     let mut last_keyframe: Option<Pose2d> = None;
     let (mut scans, mut truth) = (Vec::new(), Vec::new());
+    let mut live = Vec::with_capacity(path.len());
     for (index, pose) in path.iter().enumerate() {
         if index > 0 {
             odom = odom.compose(drifting_increment(path[index - 1], *pose));
         }
+        live.push(scan_at(&backend, physics_world, *pose, &spec));
         let due = last_keyframe.is_none_or(|last| {
             let delta = last.inverse().compose(odom);
             delta.x_m.hypot(delta.y_m) >= KEYFRAME_M || delta.yaw_rad.abs() >= KEYFRAME_RAD
@@ -475,6 +480,7 @@ fn drive_day(day: usize, template: &OccupancyGrid) -> DayRun {
         graph: matched_session(slam.graph()),
         scans,
         truth,
+        live,
         odometry_error_m: (odom.x_m - truth_end.x_m).hypot(odom.y_m - truth_end.y_m),
         loop_closures: slam.loop_edge_indices().len(),
     }
