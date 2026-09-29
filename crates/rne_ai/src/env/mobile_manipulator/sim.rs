@@ -2432,30 +2432,6 @@ impl MobileManipulatorSim {
         dynamic && !is_robot_link
     }
 
-    /// Welds `object` to the end-effector link and starts an animated retarget of
-    /// the weld anchor from `object`'s raw contact-time relative pose to a
-    /// canonical in-gripper pose (centered between the finger pads, standing off
-    /// just clear of the palm/mount face rather than flush against it, axis-aligned
-    /// to the gripper frame — see [`Self::canonical_grasp_anchor`]). The weld attaches at the raw pose
-    /// immediately (so contact never has to wait), then [`Self::progress_grasp_retarget`]
-    /// eases the anchor to the canonical target over [`GRASP_RETARGET_STEPS`] ticks;
-    /// nothing about the object's world transform is teleported mid-physics, only
-    /// the joint's own local anchor, so the correction plays out as the constraint
-    /// solver pulling the object smoothly into place.
-    ///
-    /// On the fixed-base SCARA arm the canonical anchor is also seated slightly
-    /// upward (`FIXED_BASE_GRASP_SEAT_LIFT_M`): the arm has no vertical joint, so a
-    /// weld at exactly the object's resting height pins the object's resting
-    /// contact with its support (tabletop) into the constraint system, and the
-    /// contact response then resists any horizontal carry far harder than sliding
-    /// friction would — the carry stalls. The lift and mobile robots keep the
-    /// canonical anchor at the natural finger-pad height: the lift robot raises the
-    /// object off its support with its prismatic joint, and the mobile robot's
-    /// kinematically re-pinned base imposes the carry positionally.
-    ///
-    /// Also establishes the finger pinch-close limits (see
-    /// [`GRASP_PINCH_MARGIN_FRACTION`]) so future closing commands stop at the
-    /// object's surface instead of driving the fingers through it.
     /// Welds the named object to the gripper exactly where it is, when each
     /// linear finger pad is within `max_gap_m` of the object's face along the
     /// line between the pads.
@@ -2529,6 +2505,30 @@ impl MobileManipulatorSim {
         true
     }
 
+    /// Welds `object` to the end-effector link and starts an animated retarget of
+    /// the weld anchor from `object`'s raw contact-time relative pose to a
+    /// canonical in-gripper pose (centered between the finger pads, standing off
+    /// just clear of the palm/mount face rather than flush against it, axis-aligned
+    /// to the gripper frame — see [`Self::canonical_grasp_anchor`]). The weld attaches at the raw pose
+    /// immediately (so contact never has to wait), then [`Self::progress_grasp_retarget`]
+    /// eases the anchor to the canonical target over [`GRASP_RETARGET_STEPS`] ticks;
+    /// nothing about the object's world transform is teleported mid-physics, only
+    /// the joint's own local anchor, so the correction plays out as the constraint
+    /// solver pulling the object smoothly into place.
+    ///
+    /// On the fixed-base SCARA arm the canonical anchor is also seated slightly
+    /// upward (`FIXED_BASE_GRASP_SEAT_LIFT_M`): the arm has no vertical joint, so a
+    /// weld at exactly the object's resting height pins the object's resting
+    /// contact with its support (tabletop) into the constraint system, and the
+    /// contact response then resists any horizontal carry far harder than sliding
+    /// friction would — the carry stalls. The lift and mobile robots keep the
+    /// canonical anchor at the natural finger-pad height: the lift robot raises the
+    /// object off its support with its prismatic joint, and the mobile robot's
+    /// kinematically re-pinned base imposes the carry positionally.
+    ///
+    /// Also establishes the finger pinch-close limits (see
+    /// [`GRASP_PINCH_MARGIN_FRACTION`]) so future closing commands stop at the
+    /// object's surface instead of driving the fingers through it.
     fn attach_grasp(&mut self, object: Entity) {
         let ee = world_transform_of(&self.world, self.ee_link);
         let obj = world_transform_of(&self.world, object);
