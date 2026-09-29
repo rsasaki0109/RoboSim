@@ -23,6 +23,18 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Changed
 
+- The factory inspection showcase is a touch inspection at a belt conveyor.
+  The belt is a kinematic body carrying three free dynamic parts by friction;
+  it stops each within 1 mm of the inspection point, and the G1 lowers its
+  right hand onto the part until the simulation reports contact between its
+  fingertips and the part, rests it there, and lifts away. The fingertips
+  meet each part 9-12 mm from the centre of its top face and 2 mm above it,
+  stay in contact for 27-30 of the 30 hold steps, and move the part under
+  1 mm. The arm follows damped least-squares inverse kinematics on the G1's
+  chain, corrected by the measured fingertip position and by the pelvis's
+  measured drift. The G1's hands carry no colliders in this scene, so the
+  fingertips get a contact box over the hand mesh's fingertip vertices,
+  carried on the forearm.
 - The GitHub repository is renamed from `rsasaki0109/RoboSim` to
   `rsasaki0109/RobotNativeEngine`; GitHub redirects the old URLs. Links, the
   crate `repository` field, issue templates, and the release attestation

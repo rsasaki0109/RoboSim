@@ -39,10 +39,10 @@ camera state; gates and regeneration commands are in
     <td width="50%" align="center">
       <picture>
         <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-factory.png">
-        <img src="docs/media/showcase-factory.gif" alt="Unitree G1 humanoid standing at a factory workstation, raising one arm at a time to point at three gauges, each lamp turning green once the pointing is confirmed" width="460">
+        <img src="docs/media/showcase-factory.gif" alt="Unitree G1 humanoid at a belt conveyor, lowering its right hand onto each part the belt stops in front of it, with a lamp stack turning green as each part is touched" width="460">
       </picture>
       <br><b>Factory inspection</b><br>
-      <sub>Official G1 link meshes. The G1 stands and points at three gauges in turn, the arm aimed on its own kinematic chain; a lamp turns green only when the simulated arm points within 5° of it. The gauges are drawn only. <a href="docs/media/showcase-factory.json">metadata</a></sub>
+      <sub>Parts ride a belt conveyor, a kinematic belt carrying free dynamic parts by friction, and stop in front of the G1. It lowers its right hand onto each part until the simulation reports contact, rests it there and lifts away; a lamp turns green only on that contact. The fingertips meet each part within about 1 cm of its top-face centre without moving it. <a href="docs/media/showcase-factory.json">metadata</a></sub>
     </td>
   </tr>
   <tr>
