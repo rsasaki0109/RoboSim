@@ -348,7 +348,7 @@ mod tests {
     use rne_math::{Quat, Vec3};
     use rne_render::{
         hash_depth_f32, hash_rgba8, EnvironmentLighting, EnvironmentMap, RenderScene,
-        RenderSceneItem, VisualShape,
+        RenderSceneItem, TriangleMesh, VisualShape,
     };
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -595,6 +595,78 @@ mod tests {
         assert!(
             unique_colors(&output.color.rgba8) > 1,
             "expected shaded primitive colors"
+        );
+    }
+
+    /// A camera-facing quad `distance_m` in front of the origin view.
+    fn facing_quad(distance_m: f32) -> TriangleMesh {
+        TriangleMesh {
+            positions: vec![
+                [-1.0, -1.0, -distance_m],
+                [1.0, -1.0, -distance_m],
+                [1.0, 1.0, -distance_m],
+                [-1.0, 1.0, -distance_m],
+            ],
+            normals: vec![[0.0, 0.0, 1.0]; 4],
+            texcoords: vec![[0.0, 0.0]; 4],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            skinning: None,
+        }
+    }
+
+    fn quad_scene(mesh: Arc<TriangleMesh>) -> RenderScene {
+        RenderScene {
+            items: vec![RenderSceneItem {
+                transform: Transform3::IDENTITY,
+                shape: VisualShape::Mesh {
+                    path: "quad".into(),
+                    scale: Vec3::ONE,
+                },
+                color_rgba: [0.8, 0.4, 0.2, 1.0],
+                mesh: Some(mesh),
+                base_color_texture: None,
+                material: Default::default(),
+            }],
+        }
+    }
+
+    #[test]
+    fn wgpu_mesh_cache_does_not_reuse_a_dropped_mesh() {
+        if std::env::var("RNE_SKIP_GPU").is_ok() {
+            return;
+        }
+        let mut backend = match WgpuRenderBackend::new() {
+            Ok(backend) => backend,
+            Err(RenderError::NoAdapter) => return,
+            Err(error) => panic!("{error}"),
+        };
+        let camera = Camera::new(32, 24, std::f64::consts::FRAC_PI_4);
+        let clear = [0.0, 0.0, 0.0, 1.0];
+        let center = (12 * 32 + 16) as usize;
+
+        let near = Arc::new(facing_quad(2.0));
+        let near_address = Arc::as_ptr(&near) as usize;
+        backend
+            .render_scene_camera(&camera, &Transform3::IDENTITY, &quad_scene(near), clear)
+            .expect("near quad render");
+        // The first mesh is gone from the caller's side. Allocate new meshes
+        // until one lands at its address, if the allocator allows it; the
+        // cache must not hand that mesh the old upload.
+        let mut held = Vec::new();
+        let far = loop {
+            let far = Arc::new(facing_quad(6.0));
+            if Arc::as_ptr(&far) as usize == near_address || held.len() == 256 {
+                break far;
+            }
+            held.push(far);
+        };
+        let output = backend
+            .render_scene_camera(&camera, &Transform3::IDENTITY, &quad_scene(far), clear)
+            .expect("far quad render");
+        let depth_m = output.depth.depth_m[center];
+        assert!(
+            (depth_m - 6.0).abs() < 0.05,
+            "far quad drew at {depth_m} m, not 6 m"
         );
     }
 

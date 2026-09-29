@@ -48,6 +48,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
 
+mod uav_dressing;
+
 const WIDTH: u32 = 1_280;
 const HEIGHT: u32 = 720;
 const CAR_FRAME_COUNT: usize = 144;
@@ -1088,6 +1090,8 @@ fn main() {
     let uav_minimap = build_minimap(&uav_track_xz_m, |zoom, x, y| {
         fetch_osm_tile(&osm_cache_dir, zoom, x, y)
     });
+    let mut uav_city_scene = city_scene.clone();
+    uav_dressing::apply_facades(&mut uav_city_scene, &building_footprints);
     for (frame_index, uav) in uav_replay
         .frames
         .iter()
@@ -1095,7 +1099,7 @@ fn main() {
         .take(render_frame_count)
         .enumerate()
     {
-        let mut scene = city_scene.clone();
+        let mut scene = uav_city_scene.clone();
         let traffic_frame = &city_traffic[frame_index.min(city_traffic.len() - 1)];
         append_city_runtime_signals(
             &mut scene,
@@ -1122,7 +1126,7 @@ fn main() {
             &scene,
             uav_camera_noise_key(frame_index),
         );
-        append_quadrotor(&mut scene, uav);
+        uav_dressing::append_detailed_quadrotor(&mut scene, uav);
         let output = backend
             .render_scene_camera(
                 &camera,
@@ -1173,14 +1177,16 @@ fn main() {
         .expect("write controlled PLATEAU UAV frame");
     }
     let uav_gif_path = media_dir.join("plateau-uav.gif");
-    build_gif_with(&uav_frames_dir, &uav_gif_path, 560, 112)
+    // The textured facades need fewer palette entries to stay in budget.
+    build_gif_with(&uav_frames_dir, &uav_gif_path, 560, 48)
         .expect("encode controlled PLATEAU UAV GIF");
     let uav_poster_frame = render_frame_count.saturating_sub(1).min(48);
     image::open(uav_frames_dir.join(format!("frame-{uav_poster_frame:03}.png")))
         .expect("read controlled PLATEAU UAV poster frame")
         .save(media_dir.join("plateau-uav.png"))
         .expect("write controlled PLATEAU UAV poster");
-    fs::remove_dir_all(&uav_frames_dir).expect("remove controlled PLATEAU UAV frames");
+    // The frames stay under target/ for tools/prepare_showcase_uav.py, which
+    // encodes the README GIF from them rather than from the smaller GIF above.
     println!(
         "rendered controlled PLATEAU UAV media to {}",
         uav_gif_path.display()
@@ -4256,102 +4262,6 @@ fn append_uav_trail(scene: &mut RenderScene, frames: &[UavFrame], current_frame:
             [0.10, 0.72, 1.0, 1.0],
         );
     }
-}
-
-fn append_quadrotor(scene: &mut RenderScene, frame: UavFrame) {
-    let center = frame.transform.translation;
-    let rotation = frame.transform.rotation;
-    push_box(
-        scene,
-        center,
-        rotation,
-        Vec3::new(0.82, 0.28, 0.58),
-        [0.08, 0.10, 0.13, 1.0],
-    );
-    push_box(
-        scene,
-        center + rotation * Vec3::new(0.36, -0.01, 0.0),
-        rotation,
-        Vec3::new(0.22, 0.18, 0.46),
-        [0.88, 0.33, 0.08, 1.0],
-    );
-    for arm_yaw_rad in [std::f64::consts::FRAC_PI_4, -std::f64::consts::FRAC_PI_4] {
-        push_box(
-            scene,
-            center,
-            rotation * Quat::from_rotation_y(arm_yaw_rad),
-            Vec3::new(1.75, 0.07, 0.08),
-            [0.20, 0.23, 0.26, 1.0],
-        );
-    }
-    for (index, local) in [
-        Vec3::new(0.62, 0.04, 0.62),
-        Vec3::new(0.62, 0.04, -0.62),
-        Vec3::new(-0.62, 0.04, 0.62),
-        Vec3::new(-0.62, 0.04, -0.62),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let hub = center + rotation * local;
-        push_cylinder(
-            scene,
-            hub,
-            rotation * Quat::from_rotation_x(-std::f64::consts::FRAC_PI_2),
-            0.09,
-            0.11,
-            [0.18, 0.20, 0.22, 1.0],
-        );
-        let rotor_rotation = rotation
-            * Quat::from_rotation_y(if index & 1 == 0 {
-                frame.rotor_angle_rad
-            } else {
-                -frame.rotor_angle_rad
-            });
-        push_box(
-            scene,
-            hub + rotation * Vec3::new(0.0, 0.055, 0.0),
-            rotor_rotation,
-            Vec3::new(0.88, 0.018, 0.055),
-            [0.34, 0.38, 0.42, 1.0],
-        );
-        push_box(
-            scene,
-            hub + rotation * Vec3::new(0.0, 0.056, 0.0),
-            rotor_rotation * Quat::from_rotation_y(std::f64::consts::FRAC_PI_2),
-            Vec3::new(0.88, 0.016, 0.045),
-            [0.18, 0.21, 0.24, 1.0],
-        );
-    }
-    push_sphere(
-        scene,
-        center + rotation * Vec3::new(0.43, 0.02, 0.24),
-        0.055,
-        [0.10, 1.0, 0.42, 1.0],
-    );
-    push_sphere(
-        scene,
-        center + rotation * Vec3::new(-0.43, 0.02, -0.24),
-        0.055,
-        [1.0, 0.08, 0.04, 1.0],
-    );
-    let camera_pose = uav_camera_transform(frame);
-    push_cylinder(
-        scene,
-        camera_pose.translation,
-        camera_pose.rotation * Quat::from_rotation_x(-std::f64::consts::FRAC_PI_2),
-        0.045,
-        0.09,
-        [0.06, 0.07, 0.08, 1.0],
-    );
-    push_cylinder(
-        scene,
-        camera_pose.translation + camera_pose.rotation * Vec3::NEG_Z * 0.05,
-        camera_pose.rotation * Quat::from_rotation_x(-std::f64::consts::FRAC_PI_2),
-        0.032,
-        0.05,
-        [0.12, 0.16, 0.22, 1.0],
-    );
 }
 
 fn uav_chase_camera(frame: UavFrame) -> CameraOrbit {

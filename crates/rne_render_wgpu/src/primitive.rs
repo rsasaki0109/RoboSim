@@ -718,6 +718,11 @@ pub struct PrimitiveRenderer {
     occlusion_texture_cache: HashMap<usize, GpuTexture>,
     fallback_environment: GpuEnvironmentTexture,
     environment_texture_cache: HashMap<usize, GpuEnvironmentTexture>,
+    /// The sources of every cached upload. The caches are keyed by `Arc`
+    /// address, so each source stays alive for as long as its entry: a freed
+    /// source's address could otherwise be reused by a new mesh or texture,
+    /// which would then draw with the stale upload.
+    cache_sources: Vec<Arc<dyn std::any::Any + Send + Sync>>,
     taa: TemporalAntiAliasing,
     _shadow_texture: wgpu::Texture,
     shadow_view: wgpu::TextureView,
@@ -1490,6 +1495,7 @@ impl PrimitiveRenderer {
             occlusion_texture_cache: HashMap::new(),
             fallback_environment,
             environment_texture_cache: HashMap::new(),
+            cache_sources: Vec::new(),
             taa: TemporalAntiAliasing::new(device, color_format),
             _shadow_texture: shadow_texture,
             shadow_view,
@@ -1663,6 +1669,7 @@ impl PrimitiveRenderer {
                         wgpu::TextureFormat::Rgba8UnormSrgb,
                     );
                     self.texture_cache.insert(key, uploaded);
+                    self.cache_sources.push(Arc::clone(texture) as _);
                 }
             }
             if let Some(texture) = &item.material.normal_texture {
@@ -1677,6 +1684,7 @@ impl PrimitiveRenderer {
                         wgpu::TextureFormat::Rgba8Unorm,
                     );
                     self.normal_texture_cache.insert(key, uploaded);
+                    self.cache_sources.push(Arc::clone(texture) as _);
                 }
             }
             if let Some(texture) = &item.material.roughness_texture {
@@ -1691,6 +1699,7 @@ impl PrimitiveRenderer {
                         wgpu::TextureFormat::Rgba8Unorm,
                     );
                     self.roughness_texture_cache.insert(key, uploaded);
+                    self.cache_sources.push(Arc::clone(texture) as _);
                 }
             }
             if let Some(texture) = &item.material.metallic_roughness_texture {
@@ -1705,6 +1714,7 @@ impl PrimitiveRenderer {
                         wgpu::TextureFormat::Rgba8Unorm,
                     );
                     self.metallic_roughness_texture_cache.insert(key, uploaded);
+                    self.cache_sources.push(Arc::clone(texture) as _);
                 }
             }
             if let Some(texture) = &item.material.emissive_texture {
@@ -1719,6 +1729,7 @@ impl PrimitiveRenderer {
                         wgpu::TextureFormat::Rgba8UnormSrgb,
                     );
                     self.emissive_texture_cache.insert(key, uploaded);
+                    self.cache_sources.push(Arc::clone(texture) as _);
                 }
             }
             if let Some(texture) = &item.material.occlusion_texture {
@@ -1733,6 +1744,7 @@ impl PrimitiveRenderer {
                         wgpu::TextureFormat::Rgba8Unorm,
                     );
                     self.occlusion_texture_cache.insert(key, uploaded);
+                    self.cache_sources.push(Arc::clone(texture) as _);
                 }
             }
         }
@@ -2354,6 +2366,7 @@ impl PrimitiveRenderer {
         if !self.mesh_cache.contains_key(&key) {
             let uploaded = upload_mesh(device, mesh, &self.skin_layout);
             self.mesh_cache.insert(key, uploaded);
+            self.cache_sources.push(Arc::clone(mesh) as _);
         }
         self.mesh_cache.get(&key).expect("mesh uploaded into cache")
     }
@@ -2377,6 +2390,7 @@ impl PrimitiveRenderer {
                 map,
             );
             self.environment_texture_cache.insert(key, uploaded);
+            self.cache_sources.push(Arc::clone(map) as _);
         }
         self.environment_texture_cache
             .get(&key)
