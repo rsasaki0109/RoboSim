@@ -1796,6 +1796,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "go2_push_recovery_step"
+version = "0.4.0"
+dependencies = [
+ "image",
+ "png",
+ "rne_ai",
+ "rne_core",
+ "rne_math",
+ "rne_render",
+ "rne_render_wgpu",
+]
+
+[[package]]
 name = "go2_steered_turn"
 version = "0.4.0"
 dependencies = [

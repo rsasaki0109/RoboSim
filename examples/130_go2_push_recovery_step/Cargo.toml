@@ -1,0 +1,23 @@
+[package]
+name = "go2_push_recovery_step"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+image = "0.25"
+rne_core = { workspace = true }
+png = { workspace = true }
+rne_ai = { workspace = true }
+rne_math = { workspace = true }
+rne_render = { workspace = true }
+rne_render_wgpu = { workspace = true, features = ["viewer"] }
+
+[[example]]
+name = "130_go2_push_recovery_step"
+path = "main.rs"
