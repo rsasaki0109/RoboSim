@@ -52,7 +52,7 @@ camera state; gates and regeneration commands are in
         <img src="docs/media/showcase-go2-door.gif" alt="A Unitree Go2 with an arm on its back pushes a swing door open with the pad on its arm, walks through the doorway, walks around the open door and pushes it shut from the other side, with its Livox Mid-360 returns drawn coloured by height" width="460">
       </picture>
       <br><b>Go2 · door with an arm</b><br>
-      <sub>The Go2 pushes a free-swinging 6 kg door open with the pad on its arm, walks through, and pushes it back against its stop; the pad is the only part of the robot that ever touches the door. It steers only on its own Livox Mid-360 localization (0.05 m RMS), with the sensor model fitted to real Go2 recordings. <a href="docs/media/showcase-go2-door.json">metadata</a> · <a href="docs/GO2_DOOR.md">details</a></sub>
+      <sub>The Go2 pushes a free-swinging 6 kg door open with the pad on its arm, walks through, and pushes it back against its stop; the pad is the only part of the robot that ever touches the door. It steers only on its own Livox Mid-360 localization (0.08 m RMS), with the sensor model fitted to real Go2 recordings. <a href="docs/media/showcase-go2-door.json">metadata</a> · <a href="docs/GO2_DOOR.md">details</a></sub>
     </td>
     <td width="50%" align="center">
       <picture>
@@ -192,7 +192,7 @@ With an arm on its back, the Go2 walks through a swing door and shuts it
 behind itself. Nothing holds or drives the 6 kg door: the pad on the arm
 pushes it open to 87° and back against its stop, and no other part of the
 robot ever touches it. Every command comes from its own Livox Mid-360
-localization (0.052 m RMS), with the sensor model fitted to real Go2
+localization (0.081 m RMS), with the sensor model fitted to real Go2
 recordings. [docs/GO2_DOOR.md](docs/GO2_DOOR.md) ·
 [source](examples/132_go2_door/main.rs)
 

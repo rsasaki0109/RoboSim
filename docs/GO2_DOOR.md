@@ -46,18 +46,25 @@ drifting leg odometry, and matched by `rne_slam::Slam2d`, as in example 131.
 The door's position is given, as a map annotation would give it; its angle is
 read only to score the run.
 
+The Mid-360 sees the door like any other surface. Returns inside the door's
+swing (1.05 m from the hinge, on the side it opens to) are left out of SLAM,
+the way a map marks a moving object's zone: matched against a map that still
+holds the closed door, the leaf the robot is pushing dragged the estimate up to
+1.06 m off (0.179 m RMS) and nearly toppled the robot. With the mask the error
+is 0.081 m RMS.
+
 ## Measured
 
 | Measure | Result | Gate |
 | --- | --- | --- |
-| Door opened to | 1.511 rad (87°) | > 1.4 rad |
+| Door opened to | 1.520 rad (87°) | > 1.4 rad |
 | Door left at | 0.000 rad (against its stop) | < 0.02 rad |
-| Pad in contact with the door | 16.6 s | > 0 |
+| Pad in contact with the door | 16.1 s | > 0 |
 | Any other robot link in contact with the door | never | never |
-| Localization error | 0.052 m RMS, 0.096 m worst | RMS < 0.15 m |
-| Clearance to walls and furniture | at least 0.48 m | > 0.3 m |
+| Localization error | 0.081 m RMS, 0.140 m worst | RMS < 0.15 m |
+| Clearance to walls and furniture | at least 0.49 m | > 0.3 m |
 | Lowest body height | 0.258 m | > 0.2 m |
-| Whole sequence | 117.9 s | finishes |
+| Whole sequence | 118.4 s | finishes |
 
 With the robot steered by the simulation's true pose instead, the straight
 closing push alone left the door at 0.031 rad; under the ~0.06 m localization
@@ -78,8 +85,9 @@ list.
 
 The added furniture changed the SLAM trajectory enough to push this run's
 localization error from 0.059 m to 0.129 m RMS with the default matcher. With
-all 360 scan beams and a finer search (7 samples per axis, 4 levels) it is
+all 360 scan beams and a finer search (7 samples per axis, 4 levels) it was
 0.052 m, and example 131 went from 0.099 m to 0.042 m on the same settings.
+Once the scan also saw the door (below), the door run settled at 0.081 m.
 
 ## Known limitations
 
@@ -90,6 +98,12 @@ all 360 scan beams and a finer search (7 samples per axis, 4 levels) it is
   moves the door leaf to its own group; a per-robot group in the importer would
   fix it generally, but would also change existing multi-robot scenes such as
   the OpenArm pair.
+- **Scans used to skip the door.** Before this was fixed, `sample_livox_mid360`
+  skipped every URDF link in the scene, not just the Go2's own, so the door was
+  invisible to the Mid-360. It now skips only the sensor robot's links; the
+  test `mid360_scans_other_articulated_bodies_but_not_its_own_robot` counts
+  2,141 door returns over five frames where the old filter gave 22 (wall edge
+  points only).
 - **The arm and the Mid-360.** The rig occlusion table was measured without an
   arm, and the scene's raycasts skip the robot's own links, so the arm does not
   shadow the scan.

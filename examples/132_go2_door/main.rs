@@ -18,7 +18,10 @@
 //!   emission time, levelled by IMU attitude and de-skewed by drifting leg odometry,
 //!   feed `rne_slam::Slam2d`. Every command comes from that estimate; the door's
 //!   position is given, as a map annotation would give it, and its angle is read
-//!   only to score the run.
+//!   only to score the run. The Mid-360 sees the door, but returns inside its
+//!   swing are masked from SLAM, the way a map marks a moving object's zone:
+//!   matching against a door that moves under the robot's own push dragged the
+//!   estimate up to 1.06 m off.
 //!
 //! The gate checks that the door opens past 80°, ends within 1° of shut, is
 //! touched by the pad and by no other part of the robot, and that the robot stays
@@ -91,6 +94,9 @@ const STOW_POSE: [f64; 4] = [0.0, -1.3, 2.5, 0.3];
 /// The door, in the navigation frame (x, y = -world z): hinge and doorway line.
 const HINGE_NAV: [f64; 2] = [2.47, -0.2];
 const DOORWAY_CENTRE_Y: f64 = -0.7;
+/// The door leaf reaches 0.97 m from its hinge; returns within this radius on
+/// its swing side are masked from SLAM, as a map's dynamic-object zone would be.
+const DOOR_SWING_MASK_M: f64 = 1.05;
 /// Closing line: 0.52 m east of the hinge, so the pad 0.4 m to the right pushes
 /// the leaf 0.12 m from the hinge line.
 const CLOSING_LINE_X: f64 = HINGE_NAV[0] + 0.52;
@@ -377,6 +383,9 @@ impl Run {
         let sensor_from_base = Pose2d::new(UNITREE_GO2_MID360_FORWARD_OF_BASE_M, 0.0, 0.0);
         let mut ranges = vec![f64::NAN; SCAN_BEAMS];
         let increment = 2.0 * PI / SCAN_BEAMS as f64;
+        // Where the sensor is in the map, by the robot's own estimate: returns that
+        // land in the door's swing are left out of localization and mapping.
+        let sensor_in_map = self.estimate().compose(sensor_from_base);
         for (point, time_s) in cloud.points_m.iter().zip(cloud.timestamps_s.iter()) {
             let fraction = (time_s / self.spec.rotation_period_s).clamp(0.0, 1.0);
             // What the driver reports: the return in the sensor frame at emission.
@@ -407,6 +416,9 @@ impl Run {
             let at_end = sensor_from_base
                 .inverse()
                 .transform_point(emission_from_end.transform_point(base_point));
+            if in_door_swing(sensor_in_map.transform_point(at_end)) {
+                continue;
+            }
             let range = at_end.x.hypot(at_end.y);
             let beam = ((at_end.y.atan2(at_end.x) + PI) / increment).floor() as usize % SCAN_BEAMS;
             if ranges[beam].is_nan() || range < ranges[beam] {
@@ -590,6 +602,14 @@ fn slam_config() -> SlamConfig {
     config.matcher.angular_samples = 7;
     config.matcher.levels = 4;
     config
+}
+
+/// Whether a map point lies in the door's swing, which the map annotation marks
+/// as a moving object: within the leaf's reach of the hinge, on the side it swings
+/// to.
+fn in_door_swing(point: Vec3) -> bool {
+    (point.x - HINGE_NAV[0]).hypot(point.y - HINGE_NAV[1]) <= DOOR_SWING_MASK_M
+        && point.x >= HINGE_NAV[0] - 0.09
 }
 
 /// The base's true planar pose in the navigation frame, for scoring only.

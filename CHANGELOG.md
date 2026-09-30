@@ -124,7 +124,7 @@ All notable changes to Robot Native Engine are documented in this file.
   inside its collider so the robot's sensors see what is shown; the sofa,
   plants, and counter are new colliders in the scenes. Examples 131 and 132
   use it, read clearance from the scene's colliders, and match all 360 scan
-  beams on a finer grid (localization 0.042 m and 0.052 m RMS).
+  beams on a finer grid (localization 0.042 m and 0.081 m RMS).
 - The README's lift section shows one GIF (goods-in to delivery); the
   two-truck relay moves to `docs/DEMOS.md`. The README's Go2 section shows
   only the door GIF, with the trot, Mid-360, and navigation GIFs in
@@ -819,6 +819,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- `UrdfSceneSim::sample_livox_mid360` skipped every URDF link in the scene,
+  so a door (or any other articulated body) was invisible to the Mid-360. It
+  now skips only the links of the robot carrying the sensor. Example 132 masks
+  the door's swing zone out of SLAM instead: matched against a map holding the
+  closed door, the moving leaf dragged the estimate up to 1.06 m off.
 - The G1 + Dex3 robot (`unitree_g1_29dof_dex3_fixed`) ignored the URDF's
   masses: every link spawned at 1.0 kg with no declared inertia, so a Dex3
   finger (0.02 kg, 1.5e-6 kg·m² in the URDF) behaved like ~1 kg·m² and its
