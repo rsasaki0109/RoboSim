@@ -487,48 +487,159 @@ fn sample_lidar_impl<B: PhysicsBackend>(
         return PointCloud::new();
     }
 
+    let channels = spec.effective_channel_count();
+    let rays = (0..spec.ray_count).flat_map(|column| {
+        let sweep_fraction = f64::from(column) / f64::from(spec.ray_count);
+        let azimuth_rad = column_azimuth_rad(spec, column);
+        let timestamp_s = spec.column_time_s(column);
+        (0..channels).map(move |channel| PlannedRay {
+            sweep_fraction,
+            azimuth_rad,
+            elevation_rad: spec.channel_elevation_rad(channel),
+            column,
+            channel,
+            ordinal: u64::from(column) * u64::from(channels) + u64::from(channel),
+            timestamp_s,
+        })
+    });
+    cast_planned_rays(backend, physics_world, world, sweep, spec, noise_key, rays)
+}
+
+/// Samples a scan along an explicit ray pattern instead of the azimuth/channel grid.
+///
+/// Non-repetitive scanners such as the Livox Mid-360 do not fire on a regular grid;
+/// [`crate::LivoxMid360Pattern`] produces their firing sequence. Every ray is cast
+/// from the [`LidarSweep`] pose at `time_s / rotation_period_s`, so motion
+/// distortion follows the pattern's own emission times. The grid fields of `spec`
+/// (`ray_count`, azimuth and elevation limits, `channel_count`) are ignored; range,
+/// radiometry, noise, weather and failure behavior apply unchanged.
+/// [`LidarRay::column`] and [`LidarRay::channel`] populate `ray_indices` and
+/// `channel_indices`, and bloom spreads between rays sharing a channel with adjacent
+/// columns.
+///
+/// The noise ordinal of each ray is its index in `rays`, so a given pattern, spec and
+/// key always reproduce the same cloud.
+pub fn sample_lidar_pattern_swept<B: PhysicsBackend>(
+    backend: &B,
+    physics_world: PhysicsWorldId,
+    world: &World,
+    sweep: &LidarSweep,
+    spec: &LidarSpec,
+    rays: &[LidarRay],
+    noise_key: SensorNoiseKey,
+) -> PointCloud {
+    if rays.is_empty()
+        || spec.max_returns == 0
+        || !spec.max_range_m.is_finite()
+        || spec.max_range_m <= 0.0
+    {
+        return PointCloud::new();
+    }
+    let period_s = spec.rotation_period_s;
+    let planned = rays.iter().enumerate().map(|(index, ray)| PlannedRay {
+        sweep_fraction: if period_s > 0.0 && ray.time_s.is_finite() {
+            (ray.time_s / period_s).clamp(0.0, 1.0)
+        } else {
+            0.0
+        },
+        azimuth_rad: ray.azimuth_rad,
+        elevation_rad: ray.elevation_rad,
+        column: ray.column,
+        channel: ray.channel,
+        ordinal: index as u64,
+        timestamp_s: if period_s > 0.0 { ray.time_s } else { 0.0 },
+    });
+    cast_planned_rays(
+        backend,
+        physics_world,
+        Some(world),
+        sweep,
+        spec,
+        noise_key,
+        planned,
+    )
+}
+
+/// One ray of an explicit scan pattern, in the sensor frame.
+///
+/// Directions use the same convention as the grid scan: azimuth about the sensor's
+/// up (`+Y`) axis measured from `+X` toward `+Z`, elevation positive toward `+Y`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LidarRay {
+    /// Azimuth angle in radians.
+    pub azimuth_rad: f64,
+    /// Elevation angle in radians; negative points below the scan plane.
+    pub elevation_rad: f64,
+    /// Emission time relative to scan start, in seconds.
+    pub time_s: f64,
+    /// Emitter line (ring) index, reported in `channel_indices`.
+    pub channel: u16,
+    /// Firing index within the channel, reported in `ray_indices`.
+    pub column: u32,
+}
+
+/// A ray scheduled for casting, before the sweep pose is applied.
+#[derive(Clone, Copy, Debug)]
+struct PlannedRay {
+    sweep_fraction: f64,
+    azimuth_rad: f64,
+    elevation_rad: f64,
+    column: u32,
+    channel: u16,
+    ordinal: u64,
+    timestamp_s: f64,
+}
+
+fn cast_planned_rays<B: PhysicsBackend>(
+    backend: &B,
+    physics_world: PhysicsWorldId,
+    world: Option<&World>,
+    sweep: &LidarSweep,
+    spec: &LidarSpec,
+    noise_key: SensorNoiseKey,
+    rays: impl Iterator<Item = PlannedRay>,
+) -> PointCloud {
     let random = lidar_random(noise_key);
     let atmosphere = spec.domain_randomization.sample(spec.atmosphere, noise_key);
-    let channels = spec.effective_channel_count();
     let mut pending: Vec<PendingReturn> = Vec::new();
 
-    for column in 0..spec.ray_count {
-        let sweep_fraction = f64::from(column) / f64::from(spec.ray_count);
-        let pose = sweep.pose_at(sweep_fraction);
+    for planned in rays {
+        let pose = sweep.pose_at(planned.sweep_fraction);
         let origin_m = pose.translation + Vec3::new(0.0, spec.height_offset_m, 0.0);
-        let azimuth = column_azimuth_rad(spec, column);
-        let timestamp_s = spec.column_time_s(column);
+        let direction = ray_direction(
+            spec,
+            &pose,
+            planned.azimuth_rad,
+            planned.elevation_rad,
+            &random,
+            noise_key,
+            planned.ordinal,
+        );
+        let Some(direction) = direction else {
+            continue;
+        };
+        let ray = RayGeometry {
+            origin_m,
+            direction,
+            column: planned.column,
+            channel: planned.channel,
+            ordinal: planned.ordinal,
+            timestamp_s: planned.timestamp_s,
+        };
 
-        for channel in 0..channels {
-            let ordinal = u64::from(column) * u64::from(channels) + u64::from(channel);
-            let direction =
-                ray_direction(spec, &pose, azimuth, channel, &random, noise_key, ordinal);
-            let Some(direction) = direction else {
-                continue;
-            };
-            let ray = RayGeometry {
-                origin_m,
-                direction,
-                column,
-                channel,
-                ordinal,
-                timestamp_s,
-            };
-
-            match evaluate_ray(
-                backend,
-                physics_world,
-                world,
-                &ray,
-                spec,
-                atmosphere,
-                &random,
-                noise_key,
-            ) {
-                Ok(returns) => pending.extend(returns),
-                Err(RayFailure::Skip) => continue,
-                Err(RayFailure::Scan) => return PointCloud::new(),
-            }
+        match evaluate_ray(
+            backend,
+            physics_world,
+            world,
+            &ray,
+            spec,
+            atmosphere,
+            &random,
+            noise_key,
+        ) {
+            Ok(returns) => pending.extend(returns),
+            Err(RayFailure::Skip) => continue,
+            Err(RayFailure::Scan) => return PointCloud::new(),
         }
     }
 
@@ -652,12 +763,11 @@ fn ray_direction(
     spec: &LidarSpec,
     pose: &Transform3,
     azimuth: f64,
-    channel: u16,
+    elevation: f64,
     random: &KeyedRandom,
     noise_key: SensorNoiseKey,
     ordinal: u64,
 ) -> Option<Vec3> {
-    let elevation = spec.channel_elevation_rad(channel);
     let (azimuth, elevation) = if spec.beam_sample_count <= 1 {
         // Cheap model: divergence acts as an uncorrelated pointing jitter.
         let half_divergence = spec.beam_divergence_rad.max(0.0) / 2.0;
@@ -1313,7 +1423,7 @@ mod tests {
             &spec,
             &transform,
             column_azimuth_rad(&spec, 1),
-            0,
+            spec.channel_elevation_rad(0),
             &lidar_random(SensorNoiseKey::new(0, 0, 0, 0)),
             SensorNoiseKey::new(0, 0, 0, 0),
             1,
@@ -1577,6 +1687,77 @@ mod tests {
             key,
         );
         assert_eq!(plain, stationary);
+    }
+
+    #[test]
+    fn explicit_rays_in_grid_order_reproduce_the_grid_scan() {
+        let (world, wall) = diffuse_world(LidarMaterial::concrete());
+        let physics = WallPhysics {
+            entity: wall,
+            plane_x: 12.0,
+        };
+        let spec = LidarSpec {
+            ray_count: 9,
+            min_angle_rad: -0.4,
+            max_angle_rad: 0.4,
+            channel_count: 3,
+            min_elevation_rad: -0.2,
+            max_elevation_rad: 0.2,
+            min_range_m: 0.5,
+            max_range_m: 60.0,
+            height_offset_m: 0.0,
+            rotation_period_s: 0.1,
+            beam_divergence_rad: 0.004,
+            range_noise_stddev_m: 0.02,
+            intensity_noise_stddev: 0.05,
+            ..LidarSpec::default()
+        };
+        let key = SensorNoiseKey::new(5, 6, 7, 8);
+        let sweep = LidarSweep::stationary(Transform3::IDENTITY);
+        let rays = (0..spec.ray_count)
+            .flat_map(|column| {
+                let spec = &spec;
+                (0..spec.channel_count).map(move |channel| LidarRay {
+                    azimuth_rad: column_azimuth_rad(spec, column),
+                    elevation_rad: spec.channel_elevation_rad(channel),
+                    time_s: spec.column_time_s(column),
+                    channel,
+                    column,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let grid = sample_lidar_swept(
+            &physics,
+            PhysicsWorldId::DEFAULT,
+            &world,
+            &sweep,
+            &spec,
+            key,
+        );
+        let pattern = sample_lidar_pattern_swept(
+            &physics,
+            PhysicsWorldId::DEFAULT,
+            &world,
+            &sweep,
+            &spec,
+            &rays,
+            key,
+        );
+
+        assert!(!grid.points_m.is_empty());
+        assert_eq!(grid, pattern);
+        assert!(sample_lidar_pattern_swept(
+            &physics,
+            PhysicsWorldId::DEFAULT,
+            &world,
+            &sweep,
+            &spec,
+            &[],
+            key,
+        )
+        .points_m
+        .is_empty());
     }
 
     #[test]

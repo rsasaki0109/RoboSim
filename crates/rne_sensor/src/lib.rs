@@ -9,6 +9,8 @@ pub mod camera;
 pub mod components;
 pub mod imu;
 pub mod lidar;
+pub mod livox;
+mod livox_mid360_coefficients;
 pub mod noise;
 pub mod resources;
 pub mod systems;
@@ -34,8 +36,14 @@ pub use imu::{
 };
 pub use lidar::{
     sample_lidar, sample_lidar_at_entity, sample_lidar_at_entity_keyed, sample_lidar_keyed,
-    sample_lidar_swept, LidarAtmosphere, LidarDomainRandomization, LidarFailureBehavior, LidarSpec,
-    LidarSweep, RANGE_REFERENCE_M,
+    sample_lidar_pattern_swept, sample_lidar_swept, LidarAtmosphere, LidarDomainRandomization,
+    LidarFailureBehavior, LidarRay, LidarSpec, LidarSweep, RANGE_REFERENCE_M,
+};
+pub use livox::{
+    livox_mid360_near_blanking_probability, livox_mid360_spec, sample_livox_mid360,
+    LidarRigOcclusion, LidarRigOcclusionCell, LivoxMid360Pattern, LIVOX_MID360_FIRING_PERIOD_S,
+    LIVOX_MID360_FRAME_PERIOD_S, LIVOX_MID360_LINE_COUNT, LIVOX_MID360_MAX_ELEVATION_RAD,
+    LIVOX_MID360_MIN_ELEVATION_RAD, LIVOX_MID360_POINTS_PER_PACKET, LIVOX_MID360_POINT_PERIOD_S,
 };
 pub use noise::{NoiseModel, SensorNoiseKey};
 pub use resources::SensorGravity;
