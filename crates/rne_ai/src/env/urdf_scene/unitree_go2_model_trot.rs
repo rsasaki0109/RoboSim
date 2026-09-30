@@ -51,6 +51,12 @@ const YAW_RATE_GAIN_N_S: f64 = 30.0;
 const SWING_STIFFNESS_N_PER_M: f64 = 400.0;
 const SWING_DAMPING_N_S_PER_M: f64 = 12.0;
 const RAIBERT_GAIN_S: f64 = 0.1;
+/// Standing: horizontal spring holding the base where standing began, and the
+/// heading loop's gain.
+const STAND_POSITION_GAIN_N_PER_M: f64 = 1000.0;
+const STAND_HEADING_GAIN_PER_S: f64 = 2.0;
+/// A foot this far above its resting height is still swinging.
+const FOOT_DOWN_TOLERANCE_M: f64 = 0.015;
 
 /// Walking command for [`UnitreeGo2ModelTrot`].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -70,6 +76,8 @@ pub struct UnitreeGo2ModelTrot {
     in_stance: [bool; 4],
     previous_yaw_rad: f64,
     heading_rad: f64,
+    /// Base position and heading held while standing.
+    stand_anchor: Option<(Vec3, f64)>,
 }
 
 /// One leg's kinematic state, read from the simulated link frames.
@@ -152,6 +160,7 @@ impl UnitreeGo2ModelTrot {
             in_stance: [true; 4],
             previous_yaw_rad,
             heading_rad: 0.0,
+            stand_anchor: None,
         }
     }
 
@@ -179,8 +188,98 @@ impl UnitreeGo2ModelTrot {
         self.heading_rad
     }
 
+    /// Stands on all four feet, holding the base where standing began, and steps
+    /// the scene once.
+    ///
+    /// Use it while the arm works: a trot keeps stepping, and reaction forces from
+    /// the arm push a stepping body around. Each planted foot takes its share of
+    /// the weight and the hip-height spring of the trot, plus horizontal force from
+    /// a 1000 N/m spring toward the held position and the trot's velocity damping,
+    /// and yaw torque toward the held heading. A foot still in the air when
+    /// standing begins is lowered under its hip first. The next [`Self::step`]
+    /// resumes the trot.
+    pub fn stand(&mut self, sim: &mut UrdfSceneSim) {
+        let observed = sim.observe();
+        let base = sim.named_transform("base").expect("base pose");
+        let facing = base.rotation * Vec3::X;
+        let yaw = (-facing.z).atan2(facing.x);
+        let body_center = Vec3::new(observed.base_x_m, 0.0, observed.base_z_m);
+        let (anchor, anchor_yaw) = *self.stand_anchor.get_or_insert((body_center, yaw));
+        let body_velocity = Vec3::new(
+            observed.base_linear_velocity_x_m_s,
+            observed.base_linear_velocity_y_m_s,
+            observed.base_linear_velocity_z_m_s,
+        );
+        let flat_velocity = Vec3::new(body_velocity.x, 0.0, body_velocity.z);
+        let yaw_rate = observed.base_angular_velocity_y_rad_s;
+        let mut heading_error = anchor_yaw - yaw;
+        while heading_error > std::f64::consts::PI {
+            heading_error -= std::f64::consts::TAU;
+        }
+        while heading_error < -std::f64::consts::PI {
+            heading_error += std::f64::consts::TAU;
+        }
+        let yaw_rate_cmd = STAND_HEADING_GAIN_PER_S * heading_error;
+
+        let legs: Vec<Leg> = LEGS.iter().map(|names| Leg::read(sim, *names)).collect();
+        let planted: [bool; 4] = std::array::from_fn(|index| {
+            self.in_stance[index] || legs[index].foot.y < FOOT_GROUND_Y_M + FOOT_DOWN_TOLERANCE_M
+        });
+        let stance_count = planted.iter().filter(|p| **p).count().max(1) as f64;
+        let mut torques: Vec<UrdfJointTorqueTarget<'_>> = Vec::with_capacity(12);
+        for (index, leg) in legs.iter().enumerate() {
+            let hip = leg.origins[1];
+            let force = if planted[index] {
+                self.in_stance[index] = true;
+                let hip_height = hip.y - leg.foot.y;
+                let hip_rise_rate = -leg.foot_velocity_rel().y;
+                let lift = self.mass_kg * GRAVITY_M_S2 / stance_count
+                    + HEIGHT_STIFFNESS_N_PER_M * (STANCE_HEIGHT_M - hip_height)
+                    - HEIGHT_DAMPING_N_S_PER_M * hip_rise_rate;
+                let lever = Vec3::new(leg.foot.x, 0.0, leg.foot.z) - body_center;
+                let tangent = Vec3::Y.cross(lever).normalize_or_zero();
+                let push = ((anchor - body_center) * STAND_POSITION_GAIN_N_PER_M
+                    - flat_velocity * VELOCITY_GAIN_N_S_PER_M)
+                    / stance_count
+                    + tangent * (YAW_RATE_GAIN_N_S * (yaw_rate_cmd - yaw_rate));
+                -Vec3::new(push.x, lift.max(0.0), push.z)
+            } else {
+                // Lower a swinging foot under its hip.
+                let target = Vec3::new(hip.x, FOOT_GROUND_Y_M, hip.z);
+                let foot_velocity = leg.foot_velocity_rel() + body_velocity;
+                (target - leg.foot) * SWING_STIFFNESS_N_PER_M
+                    - foot_velocity * SWING_DAMPING_N_S_PER_M
+            };
+            let tau = leg.torques_for(force);
+            for (joint, torque) in leg.joints.iter().zip(tau) {
+                torques.push(UrdfJointTorqueTarget {
+                    link_name: joint,
+                    torque_nm: torque,
+                    max_velocity_rad_s: MAX_JOINT_SPEED_RAD_S,
+                });
+            }
+        }
+        sim.step_joint_torques(&torques);
+        self.track_heading(sim);
+    }
+
+    fn track_heading(&mut self, sim: &UrdfSceneSim) {
+        let after = sim.observe();
+        let mut delta = after.base_relative_yaw_rad - self.previous_yaw_rad;
+        while delta > std::f64::consts::PI {
+            delta -= std::f64::consts::TAU;
+        }
+        while delta < -std::f64::consts::PI {
+            delta += std::f64::consts::TAU;
+        }
+        self.heading_rad += delta;
+        self.previous_yaw_rad = after.base_relative_yaw_rad;
+        self.step += 1;
+    }
+
     /// Computes leg torques for `command`, steps the scene once, and tracks heading.
     pub fn step(&mut self, sim: &mut UrdfSceneSim, command: UnitreeGo2TrotCommand) {
+        self.stand_anchor = None;
         let t_s = self.time_s();
         let observed = sim.observe();
         let base = sim.named_transform("base").expect("base pose");
@@ -253,17 +352,62 @@ impl UnitreeGo2ModelTrot {
             }
         }
         sim.step_joint_torques(&torques);
+        self.track_heading(sim);
+    }
+}
 
-        let after = sim.observe();
-        let mut delta = after.base_relative_yaw_rad - self.previous_yaw_rad;
-        while delta > std::f64::consts::PI {
-            delta -= std::f64::consts::TAU;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stand_stops_a_walking_go2_and_holds_it_in_place() {
+        let path = crate::asset_path::bundled_asset_path(
+            std::path::Path::new("scenes").join("unitree_go2_jump.rne.scene.toml"),
+        );
+        let mut sim = UrdfSceneSim::from_scene_path(&path).expect("spawn the Go2");
+        let mut trot = UnitreeGo2ModelTrot::stand_up(&mut sim);
+        let command = UnitreeGo2TrotCommand {
+            forward_speed_m_s: 0.2,
+            yaw_rate_rad_s: 0.0,
+        };
+        for _ in 0..500 {
+            trot.step(&mut sim, command);
         }
-        while delta < -std::f64::consts::PI {
-            delta += std::f64::consts::TAU;
+        let walking = sim.observe();
+        assert!(
+            walking.base_linear_velocity_x_m_s > 0.05,
+            "the Go2 should be walking: {walking:?}"
+        );
+        let facing = |sim: &UrdfSceneSim| {
+            let facing = sim.named_transform("base").expect("base").rotation * Vec3::X;
+            (-facing.z).atan2(facing.x)
+        };
+        let yaw = facing(&sim);
+        for _ in 0..500 {
+            trot.stand(&mut sim);
         }
-        self.heading_rad += delta;
-        self.previous_yaw_rad = after.base_relative_yaw_rad;
-        self.step += 1;
+        let standing = sim.observe();
+        let drift =
+            (standing.base_x_m - walking.base_x_m).hypot(standing.base_z_m - walking.base_z_m);
+        // Measured: 0.017 m of drift, 0.015 m/s, 0.001 rad, 0.315 m high.
+        assert!(drift < 0.05, "stand let the body drift {drift:.3} m");
+        assert!(
+            standing.base_linear_velocity_x_m_s.abs() < 0.03,
+            "the body should have stopped: {standing:?}"
+        );
+        assert!(
+            (facing(&sim) - yaw).abs() < 0.02,
+            "stand should hold the heading"
+        );
+        assert!(standing.base_y_m > 0.25, "the body sagged: {standing:?}");
+        // Every foot is down.
+        for foot in ["FL_foot", "FR_foot", "RL_foot", "RR_foot"] {
+            let height = sim.named_transform(foot).expect("foot").translation.y;
+            assert!(
+                height < FOOT_GROUND_Y_M + FOOT_DOWN_TOLERANCE_M,
+                "{foot} is {height:.3} m up"
+            );
+        }
     }
 }
