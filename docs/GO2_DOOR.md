@@ -5,10 +5,16 @@ door and shuts it behind itself. The door is moved only by contact with the
 pad on the arm: nothing welds, drives, or holds it, and no other part of the
 robot touches it.
 
+![The Go2 pushing the door open with its arm, walking through, and pushing it shut](media/showcase-go2-door.gif)
+
 ```text
 cargo run --release -p go2_door --example 132_go2_door -- --smoke
-cargo run --release -p go2_door --example 132_go2_door
+cargo run --release -p go2_door --example 132_go2_door -- --capture
 ```
+
+`--capture` renders the README showcase (`docs/media/showcase-go2-door.*`, 48
+frames at 960 x 540, one every 2.4 s) after checking that the rendered run
+replays the headless run's final state digest exactly.
 
 ## Assets
 

@@ -123,7 +123,8 @@ All notable changes to Robot Native Engine are documented in this file.
   shuts it behind itself, moving the door only by the pad's contact and
   steering only on its Mid-360 localization: the door opens to 86° and ends
   against its stop, and no other robot link touches it. See
-  `docs/GO2_DOOR.md`. `UnitreeGo2ModelTrot::with_total_mass_kg` gives the
+  `docs/GO2_DOOR.md`. It replaces the office AGV on the README front-page
+  showcase (the office AGV moves to `docs/DEMOS.md`). `UnitreeGo2ModelTrot::with_total_mass_kg` gives the
   trot a payload's weight.
 - Example 131 navigates the Go2 between two rooms with no map given, on its
   recording-matched Mid-360: returns in the sensor frame at emission time,

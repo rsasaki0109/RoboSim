@@ -26,7 +26,7 @@
 //!
 //! ```text
 //! cargo run --release -p go2_door --example 132_go2_door -- --smoke
-//! cargo run --release -p go2_door --example 132_go2_door
+//! cargo run --release -p go2_door --example 132_go2_door -- --capture
 //! ```
 
 use std::collections::BTreeMap;
@@ -54,6 +54,7 @@ use rne_sensor::{
 };
 use rne_slam::{Slam2d, SlamConfig};
 use rne_world::Transform3 as WorldTransform3;
+use sha2::{Digest, Sha256};
 
 const MAX_DURATION_S: f64 = 180.0;
 const STEPS_PER_LIDAR_FRAME: u64 = 50;
@@ -141,7 +142,11 @@ const OBSTACLES: [([f64; 2], [f64; 2]); 11] = [
 const WIDTH: u32 = 960;
 const HEIGHT: u32 = 540;
 const CLEAR_COLOR: [f32; 4] = [0.035, 0.05, 0.08, 1.0];
-const LIDAR_FRAMES_PER_GIF_FRAME: u64 = 16;
+/// README showcase: 48 frames, one every 2.4 s, 96 colours (1.69 MB).
+const SHOWCASE_LIDAR_FRAMES_PER_GIF_FRAME: u64 = 24;
+const SHOWCASE_FRAMES: usize = 48;
+const SHOWCASE_POSTER_FRAME: usize = 13;
+const SHOWCASE_COLORS: u32 = 96;
 const COLORMAP_BUCKETS: usize = 16;
 
 fn repo_path(relative: &str) -> PathBuf {
@@ -676,43 +681,211 @@ fn main() {
     if std::env::args().any(|arg| arg == "--smoke") {
         let run = run(|_| {});
         report_and_gate(&run);
-        println!("smoke ok: the Go2 pushed the door open with its arm, went through, and shut it");
+        println!(
+            "smoke ok: the Go2 pushed the door open with its arm, went through, and shut it; digest={:#018x}",
+            state_digest(&run)
+        );
         return;
     }
-    render_media();
+    capture_showcase();
 }
 
-fn render_media() {
+/// FNV-1a over the bits of the state the run leaves behind: the robot's pose and
+/// joints, the door, and the robot's own estimate.
+fn state_digest(run: &Run) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    let mut mix = |value: f64| {
+        for byte in value.to_bits().to_le_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+    let base = run.sim.named_transform("base").expect("base pose");
+    for value in [
+        base.translation.x,
+        base.translation.y,
+        base.translation.z,
+        base.rotation.x,
+        base.rotation.y,
+        base.rotation.z,
+        base.rotation.w,
+    ] {
+        mix(value);
+    }
+    for joint in ARM_JOINTS.iter().chain(["door_leaf"].iter()) {
+        mix(run.sim.named_joint_position(joint).unwrap_or(f64::NAN));
+    }
+    let estimate = run.estimate();
+    for value in [
+        estimate.x_m,
+        estimate.y_m,
+        estimate.yaw_rad,
+        run.trot.time_s(),
+    ] {
+        mix(value);
+    }
+    hash
+}
+
+fn hash_rgba(rgba: &[u8]) -> u64 {
+    rgba.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+fn sha256_file(path: &Path) -> String {
+    Sha256::digest(fs::read(path).expect("read hash input"))
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Renders the README showcase: a 960 x 540 frame every 2.4 s of the run, the
+/// GIF, a poster, and metadata with replay evidence.
+fn capture_showcase() {
     let view = CameraOrbit {
         focus: Vec3::new(2.7, 0.2, 0.3),
         yaw_rad: -2.45,
         pitch_rad: 0.72,
         distance_m: 5.2,
     };
+    // A headless run first: the capture must replay it exactly.
+    let headless = run(|_| {});
+    report_and_gate(&headless);
+    let headless_digest = state_digest(&headless);
+    let initial_digest = state_digest(&Run::new());
+
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
     let camera = Camera::new(WIDTH, HEIGHT, std::f64::consts::FRAC_PI_4);
     let mut mesh_cache = MeshRenderCache::new();
-    let frames_dir = repo_path("target/rne-go2-door-frames");
+    let frames_dir = repo_path("target/rne-showcase-go2-door");
     let _ = fs::remove_dir_all(&frames_dir);
     fs::create_dir_all(&frames_dir).expect("create frame directory");
-    let mut frame = 0_usize;
-    let run = run(|run| {
-        if !run.frame_index.is_multiple_of(LIDAR_FRAMES_PER_GIF_FRAME) {
+    let mut hashes = Vec::new();
+    let mut sampled_sim_steps = Vec::new();
+    let mut sampled_phases = Vec::new();
+    let captured = run(|run| {
+        if !run
+            .frame_index
+            .is_multiple_of(SHOWCASE_LIDAR_FRAMES_PER_GIF_FRAME)
+            || hashes.len() >= SHOWCASE_FRAMES
+        {
             return;
         }
         let rgba = render_frame(&mut backend, &camera, &mut mesh_cache, run, &view);
-        write_png(&frames_dir.join(format!("frame-{frame:03}.png")), &rgba).expect("write frame");
-        frame += 1;
+        write_png(
+            &frames_dir.join(format!("frame-{:03}.png", hashes.len())),
+            &rgba,
+        )
+        .expect("write frame");
+        hashes.push(hash_rgba(&rgba));
+        sampled_sim_steps.push(run.trot.steps());
+        sampled_phases.push(format!("{:?}", run.phase));
     });
-    report_and_gate(&run);
+    report_and_gate(&captured);
+    let final_digest = state_digest(&captured);
+    assert_eq!(
+        final_digest, headless_digest,
+        "the capture did not replay the headless run"
+    );
+
+    let frame_count = hashes.len();
+    let unique_render_hashes = hashes
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
+    let duplicate_adjacent_frames = hashes.windows(2).filter(|pair| pair[0] == pair[1]).count();
     let media_dir = repo_path("docs/media");
-    let gif_path = media_dir.join("go2-door.gif");
-    build_gif(&frames_dir, &gif_path).expect("encode gif");
-    image::open(frames_dir.join(format!("frame-{:03}.png", frame * 2 / 5)))
-        .expect("read poster frame")
-        .save(media_dir.join("go2-door.png"))
-        .expect("write poster");
-    println!("wrote {} ({frame} frames)", gif_path.display());
+    let gif_path = media_dir.join("showcase-go2-door.gif");
+    let poster_path = media_dir.join("showcase-go2-door.png");
+    let ffmpeg_filter = format!(
+        "split[a][b];[a]palettegen=max_colors={SHOWCASE_COLORS}:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle"
+    );
+    let status = std::process::Command::new("ffmpeg")
+        .args(["-y", "-loglevel", "error", "-framerate", "6", "-i"])
+        .arg(frames_dir.join("frame-%03d.png"))
+        .args(["-vf", &ffmpeg_filter])
+        .arg(&gif_path)
+        .status()
+        .expect("run ffmpeg");
+    assert!(status.success(), "ffmpeg gif encode failed");
+    fs::copy(
+        frames_dir.join(format!("frame-{SHOWCASE_POSTER_FRAME:03}.png")),
+        &poster_path,
+    )
+    .expect("write poster");
+
+    let door_final = captured.door_rad();
+    let metadata = serde_json::json!({
+        "kind": "rne_showcase_environment_metadata",
+        "schema_version": 1,
+        "environment_id": "go2-door",
+        "subject": "Go2 with an arm pushing a swing door open, walking through, and shutting it, steered by Mid-360 localization",
+        "visual_state_sync": "The Go2, its arm, and the door leaf are drawn from the solved simulation poses each frame. The door is a separate articulated body on a damped hinge moved only by contact; the Mid-360 returns drawn are that frame's scan, and the yellow trail is the robot's true path.",
+        "simulation": {
+            "scenario": "Go2 door push open, pass, and push shut (examples/132_go2_door)",
+            "steps": captured.trot.steps(),
+            "initial_state_digest": initial_digest,
+            "final_state_digest": final_digest,
+            "replay_final_state_digest": headless_digest,
+            "replay_match": final_digest == headless_digest,
+            "outcome": format!(
+                "door_max_rad={:.3}; door_final_rad={:.3}; pad_contact_s={:.1}; other_link_contacts={}; localization_rms_m={:.3}; min_clearance_m={:.2}; lowest_body_m={:.3}",
+                captured.door_max_rad,
+                door_final,
+                captured.door_contact_steps.get(PAD_LINK).copied().unwrap_or(0) as f64
+                    / UNITREE_GO2_MODEL_TROT_CONTROL_HZ,
+                captured.door_contact_steps.iter().filter(|(link, _)| **link != PAD_LINK).count(),
+                captured.slam_rms_m(),
+                captured.min_clearance_m,
+                captured.min_height_m
+            ),
+        },
+        "capture": {
+            "gpu_rendered": true,
+            "width_px": WIDTH,
+            "height_px": HEIGHT,
+            "frame_count": frame_count,
+            "frame_pattern": "target/rne-showcase-go2-door/frame-%03d.png",
+            "gif_path": "docs/media/showcase-go2-door.gif",
+            "gif_bytes": fs::metadata(&gif_path).expect("gif").len(),
+            "gif_sha256": sha256_file(&gif_path),
+            "poster_path": "docs/media/showcase-go2-door.png",
+            "poster_bytes": fs::metadata(&poster_path).expect("poster").len(),
+            "poster_sha256": sha256_file(&poster_path),
+            "poster_frame": SHOWCASE_POSTER_FRAME,
+            "sampled_sim_steps": sampled_sim_steps,
+            "sampled_phases": sampled_phases,
+            "unique_render_hashes": unique_render_hashes,
+            "duplicate_adjacent_frames": duplicate_adjacent_frames,
+            "ffmpeg_command": format!("ffmpeg -y -framerate 6 -i target/rne-showcase-go2-door/frame-%03d.png -vf \"{ffmpeg_filter}\" docs/media/showcase-go2-door.gif"),
+        },
+        "camera": {
+            "fov_y_rad": std::f64::consts::FRAC_PI_4,
+            "yaw_rad": view.yaw_rad,
+            "pitch_rad": view.pitch_rad,
+            "distance_m": view.distance_m,
+        },
+        "provenance": [
+            "assets/scenes/unitree_go2_door.rne.scene.toml",
+            "assets/robots/unitree_go2_arm.rne.robot.toml",
+            "assets/robots/swing_door.rne.robot.toml",
+            "assets/sensors/livox_mid360/go2_rig_occlusion.json",
+            "examples/132_go2_door/main.rs",
+        ],
+        "reproduce_smoke": "cargo run --locked -p go2_door --example 132_go2_door -- --smoke",
+        "reproduce_capture": "cargo run --release --locked -p go2_door --example 132_go2_door -- --capture",
+    });
+    fs::write(
+        media_dir.join("showcase-go2-door.json"),
+        serde_json::to_string_pretty(&metadata).expect("metadata json") + "\n",
+    )
+    .expect("write metadata");
+    println!(
+        "wrote {} ({frame_count} frames, {} bytes)",
+        gif_path.display(),
+        fs::metadata(&gif_path).expect("gif").len()
+    );
 }
 
 fn render_frame(
@@ -909,22 +1082,6 @@ fn turbo_colormap(t: f64) -> [f32; 4] {
         ]),
         1.0,
     ]
-}
-
-fn build_gif(frames_dir: &Path, gif_path: &Path) -> std::io::Result<()> {
-    let status = std::process::Command::new("ffmpeg")
-        .args(["-y", "-loglevel", "error", "-framerate", "8", "-i"])
-        .arg(frames_dir.join("frame-%03d.png"))
-        .args([
-            "-vf",
-            "scale=720:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle",
-        ])
-        .arg(gif_path)
-        .status()?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| std::io::Error::other("ffmpeg gif encode failed"))
 }
 
 fn write_png(path: &Path, rgba: &[u8]) -> std::io::Result<()> {

@@ -48,11 +48,11 @@ camera state; gates and regeneration commands are in
   <tr>
     <td width="50%" align="center">
       <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-office.png">
-        <img src="docs/media/showcase-office.gif" alt="Office AGV taking a tote pushed onto its deck at the dock, waiting at the yield line while an oncoming robot passes, then pushing the tote onto a tray at the desk" width="460">
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-go2-door.png">
+        <img src="docs/media/showcase-go2-door.gif" alt="A Unitree Go2 with an arm on its back pushes a swing door open with the pad on its arm, walks through the doorway, walks around the open door and pushes it shut from the other side, with its Livox Mid-360 returns drawn coloured by height" width="460">
       </picture>
-      <br><b>Office AGV</b><br>
-      <sub>The tote is a dynamic body moved only by contact: the dock's pusher slides it onto the AGV's deck, friction carries it (8 mm of slip), and the AGV's own pusher slides it onto the tray at the desk. On the way the AGV waits at the yield line while the oncoming AGV comes through the single-lane section, which is drawn, not collided with. <a href="docs/media/showcase-office.json">metadata</a></sub>
+      <br><b>Go2 · door with an arm</b><br>
+      <sub>The Go2 pushes a free-swinging 6 kg door open with the pad on its arm, walks through, and pushes it back against its stop; the pad is the only part of the robot that ever touches the door. It steers only on its own Livox Mid-360 localization (0.06 m RMS), with the sensor model fitted to real Go2 recordings. <a href="docs/media/showcase-go2-door.json">metadata</a> · <a href="docs/GO2_DOOR.md">details</a></sub>
     </td>
     <td width="50%" align="center">
       <picture>
@@ -239,15 +239,8 @@ appears. It reaches both goals (0.27 m and 0.24 m from them) with 0.099 m RMS
 localization error while leg odometry alone drifts 7.1 m.
 [source](examples/131_go2_mid360_navigation/main.rs)
 
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/go2-door.png">
-    <img src="docs/media/go2-door.gif" alt="A Go2 with an arm on its back pushes a swing door open with the pad on its arm, walks through the doorway, walks around the open door, and pushes it shut from the other side, with its Mid-360 returns drawn coloured by height" width="720">
-  </picture>
-</p>
-
 With an arm on its back, the Go2 walks through a swing door and shuts it
-behind itself. Nothing holds or drives the 6 kg door: the pad on the arm
+behind itself (the showcase above). Nothing holds or drives the 6 kg door: the pad on the arm
 pushes it open to 86° and back against its stop, and no other part of the
 robot ever touches it. Every command comes from the Mid-360 localization
 above (0.059 m RMS). [docs/GO2_DOOR.md](docs/GO2_DOOR.md) ·

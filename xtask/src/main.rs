@@ -3167,7 +3167,7 @@ fn showcase_media_check() -> anyhow::Result<()> {
         "house-mobile-manipulation",
         "openarm",
         "factory",
-        "office",
+        "go2-door",
         "uav",
     ];
     anyhow::ensure!(
@@ -4378,7 +4378,7 @@ mod tests {
                 "house-mobile-manipulation",
                 "openarm",
                 "factory",
-                "office",
+                "go2-door",
                 "uav",
             ]
         );

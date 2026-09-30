@@ -5,6 +5,27 @@ dynamics / navigation / G1 locomotion highlights. This page holds the rest of
 the demo write-ups: full captions, GIFs, and commands for the pieces that
 used to live under the README's "Selected demos" section.
 
+## Office AGV delivery
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="media/showcase-office.png">
+    <img src="media/showcase-office.gif" alt="Office AGV taking a tote pushed onto its deck at the dock, waiting at the yield line while an oncoming robot passes, then pushing the tote onto a tray at the desk" width="600">
+  </picture>
+</p>
+
+The tote is a dynamic body moved only by contact: the dock's pusher slides it
+onto the AGV's deck, friction carries it (8 mm of slip), and the AGV's own
+pusher slides it onto the tray at the desk. On the way the AGV waits at the
+yield line while the oncoming AGV comes through the single-lane section, which
+is drawn, not collided with. This was a README front-page showcase until the
+Go2 door took its place. [metadata](media/showcase-office.json) ·
+[source](../examples/90_showcase_captures/office.rs)
+
+```bash
+cargo run --release --locked -p showcase_captures --example 90_showcase_captures -- --capture --environment office
+```
+
 ## Camera-based localization with visloc-rs
 
 <p align="center">
