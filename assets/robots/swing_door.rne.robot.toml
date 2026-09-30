@@ -1,0 +1,16 @@
+kind = "urdf"
+model_name = "swing_door"
+
+[urdf]
+path = "swing_door/swing_door.urdf"
+base_body_type = "fixed"
+# Hinge on the doorway's north jamb, 2 cm proud of the partition face on the
+# room-B side (world x 2.47, z 0.2) so the leaf clears the wall at every angle.
+initial_translation_m = [2.47, 0.0, 0.2]
+initial_rotation_rpy = [-1.5707963267948966, 0.0, 0.0]
+articulation = true
+collisions = true
+mesh_collisions = false
+self_collisions = false
+multibody = true
+use_declared_inertial_masses = true

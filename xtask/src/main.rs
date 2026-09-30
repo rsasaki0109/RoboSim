@@ -2910,7 +2910,8 @@ fn run_locomotion_smokes() -> anyhow::Result<()> {
     run_step("cargo run --locked -p go2_mid360_room --example 130_go2_mid360_room -- --smoke")?;
     run_step(
         "cargo run --locked -p go2_mid360_navigation --example 131_go2_mid360_navigation -- --smoke",
-    )
+    )?;
+    run_step("cargo run --locked -p go2_door --example 132_go2_door -- --smoke")
 }
 
 fn run_asset_smokes() -> anyhow::Result<()> {
@@ -3166,7 +3167,7 @@ fn showcase_media_check() -> anyhow::Result<()> {
         "house-mobile-manipulation",
         "openarm",
         "factory",
-        "office",
+        "go2-door",
         "uav",
     ];
     anyhow::ensure!(
@@ -4377,7 +4378,7 @@ mod tests {
                 "house-mobile-manipulation",
                 "openarm",
                 "factory",
-                "office",
+                "go2-door",
                 "uav",
             ]
         );

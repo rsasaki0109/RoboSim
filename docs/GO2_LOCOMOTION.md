@@ -26,6 +26,10 @@ measured on the plant; the numbers that matter are pinned by tests in
 
 ## Walking with feet: a model-based trot
 
+<p align="center">
+  <img src="media/go2-heading-steer.gif" alt="The official Go2 trotting head first along an S: straight, a left 90-degree turn, straight, a right 90-degree turn, straight, with its path drawn on the floor coloured by the commanded heading and a yellow arrow showing the heading it is steering to" width="720">
+</p>
+
 `examples/126_go2_heading_steer` runs `unitree_go2_jump` -- the same URDF with
 its fixed children welded and its declared masses (16.1 kg) -- and walks it
 head first through an S (straight, left 90°, straight, right 90°, straight)

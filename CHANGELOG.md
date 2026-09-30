@@ -118,11 +118,30 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- `examples/go2_indoor` dresses the Go2 examples' two rooms (wood and tile
+  floors, rug, plastered walls with baseboards, kitchen island, bookshelf,
+  crates, sofa, plants, counter) with procedural textures, drawing every model
+  inside its collider so the robot's sensors see what is shown; the sofa,
+  plants, and counter are new colliders in the scenes. Examples 131 and 132
+  use it, read clearance from the scene's colliders, and match all 360 scan
+  beams on a finer grid (localization 0.042 m and 0.081 m RMS).
+- The README's lift section shows one GIF (goods-in to delivery); the
+  two-truck relay moves to `docs/DEMOS.md`. The README's Go2 section shows
+  only the door GIF, with the trot, Mid-360, and navigation GIFs in
+  `docs/GO2_LOCOMOTION.md` and `docs/LIVOX_MID360.md`.
+- Example 132 walks an arm-carrying Go2 (`unitree_go2_arm`: a generic 1.3 kg
+  4-DOF arm with a push pad) through a damped swing door (`swing_door`) and
+  shuts it behind itself, moving the door only by the pad's contact and
+  steering only on its Mid-360 localization: the door opens to 87° and ends
+  against its stop, and no other robot link touches it. See
+  `docs/GO2_DOOR.md`. It replaces the office AGV on the README front-page
+  showcase (the office AGV moves to `docs/DEMOS.md`). `UnitreeGo2ModelTrot::with_total_mass_kg` gives the
+  trot a payload's weight.
 - Example 131 navigates the Go2 between two rooms with no map given, on its
   recording-matched Mid-360: returns in the sensor frame at emission time,
   levelled by IMU attitude, de-skewed by drifting leg odometry, and cut into a
   2D scan for `rne_slam::Slam2d`; A* through unexplored space with replanning
-  finds the doorway. Both goals are reached with 0.099 m RMS localization
+  finds the doorway. Both goals are reached with 0.042 m RMS localization
   error while odometry alone drifts 7.1 m.
 - Example 130 walks the Go2 around a room, steering to waypoints, with an
   upside-down Livox Mid-360 on its back: `UrdfSceneSim::sample_livox_mid360`
@@ -800,6 +819,11 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Fixed
 
+- `UrdfSceneSim::sample_livox_mid360` skipped every URDF link in the scene,
+  so a door (or any other articulated body) was invisible to the Mid-360. It
+  now skips only the links of the robot carrying the sensor. Example 132 masks
+  the door's swing zone out of SLAM instead: matched against a map holding the
+  closed door, the moving leaf dragged the estimate up to 1.06 m off.
 - The G1 + Dex3 robot (`unitree_g1_29dof_dex3_fixed`) ignored the URDF's
   masses: every link spawned at 1.0 kg with no declared inertia, so a Dex3
   finger (0.02 kg, 1.5e-6 kg·m² in the URDF) behaved like ~1 kg·m² and its

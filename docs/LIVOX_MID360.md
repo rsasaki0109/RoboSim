@@ -144,6 +144,10 @@ keyed streams disjoint from the other noise, so a frame replays exactly.
 
 ## On the Go2 in simulation
 
+<p align="center">
+  <img src="media/go2-mid360-room.gif" alt="The Go2 trots around a table in a room, steering to waypoints, while the upside-down Livox Mid-360 on its back scans: each 0.1 s frame's returns are drawn coloured by height" width="720">
+</p>
+
 `UrdfSceneSim::sample_livox_mid360` scans a URDF scene with every raycast
 skipping the robot's own links, whose returns come from the rig table instead;
 `unitree_go2_mid360_mount()` places the sensor upside down 0.147 m above and
@@ -166,6 +170,10 @@ body never drops below 0.263 m.
 
 ## Navigating on the Mid-360
 
+<p align="center">
+  <img src="media/go2-mid360-navigation.gif" alt="Cutaway view of two rooms joined by a doorway: the Go2 walks from one room through the doorway to a goal in the far corner of the other and back, while the occupancy map its Mid-360 builds is revealed on the floor and its planned path is drawn in yellow" width="720">
+</p>
+
 Example 131 gives the Go2 no map. Two rooms are joined by a 1.0 m doorway, and
 the robot must reach the far corner of the second room and come back. Per
 0.1 s frame it uses only what a real Go2 has:
@@ -179,17 +187,21 @@ the robot must reach the far corner of the second room and come back. Per
   each frame to the pose at its end;
 - a 720-beam 2D scan of the returns 0.15–0.65 m above the floor.
 
-`Slam2d` processes a keyframe every 0.15 m or 0.15 rad; A* plans on the map
+`Slam2d` processes a keyframe every 0.15 m or 0.15 rad, matching all 360 scan
+beams on a finer search grid than its default (7 samples per axis, 4 levels); A* plans on the map
 inflated to keep the base centre 0.30 m from obstacles, treats unexplored cells
 as traversable, and replans every second.
 
 | Measure | Result |
 | --- | --- |
-| Goals reached | 2 / 2 in 85.8 s, 0.27 m and 0.24 m from them |
-| Localization error | 0.099 m RMS, 0.147 m worst |
+| Goals reached | 2 / 2 in 85.2 s, 0.25 m and 0.28 m from them |
+| Localization error | 0.042 m RMS, 0.060 m worst |
 | Leg odometry alone | 7.1 m worst |
-| Clearance | at least 0.40 m |
-| Occupied map cells within 10 cm of a real obstacle | 87.9 % of 1,424 |
+
+The rooms carry furniture (a sofa, plants, a counter) whose colliders are the
+envelopes the dressed render draws inside; see [GO2_DOOR.md](GO2_DOOR.md#dressed-interior).
+| Clearance | at least 0.41 m |
+| Occupied map cells within 10 cm of a real obstacle | 100 % of 1,065 |
 
 ## What is not established
 

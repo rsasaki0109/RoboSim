@@ -3,8 +3,9 @@
 //! A robot's own body shows up in real scans, but for a mounted sensor those returns
 //! are measured per bin in a [`LidarRigOcclusion`] table, which also carries the
 //! mount posts the collision model does not have. Casting against the robot's
-//! colliders as well would count the body twice, so the scene's raycasts skip every
-//! entity carrying a [`Link`].
+//! colliders as well would count the body twice, so the scene's raycasts skip the
+//! links of the robot carrying the sensor. Links of other articulated bodies in the
+//! scene, such as a door on its hinge, are scanned like any other surface.
 
 use super::UrdfSceneSim;
 use rne_data::PointCloud;
@@ -72,6 +73,10 @@ impl UrdfSceneSim {
         let environment = EnvironmentRaycaster {
             backend: &self.backend,
             world: &self.world,
+            own_robot: self
+                .world
+                .get::<Link>(self.base_link)
+                .map(|link| link.robot),
         };
         sample_livox_mid360(
             &environment,
@@ -87,10 +92,12 @@ impl UrdfSceneSim {
     }
 }
 
-/// Read-only view of the scene backend whose raycasts skip robot links.
+/// Read-only view of the scene backend whose raycasts skip the sensor robot's links.
 struct EnvironmentRaycaster<'a> {
     backend: &'a RapierBackend,
     world: &'a World,
+    /// The robot entity whose links the scan skips.
+    own_robot: Option<rne_ecs::Entity>,
 }
 
 impl LidarRaycaster for EnvironmentRaycaster<'_> {
@@ -100,7 +107,11 @@ impl LidarRaycaster for EnvironmentRaycaster<'_> {
         query: RaycastQuery,
     ) -> Result<Vec<RaycastHit>, PhysicsError> {
         let mut hits = self.backend.raycast(physics_world, query)?;
-        hits.retain(|hit| self.world.get::<Link>(hit.entity).is_none());
+        hits.retain(|hit| {
+            self.world
+                .get::<Link>(hit.entity)
+                .is_none_or(|link| Some(link.robot) != self.own_robot)
+        });
         Ok(hits)
     }
 }
@@ -113,8 +124,13 @@ mod tests {
     use std::path::PathBuf;
 
     fn standing_go2() -> UrdfSceneSim {
+        standing_go2_in("unitree_go2_jump.rne.scene.toml")
+    }
+
+    fn standing_go2_in(scene: &str) -> UrdfSceneSim {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../assets/scenes/unitree_go2_jump.rne.scene.toml");
+            .join("../../assets/scenes")
+            .join(scene);
         let mut sim = UrdfSceneSim::from_scene_path(&path).expect("load welded Go2");
         sim.configure_position_motors(180.0, 18.0, 23.7);
         let stand = unitree_go2_trot_targets(
@@ -214,5 +230,45 @@ mod tests {
                 24 + 4 * band
             );
         }
+    }
+
+    #[test]
+    fn mid360_scans_other_articulated_bodies_but_not_its_own_robot() {
+        // The door is a URDF body of its own: its leaf must show in the scan, while
+        // the Go2's links stay out (their returns come from the rig table).
+        let sim = standing_go2_in("unitree_go2_door.rne.scene.toml");
+        let pose = sim
+            .named_mount_transform("base", &unitree_go2_mid360_mount())
+            .expect("mount pose");
+        let base = sim.named_transform("base").expect("base pose").translation;
+        let spec = livox_mid360_spec();
+        let pattern = LivoxMid360Pattern::new();
+        let mut door_points = 0;
+        let mut robot_points = 0;
+        for frame in 0..5 {
+            let cloud = sim.sample_livox_mid360(
+                &LidarSweep::stationary(pose),
+                &spec,
+                &pattern,
+                frame,
+                None,
+                SensorNoiseKey::new(sim.world_seed(), spec.seed, 1, frame),
+            );
+            for point in &cloud.points_m {
+                // The closed leaf: x 2.455..2.485, z 0.21..1.17, up to 0.92 m high.
+                if (2.44..2.50).contains(&point.x)
+                    && (0.21..1.17).contains(&point.z)
+                    && point.y < 0.93
+                {
+                    door_points += 1;
+                }
+                let local = *point - base;
+                if local.x.abs() < 0.35 && local.z.abs() < 0.2 && point.y > 0.1 {
+                    robot_points += 1;
+                }
+            }
+        }
+        assert!(door_points > 100, "door returns {door_points}");
+        assert_eq!(robot_points, 0, "cast returns on the Go2 itself");
     }
 }

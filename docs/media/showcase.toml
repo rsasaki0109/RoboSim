@@ -70,25 +70,25 @@ license_files = ["assets/robots/g1_description/LICENSE.unitree_ros", "LICENSE-MI
 provenance = ["assets/scenes/unitree_g1_factory.rne.scene.toml", "assets/robots/unitree_g1_dynamic.rne.robot.toml", "crates/rne_ai/src/env/urdf_scene/unitree_g1_commanded_gait.rs", "examples/90_showcase_captures/factory.rs"]
 
 [[media]]
-id = "office"
-label = "Office AGV delivery"
-gif = "docs/media/showcase-office.gif"
-poster = "docs/media/showcase-office.png"
-readme_gif = "docs/media/showcase-office.gif"
-readme_poster = "docs/media/showcase-office.png"
-gif_bytes = 1235807
-poster_bytes = 100373
-gif_sha256 = "sha256:45ee21fbd4ec3476d3efeaa826c42f1376470691d6f25f9d7abe94562f30ea24"
-poster_sha256 = "sha256:10c9b8f8de0db8f4a0233e401d1622d9c564787335e3a319b819395be2651f52"
+id = "go2-door"
+label = "Go2 door with arm"
+gif = "docs/media/showcase-go2-door.gif"
+poster = "docs/media/showcase-go2-door.png"
+readme_gif = "docs/media/showcase-go2-door.gif"
+readme_poster = "docs/media/showcase-go2-door.png"
+gif_bytes = 1509699
+poster_bytes = 527022
+gif_sha256 = "sha256:952b0112c5a00f6fcc8f514a19d8615011c98c04bac95e44d6ba815e63261b8e"
+poster_sha256 = "sha256:0bb4a4bd2c9ded82576a373cc2997c3d5a70b9f889fc1e08e570c8ac22f6d6d4"
 poster_width = 960
 poster_height = 540
-smoke_command = "cargo run --locked -p showcase_captures --example 90_showcase_captures -- --smoke --environment office"
-capture_command = "cargo run --release --locked -p showcase_captures --example 90_showcase_captures -- --capture --environment office"
-metadata = "docs/media/showcase-office.json"
-regenerate = "examples/90_showcase_captures/office.rs"
-license = "MIT OR Apache-2.0"
-license_files = ["LICENSE-MIT", "LICENSE-APACHE"]
-provenance = ["assets/scenes/office_agv_delivery.rne.scene.toml", "assets/robots/office_agv_delivery.rne.robot.toml", "crates/rne_ai/src/env/office_agv_shared_aisle.rs", "examples/90_showcase_captures/office.rs"]
+smoke_command = "cargo run --locked -p go2_door --example 132_go2_door -- --smoke"
+capture_command = "cargo run --release --locked -p go2_door --example 132_go2_door -- --capture"
+metadata = "docs/media/showcase-go2-door.json"
+regenerate = "examples/132_go2_door/main.rs"
+license = "BSD-3-Clause AND (MIT OR Apache-2.0)"
+license_files = ["assets/robots/go2_description/LICENSE.unitree_ros", "LICENSE-MIT", "LICENSE-APACHE"]
+provenance = ["assets/scenes/unitree_go2_door.rne.scene.toml", "assets/robots/unitree_go2_arm.rne.robot.toml", "assets/robots/go2_description/UPSTREAM.md", "assets/robots/swing_door.rne.robot.toml", "assets/sensors/livox_mid360/go2_rig_occlusion.json", "docs/LIVOX_MID360.md", "examples/132_go2_door/main.rs"]
 
 [[media]]
 id = "uav"

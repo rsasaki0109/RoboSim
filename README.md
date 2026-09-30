@@ -48,11 +48,11 @@ camera state; gates and regeneration commands are in
   <tr>
     <td width="50%" align="center">
       <picture>
-        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-office.png">
-        <img src="docs/media/showcase-office.gif" alt="Office AGV taking a tote pushed onto its deck at the dock, waiting at the yield line while an oncoming robot passes, then pushing the tote onto a tray at the desk" width="460">
+        <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-go2-door.png">
+        <img src="docs/media/showcase-go2-door.gif" alt="A Unitree Go2 with an arm on its back pushes a swing door open with the pad on its arm, walks through the doorway, walks around the open door and pushes it shut from the other side, with its Livox Mid-360 returns drawn coloured by height" width="460">
       </picture>
-      <br><b>Office AGV</b><br>
-      <sub>The tote is a dynamic body moved only by contact: the dock's pusher slides it onto the AGV's deck, friction carries it (8 mm of slip), and the AGV's own pusher slides it onto the tray at the desk. On the way the AGV waits at the yield line while the oncoming AGV comes through the single-lane section, which is drawn, not collided with. <a href="docs/media/showcase-office.json">metadata</a></sub>
+      <br><b>Go2 · door with an arm</b><br>
+      <sub>The Go2 pushes a free-swinging 6 kg door open with the pad on its arm, walks through, and pushes it back against its stop; the pad is the only part of the robot that ever touches the door. It steers only on its own Livox Mid-360 localization (0.08 m RMS), with the sensor model fitted to real Go2 recordings. <a href="docs/media/showcase-go2-door.json">metadata</a> · <a href="docs/GO2_DOOR.md">details</a></sub>
     </td>
     <td width="50%" align="center">
       <picture>
@@ -167,77 +167,49 @@ SLAM with loop closure and AMCL (a ROS 2 adapter maps to Nav2). Details:
 
 ## Logistics across floors
 
-<table>
-  <tr>
-    <td width="50%" align="center">
-      <img src="docs/media/warehouse-logistics.gif" alt="Forklift AGV lifting a case off a goods-in stand, carrying it into a lift, riding to the upper floor and setting it down on an outbound stand" width="460">
-      <br><b>Goods-in to delivery</b><br>
-      <sub>A forklift AGV takes a case off a stand, calls the lift, rides up with the load and sets it down on the floor above. The mast is a prismatic joint with a position servo and the case is an ordinary dynamic body throughout: it moves 0.038 m on the tines across the whole carry. <a href="examples/123_warehouse_logistics/main.rs">source</a></sub>
-    </td>
-    <td width="50%" align="center">
-      <img src="docs/media/multi-floor-lift.gif" alt="Delivery robot pressing a lift call button, boarding the car and riding to the floor above, with the hoist ropes and counterweight moving in the shaft" width="460">
-      <br><b>Calling and riding a lift</b><br>
-      <sub>The call button reads solved contact force from the robot's own body, the car and doors are <code>rne_nav::Elevator</code> state, and the car carries the robot by ordinary contact rather than by parenting it. The robot is drawn at its solved pose and stays within 0.2° of upright; its height on the car moves 0.7 mm during the ride. <a href="examples/122_multi_floor_media/main.rs">source</a></sub>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center">
-      <img src="docs/media/warehouse-relay.gif" alt="An orange forklift takes a case off the goods-in stand, turns round and sets it on a stand inside the lift car; the car carries the case up alone and a blue forklift on the upper floor takes it out, turns round and sets it on the outbound bay" width="700">
-      <br><b>Two trucks, one lift</b><br>
-      <sub>A truck on each floor and the lift as the conveyor between them. The ground-floor truck sets the case on a stand inside the car and backs out; the car goes up with only the case; the upper-floor truck forks it out and delivers it. A light-curtain check holds the doors while anything is in the doorway, and the case moves 6 mm and 1.5 mm on the two trucks' tines. Driving and turning are commanded; the wheels are not modelled. <a href="examples/125_warehouse_relay/main.rs">source</a></sub>
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/media/warehouse-logistics.gif" alt="Forklift AGV lifting a case off a goods-in stand, carrying it into a lift, riding to the upper floor and setting it down on an outbound stand" width="720">
+</p>
+
+**Goods-in to delivery.** A forklift AGV takes a case off a stand, calls the
+lift, rides up with the load and sets it down on the floor above. The mast is a
+prismatic joint with a position servo and the case is an ordinary dynamic body
+throughout: it moves 0.038 m on the tines across the whole carry.
+[source](examples/123_warehouse_logistics/main.rs) · more lift demos in
+[Multi-floor navigation](docs/MULTI_FLOOR_NAVIGATION.md) and
+[More demos](docs/DEMOS.md#two-trucks-one-lift)
 
 ## Go2 locomotion
 
 <p align="center">
-  <img src="docs/media/go2-heading-steer.gif" alt="The official Go2 trotting head first along an S: straight, a left 90-degree turn, straight, a right 90-degree turn, straight, with its path drawn on the floor coloured by the commanded heading and a yellow arrow showing the heading it is steering to" width="820">
-</p>
-
-The official Go2 walks head first through an S on a model-based trot of the
-kind Pinocchio-based quadruped stacks run: 500 Hz joint torques, foot
-Jacobians from the link frames, stance legs pushing `tau = -J^T f` for weight,
-height, speed and yaw rate, swing feet placed by the Raibert heuristic and
-tracked by Cartesian PD. A heading loop steers it; held headings stay within
-0.04 rad RMS (0.15 rad worst) while it covers 8.5 m. This runs on
-`unitree_go2_jump`, the Go2 with its feet attached: the older walking asset
-leaves them on the floor ([#346](https://github.com/rsasaki0109/RobotNativeEngine/issues/346)),
-and the results measured on it are marked as such in
-[docs/GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md).
-[source](examples/126_go2_heading_steer/main.rs)
-
-<p align="center">
   <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/go2-mid360-room.png">
-    <img src="docs/media/go2-mid360-room.gif" alt="The Go2 trots around a table in a room, steering to waypoints, while the upside-down Livox Mid-360 on its back scans: each 0.1 s frame's returns are drawn coloured by height, showing rings on the floor, the table's side, and the walls" width="720">
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-go2-door.png">
+    <img src="docs/media/showcase-go2-door.gif" alt="A Unitree Go2 with an arm on its back pushes a swing door open with the pad on its arm, walks through the doorway, walks around the open door and pushes it shut from the other side, with its Livox Mid-360 returns drawn coloured by height" width="820">
   </picture>
 </p>
 
-The same trot steers to waypoints around a room while an upside-down Livox
-Mid-360 on its back scans at 10 Hz. The sensor model is fitted to real Go2
-recordings: its non-repetitive four-line pattern matches held-out real returns
-to 0.13° median, and the rig occlusion, self returns, and near-range blanking
-are measured. While the Go2 walks the loop, the no-return fraction of every
-floor-facing elevation band stays between the two recordings'
-([docs/LIVOX_MID360.md](docs/LIVOX_MID360.md)).
-[source](examples/130_go2_mid360_room/main.rs)
+With an arm on its back, the Go2 walks through a swing door and shuts it
+behind itself. Nothing holds or drives the 6 kg door: the pad on the arm
+pushes it open to 87° and back against its stop, and no other part of the
+robot ever touches it. Every command comes from its own Livox Mid-360
+localization (0.081 m RMS), with the sensor model fitted to real Go2
+recordings. [docs/GO2_DOOR.md](docs/GO2_DOOR.md) ·
+[source](examples/132_go2_door/main.rs)
 
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/go2-mid360-navigation.png">
-    <img src="docs/media/go2-mid360-navigation.gif" alt="Cutaway view of two rooms joined by a doorway: the Go2 walks from one room through the doorway to a goal in the far corner of the other and back, while the occupancy map its Mid-360 builds grows on the floor, known free space lighter than unexplored floor and walls marked in pink, with its planned path in yellow" width="720">
-  </picture>
-</p>
+The pieces underneath, each with its own GIF in the docs:
 
-With no map given, the Go2 navigates between two rooms on what its Mid-360
-sees: each frame's returns, in the sensor frame at their emission times, are
-levelled by IMU attitude, de-skewed by leg odometry, and cut into a 2D scan for
-`rne_slam`'s online SLAM; A* on the inflated map plans through unexplored
-space and replans every second, so the robot finds the doorway as the partition
-appears. It reaches both goals (0.27 m and 0.24 m from them) with 0.099 m RMS
-localization error while leg odometry alone drifts 7.1 m.
-[source](examples/131_go2_mid360_navigation/main.rs)
+- **Model-based trot** on `unitree_go2_jump`, the Go2 with its feet attached:
+  500 Hz joint torques, stance `tau = -J^T f`, Raibert swing; held headings
+  stay within 0.04 rad RMS over 8.5 m.
+  [docs/GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md#walking-with-feet-a-model-based-trot)
+- **Livox Mid-360** fitted to real Go2 recordings: non-repetitive pattern to
+  0.13° on a held-out recording, measured rig occlusion and near-range
+  blanking; walking, every floor-facing band's no-return fraction stays
+  between the recordings'. [docs/LIVOX_MID360.md](docs/LIVOX_MID360.md)
+- **Navigation with no map given**: online SLAM on the Mid-360, A* through
+  unexplored space, both rooms reached with 0.042 m RMS localization while
+  leg odometry alone drifts 7.1 m.
+  [docs/LIVOX_MID360.md](docs/LIVOX_MID360.md#navigating-on-the-mid-360)
 
 ## G1 locomotion
 

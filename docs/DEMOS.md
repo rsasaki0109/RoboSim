@@ -5,6 +5,41 @@ dynamics / navigation / G1 locomotion highlights. This page holds the rest of
 the demo write-ups: full captions, GIFs, and commands for the pieces that
 used to live under the README's "Selected demos" section.
 
+## Office AGV delivery
+
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="media/showcase-office.png">
+    <img src="media/showcase-office.gif" alt="Office AGV taking a tote pushed onto its deck at the dock, waiting at the yield line while an oncoming robot passes, then pushing the tote onto a tray at the desk" width="600">
+  </picture>
+</p>
+
+The tote is a dynamic body moved only by contact: the dock's pusher slides it
+onto the AGV's deck, friction carries it (8 mm of slip), and the AGV's own
+pusher slides it onto the tray at the desk. On the way the AGV waits at the
+yield line while the oncoming AGV comes through the single-lane section, which
+is drawn, not collided with. This was a README front-page showcase until the
+Go2 door took its place. [metadata](media/showcase-office.json) ·
+[source](../examples/90_showcase_captures/office.rs)
+
+```bash
+cargo run --release --locked -p showcase_captures --example 90_showcase_captures -- --capture --environment office
+```
+
+## Two trucks, one lift
+
+<p align="center">
+  <img src="media/warehouse-relay.gif" alt="An orange forklift takes a case off the goods-in stand, turns round and sets it on a stand inside the lift car; the car carries the case up alone and a blue forklift on the upper floor takes it out, turns round and sets it on the outbound bay" width="600">
+</p>
+
+A truck on each floor and the lift as the conveyor between them. The
+ground-floor truck sets the case on a stand inside the car and backs out; the
+car goes up with only the case; the upper-floor truck forks it out and
+delivers it. A light-curtain check holds the doors while anything is in the
+doorway, and the case moves 6 mm and 1.5 mm on the two trucks' tines. Driving
+and turning are commanded; the wheels are not modelled.
+[source](../examples/125_warehouse_relay/main.rs)
+
 ## Camera-based localization with visloc-rs
 
 <p align="center">

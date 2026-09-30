@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A 0.96 m x 0.90 m swing door leaf on a vertical hinge (URDF z up). Closed at
+     0 rad against the stop (the joint's lower limit); positive angles open it
+     toward +x. Leaf: 6 kg, 3 cm thick; hinge damping 1 N m s/rad and friction
+     0.2 N m, so a pushed door keeps swinging for a while as a real one does. -->
+<robot name="swing_door">
+  <link name="door_frame">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="1.0"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+  </link>
+  <link name="door_leaf">
+    <inertial>
+      <origin xyz="0 -0.49 0.47" rpy="0 0 0"/>
+      <mass value="6.0"/>
+      <!-- Box 0.03 x 0.96 x 0.90 about its centre. -->
+      <inertia ixx="0.8658" ixy="0" ixz="0" iyy="0.4055" iyz="0" izz="0.4613"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 -0.49 0.47" rpy="0 0 0"/>
+      <geometry><box size="0.03 0.96 0.90"/></geometry>
+      <material name="door_wood"><color rgba="0.62 0.46 0.30 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="0.017 -0.86 0.50" rpy="0 0 0"/>
+      <geometry><box size="0.004 0.16 0.22"/></geometry>
+      <material name="push_plate"><color rgba="0.82 0.84 0.86 1"/></material>
+    </visual>
+    <visual>
+      <origin xyz="-0.017 -0.86 0.50" rpy="0 0 0"/>
+      <geometry><box size="0.004 0.16 0.22"/></geometry>
+      <material name="push_plate"><color rgba="0.82 0.84 0.86 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 -0.49 0.47" rpy="0 0 0"/>
+      <geometry><box size="0.03 0.96 0.90"/></geometry>
+    </collision>
+  </link>
+  <joint name="door_hinge" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="door_frame"/>
+    <child link="door_leaf"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="1.75" effort="0" velocity="3.0"/>
+    <dynamics damping="1.0" friction="0.2"/>
+  </joint>
+</robot>

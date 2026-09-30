@@ -169,6 +169,8 @@ members = [
   "examples/129_uav_race",
   "examples/130_go2_mid360_room",
   "examples/131_go2_mid360_navigation",
+  "examples/132_go2_door",
+  "examples/go2_indoor",
   "examples/117_go2_push_recovery",
   "examples/118_elevator_ride",
   "examples/119_elevator_call_button",
@@ -216,6 +218,7 @@ dbg_macro = "deny"
 too_many_lines = "warn"
 
 [workspace.dependencies]
+go2_indoor = { version = "=0.4.0", path = "examples/go2_indoor" }
 # Internal crates use exact release requirements so packaged manifests resolve the
 # same release set from a registry after Cargo removes local paths.
 rne_adapter_ros2 = { version = "=0.4.0", path = "adapters/ros2/rne_adapter_ros2" }

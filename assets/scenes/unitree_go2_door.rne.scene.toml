@@ -1,13 +1,18 @@
 [world]
 gravity_m_s2 = [0.0, -9.81, 0.0]
-seed = 361
+seed = 362
 
 [ground]
 enabled = true
 
 [[robots]]
-path = "../robots/unitree_go2_jump.rne.robot.toml"
+path = "../robots/unitree_go2_arm.rne.robot.toml"
 
+# The swing door hangs in the doorway, hinged on its north jamb.
+[[robots]]
+path = "../robots/swing_door.rne.robot.toml"
+
+# The two-room scene with a swing door in its doorway and the arm-carrying Go2.
 # Two rooms joined by a 1.0 m doorway in the partition at x = 2.4, walls 1.0 m
 # high. Room A spans x -2.4..2.4, room B x 2.4..7.0; both span z -2.4..2.4.
 # The Go2 spawns at the origin facing +x.
