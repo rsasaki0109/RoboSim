@@ -223,6 +223,22 @@ floor-facing elevation band stays between the two recordings'
 ([docs/LIVOX_MID360.md](docs/LIVOX_MID360.md)).
 [source](examples/130_go2_mid360_room/main.rs)
 
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/go2-mid360-navigation.png">
+    <img src="docs/media/go2-mid360-navigation.gif" alt="Cutaway view of two rooms joined by a doorway: the Go2 walks from one room through the doorway to a goal in the far corner of the other and back, while the occupancy map its Mid-360 builds grows on the floor, known free space lighter than unexplored floor and walls marked in pink, with its planned path in yellow" width="720">
+  </picture>
+</p>
+
+With no map given, the Go2 navigates between two rooms on what its Mid-360
+sees: each frame's returns, in the sensor frame at their emission times, are
+levelled by IMU attitude, de-skewed by leg odometry, and cut into a 2D scan for
+`rne_slam`'s online SLAM; A* on the inflated map plans through unexplored
+space and replans every second, so the robot finds the doorway as the partition
+appears. It reaches both goals (0.27 m and 0.24 m from them) with 0.099 m RMS
+localization error while leg odometry alone drifts 7.1 m.
+[source](examples/131_go2_mid360_navigation/main.rs)
+
 ## G1 locomotion
 
 ![The official Unitree G1 completing a backflip in native RoboSim/Rapier dynamics and landing on its feet](docs/media/unitree-g1-robosim-native-backflip.gif)
