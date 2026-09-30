@@ -118,6 +118,16 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- `rne_sensor::livox` models the Livox Mid-360 from real Go2 recordings:
+  `LivoxMid360Pattern` reproduces its non-repetitive four-line firing pattern
+  (a 91-term fit over the measured rotor and elevation-nod phases; 0.128°
+  median error on a held-out recording, below the datasheet's 0.15°),
+  `livox_mid360_spec` carries the datasheet range and detection figures, and
+  `sample_livox_mid360` applies the measured Go2 rig occlusion
+  (`assets/sensors/livox_mid360/go2_rig_occlusion.json`: four mount posts and
+  5.4 % self returns). `sample_lidar_pattern_swept` and `LidarRay` cast any
+  explicit ray pattern through the physics-aware LiDAR model. See
+  `docs/LIVOX_MID360.md`.
 - `MobileManipulatorSim::weld_grasp_in_place` holds an object where a linear
   gripper's pads caught it, once each pad is within a given distance of its
   faces, and closes the pads onto the faces;

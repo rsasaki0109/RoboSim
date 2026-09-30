@@ -20,6 +20,11 @@ and `max_elevation_rad`, which describes VLP-16/32 and Ouster OS-class sensors.
 The defaults (`channel_count = 1`, zero elevation limits) keep legacy
 single-plane 2D configurations behaving exactly as before.
 
+Scanners that do not fire on a grid use `sample_lidar_pattern_swept`, which
+casts an explicit list of `LidarRay`s (azimuth, elevation, emission time, line)
+through the same model. The Livox Mid-360's non-repetitive pattern, fitted to
+real recordings, is described in [LIVOX_MID360.md](LIVOX_MID360.md).
+
 Columns are emitted sequentially over `rotation_period_s`. `sample_lidar_swept`
 takes a `LidarSweep` — the sensor pose at the start and end of the revolution —
 and casts each column from the pose interpolated at its own emission time. A
