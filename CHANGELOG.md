@@ -118,6 +118,12 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Example 131 navigates the Go2 between two rooms with no map given, on its
+  recording-matched Mid-360: returns in the sensor frame at emission time,
+  levelled by IMU attitude, de-skewed by drifting leg odometry, and cut into a
+  2D scan for `rne_slam::Slam2d`; A* through unexplored space with replanning
+  finds the doorway. Both goals are reached with 0.099 m RMS localization
+  error while odometry alone drifts 7.1 m.
 - Example 130 walks the Go2 around a room, steering to waypoints, with an
   upside-down Livox Mid-360 on its back: `UrdfSceneSim::sample_livox_mid360`
   scans the scene without the robot's own links (their returns come from the

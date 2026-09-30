@@ -164,6 +164,33 @@ Example 130 walks the Go2 on `UnitreeGo2ModelTrot` around a table in a
 The walk takes 74.4 s, keeps at least 0.88 m from walls and furniture, and the
 body never drops below 0.263 m.
 
+## Navigating on the Mid-360
+
+Example 131 gives the Go2 no map. Two rooms are joined by a 1.0 m doorway, and
+the robot must reach the far corner of the second room and come back. Per
+0.1 s frame it uses only what a real Go2 has:
+
+- each return in the sensor frame at its own emission time, as the driver
+  publishes it;
+- roll and pitch from the IMU to level the points (heading is never read from
+  the simulation);
+- leg odometry: body velocity and yaw rate integrated with a 4 % scale error
+  and a 0.02 rad/s yaw-rate bias (chosen, not measured), also used to de-skew
+  each frame to the pose at its end;
+- a 720-beam 2D scan of the returns 0.15–0.65 m above the floor.
+
+`Slam2d` processes a keyframe every 0.15 m or 0.15 rad; A* plans on the map
+inflated to keep the base centre 0.30 m from obstacles, treats unexplored cells
+as traversable, and replans every second.
+
+| Measure | Result |
+| --- | --- |
+| Goals reached | 2 / 2 in 85.8 s, 0.27 m and 0.24 m from them |
+| Localization error | 0.099 m RMS, 0.147 m worst |
+| Leg odometry alone | 7.1 m worst |
+| Clearance | at least 0.40 m |
+| Occupied map cells within 10 cm of a real obstacle | 87.9 % of 1,424 |
+
 ## What is not established
 
 - **Timestamp jitter.** Real `t` values carry packet-level host jitter (−270
