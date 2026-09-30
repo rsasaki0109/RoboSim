@@ -169,6 +169,7 @@ members = [
   "examples/129_uav_race",
   "examples/130_go2_mid360_room",
   "examples/131_go2_mid360_navigation",
+  "examples/132_go2_door",
   "examples/117_go2_push_recovery",
   "examples/118_elevator_ride",
   "examples/119_elevator_call_button",

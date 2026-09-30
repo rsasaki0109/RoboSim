@@ -239,6 +239,20 @@ appears. It reaches both goals (0.27 m and 0.24 m from them) with 0.099 m RMS
 localization error while leg odometry alone drifts 7.1 m.
 [source](examples/131_go2_mid360_navigation/main.rs)
 
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/go2-door.png">
+    <img src="docs/media/go2-door.gif" alt="A Go2 with an arm on its back pushes a swing door open with the pad on its arm, walks through the doorway, walks around the open door, and pushes it shut from the other side, with its Mid-360 returns drawn coloured by height" width="720">
+  </picture>
+</p>
+
+With an arm on its back, the Go2 walks through a swing door and shuts it
+behind itself. Nothing holds or drives the 6 kg door: the pad on the arm
+pushes it open to 86° and back against its stop, and no other part of the
+robot ever touches it. Every command comes from the Mid-360 localization
+above (0.059 m RMS). [docs/GO2_DOOR.md](docs/GO2_DOOR.md) ·
+[source](examples/132_go2_door/main.rs)
+
 ## G1 locomotion
 
 ![The official Unitree G1 completing a backflip in native RoboSim/Rapier dynamics and landing on its feet](docs/media/unitree-g1-robosim-native-backflip.gif)

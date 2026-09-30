@@ -118,6 +118,13 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Example 132 walks an arm-carrying Go2 (`unitree_go2_arm`: a generic 1.3 kg
+  4-DOF arm with a push pad) through a damped swing door (`swing_door`) and
+  shuts it behind itself, moving the door only by the pad's contact and
+  steering only on its Mid-360 localization: the door opens to 86° and ends
+  against its stop, and no other robot link touches it. See
+  `docs/GO2_DOOR.md`. `UnitreeGo2ModelTrot::with_total_mass_kg` gives the
+  trot a payload's weight.
 - Example 131 navigates the Go2 between two rooms with no map given, on its
   recording-matched Mid-360: returns in the sensor frame at emission time,
   levelled by IMU attitude, de-skewed by drifting leg odometry, and cut into a

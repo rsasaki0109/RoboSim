@@ -64,6 +64,7 @@ pub struct UnitreeGo2TrotCommand {
 /// State of the model-based Go2 trot.
 #[derive(Clone, Debug)]
 pub struct UnitreeGo2ModelTrot {
+    mass_kg: f64,
     step: u64,
     liftoff: [Vec3; 4],
     in_stance: [bool; 4],
@@ -145,12 +146,22 @@ impl UnitreeGo2ModelTrot {
         )));
         let previous_yaw_rad = sim.observe().base_relative_yaw_rad;
         Self {
+            mass_kg: MASS_KG,
             step: 0,
             liftoff: [Vec3::ZERO; 4],
             in_stance: [true; 4],
             previous_yaw_rad,
             heading_rad: 0.0,
         }
+    }
+
+    /// Uses `mass_kg` for the stance legs' weight share instead of the bare Go2's
+    /// declared 16.1 kg, for a Go2 carrying a payload such as an arm.
+    pub fn with_total_mass_kg(mut self, mass_kg: f64) -> Self {
+        if mass_kg.is_finite() && mass_kg > 0.0 {
+            self.mass_kg = mass_kg;
+        }
+        self
     }
 
     /// Controller steps taken since [`Self::stand_up`].
@@ -199,7 +210,7 @@ impl UnitreeGo2ModelTrot {
                 // Ground reaction wanted at this foot.
                 let hip_height = hip.y - leg.foot.y;
                 let hip_rise_rate = -leg.foot_velocity_rel().y;
-                let lift = MASS_KG * GRAVITY_M_S2 / stance_count
+                let lift = self.mass_kg * GRAVITY_M_S2 / stance_count
                     + HEIGHT_STIFFNESS_N_PER_M * (STANCE_HEIGHT_M - hip_height)
                     - HEIGHT_DAMPING_N_S_PER_M * hip_rise_rate;
                 let velocity_error = velocity_cmd - flat_velocity;
