@@ -1,30 +1,38 @@
-//! The arm-carrying Go2 walks through a swing door and shuts it behind itself,
-//! pushing the door only with the pad on its arm and steering on what its Mid-360
+//! The arm-carrying Go2 turns a door's knob, pushes the door open, walks through,
+//! and shuts it behind itself so the latch catches, steering on what its Mid-360
 //! sees.
 //!
-//! * **Robot.** `unitree_go2_arm`: the welded Go2 with a generic 4-DOF arm (1.3 kg)
-//!   on its back, on `rne_ai::UnitreeGo2ModelTrot` carrying the extra mass.
+//! * **Robot.** `unitree_go2_arm`: the welded Go2 with a generic 5-DOF arm and a
+//!   two-finger gripper (1.46 kg) on its back, on `rne_ai::UnitreeGo2ModelTrot`
+//!   carrying the extra mass.
 //! * **Door.** A 6 kg leaf on a damped hinge (`swing_door`), a separate articulated
-//!   body in the two-room scene's doorway. Nothing holds, welds, or drives it: it
-//!   moves only when something pushes it.
-//! * **Opening.** The Go2 walks the doorway's centre line with the pad turned 0.35 m
-//!   to its left, toward the hinge. The pad pushes the leaf near the hinge, so the
-//!   leaf swings ahead of the body and the body never meets it.
+//!   body in the two-room scene's doorway, with a round knob on a sprung spindle.
+//!   The latch is modelled here: it holds the leaf shut until the knob turns past
+//!   0.7 rad, and catches it again when the leaf is back shut with the knob at
+//!   rest. Nothing else drives the door.
+//! * **Knob.** Standing on all four feet, the Go2 closes its fingers on the knob;
+//!   the knob is held (welded to the hand) only once both fingers are measured on
+//!   it, and both must stay on it every held step. The wrist roll turns it until
+//!   the latch is out, the hand pushes on through it until the leaf leaves its
+//!   catch, and the hand lets go. The knob's position relative to the body is
+//!   read from the simulator, standing in for a camera detection.
+//! * **Opening.** The Go2 walks over to the doorway's centre line and on through
+//!   it with the hand turned 0.35 m to its left, toward the hinge, so the leaf
+//!   swings ahead of the body and the body never meets it.
 //! * **Closing.** From the far side it walks around the open leaf and back along a
-//!   line 0.52 m east of the hinge with the pad on its right, pushing the leaf
-//!   nearly shut, then stops beside it and sweeps the pad outward to press the
-//!   last degrees shut.
+//!   line 0.52 m east of the hinge with the hand on its right, pushing the leaf
+//!   nearly shut, then stops beside it and sweeps the hand outward to press the
+//!   last degrees shut, where the latch catches.
 //! * **Localization.** As in example 131: Mid-360 returns in the sensor frame at
 //!   emission time, levelled by IMU attitude and de-skewed by drifting leg odometry,
-//!   feed `rne_slam::Slam2d`. Every command comes from that estimate; the door's
-//!   position is given, as a map annotation would give it, and its angle is read
-//!   only to score the run. The Mid-360 sees the door, but returns inside its
-//!   swing are masked from SLAM, the way a map marks a moving object's zone:
-//!   matching against a door that moves under the robot's own push dragged the
-//!   estimate up to 1.06 m off.
+//!   feed `rne_slam::Slam2d`. Every walking command comes from that estimate; the
+//!   door's position is given, as a map annotation would give it, and its angle is
+//!   read only to score the run. Returns inside the door's swing are masked from
+//!   SLAM, the way a map marks a moving object's zone.
 //!
-//! The gate checks that the door opens past 80°, ends within 1° of shut, is
-//! touched by the pad and by no other part of the robot, and that the robot stays
+//! The gate checks that the knob is held with both fingers on it throughout and
+//! turned past the latch, that the door opens past 80°, ends within 1° of shut
+//! with the latch caught, is touched only by the hand, and that the robot stays
 //! upright and localized.
 //!
 //! ```text
@@ -66,6 +74,13 @@ const MAX_DURATION_S: f64 = 180.0;
 const STEPS_PER_LIDAR_FRAME: u64 = 50;
 const KEYFRAME_TRANSLATION_M: f64 = 0.15;
 const KEYFRAME_ROTATION_RAD: f64 = 0.15;
+/// Standing at the knob the odometry's yaw-rate bias keeps integrating, so a
+/// scan is matched at least this often even when the body barely moves.
+const KEYFRAME_INTERVAL_S: f64 = 1.0;
+/// Scan matches scoring below this are rejected. Measured over two runs, good
+/// matches scored 0.90-1.00 (mostly above 0.95); a 0.51 match had jumped the
+/// estimate 0.5 m and a 0.80 one 0.11 m.
+const MIN_MATCH_SCORE: f64 = 0.85;
 const ODOM_SCALE_ERROR: f64 = 0.04;
 const ODOM_YAW_RATE_BIAS_RAD_S: f64 = 0.02;
 const SCAN_MIN_HEIGHT_M: f64 = -0.30;
@@ -77,23 +92,59 @@ const MAP_ORIGIN: [f64; 2] = [-3.0, -3.0];
 const MAP_SIZE_M: [f64; 2] = [10.5, 6.0];
 const MAP_RESOLUTION_M: f64 = 0.05;
 
-/// The Go2 with its 1.3 kg arm.
-const TOTAL_MASS_KG: f64 = 16.1 + 1.3;
+/// The Go2 with its 1.46 kg arm.
+const TOTAL_MASS_KG: f64 = 16.1 + 1.46;
 const ARM_JOINTS: [&str; 4] = ["arm_yaw", "arm_upper", "arm_fore", "arm_wrist"];
 /// Arm effort limits from the URDF, N·m.
 const ARM_EFFORT_NM: [f64; 4] = [10.0, 20.0, 12.0, 5.0];
+/// Arm position gains (N·m/rad, N·m·s/rad) while walking and pushing. At a
+/// damping of 4 the stowed arm swung and rocked the trotting body up to 59° in
+/// a turn, and two runs in seven fell; at 10 the worst sway was 33° and all
+/// seven finished.
+const ARM_WALK_GAINS: (f64, f64) = (60.0, 10.0);
+/// Wrist roll: turns the hand, and with it a held knob.
+const ROLL_JOINT: &str = "arm_hand";
+const ROLL_EFFORT_NM: f64 = 5.0;
+const FINGERS: [&str; 2] = ["arm_finger_left", "arm_finger_right"];
+const FINGER_OPEN_M: f64 = 0.04;
 /// Shoulder pitch axis in the base frame (x forward, z up), meters.
 const SHOULDER_X_M: f64 = 0.05;
 const SHOULDER_Z_M: f64 = 0.197;
 const UPPER_M: f64 = 0.28;
 const FORE_M: f64 = 0.28;
-const PAD_FROM_WRIST_M: f64 = 0.095;
+/// From the wrist pitch axis to the middle of the fingers.
+const GRIP_FROM_WRIST_M: f64 = 0.06 + 0.05 + 0.025;
+/// From the hand frame (on the roll joint) to the middle of the fingers.
+const GRIP_FROM_HAND_M: f64 = 0.075;
 /// Folded over the back.
 const STOW_POSE: [f64; 4] = [0.0, -1.3, 2.5, 0.3];
 
 /// The door, in the navigation frame (x, y = -world z): hinge and doorway line.
 const HINGE_NAV: [f64; 2] = [2.47, -0.2];
 const DOORWAY_CENTRE_Y: f64 = -0.7;
+/// The knob's line, 0.87 m from the hinge; the Go2 stands on it to work the knob.
+const KNOB_LINE_Y: f64 = -1.07;
+const KNOB_STAND_X: f64 = 1.85;
+/// Knob distance ahead of the body the arm works it from.
+const KNOB_REACH_M: f64 = 0.60;
+/// Room-A knob, in the knob's own frame (x along the spindle, toward room B).
+const KNOB_GRIP_LOCAL_M: [f64; 3] = [-0.065, 0.0, 0.0];
+/// The palm stops this far short of the knob so it never pushes on it.
+const GRIP_STANDOFF_M: f64 = 0.012;
+const PREGRASP_STANDOFF_M: f64 = 0.08;
+/// Wrist roll the hand turns the knob with.
+const KNOB_TURN_RAD: f64 = 0.9;
+/// The latch: the bolt is out, holding the leaf shut, until the knob turns past
+/// this; it catches again when the leaf is back within the catch angle with the
+/// knob at rest.
+const LATCH_RELEASE_KNOB_RAD: f64 = 0.7;
+const LATCH_CATCH_DOOR_RAD: f64 = 0.02;
+const LATCH_CATCH_KNOB_RAD: f64 = 0.3;
+/// Held and unlatched, the hand aims this far beyond the knob, following it as
+/// the leaf gives, and lets go once the leaf is open at least this much, well
+/// past the catch.
+const CRACK_LEAD_M: f64 = 0.02;
+const CRACK_OPEN_RAD: f64 = 0.035;
 /// The door leaf reaches 0.97 m from its hinge; returns within this radius on
 /// its swing side are masked from SLAM, as a map's dynamic-object zone would be.
 const DOOR_SWING_MASK_M: f64 = 1.05;
@@ -107,9 +158,12 @@ const NUDGE_END_LATERAL_M: f64 = -0.62;
 const NUDGE_SETTLE_S: f64 = 1.0;
 const NUDGE_SWEEP_S: f64 = 2.0;
 const CLOSE_SPEED_M_S: f64 = 0.12;
+/// Where the closing walk stops for the nudge: 0.65 m from the hinge, clear of
+/// the knob's line so the sweeping arm passes beside the room-B knob.
+const NUDGE_AT_Y: f64 = -0.85;
 
 /// Robot links checked for contact with the door leaf.
-const ROBOT_LINKS: [&str; 19] = [
+const ROBOT_LINKS: [&str; 22] = [
     "base",
     "Head_upper",
     "arm_mount",
@@ -117,6 +171,9 @@ const ROBOT_LINKS: [&str; 19] = [
     "arm_upper",
     "arm_fore",
     "arm_wrist",
+    "arm_hand",
+    "arm_finger_left",
+    "arm_finger_right",
     "FL_hip",
     "FL_thigh",
     "FL_calf",
@@ -130,16 +187,18 @@ const ROBOT_LINKS: [&str; 19] = [
     "RR_thigh",
     "RR_calf",
 ];
-/// The only link allowed to touch the door: it carries the push pad.
-const PAD_LINK: &str = "arm_wrist";
+/// The only links allowed to touch the leaf: the hand pushes it.
+const HAND_LINKS: [&str; 3] = ["arm_hand", "arm_finger_left", "arm_finger_right"];
 
 const WIDTH: u32 = 960;
 const HEIGHT: u32 = 540;
 const CLEAR_COLOR: [f32; 4] = [0.035, 0.05, 0.08, 1.0];
-/// README showcase: 48 frames, one every 2.4 s, 64 colours (1.74 MB).
-const SHOWCASE_LIDAR_FRAMES_PER_GIF_FRAME: u64 = 24;
-const SHOWCASE_FRAMES: usize = 48;
-const SHOWCASE_POSTER_FRAME: usize = 13;
+/// README showcase, 64 colours: one frame every 4.5 s from the room view, and
+/// one every 0.4 s from close by while the hand works the knob. The front-page
+/// GIF budget leaves room for about 50 frames.
+const SHOWCASE_LIDAR_FRAMES_PER_GIF_FRAME: u64 = 45;
+const SHOWCASE_LIDAR_FRAMES_PER_KNOB_FRAME: u64 = 4;
+const SHOWCASE_FRAMES: usize = 60;
 const SHOWCASE_COLORS: u32 = 64;
 const COLORMAP_BUCKETS: usize = 16;
 
@@ -159,15 +218,15 @@ fn wrap_angle(angle: f64) -> f64 {
     (angle + PI).rem_euclid(2.0 * PI) - PI
 }
 
-/// Joint angles that put the pad centre at `(x, y, z)` in the base frame: the yaw
-/// joint turns the arm toward it, the shoulder and elbow reach it elbow up, and the
-/// wrist keeps the pad face level.
-fn arm_pose(pad_x_m: f64, pad_y_m: f64, pad_z_m: f64) -> [f64; 4] {
-    let yaw = pad_y_m.atan2(pad_x_m - SHOULDER_X_M);
-    let radial = (pad_x_m - SHOULDER_X_M).hypot(pad_y_m);
-    let u = radial - PAD_FROM_WRIST_M;
+/// Joint angles that put the middle of the fingers at `(x, y, z)` in the base
+/// frame: the yaw joint turns the arm toward it, the shoulder and elbow reach it
+/// elbow up, and the wrist keeps the hand level, pointing along the reach.
+fn arm_pose(grip_x_m: f64, grip_y_m: f64, grip_z_m: f64) -> [f64; 4] {
+    let yaw = grip_y_m.atan2(grip_x_m - SHOULDER_X_M);
+    let radial = (grip_x_m - SHOULDER_X_M).hypot(grip_y_m);
+    let u = radial - GRIP_FROM_WRIST_M;
     // Pitch angles are positive downward (about +y, x turns toward -z).
-    let v = SHOULDER_Z_M - pad_z_m;
+    let v = SHOULDER_Z_M - grip_z_m;
     let cos_elbow = ((u * u + v * v - UPPER_M * UPPER_M - FORE_M * FORE_M)
         / (2.0 * UPPER_M * FORE_M))
         .clamp(-1.0, 1.0);
@@ -178,8 +237,23 @@ fn arm_pose(pad_x_m: f64, pad_y_m: f64, pad_z_m: f64) -> [f64; 4] {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Phase {
-    /// Walk to the doorway's centre line, then face the door.
+    /// Walk onto the knob's line, then face the door.
     Approach(usize),
+    /// Step to the distance the arm works the knob from.
+    SquareUp,
+    /// Standing: the open hand goes to just short of the knob, then around it.
+    ReachKnob,
+    InsertKnob,
+    /// Close the fingers; the knob is held once both are measured on it.
+    GraspKnob,
+    /// Roll the wrist until the latch is out.
+    TurnKnob,
+    /// Push on through the held knob so the leaf leaves its catch.
+    CrackDoor,
+    /// Open the hand and let the knob spring back.
+    ReleaseKnob,
+    /// Walk over to the doorway's centre line.
+    ToDoorway(usize),
     ReachOpen,
     PushOpen,
     /// Walk around the open leaf to the start of the closing line.
@@ -191,6 +265,21 @@ enum Phase {
     Nudge,
     StepBack,
     Done,
+}
+
+impl Phase {
+    /// Whether the hand is working the knob, standing.
+    fn works_knob(self) -> bool {
+        matches!(
+            self,
+            Phase::ReachKnob
+                | Phase::InsertKnob
+                | Phase::GraspKnob
+                | Phase::TurnKnob
+                | Phase::CrackDoor
+                | Phase::ReleaseKnob
+        )
+    }
 }
 
 struct Run {
@@ -206,20 +295,39 @@ struct Run {
     odom_at_frame_start: Pose2d,
     slam_pose: Pose2d,
     odom_at_slam: Pose2d,
+    slam_time_s: f64,
     phase: Phase,
     phase_start_s: f64,
     phase_log: Vec<(f64, Phase)>,
+    /// The knob centre the hand works on, in the world; fixed once it is held.
+    knob_target: Vec3,
+    /// Sideways and vertical correction of the grip target, in the base frame.
+    grip_correction: Vec3,
+    /// Wrist roll held once the latch is out.
+    held_roll_rad: f64,
+    /// Across the open fingers, in the world: the way the hand slides off.
+    slip_out: Vec3,
+    latched: bool,
+    unlatched_at_s: Option<f64>,
+    relatched_at_s: Option<f64>,
+    knob_max_rad: f64,
+    held_steps: u64,
+    held_dual_contact_steps: u64,
+    failure: Option<&'static str>,
     open_pose: [f64; 4],
     close_pose: [f64; 4],
     last_cloud: Option<PointCloud>,
     true_trail: Vec<[f64; 2]>,
     door_max_rad: f64,
     door_contact_steps: BTreeMap<&'static str, u64>,
+    knob_contact_steps: BTreeMap<&'static str, u64>,
     slam_error_sq: f64,
     slam_error_max_m: f64,
+    slam_error_max_at: (f64, Phase),
     error_samples: u64,
     min_clearance_m: f64,
     min_height_m: f64,
+    min_height_at: (f64, Phase),
     obstacles: Vec<StaticObject>,
 }
 
@@ -231,19 +339,33 @@ impl Run {
         .expect("load door scene");
         let trot = UnitreeGo2ModelTrot::stand_up(&mut sim).with_total_mass_kg(TOTAL_MASS_KG);
         // URDF robots share collision group 1 with self-collision filtered out,
-        // which would also keep the Go2 and the door from touching; the door gets
-        // its own group.
+        // which would also keep the Go2 and the door from touching. The leaf and
+        // the knob each get their own group, so the Go2 touches both while the
+        // knob, like the rest of one body, never touches its own leaf.
         assert!(sim.set_named_collision_groups(
             "door_leaf",
             CollisionGroups {
                 memberships: 2,
-                filter: u32::MAX,
+                filter: !4,
             },
         ));
-        // Stand-up sets every motor to hold position; the hinge must swing freely.
-        assert!(sim.configure_named_position_motor("door_leaf", 0.0, 0.0, 1.0e-9));
-        for (joint, effort) in ARM_JOINTS.iter().zip(ARM_EFFORT_NM) {
-            assert!(sim.configure_named_position_motor(joint, 60.0, 4.0, effort));
+        assert!(sim.set_named_collision_groups(
+            "door_knob",
+            CollisionGroups {
+                memberships: 4,
+                filter: !2,
+            },
+        ));
+        for name in FINGERS.into_iter().chain(["door_knob"]) {
+            assert!(sim.set_named_collider_friction(name, 1.0), "{name}");
+        }
+        // The knob's return spring; the latch holds the leaf shut.
+        assert!(sim.configure_named_position_motor("door_knob", 0.5, 0.02, 3.0));
+        set_latch(&mut sim, true);
+        set_arm_gains(&mut sim, ARM_WALK_GAINS.0, ARM_WALK_GAINS.1);
+        assert!(sim.configure_named_position_motor(ROLL_JOINT, 150.0, 6.0, ROLL_EFFORT_NM));
+        for finger in FINGERS {
+            assert!(sim.configure_named_position_motor(finger, 800.0, 20.0, 25.0));
         }
         let rig: LidarRigOcclusion = serde_json::from_str(
             &fs::read_to_string(repo_path(
@@ -277,26 +399,120 @@ impl Run {
             odom_at_frame_start: start,
             slam_pose: start,
             odom_at_slam: start,
+            slam_time_s: 0.0,
             phase: Phase::Approach(0),
             phase_start_s: 0.0,
             phase_log: Vec::new(),
+            knob_target: Vec3::ZERO,
+            grip_correction: Vec3::ZERO,
+            held_roll_rad: 0.0,
+            slip_out: Vec3::Y,
+            latched: true,
+            unlatched_at_s: None,
+            relatched_at_s: None,
+            knob_max_rad: 0.0,
+            held_steps: 0,
+            held_dual_contact_steps: 0,
+            failure: None,
             // Opening: 0.35 m left of the body, toward the hinge; closing: 0.4 m
-            // right. Both 0.55 m ahead at the push plate's height.
+            // right. Both 0.55 m ahead, 0.47 m above the floor.
             open_pose: arm_pose(0.55, 0.35, 0.17),
             close_pose: arm_pose(0.55, -0.40, 0.17),
             last_cloud: None,
             true_trail: Vec::new(),
             door_max_rad: 0.0,
             door_contact_steps: BTreeMap::new(),
+            knob_contact_steps: BTreeMap::new(),
             slam_error_sq: 0.0,
             slam_error_max_m: 0.0,
+            slam_error_max_at: (0.0, Phase::Approach(0)),
             error_samples: 0,
             min_clearance_m: f64::MAX,
             min_height_m: f64::MAX,
+            min_height_at: (0.0, Phase::Approach(0)),
             obstacles,
         };
         run.set_arm(STOW_POSE);
+        run.set_hand(0.0, FINGER_OPEN_M);
         run
+    }
+
+    fn set_hand(&mut self, roll: f64, fingers_m: f64) {
+        let mut targets = vec![UrdfJointPositionTarget {
+            link_name: ROLL_JOINT,
+            position: roll,
+        }];
+        targets.extend(FINGERS.map(|link_name| UrdfJointPositionTarget {
+            link_name,
+            position: fingers_m,
+        }));
+        self.sim.set_joint_position_targets(&targets);
+    }
+
+    fn knob_rad(&self) -> f64 {
+        self.sim
+            .named_joint_position("door_knob")
+            .unwrap_or(f64::NAN)
+    }
+
+    fn knob_held(&self) -> bool {
+        self.sim.named_child_is_welded("door_knob")
+    }
+
+    /// Room-A knob centre in the world. Read from the simulator while reaching,
+    /// standing in for the knob detection a camera on the arm would give.
+    fn knob_centre(&self) -> Vec3 {
+        let knob = self.sim.named_transform("door_knob").expect("knob pose");
+        knob.translation + knob.rotation * Vec3::from_array(KNOB_GRIP_LOCAL_M)
+    }
+
+    /// Level distance from the base to the room-A knob centre along the facing.
+    fn knob_ahead_m(&self) -> f64 {
+        let base = self.sim.named_transform("base").expect("base pose");
+        let facing = base.rotation * Vec3::X;
+        let level = Vec3::new(facing.x, 0.0, facing.z).normalize_or_zero();
+        (self.knob_centre() - base.translation).dot(level)
+    }
+
+    /// Middle of the fingers in the world, from the hand's pose.
+    fn grip_centre(&self) -> Vec3 {
+        let hand = self.sim.named_transform(ROLL_JOINT).expect("hand pose");
+        hand.translation + hand.rotation * Vec3::new(GRIP_FROM_HAND_M, 0.0, 0.0)
+    }
+
+    /// Sends the arm to put the middle of the fingers `push_m` beyond the knob
+    /// target along its spindle, level (negative: short of it), at wrist roll
+    /// `roll`. Along the body's own axis instead, a pitched body moved the hand
+    /// down onto the knob's neck as it drew back.
+    fn reach_knob(&mut self, push_m: f64, roll: f64, fingers_m: f64) {
+        self.reach_knob_offset(push_m, Vec3::ZERO, roll, fingers_m);
+    }
+
+    /// [`Self::reach_knob`], with the hand moved `offset` (world) off the knob
+    /// target.
+    fn reach_knob_offset(&mut self, push_m: f64, offset: Vec3, roll: f64, fingers_m: f64) {
+        let base = self.sim.named_transform("base").expect("base pose");
+        let spindle = self
+            .sim
+            .named_transform("door_knob")
+            .expect("knob pose")
+            .rotation
+            * Vec3::X;
+        let along = Vec3::new(spindle.x, 0.0, spindle.z).normalize_or_zero();
+        let world = self.knob_target + along * (push_m - GRIP_STANDOFF_M) + offset;
+        let target = base.rotation.inverse() * (world - base.translation) + self.grip_correction;
+        self.set_arm(arm_pose(target.x, target.y, target.z));
+        self.set_hand(roll, fingers_m);
+    }
+
+    /// Servo the grip target sideways and up onto the knob, from where the
+    /// fingers are; along the reach the palm must stop short of the knob or it
+    /// pushes the body back off its stance.
+    fn servo_grip(&mut self) {
+        let base = self.sim.named_transform("base").expect("base pose");
+        let error = base.rotation.inverse() * (self.knob_target - self.grip_centre());
+        self.grip_correction += Vec3::new(0.0, error.y, error.z) * 0.004;
+        self.grip_correction = self.grip_correction.clamp_length_max(0.05);
     }
 
     fn set_arm(&mut self, pose: [f64; 4]) {
@@ -351,6 +567,7 @@ impl Run {
         if self.slam.scans_processed() == 0
             || since_slam.x_m.hypot(since_slam.y_m) >= KEYFRAME_TRANSLATION_M
             || since_slam.yaw_rad.abs() >= KEYFRAME_ROTATION_RAD
+            || self.trot.time_s() - self.slam_time_s >= KEYFRAME_INTERVAL_S
         {
             self.process_keyframe(&scan);
         }
@@ -363,18 +580,30 @@ impl Run {
         let estimate = self.estimate();
         let error = (truth.x_m - estimate.x_m).hypot(truth.y_m - estimate.y_m);
         self.slam_error_sq += error * error;
-        self.slam_error_max_m = self.slam_error_max_m.max(error);
+        if error > self.slam_error_max_m {
+            self.slam_error_max_m = error;
+            self.slam_error_max_at = (self.trot.time_s(), self.phase);
+        }
         self.error_samples += 1;
     }
 
     fn process_keyframe(&mut self, scan: &LaserScan2d) {
         let sensor_from_base = Pose2d::new(UNITREE_GO2_MID360_FORWARD_OF_BASE_M, 0.0, 0.0);
+        let predicted = self.estimate();
         let update = self
             .slam
             .process(scan, self.odom, sensor_from_base)
             .expect("slam update");
-        self.slam_pose = update.pose;
+        // A weak match is more likely a wrong one: keep the odometry prediction.
+        let pose = if update.matched && update.match_score < MIN_MATCH_SCORE {
+            self.slam.set_pose(predicted);
+            predicted
+        } else {
+            update.pose
+        };
+        self.slam_pose = pose;
         self.odom_at_slam = self.odom;
+        self.slam_time_s = self.trot.time_s();
     }
 
     /// Turns a frame's returns into a 2D scan at the sensor's pose at the frame end.
@@ -437,28 +666,67 @@ impl Run {
     }
 
     fn step_control(&mut self) {
-        let command = self.door_controller();
-        self.trot.step(&mut self.sim, command);
+        match self.door_controller() {
+            Some(command) => self.trot.step(&mut self.sim, command),
+            // Working the knob: stand on all four feet, held in place.
+            None => self.trot.stand(&mut self.sim),
+        }
+        self.update_latch();
         self.integrate_odometry();
         let observed = self.sim.observe();
         if self.trot.steps().is_multiple_of(125) {
             self.true_trail.push([observed.base_x_m, observed.base_z_m]);
         }
-        self.min_height_m = self.min_height_m.min(observed.base_y_m);
+        if observed.base_y_m < self.min_height_m {
+            self.min_height_m = observed.base_y_m;
+            self.min_height_at = (self.trot.time_s(), self.phase);
+        }
         self.min_clearance_m = self.min_clearance_m.min(clearance_m(
             &self.obstacles,
             [observed.base_x_m, observed.base_z_m],
         ));
         self.door_max_rad = self.door_max_rad.max(self.door_rad());
+        self.knob_max_rad = self.knob_max_rad.max(self.knob_rad().abs());
         for link in ROBOT_LINKS {
             if self.sim.named_entities_in_contact("door_leaf", link) {
                 *self.door_contact_steps.entry(link).or_default() += 1;
             }
+            if self.sim.named_entities_in_contact("door_knob", link) {
+                *self.knob_contact_steps.entry(link).or_default() += 1;
+            }
+        }
+        if self.knob_held() {
+            self.held_steps += 1;
+            if FINGERS
+                .iter()
+                .all(|finger| self.sim.named_entities_in_contact(finger, "door_knob"))
+            {
+                self.held_dual_contact_steps += 1;
+            }
         }
     }
 
-    /// The door sequence, driven by the estimated pose alone.
-    fn door_controller(&mut self) -> UnitreeGo2TrotCommand {
+    /// The latch bolt: out while the knob is near rest, in once it turns past the
+    /// release angle, and out again, catching the leaf, when the leaf is back
+    /// shut with the knob at rest.
+    fn update_latch(&mut self) {
+        let (door, knob) = (self.door_rad(), self.knob_rad());
+        let t = self.trot.time_s();
+        if self.latched && knob.abs() > LATCH_RELEASE_KNOB_RAD {
+            self.latched = false;
+            self.unlatched_at_s.get_or_insert(t);
+            set_latch(&mut self.sim, false);
+        } else if !self.latched && door < LATCH_CATCH_DOOR_RAD && knob.abs() < LATCH_CATCH_KNOB_RAD
+        {
+            self.latched = true;
+            self.relatched_at_s = Some(t);
+            set_latch(&mut self.sim, true);
+        }
+    }
+
+    /// The door sequence. Walking runs on the estimated pose alone; working the
+    /// knob, the arm is aimed at the knob as seen from the body.
+    fn door_controller(&mut self) -> Option<UnitreeGo2TrotCommand> {
         let t = self.trot.time_s();
         let pose = self.estimate();
         let goto = |target: [f64; 2]| -> UnitreeGo2TrotCommand {
@@ -480,24 +748,62 @@ impl Run {
         let elapsed = t - self.phase_start_s;
         let (command, next) = match self.phase {
             Phase::Approach(index) => {
-                let waypoints = [[1.0, DOORWAY_CENTRE_Y], [1.35, DOORWAY_CENTRE_Y]];
+                let waypoints = [[1.0, KNOB_LINE_Y], [KNOB_STAND_X, KNOB_LINE_Y]];
                 match waypoints.get(index) {
                     Some(target) => (
-                        goto(*target),
-                        near(*target, 0.1).then_some(Phase::Approach(index + 1)),
+                        Some(goto(*target)),
+                        near(*target, 0.06).then_some(Phase::Approach(index + 1)),
                     ),
-                    None => (turn_to(0.0), aligned(0.0).then_some(Phase::ReachOpen)),
+                    None => (Some(turn_to(0.0)), aligned(0.0).then_some(Phase::SquareUp)),
                 }
             }
-            Phase::ReachOpen => (turn_to(0.0), (elapsed > 1.5).then_some(Phase::PushOpen)),
+            Phase::SquareUp => {
+                // Step forward or back until the knob, as seen from the body, is
+                // at the reach the arm turns it best from, and settle there.
+                let error = self.knob_ahead_m() - KNOB_REACH_M;
+                let observed = self.sim.observe();
+                let speed = observed
+                    .base_linear_velocity_x_m_s
+                    .hypot(observed.base_linear_velocity_z_m_s);
+                let settled = error.abs() < 0.025 && speed < 0.02;
+                (
+                    Some(UnitreeGo2TrotCommand {
+                        forward_speed_m_s: (2.5 * error).clamp(-0.06, 0.06),
+                        yaw_rate_rad_s: (1.5 * wrap_angle(-pose.yaw_rad)).clamp(-0.5, 0.5),
+                    }),
+                    (settled || elapsed > 10.0).then_some(Phase::ReachKnob),
+                )
+            }
+            Phase::ReachKnob
+            | Phase::InsertKnob
+            | Phase::GraspKnob
+            | Phase::TurnKnob
+            | Phase::CrackDoor
+            | Phase::ReleaseKnob => (None, self.work_knob(elapsed)),
+            Phase::ToDoorway(index) => {
+                // Turn about on the spot and walk over: the trot does not walk
+                // backward reliably.
+                let waypoints = [[1.5, DOORWAY_CENTRE_Y]];
+                match waypoints.get(index) {
+                    Some(target) => (
+                        Some(goto(*target)),
+                        near(*target, 0.1).then_some(Phase::ToDoorway(index + 1)),
+                    ),
+                    None => (Some(turn_to(0.0)), aligned(0.0).then_some(Phase::ReachOpen)),
+                }
+            }
+            Phase::ReachOpen => (
+                Some(turn_to(0.0)),
+                (elapsed > 1.5).then_some(Phase::PushOpen),
+            ),
             Phase::PushOpen => {
                 // Hold the doorway's centre line while walking through it.
                 let heading = (DOORWAY_CENTRE_Y - pose.y_m).clamp(-0.3, 0.3);
                 (
-                    UnitreeGo2TrotCommand {
+                    Some(UnitreeGo2TrotCommand {
                         forward_speed_m_s: PUSH_SPEED_M_S,
                         yaw_rate_rad_s: (1.5 * wrap_angle(heading - pose.yaw_rad)).clamp(-0.5, 0.5),
-                    },
+                    }),
                     (pose.x_m > HINGE_NAV[0] + 1.0).then_some(Phase::GoAround(0)),
                 )
             }
@@ -509,28 +815,28 @@ impl Run {
                 ];
                 match waypoints.get(index) {
                     Some(target) => (
-                        goto(*target),
+                        Some(goto(*target)),
                         near(*target, 0.12).then_some(Phase::GoAround(index + 1)),
                     ),
                     None => (
-                        turn_to(-FRAC_PI_2),
+                        Some(turn_to(-FRAC_PI_2)),
                         aligned(-FRAC_PI_2).then_some(Phase::ReachClose),
                     ),
                 }
             }
             Phase::ReachClose => (
-                turn_to(-FRAC_PI_2),
+                Some(turn_to(-FRAC_PI_2)),
                 (elapsed > 1.5).then_some(Phase::PushClose),
             ),
             Phase::PushClose => {
                 // Hold the closing line heading south.
                 let heading = -FRAC_PI_2 - (pose.x_m - CLOSING_LINE_X).clamp(-0.3, 0.3);
                 (
-                    UnitreeGo2TrotCommand {
+                    Some(UnitreeGo2TrotCommand {
                         forward_speed_m_s: CLOSE_SPEED_M_S,
                         yaw_rate_rad_s: (1.5 * wrap_angle(heading - pose.yaw_rad)).clamp(-0.5, 0.5),
-                    },
-                    (pose.y_m < -1.05).then_some(Phase::Nudge),
+                    }),
+                    (pose.y_m < NUDGE_AT_Y).then_some(Phase::Nudge),
                 )
             }
             Phase::Nudge => {
@@ -540,19 +846,30 @@ impl Run {
                     NUDGE_START_LATERAL_M + (NUDGE_END_LATERAL_M - NUDGE_START_LATERAL_M) * reach;
                 self.set_arm(arm_pose(0.0, lateral, 0.17));
                 (
-                    UnitreeGo2TrotCommand::default(),
+                    Some(UnitreeGo2TrotCommand::default()),
                     (elapsed > NUDGE_SETTLE_S + NUDGE_SWEEP_S + 1.0).then_some(Phase::StepBack),
                 )
             }
             Phase::StepBack => (
-                UnitreeGo2TrotCommand::default(),
+                Some(UnitreeGo2TrotCommand::default()),
                 (elapsed > 4.0).then_some(Phase::Done),
             ),
-            Phase::Done => (UnitreeGo2TrotCommand::default(), None),
+            Phase::Done => (Some(UnitreeGo2TrotCommand::default()), None),
         };
         if let Some(next) = next {
             match next {
-                Phase::ReachOpen => self.set_arm(self.open_pose),
+                Phase::ReachKnob => set_arm_gains(&mut self.sim, 150.0, 6.0),
+                // Held: the arm goes soft so it follows the knob instead of
+                // wrenching the body against the door; the roll does the work.
+                Phase::TurnKnob => set_arm_gains(&mut self.sim, 25.0, 2.0),
+                Phase::ToDoorway(0) => {
+                    set_arm_gains(&mut self.sim, ARM_WALK_GAINS.0, ARM_WALK_GAINS.1);
+                    self.set_arm(STOW_POSE);
+                }
+                Phase::ReachOpen => {
+                    self.set_arm(self.open_pose);
+                    self.set_hand(0.0, 0.0);
+                }
                 Phase::GoAround(0) | Phase::StepBack => self.set_arm(STOW_POSE),
                 Phase::ReachClose => self.set_arm(self.close_pose),
                 _ => {}
@@ -562,6 +879,106 @@ impl Run {
             self.phase_log.push((t, next));
         }
         command
+    }
+
+    /// Working the knob, standing: reach, grasp, turn, crack the door, let go.
+    /// Returns the next phase once this one is over.
+    fn work_knob(&mut self, elapsed: f64) -> Option<Phase> {
+        match self.phase {
+            Phase::ReachKnob => {
+                self.knob_target = self.knob_centre();
+                self.reach_knob(-PREGRASP_STANDOFF_M, 0.0, FINGER_OPEN_M);
+                (elapsed > 1.5).then_some(Phase::InsertKnob)
+            }
+            Phase::InsertKnob => {
+                self.knob_target = self.knob_centre();
+                self.servo_grip();
+                self.reach_knob(0.0, 0.0, FINGER_OPEN_M);
+                (elapsed > 1.5).then_some(Phase::GraspKnob)
+            }
+            Phase::GraspKnob => {
+                self.knob_target = self.knob_centre();
+                self.servo_grip();
+                self.reach_knob(0.0, 0.0, 0.0);
+                // Held where the fingers closed on it: the weld keeps the knob's
+                // pose relative to the hand as it was, so confirming the grasp
+                // moves nothing.
+                let held = elapsed > 0.6
+                    && self.sim.weld_named_child_on_dual_contact(
+                        ROLL_JOINT,
+                        FINGERS[0],
+                        FINGERS[1],
+                        "door_knob",
+                    );
+                if held {
+                    Some(Phase::TurnKnob)
+                } else if elapsed > 3.0 {
+                    self.failure = Some("the fingers never closed on the knob");
+                    Some(Phase::Done)
+                } else {
+                    None
+                }
+            }
+            Phase::TurnKnob => {
+                let roll = KNOB_TURN_RAD * (elapsed / 1.5).min(1.0);
+                self.reach_knob(0.0, roll, 0.0);
+                if !self.latched {
+                    // Hold the wrist where the latch let go: turning on drives
+                    // the knob into its stop and rolls the body instead.
+                    self.held_roll_rad = roll;
+                    Some(Phase::CrackDoor)
+                } else if elapsed > 4.0 {
+                    self.failure = Some("the latch never released");
+                    Some(Phase::Done)
+                } else {
+                    None
+                }
+            }
+            Phase::CrackDoor => {
+                // Push on through the knob as the leaf gives, whatever the body
+                // does, rather than toward a fixed point.
+                self.knob_target = self.knob_centre();
+                let push = CRACK_LEAD_M * (elapsed / 0.5).min(1.0);
+                self.reach_knob(push, self.held_roll_rad, 0.0);
+                if self.door_rad() > CRACK_OPEN_RAD {
+                    Some(Phase::ReleaseKnob)
+                } else if elapsed > 5.0 {
+                    self.failure = Some("the door never left its catch");
+                    Some(Phase::Done)
+                } else {
+                    None
+                }
+            }
+            Phase::ReleaseKnob => {
+                if self.knob_held() {
+                    self.sim.release_named_child("door_knob");
+                    self.knob_target = self.knob_centre();
+                    let hand = self.sim.named_transform(ROLL_JOINT).expect("hand pose");
+                    self.slip_out = hand.rotation * Vec3::Z;
+                    set_arm_gains(&mut self.sim, ARM_WALK_GAINS.0, ARM_WALK_GAINS.1);
+                }
+                // Let go gently: open the fingers where the hand is, slide the
+                // hand off the knob through the gap between the open fingers,
+                // and unwind the wrist only then. Unwound on the knob, a finger
+                // still touching it levered the body into a 40° roll; drawn back
+                // along the spindle, a fingertip caught behind the knob and
+                // pulled the leaf shut; lifted straight up with the wrist still
+                // turned, the lower finger jammed under the knob.
+                let slide = ((elapsed - 0.3) / 0.6).clamp(0.0, 1.0);
+                let unwind = ((elapsed - 0.9) / 0.5).clamp(0.0, 1.0);
+                // Clear of the knob, draw the hand straight back before the arm
+                // folds: folding from beside the knob swept the hand across it.
+                let back = ((elapsed - 1.4) / 0.6).clamp(0.0, 1.0);
+                self.reach_knob_offset(
+                    -0.15 * back,
+                    self.slip_out * (0.08 * slide),
+                    self.held_roll_rad * (1.0 - unwind),
+                    FINGER_OPEN_M,
+                );
+                (elapsed > 2.2).then_some(Phase::ToDoorway(0))
+            }
+            _ => None,
+        }
     }
 
     /// Leg odometry: the body's planar velocity and yaw rate with a scale error
@@ -587,8 +1004,52 @@ impl Run {
         self.odom = self.odom.compose(delta);
     }
 
+    /// Steps the hand touched the leaf, and every other link that did.
+    fn leaf_contacts(&self) -> (u64, Vec<&'static str>) {
+        let hand = HAND_LINKS
+            .iter()
+            .filter_map(|link| self.door_contact_steps.get(link))
+            .sum();
+        let other = self
+            .door_contact_steps
+            .keys()
+            .filter(|link| !HAND_LINKS.contains(link))
+            .copied()
+            .collect();
+        (hand, other)
+    }
+
+    /// Links other than the hand (palm and fingers) that touched the knob.
+    fn knob_other_contacts(&self) -> Vec<&'static str> {
+        self.knob_contact_steps
+            .keys()
+            .filter(|link| !HAND_LINKS.contains(link))
+            .copied()
+            .collect()
+    }
+
     fn slam_rms_m(&self) -> f64 {
         (self.slam_error_sq / self.error_samples.max(1) as f64).sqrt()
+    }
+}
+
+/// Engages or frees the latch. Engaged, it holds the leaf shut the way a latch
+/// bolt in its strike plate does; freed, the hinge swings on its own damping.
+fn set_latch(sim: &mut UrdfSceneSim, engaged: bool) {
+    if engaged {
+        assert!(sim.configure_named_position_motor("door_leaf", 3000.0, 50.0, 60.0));
+        sim.set_joint_position_targets(&[UrdfJointPositionTarget {
+            link_name: "door_leaf",
+            position: 0.0,
+        }]);
+    } else {
+        assert!(sim.configure_named_position_motor("door_leaf", 0.0, 0.0, 1.0e-9));
+    }
+}
+
+fn set_arm_gains(sim: &mut UrdfSceneSim, stiffness: f64, damping: f64) {
+    for (joint, effort) in ARM_JOINTS.iter().zip(ARM_EFFORT_NM) {
+        assert!(sim.configure_named_position_motor(joint, stiffness, damping, effort));
     }
 }
 
@@ -633,12 +1094,9 @@ fn run(mut on_frame: impl FnMut(&Run)) -> Run {
 
 fn report_and_gate(run: &Run) {
     let door_final = run.door_rad();
-    let pad_steps = run.door_contact_steps.get(PAD_LINK).copied().unwrap_or(0);
-    let other: Vec<_> = run
-        .door_contact_steps
-        .iter()
-        .filter(|(link, _)| **link != PAD_LINK)
-        .collect();
+    let (hand_steps, other_leaf) = run.leaf_contacts();
+    let other_knob = run.knob_other_contacts();
+    let hz = UNITREE_GO2_MODEL_TROT_CONTROL_HZ;
     println!(
         "phases: {}",
         run.phase_log
@@ -648,31 +1106,62 @@ fn report_and_gate(run: &Run) {
             .join(", ")
     );
     println!(
-        "door: opened to {:.3} rad ({:.0}°), left at {:.3} rad ({:.1}°); pad touched it for {:.1} s, other links {other:?}",
+        "knob: held {:.2} s with both fingers on it for {:.2} s, turned to {:.3} rad; unlatched at {:?} s, latched again at {:?} s; other links on it {other_knob:?}",
+        run.held_steps as f64 / hz,
+        run.held_dual_contact_steps as f64 / hz,
+        run.knob_max_rad,
+        run.unlatched_at_s.map(|t| (t * 10.0).round() / 10.0),
+        run.relatched_at_s.map(|t| (t * 10.0).round() / 10.0),
+    );
+    println!(
+        "door: opened to {:.3} rad ({:.0}°), left at {:.3} rad ({:.1}°), latched {}; hand touched it for {:.1} s, other links {other_leaf:?}",
         run.door_max_rad,
         run.door_max_rad.to_degrees(),
         door_final,
         door_final.to_degrees(),
-        pad_steps as f64 / UNITREE_GO2_MODEL_TROT_CONTROL_HZ
+        run.latched,
+        hand_steps as f64 / hz
     );
     println!(
-        "robot: done in {:.1} s, clearance >= {:.2} m, lowest body {:.3} m; localization {:.3} m RMS ({:.3} max)",
+        "robot: done in {:.1} s, clearance >= {:.2} m, lowest body {:.3} m (at {:.1} s, {:?}); localization {:.3} m RMS ({:.3} max, at {:.1} s, {:?})",
         run.trot.time_s(),
         run.min_clearance_m,
         run.min_height_m,
+        run.min_height_at.0,
+        run.min_height_at.1,
         run.slam_rms_m(),
-        run.slam_error_max_m
+        run.slam_error_max_m,
+        run.slam_error_max_at.0,
+        run.slam_error_max_at.1,
     );
+    assert_eq!(run.failure, None, "the sequence failed");
     assert_eq!(run.phase, Phase::Done, "the sequence did not finish");
+    assert!(run.held_steps > 0, "the knob was never held");
+    assert_eq!(
+        run.held_dual_contact_steps, run.held_steps,
+        "a finger left the knob while it was held"
+    );
+    assert!(
+        run.knob_max_rad > LATCH_RELEASE_KNOB_RAD,
+        "knob turned only {:.3} rad",
+        run.knob_max_rad
+    );
+    assert!(
+        other_knob.is_empty(),
+        "other links touched the knob: {other_knob:?}"
+    );
     assert!(
         run.door_max_rad > 1.4,
         "door opened only {:.3} rad",
         run.door_max_rad
     );
-    // Measured 0.000 rad: the nudge presses the leaf against its stop.
+    assert!(run.latched, "the latch did not catch at the end");
     assert!(door_final < 0.02, "door left open at {door_final:.3} rad");
-    assert!(pad_steps > 0, "the pad never touched the door");
-    assert!(other.is_empty(), "other links touched the door: {other:?}");
+    assert!(hand_steps > 0, "the hand never touched the door");
+    assert!(
+        other_leaf.is_empty(),
+        "other links touched the door: {other_leaf:?}"
+    );
     assert!(
         run.min_height_m > 0.2,
         "the walk sagged: {:.3} m",
@@ -762,47 +1251,26 @@ fn capture_showcase() {
         pitch_rad: 0.72,
         distance_m: 5.2,
     };
+    // Close by the knob, from the doorway side, without the scan.
+    let knob_view = CameraOrbit {
+        focus: Vec3::new(2.33, 0.55, 1.03),
+        yaw_rad: -2.1,
+        pitch_rad: 1.12,
+        distance_m: 0.85,
+    };
     // A headless run first: the capture must replay it exactly.
     let headless = run(|_| {});
     report_and_gate(&headless);
     let headless_digest = state_digest(&headless);
     let initial_digest = state_digest(&Run::new());
 
-    let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
-    let camera = Camera::new(WIDTH, HEIGHT, std::f64::consts::FRAC_PI_4);
-    let mut mesh_cache = MeshRenderCache::new();
-    let interior = Interior::new(two_room_floors());
     let frames_dir = repo_path("target/rne-showcase-go2-door");
-    let _ = fs::remove_dir_all(&frames_dir);
-    fs::create_dir_all(&frames_dir).expect("create frame directory");
-    let mut hashes = Vec::new();
-    let mut sampled_sim_steps = Vec::new();
-    let mut sampled_phases = Vec::new();
-    let captured = run(|run| {
-        if !run
-            .frame_index
-            .is_multiple_of(SHOWCASE_LIDAR_FRAMES_PER_GIF_FRAME)
-            || hashes.len() >= SHOWCASE_FRAMES
-        {
-            return;
-        }
-        let rgba = render_frame(
-            &mut backend,
-            &camera,
-            &mut mesh_cache,
-            &interior,
-            run,
-            &view,
-        );
-        write_png(
-            &frames_dir.join(format!("frame-{:03}.png", hashes.len())),
-            &rgba,
-        )
-        .expect("write frame");
-        hashes.push(hash_rgba(&rgba));
-        sampled_sim_steps.push(run.trot.steps());
-        sampled_phases.push(format!("{:?}", run.phase));
-    });
+    let (captured, frames) = capture_frames(&frames_dir, &view, &knob_view);
+    let Frames {
+        hashes,
+        sampled_sim_steps,
+        sampled_phases,
+    } = frames;
     report_and_gate(&captured);
     let final_digest = state_digest(&captured);
     assert_eq!(
@@ -819,19 +1287,14 @@ fn capture_showcase() {
     let media_dir = repo_path("docs/media");
     let gif_path = media_dir.join("showcase-go2-door.gif");
     let poster_path = media_dir.join("showcase-go2-door.png");
-    let ffmpeg_filter = format!(
-        "split[a][b];[a]palettegen=max_colors={SHOWCASE_COLORS}:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle"
-    );
-    let status = std::process::Command::new("ffmpeg")
-        .args(["-y", "-loglevel", "error", "-framerate", "6", "-i"])
-        .arg(frames_dir.join("frame-%03d.png"))
-        .args(["-vf", &ffmpeg_filter])
-        .arg(&gif_path)
-        .status()
-        .expect("run ffmpeg");
-    assert!(status.success(), "ffmpeg gif encode failed");
+    let ffmpeg_filter = encode_gif(&frames_dir, &gif_path);
+    // The poster: the hand pushing through the turned knob.
+    let poster_frame = sampled_phases
+        .iter()
+        .position(|phase| phase == "CrackDoor")
+        .expect("a frame of the knob held turned");
     fs::copy(
-        frames_dir.join(format!("frame-{SHOWCASE_POSTER_FRAME:03}.png")),
+        frames_dir.join(format!("frame-{poster_frame:03}.png")),
         &poster_path,
     )
     .expect("write poster");
@@ -841,22 +1304,25 @@ fn capture_showcase() {
         "kind": "rne_showcase_environment_metadata",
         "schema_version": 1,
         "environment_id": "go2-door",
-        "subject": "Go2 with an arm pushing a swing door open, walking through, and shutting it, steered by Mid-360 localization",
-        "visual_state_sync": "The Go2, its arm, and the door leaf are drawn from the solved simulation poses each frame. The door is a separate articulated body on a damped hinge moved only by contact; the Mid-360 returns drawn are that frame's scan, and the yellow trail is the robot's true path.",
+        "subject": "Go2 with an arm turning a door knob, pushing the door open, walking through, and shutting it until the latch catches, steered by Mid-360 localization",
+        "visual_state_sync": "The Go2, its arm and gripper, the door leaf, and the knob are drawn from the solved simulation poses each frame. The door is a separate articulated body on a damped hinge; the knob is welded to the hand only while both fingers are measured on it. Room-view frames show that frame's Mid-360 scan and the robot's true path (yellow); close-up frames while the hand works the knob omit the scan.",
         "simulation": {
-            "scenario": "Go2 door push open, pass, and push shut (examples/132_go2_door)",
+            "scenario": "Go2 turns the knob, pushes the door open, passes, and pushes it shut until the latch catches (examples/132_go2_door)",
             "steps": captured.trot.steps(),
             "initial_state_digest": initial_digest,
             "final_state_digest": final_digest,
             "replay_final_state_digest": headless_digest,
             "replay_match": final_digest == headless_digest,
             "outcome": format!(
-                "door_max_rad={:.3}; door_final_rad={:.3}; pad_contact_s={:.1}; other_link_contacts={}; localization_rms_m={:.3}; min_clearance_m={:.2}; lowest_body_m={:.3}",
+                "knob_held_s={:.2}; knob_held_dual_contact_s={:.2}; knob_max_rad={:.3}; door_max_rad={:.3}; door_final_rad={:.3}; latched_at_end={}; hand_contact_s={:.1}; other_link_contacts={}; localization_rms_m={:.3}; min_clearance_m={:.2}; lowest_body_m={:.3}",
+                captured.held_steps as f64 / UNITREE_GO2_MODEL_TROT_CONTROL_HZ,
+                captured.held_dual_contact_steps as f64 / UNITREE_GO2_MODEL_TROT_CONTROL_HZ,
+                captured.knob_max_rad,
                 captured.door_max_rad,
                 door_final,
-                captured.door_contact_steps.get(PAD_LINK).copied().unwrap_or(0) as f64
-                    / UNITREE_GO2_MODEL_TROT_CONTROL_HZ,
-                captured.door_contact_steps.iter().filter(|(link, _)| **link != PAD_LINK).count(),
+                captured.latched,
+                captured.leaf_contacts().0 as f64 / UNITREE_GO2_MODEL_TROT_CONTROL_HZ,
+                captured.leaf_contacts().1.len() + captured.knob_other_contacts().len(),
                 captured.slam_rms_m(),
                 captured.min_clearance_m,
                 captured.min_height_m
@@ -874,7 +1340,7 @@ fn capture_showcase() {
             "poster_path": "docs/media/showcase-go2-door.png",
             "poster_bytes": fs::metadata(&poster_path).expect("poster").len(),
             "poster_sha256": sha256_file(&poster_path),
-            "poster_frame": SHOWCASE_POSTER_FRAME,
+            "poster_frame": poster_frame,
             "sampled_sim_steps": sampled_sim_steps,
             "sampled_phases": sampled_phases,
             "unique_render_hashes": unique_render_hashes,
@@ -886,6 +1352,12 @@ fn capture_showcase() {
             "yaw_rad": view.yaw_rad,
             "pitch_rad": view.pitch_rad,
             "distance_m": view.distance_m,
+            "knob_close_up": {
+                "focus": knob_view.focus.to_array(),
+                "yaw_rad": knob_view.yaw_rad,
+                "pitch_rad": knob_view.pitch_rad,
+                "distance_m": knob_view.distance_m,
+            },
         },
         "provenance": [
             "assets/scenes/unitree_go2_door.rne.scene.toml",
@@ -909,6 +1381,85 @@ fn capture_showcase() {
     );
 }
 
+/// The rendered frames' hashes, simulation steps, and phases.
+struct Frames {
+    hashes: Vec<u64>,
+    sampled_sim_steps: Vec<u64>,
+    sampled_phases: Vec<String>,
+}
+
+/// Runs the sequence, rendering a frame every
+/// [`SHOWCASE_LIDAR_FRAMES_PER_GIF_FRAME`] Mid-360 frames from `view`, and every
+/// [`SHOWCASE_LIDAR_FRAMES_PER_KNOB_FRAME`] from `knob_view` while the hand works
+/// the knob.
+fn capture_frames(frames_dir: &Path, view: &CameraOrbit, knob_view: &CameraOrbit) -> (Run, Frames) {
+    let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
+    let camera = Camera::new(WIDTH, HEIGHT, std::f64::consts::FRAC_PI_4);
+    let mut mesh_cache = MeshRenderCache::new();
+    let interior = Interior::new(two_room_floors());
+    let _ = fs::remove_dir_all(frames_dir);
+    fs::create_dir_all(frames_dir).expect("create frame directory");
+    let mut hashes = Vec::new();
+    let mut sampled_sim_steps = Vec::new();
+    let mut sampled_phases = Vec::new();
+    let mut last_frame: Option<u64> = None;
+    let captured = run(|run| {
+        let at_knob = run.phase.works_knob();
+        let every = if at_knob {
+            SHOWCASE_LIDAR_FRAMES_PER_KNOB_FRAME
+        } else {
+            SHOWCASE_LIDAR_FRAMES_PER_GIF_FRAME
+        };
+        if last_frame.is_some_and(|last| run.frame_index < last + every)
+            || hashes.len() >= SHOWCASE_FRAMES
+        {
+            return;
+        }
+        last_frame = Some(run.frame_index);
+        let rgba = render_frame(
+            &mut backend,
+            &camera,
+            &mut mesh_cache,
+            &interior,
+            run,
+            if at_knob { knob_view } else { view },
+            !at_knob,
+        );
+        write_png(
+            &frames_dir.join(format!("frame-{:03}.png", hashes.len())),
+            &rgba,
+        )
+        .expect("write frame");
+        hashes.push(hash_rgba(&rgba));
+        sampled_sim_steps.push(run.trot.steps());
+        sampled_phases.push(format!("{:?}", run.phase));
+    });
+    (
+        captured,
+        Frames {
+            hashes,
+            sampled_sim_steps,
+            sampled_phases,
+        },
+    )
+}
+
+/// Encodes the numbered frames into the GIF at 6 fps; returns the ffmpeg filter.
+fn encode_gif(frames_dir: &Path, gif_path: &Path) -> String {
+    let ffmpeg_filter = format!(
+        "split[a][b];[a]palettegen=max_colors={SHOWCASE_COLORS}:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle"
+    );
+    let status = std::process::Command::new("ffmpeg")
+        .args(["-y", "-loglevel", "error", "-framerate", "6", "-i"])
+        .arg(frames_dir.join("frame-%03d.png"))
+        .args(["-vf", &ffmpeg_filter])
+        .arg(gif_path)
+        .status()
+        .expect("run ffmpeg");
+    assert!(status.success(), "ffmpeg gif encode failed");
+    ffmpeg_filter
+}
+
 fn render_frame(
     backend: &mut WgpuRenderBackend,
     camera: &Camera,
@@ -916,6 +1467,7 @@ fn render_frame(
     interior: &Interior,
     run: &Run,
     view: &CameraOrbit,
+    show_scan: bool,
 ) -> Vec<u8> {
     let mut scene = build_visual_render_scene(run.sim.world());
     interior.decorate(&mut scene, run.sim.world(), DecorOptions::default());
@@ -928,7 +1480,7 @@ fn render_frame(
         );
     }
     push_mesh(&mut scene, trail, [0.98, 0.84, 0.25, 1.0]);
-    if let Some(cloud) = &run.last_cloud {
+    if let Some(cloud) = run.last_cloud.as_ref().filter(|_| show_scan) {
         append_height_colored_points(&mut scene, cloud);
     }
     // The Mid-360 itself, hanging upside down from its mount.

@@ -73,6 +73,10 @@ struct RapierWorldState {
     collider_to_entity: HashMap<ColliderHandle, Entity>,
     entity_to_joint: HashMap<Entity, ImpulseJointHandle>,
     entity_to_multibody_joint: HashMap<Entity, MultibodyJointHandle>,
+    /// Welds on articulated links: a [`FixedJointDesc`] on an entity whose own
+    /// articulation joint is revolute or prismatic becomes an extra impulse joint,
+    /// closing a loop, while the articulation joint keeps its coordinate.
+    entity_to_attachment: HashMap<Entity, ImpulseJointHandle>,
     contacts: Vec<ContactEvent>,
     contact_points: Vec<ContactPointSample>,
     /// Bodies carrying a one-step disturbance force, cleared after the next step.
@@ -319,6 +323,7 @@ impl PhysicsBackend for RapierBackend {
                 collider_to_entity: HashMap::new(),
                 entity_to_joint: HashMap::new(),
                 entity_to_multibody_joint: HashMap::new(),
+                entity_to_attachment: HashMap::new(),
                 contacts: Vec::new(),
                 contact_points: Vec::new(),
                 impulse_forced: Vec::new(),
@@ -672,7 +677,12 @@ impl PhysicsBackend for RapierBackend {
         let joint_states = joint_entities
             .into_iter()
             .filter_map(|entity| {
-                if world.get::<FixedJointDesc>(entity).is_some() {
+                // A weld on an articulated revolute or prismatic link leaves its
+                // coordinate measurable; only a joint that is fixed itself reports
+                // `Fixed`.
+                if world.get::<FixedJointDesc>(entity).is_some()
+                    && !has_articulated_coordinate(world, entity)
+                {
                     return Some((entity, JointState::Fixed));
                 }
                 let (position, velocity) = multibody_joint_coordinate(state, entity)?;
@@ -964,6 +974,31 @@ fn motor_axis_for_entity(world: &World, entity: Entity) -> Option<JointAxis> {
     }
 }
 
+/// Returns true when the entity's own joint is a revolute or prismatic joint.
+fn has_articulated_coordinate(world: &World, entity: Entity) -> bool {
+    world.get::<RevoluteJointDesc>(entity).is_some()
+        || world.get::<PrismaticJointDesc>(entity).is_some()
+}
+
+/// Builds a fixed joint holding the child at the described relative pose: the
+/// parent frame carries the relative rotation, the child frame is the identity at
+/// its anchor.
+fn fixed_joint_from_desc(desc: &FixedJointDesc) -> GenericJoint {
+    let frame1 = Isometry::from_parts(
+        Translation3::from(vec3_to_rapier(desc.anchor_parent_m)),
+        quat_to_rapier(desc.relative_rotation),
+    );
+    let frame2 = Isometry::from_parts(
+        Translation3::from(vec3_to_rapier(desc.anchor_child_m)),
+        UnitQuaternion::identity(),
+    );
+    FixedJointBuilder::new()
+        .local_frame1(frame1)
+        .local_frame2(frame2)
+        .build()
+        .into()
+}
+
 /// Returns true when the entity still carries any joint description component.
 fn has_joint_desc(world: &World, entity: Entity) -> bool {
     world.get::<RevoluteJointDesc>(entity).is_some()
@@ -1057,21 +1092,7 @@ fn sync_joints_from_ecs(world: &World, state: &mut RapierWorldState) -> Result<(
                 Some(JointAxis::LinX),
             )
         } else if let Some(desc) = world.get::<FixedJointDesc>(entity) {
-            // Lock the child at its current relative pose: parent frame carries the
-            // relative rotation, child frame is the identity at its anchor.
-            let frame1 = Isometry::from_parts(
-                Translation3::from(vec3_to_rapier(desc.anchor_parent_m)),
-                quat_to_rapier(desc.relative_rotation),
-            );
-            let frame2 = Isometry::from_parts(
-                Translation3::from(vec3_to_rapier(desc.anchor_child_m)),
-                UnitQuaternion::identity(),
-            );
-            let joint = FixedJointBuilder::new()
-                .local_frame1(frame1)
-                .local_frame2(frame2)
-                .build();
-            (desc.parent, GenericJoint::from(joint), None)
+            (desc.parent, fixed_joint_from_desc(desc), None)
         } else {
             continue;
         };
@@ -1115,7 +1136,46 @@ fn sync_joints_from_ecs(world: &World, state: &mut RapierWorldState) -> Result<(
         state.entity_to_joint.insert(entity, handle);
     }
 
+    sync_attachments_from_ecs(world, state);
     Ok(())
+}
+
+/// Creates and releases welds on articulated revolute and prismatic links.
+fn sync_attachments_from_ecs(world: &World, state: &mut RapierWorldState) {
+    let mut released: Vec<Entity> = state
+        .entity_to_attachment
+        .keys()
+        .copied()
+        .filter(|entity| world.get::<FixedJointDesc>(*entity).is_none())
+        .collect();
+    released.sort_unstable();
+    for entity in released {
+        if let Some(handle) = state.entity_to_attachment.remove(&entity) {
+            state.impulse_joints.remove(handle, true);
+        }
+    }
+    for entity in sorted_entities(world) {
+        if state.entity_to_attachment.contains_key(&entity)
+            || !state.entity_to_multibody_joint.contains_key(&entity)
+            || !has_articulated_coordinate(world, entity)
+        {
+            continue;
+        }
+        let Some(desc) = world.get::<FixedJointDesc>(entity) else {
+            continue;
+        };
+        let (Some(parent_body), Some(child_body)) = (
+            state.entity_to_body.get(&desc.parent).copied(),
+            state.entity_to_body.get(&entity).copied(),
+        ) else {
+            continue;
+        };
+        let handle =
+            state
+                .impulse_joints
+                .insert(parent_body, child_body, fixed_joint_from_desc(desc), true);
+        state.entity_to_attachment.insert(entity, handle);
+    }
 }
 
 fn apply_joint_motors(world: &World, state: &mut RapierWorldState) -> Result<(), PhysicsError> {
@@ -2676,6 +2736,103 @@ mod tests {
 
         // Doubling the force must increase the response.
         assert!(pendulum_swing_m(true, 20.0) > multibody + 0.05);
+    }
+
+    /// Pushes the pendulum of [`pendulum_swing_m`] (multibody, hinged about z one
+    /// meter above the link) sideways, optionally welded to a fixed "hand" at the
+    /// hinge point, and returns the link's x displacement.
+    fn welded_pendulum_swing_m(welded: bool) -> f64 {
+        let mut backend = RapierBackend::new();
+        let id = backend
+            .create_world(PhysicsWorldDesc {
+                gravity_m_s2: Vec3::ZERO,
+                ..PhysicsWorldDesc::default()
+            })
+            .unwrap();
+        let mut world = World::new();
+        let anchor = spawn_named(&mut world, "anchor");
+        world.entity_mut(anchor).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            Collider::cuboid(Vec3::splat(0.05)),
+            MultibodyLink,
+            Transform3::from_translation_rotation(Vec3::new(0.0, 3.0, 0.0), Quat::IDENTITY),
+        ));
+        let hand = spawn_named(&mut world, "hand");
+        world.entity_mut(hand).insert((
+            RigidBody {
+                body_type: RigidBodyType::Fixed,
+                ..RigidBody::default()
+            },
+            // Behind the hinge, out of the link's way.
+            Collider::sphere(0.02),
+            Transform3::from_translation_rotation(Vec3::new(0.0, 2.0, -0.5), Quat::IDENTITY),
+        ));
+        let link = spawn_named(&mut world, "link");
+        world.entity_mut(link).insert((
+            RigidBody {
+                mass_kg: 1.0,
+                ..RigidBody::default()
+            },
+            Collider::cuboid(Vec3::splat(0.1)),
+            MultibodyLink,
+            Transform3::from_translation_rotation(Vec3::new(0.0, 1.0, 0.0), Quat::IDENTITY),
+            RevoluteJointDesc {
+                parent: anchor,
+                axis: Vec3::Z,
+                anchor_parent_m: Vec3::new(0.0, -1.0, 0.0),
+                anchor_child_m: Vec3::new(0.0, 1.0, 0.0),
+                relative_rotation: Quat::IDENTITY,
+                lower_rad: None,
+                upper_rad: None,
+            },
+        ));
+        // The articulation exists before the weld, as when a gripper closes on
+        // a knob.
+        backend.sync_from_ecs(&mut world, id).unwrap();
+        if welded {
+            // At the hinge point, one meter below the anchor: the hand holds
+            // the link where the hinge already pins it.
+            world.entity_mut(link).insert(FixedJointDesc {
+                parent: hand,
+                anchor_parent_m: Vec3::new(0.0, 0.0, 0.5),
+                anchor_child_m: Vec3::new(0.0, 1.0, 0.0),
+                relative_rotation: Quat::IDENTITY,
+            });
+        }
+        for _ in 0..60 {
+            backend.sync_from_ecs(&mut world, id).unwrap();
+            let point_world_m = world_transform_of(&world, link).translation;
+            backend
+                .apply_external_body_wrench(
+                    id,
+                    ExternalBodyWrench {
+                        entity: link,
+                        point_world_m,
+                        force_world_n: Vec3::new(10.0, 0.0, 0.0),
+                        torque_world_nm: Vec3::ZERO,
+                    },
+                )
+                .unwrap();
+            backend.step(id, fixed_step()).unwrap();
+            backend.sync_to_ecs(&mut world, id).unwrap();
+        }
+        world.get::<Transform3>(link).unwrap().translation.x
+    }
+
+    #[test]
+    fn weld_holds_an_articulated_link_against_its_own_joint() {
+        // A link on a multibody joint already has that joint; the weld is added
+        // as a separate loop-closing constraint, so it holds the link still.
+        let free = welded_pendulum_swing_m(false);
+        let welded = welded_pendulum_swing_m(true);
+        assert!(free > 0.05, "the unwelded pendulum should swing: {free}");
+        assert!(
+            welded.abs() < 0.01,
+            "the weld should hold the link on its hinge: {welded}"
+        );
     }
 
     #[test]

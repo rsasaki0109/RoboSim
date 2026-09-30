@@ -49,10 +49,10 @@ camera state; gates and regeneration commands are in
     <td width="50%" align="center">
       <picture>
         <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-go2-door.png">
-        <img src="docs/media/showcase-go2-door.gif" alt="A Unitree Go2 with an arm on its back pushes a swing door open with the pad on its arm, walks through the doorway, walks around the open door and pushes it shut from the other side, with its Livox Mid-360 returns drawn coloured by height" width="460">
+        <img src="docs/media/showcase-go2-door.gif" alt="A Unitree Go2 with an arm on its back grips and turns a door knob, pushes the swing door open, walks through the doorway, walks around the open door and pushes it shut from the other side, with its Livox Mid-360 returns drawn coloured by height and a close-up of the gripper on the knob" width="460">
       </picture>
-      <br><b>Go2 · door with an arm</b><br>
-      <sub>The Go2 pushes a free-swinging 6 kg door open with the pad on its arm, walks through, and pushes it back against its stop; the pad is the only part of the robot that ever touches the door. It steers only on its own Livox Mid-360 localization (0.08 m RMS), with the sensor model fitted to real Go2 recordings. <a href="docs/media/showcase-go2-door.json">metadata</a> · <a href="docs/GO2_DOOR.md">details</a></sub>
+      <br><b>Go2 · turns a door knob</b><br>
+      <sub>The Go2 grips the door's round knob with both fingers, turns it until the latch lets go, pushes the 6 kg door open, walks through, and pushes it shut until the latch catches; the hand is the only part of the robot that touches the door. It steers only on its own Livox Mid-360 localization (0.06 m RMS), with the sensor model fitted to real Go2 recordings. <a href="docs/media/showcase-go2-door.json">metadata</a> · <a href="docs/GO2_DOOR.md">details</a></sub>
     </td>
     <td width="50%" align="center">
       <picture>
@@ -184,15 +184,17 @@ throughout: it moves 0.038 m on the tines across the whole carry.
 <p align="center">
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-go2-door.png">
-    <img src="docs/media/showcase-go2-door.gif" alt="A Unitree Go2 with an arm on its back pushes a swing door open with the pad on its arm, walks through the doorway, walks around the open door and pushes it shut from the other side, with its Livox Mid-360 returns drawn coloured by height" width="820">
+    <img src="docs/media/showcase-go2-door.gif" alt="A Unitree Go2 with an arm on its back grips and turns a door knob, pushes the swing door open, walks through the doorway, walks around the open door and pushes it shut from the other side, with its Livox Mid-360 returns drawn coloured by height and a close-up of the gripper on the knob" width="820">
   </picture>
 </p>
 
-With an arm on its back, the Go2 walks through a swing door and shuts it
-behind itself. Nothing holds or drives the 6 kg door: the pad on the arm
-pushes it open to 87° and back against its stop, and no other part of the
-robot ever touches it. Every command comes from its own Livox Mid-360
-localization (0.081 m RMS), with the sensor model fitted to real Go2
+With an arm on its back, the Go2 opens a latched swing door by its knob,
+walks through, and shuts it behind itself. It closes a two-finger gripper on
+the round knob, holds it only while both fingers are measured on it, and turns
+it with its wrist until the latch lets go; then it pushes the 6 kg door open to
+86° and back shut until the latch catches, and no part of the robot but the
+hand ever touches the door. Every walking command comes from its own Livox
+Mid-360 localization (0.058 m RMS), with the sensor model fitted to real Go2
 recordings. [docs/GO2_DOOR.md](docs/GO2_DOOR.md) ·
 [source](examples/132_go2_door/main.rs)
 

@@ -71,15 +71,15 @@ provenance = ["assets/scenes/unitree_g1_factory.rne.scene.toml", "assets/robots/
 
 [[media]]
 id = "go2-door"
-label = "Go2 door with arm"
+label = "Go2 turns a door knob"
 gif = "docs/media/showcase-go2-door.gif"
 poster = "docs/media/showcase-go2-door.png"
 readme_gif = "docs/media/showcase-go2-door.gif"
 readme_poster = "docs/media/showcase-go2-door.png"
-gif_bytes = 1509699
-poster_bytes = 527022
-gif_sha256 = "sha256:952b0112c5a00f6fcc8f514a19d8615011c98c04bac95e44d6ba815e63261b8e"
-poster_sha256 = "sha256:0bb4a4bd2c9ded82576a373cc2997c3d5a70b9f889fc1e08e570c8ac22f6d6d4"
+gif_bytes = 1247917
+poster_bytes = 124167
+gif_sha256 = "sha256:ee30f974fc49b3cdb53362a2fdf17cd6d06ef7f2fbc7e6c06213dfa630693f54"
+poster_sha256 = "sha256:12ba0c90b4545530fcae1be669f80bf17eafa2a1efadb015a50b44daba581015"
 poster_width = 960
 poster_height = 540
 smoke_command = "cargo run --locked -p go2_door --example 132_go2_door -- --smoke"
