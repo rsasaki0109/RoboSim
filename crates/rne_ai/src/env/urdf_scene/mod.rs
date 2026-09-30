@@ -2,6 +2,7 @@
 
 mod humanoid_episode;
 mod lekiwi_drive;
+mod lidar;
 mod quadruped;
 mod quadruped_episode;
 mod unitree_g1_commanded_gait;
@@ -18,6 +19,7 @@ mod unitree_g1_parts_episode;
 mod unitree_g1_workbench_mission;
 mod unitree_go2_episode;
 mod unitree_go2_gait;
+mod unitree_go2_model_trot;
 mod vectorized;
 
 pub use humanoid_episode::{
@@ -27,6 +29,10 @@ pub use lekiwi_drive::{
     lekiwi_twist_to_wheel_velocities, lekiwi_wheel_command_to_motor_rad_s, UrdfKiwiAction,
     LEKIWI_DRIVE_WHEEL_LINKS, LEKIWI_WHEEL_AZIMUTH_RAD, LEKIWI_WHEEL_JOINT_SIGN,
     LEKIWI_WHEEL_PIVOT_RADIUS_M, LEKIWI_WHEEL_RADIUS_M,
+};
+pub use lidar::{
+    unitree_go2_mid360_mount, UNITREE_GO2_MID360_FORWARD_OF_BASE_M,
+    UNITREE_GO2_MID360_HEIGHT_ABOVE_BASE_M,
 };
 pub use quadruped::{quadruped_trot_targets, QUADRUPED_FOOT_LINKS};
 pub use quadruped_episode::{
@@ -95,6 +101,9 @@ pub use unitree_go2_gait::{
     UnitreeGo2PureTorquePolicy, UnitreeGo2TerrainObservation, UnitreeGo2TorqueOverlay,
     UnitreeGo2TorquePolicy, UnitreeGo2VelocityCommand, UnitreeGo2VelocityPolicyConfig,
     UnitreeGo2VelocityPolicyInput, UNITREE_GO2_POLICY_FEATURES, UNITREE_GO2_PURE_TORQUE_PHASE_BINS,
+};
+pub use unitree_go2_model_trot::{
+    UnitreeGo2ModelTrot, UnitreeGo2TrotCommand, UNITREE_GO2_MODEL_TROT_CONTROL_HZ,
 };
 pub use vectorized::{
     VectorizedUnitreeG1GaitCheckpoint, VectorizedUnitreeG1GaitConfig, VectorizedUnitreeG1GaitEnv,

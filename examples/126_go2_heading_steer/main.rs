@@ -9,8 +9,8 @@
 //! the thigh angle, and on the Go2 a higher thigh angle puts the foot further
 //! back), and the thigh-torque channel turns it by at most 0.3 rad.
 //!
-//! So this is a controller of the kind Pinocchio-based quadruped stacks run,
-//! at 500 Hz on joint torques:
+//! So this runs `rne_ai::UnitreeGo2ModelTrot`, a controller of the kind
+//! Pinocchio-based quadruped stacks run, at 500 Hz on joint torques:
 //!
 //! * **Kinematics.** Each leg's joint origins and axes come from the simulated
 //!   link frames; the foot's linear Jacobian column for a revolute joint is
@@ -39,49 +39,16 @@ use std::path::{Path, PathBuf};
 
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
-    build_visual_render_scene, unitree_go2_trot_targets, UnitreeGo2GaitCommand,
-    UrdfJointTorqueTarget, UrdfSceneSim,
+    build_visual_render_scene, UnitreeGo2ModelTrot, UnitreeGo2TrotCommand, UrdfSceneSim,
+    UNITREE_GO2_MODEL_TROT_CONTROL_HZ,
 };
-use rne_core::SimDuration;
-use rne_math::{Hertz, Quat, Transform3, Vec3};
+use rne_math::{Quat, Transform3, Vec3};
 use rne_render::{
     Camera, MeshRenderCache, RenderBackend, RenderScene, RenderSceneItem, VisualShape,
 };
 use rne_render_wgpu::{CameraOrbit, WgpuRenderBackend};
 
-const CONTROL_HZ: f64 = 500.0;
-const GRAVITY_M_S2: f64 = 9.81;
-/// Declared URDF mass of the model, in kilograms.
-const MASS_KG: f64 = 16.1;
-/// Effort limits from the URDF: hip, thigh, calf.
-const EFFORT_NM: [f64; 3] = [23.7, 23.7, 45.43];
-const LEGS: [[&str; 4]; 4] = [
-    ["FL_hip", "FL_thigh", "FL_calf", "FL_foot"],
-    ["FR_hip", "FR_thigh", "FR_calf", "FR_foot"],
-    ["RL_hip", "RL_thigh", "RL_calf", "RL_foot"],
-    ["RR_hip", "RR_thigh", "RR_calf", "RR_foot"],
-];
-/// Trot phase offsets: diagonal pairs FL/RR and FR/RL half a cycle apart.
-const PHASE_OFFSETS: [f64; 4] = [0.0, 0.5, 0.5, 0.0];
-
-const GAIT_PERIOD_S: f64 = 0.4;
-const DUTY: f64 = 0.5;
-const STANCE_HEIGHT_M: f64 = 0.30;
-const STEP_HEIGHT_M: f64 = 0.06;
-/// Height of a planted foot's centre above the floor, in meters.
-const FOOT_GROUND_Y_M: f64 = 0.022;
 const FORWARD_SPEED_M_S: f64 = 0.25;
-/// Stance-leg gains: hip-height spring and damper, velocity and yaw-rate
-/// force gains.
-const HEIGHT_STIFFNESS_N_PER_M: f64 = 600.0;
-const HEIGHT_DAMPING_N_S_PER_M: f64 = 40.0;
-const VELOCITY_GAIN_N_S_PER_M: f64 = 300.0;
-const YAW_RATE_GAIN_N_S: f64 = 30.0;
-/// Swing-leg Cartesian PD.
-const SWING_STIFFNESS_N_PER_M: f64 = 400.0;
-const SWING_DAMPING_N_S_PER_M: f64 = 12.0;
-/// Raibert velocity-error correction, in seconds.
-const RAIBERT_GAIN_S: f64 = 0.1;
 /// Heading loop: yaw-rate command per rad of heading error, and its limit.
 const HEADING_GAIN_PER_S: f64 = 1.5;
 const YAW_RATE_LIMIT_RAD_S: f64 = 0.5;
@@ -120,67 +87,9 @@ fn scene_path() -> PathBuf {
         .join("../../assets/scenes/unitree_go2_jump.rne.scene.toml")
 }
 
-/// One leg's kinematic state, read from the simulated link frames the way
-/// Pinocchio's forward kinematics computes it.
-struct Leg {
-    joints: [&'static str; 3],
-    origins: [Vec3; 3],
-    axes: [Vec3; 3],
-    foot: Vec3,
-    joint_rates: [f64; 3],
-}
-
-impl Leg {
-    fn read(sim: &UrdfSceneSim, names: [&'static str; 4]) -> Self {
-        // URDF joint axes: hip abduction about x, thigh and calf about y.
-        let local_axes = [Vec3::X, Vec3::Y, Vec3::Y];
-        let mut origins = [Vec3::ZERO; 3];
-        let mut axes = [Vec3::ZERO; 3];
-        let mut joint_rates = [0.0; 3];
-        for i in 0..3 {
-            let pose = sim.named_transform(names[i]).expect("leg link pose");
-            origins[i] = pose.translation;
-            axes[i] = (pose.rotation * local_axes[i]).normalize();
-            joint_rates[i] = sim.named_joint_velocity(names[i]).expect("joint rate");
-        }
-        let foot = sim
-            .named_transform(names[3])
-            .expect("foot pose")
-            .translation;
-        Self {
-            joints: [names[0], names[1], names[2]],
-            origins,
-            axes,
-            foot,
-            joint_rates,
-        }
-    }
-
-    /// Linear Jacobian columns of the foot point.
-    fn jacobian(&self) -> [Vec3; 3] {
-        std::array::from_fn(|i| self.axes[i].cross(self.foot - self.origins[i]))
-    }
-
-    /// Foot velocity relative to the base, `J qdot`.
-    fn foot_velocity_rel(&self) -> Vec3 {
-        let jacobian = self.jacobian();
-        (0..3).fold(Vec3::ZERO, |sum, i| sum + jacobian[i] * self.joint_rates[i])
-    }
-
-    /// Joint torques that make the foot exert force `f`: `J^T f`, clamped.
-    fn torques_for(&self, f: Vec3) -> [f64; 3] {
-        let jacobian = self.jacobian();
-        std::array::from_fn(|i| jacobian[i].dot(f).clamp(-EFFORT_NM[i], EFFORT_NM[i]))
-    }
-}
-
 struct Walker {
     sim: UrdfSceneSim,
-    step: u64,
-    liftoff: [Vec3; 4],
-    in_stance: [bool; 4],
-    previous_yaw_rad: f64,
-    heading_rad: f64,
+    trot: UnitreeGo2ModelTrot,
     along_facing_m: f64,
     trail: Vec<([f64; 2], f64)>,
     held_sq: f64,
@@ -193,29 +102,10 @@ struct Walker {
 impl Walker {
     fn new() -> Self {
         let mut sim = UrdfSceneSim::from_scene_path(&scene_path()).expect("load welded Go2");
-        // Stand up on the position servos at the scene's own 60 Hz, then hand
-        // over to torque control at the controller's rate.
-        sim.configure_position_motors(180.0, 18.0, EFFORT_NM[0]);
-        let stand = unitree_go2_trot_targets(
-            0,
-            UnitreeGo2GaitCommand {
-                stride_rad: 0.0,
-                foot_lift_rad: 0.0,
-                ..UnitreeGo2GaitCommand::default()
-            },
-        );
-        for _ in 0..240 {
-            sim.step_joint_position_targets(&stand);
-        }
-        sim.set_fixed_delta(SimDuration::from_hertz(Hertz::new(CONTROL_HZ)));
-        let previous_yaw_rad = sim.observe().base_relative_yaw_rad;
+        let trot = UnitreeGo2ModelTrot::stand_up(&mut sim);
         Self {
             sim,
-            step: 0,
-            liftoff: [Vec3::ZERO; 4],
-            in_stance: [true; 4],
-            previous_yaw_rad,
-            heading_rad: 0.0,
+            trot,
             along_facing_m: 0.0,
             trail: Vec::new(),
             held_sq: 0.0,
@@ -227,111 +117,43 @@ impl Walker {
     }
 
     fn t_s(&self) -> f64 {
-        self.step as f64 / CONTROL_HZ
+        self.trot.time_s()
     }
 
     fn step_once(&mut self) {
         let t_s = self.t_s();
         let (segment_start_s, target_rad) = segment_at(t_s);
-        let yaw_rate_cmd = (HEADING_GAIN_PER_S * (target_rad - self.heading_rad))
+        let yaw_rate_cmd = (HEADING_GAIN_PER_S * (target_rad - self.trot.heading_rad()))
             .clamp(-YAW_RATE_LIMIT_RAD_S, YAW_RATE_LIMIT_RAD_S);
 
         let observed = self.sim.observe();
         let base = self.sim.named_transform("base").expect("base pose");
         let facing = base.rotation * Vec3::X;
         let flat_facing = Vec3::new(facing.x, 0.0, facing.z).normalize_or_zero();
-        let body_velocity = Vec3::new(
-            observed.base_linear_velocity_x_m_s,
-            observed.base_linear_velocity_y_m_s,
-            observed.base_linear_velocity_z_m_s,
-        );
-        let flat_velocity = Vec3::new(body_velocity.x, 0.0, body_velocity.z);
-        let body_center = Vec3::new(observed.base_x_m, 0.0, observed.base_z_m);
-        let yaw_rate = observed.base_angular_velocity_y_rad_s;
-        let velocity_cmd = flat_facing * FORWARD_SPEED_M_S;
-        if self.step.is_multiple_of(TRAIL_EVERY_STEPS) {
+        if self.trot.steps().is_multiple_of(TRAIL_EVERY_STEPS) {
             self.trail
                 .push(([observed.base_x_m, observed.base_z_m], target_rad));
         }
 
-        let phases: [f64; 4] =
-            std::array::from_fn(|i| (t_s / GAIT_PERIOD_S + PHASE_OFFSETS[i]) % 1.0);
-        let stance_count = phases.iter().filter(|p| **p < DUTY).count().max(1) as f64;
-        let stance_s = GAIT_PERIOD_S * DUTY;
-        let mut torques: Vec<UrdfJointTorqueTarget<'_>> = Vec::with_capacity(12);
-        for (index, names) in LEGS.iter().enumerate() {
-            let leg = Leg::read(&self.sim, *names);
-            let hip = leg.origins[1];
-            let force = if phases[index] < DUTY {
-                self.in_stance[index] = true;
-                // Ground reaction wanted at this foot.
-                let hip_height = hip.y - leg.foot.y;
-                let hip_rise_rate = -leg.foot_velocity_rel().y;
-                let lift = MASS_KG * GRAVITY_M_S2 / stance_count
-                    + HEIGHT_STIFFNESS_N_PER_M * (STANCE_HEIGHT_M - hip_height)
-                    - HEIGHT_DAMPING_N_S_PER_M * hip_rise_rate;
-                let velocity_error = velocity_cmd - flat_velocity;
-                let lever = Vec3::new(leg.foot.x, 0.0, leg.foot.z) - body_center;
-                let tangent = Vec3::Y.cross(lever).normalize_or_zero();
-                let push = velocity_error * (VELOCITY_GAIN_N_S_PER_M / stance_count)
-                    + tangent * (YAW_RATE_GAIN_N_S * (yaw_rate_cmd - yaw_rate));
-                // The foot pushes the ground the other way: tau = -J^T f.
-                -Vec3::new(push.x, lift.max(0.0), push.z)
-            } else {
-                if self.in_stance[index] {
-                    self.liftoff[index] = leg.foot;
-                    self.in_stance[index] = false;
-                }
-                let swing = ((phases[index] - DUTY) / (1.0 - DUTY)).clamp(0.0, 1.0);
-                let hip_ground = Vec3::new(hip.x, 0.0, hip.z);
-                let from_center = hip_ground - body_center;
-                let touchdown = hip_ground
-                    + flat_velocity * (stance_s * 0.5)
-                    + (flat_velocity - velocity_cmd) * RAIBERT_GAIN_S
-                    + Vec3::Y.cross(from_center) * (yaw_rate_cmd * stance_s * 0.5);
-                let blend = 0.5 - 0.5 * (std::f64::consts::PI * swing).cos();
-                let liftoff = self.liftoff[index];
-                let target = Vec3::new(
-                    liftoff.x + (touchdown.x - liftoff.x) * blend,
-                    FOOT_GROUND_Y_M + STEP_HEIGHT_M * (std::f64::consts::PI * swing).sin(),
-                    liftoff.z + (touchdown.z - liftoff.z) * blend,
-                );
-                let foot_velocity = leg.foot_velocity_rel() + body_velocity;
-                (target - leg.foot) * SWING_STIFFNESS_N_PER_M
-                    - foot_velocity * SWING_DAMPING_N_S_PER_M
-            };
-            let tau = leg.torques_for(force);
-            for (joint, torque) in leg.joints.iter().zip(tau) {
-                torques.push(UrdfJointTorqueTarget {
-                    link_name: joint,
-                    torque_nm: torque,
-                    max_velocity_rad_s: 30.1,
-                });
-            }
-        }
-        self.sim.step_joint_torques(&torques);
+        self.trot.step(
+            &mut self.sim,
+            UnitreeGo2TrotCommand {
+                forward_speed_m_s: FORWARD_SPEED_M_S,
+                yaw_rate_rad_s: yaw_rate_cmd,
+            },
+        );
 
         let after = self.sim.observe();
-        let mut delta = after.base_relative_yaw_rad - self.previous_yaw_rad;
-        while delta > std::f64::consts::PI {
-            delta -= std::f64::consts::TAU;
-        }
-        while delta < -std::f64::consts::PI {
-            delta += std::f64::consts::TAU;
-        }
-        self.heading_rad += delta;
-        self.previous_yaw_rad = after.base_relative_yaw_rad;
         self.along_facing_m += (after.base_linear_velocity_x_m_s * flat_facing.x
             + after.base_linear_velocity_z_m_s * flat_facing.z)
-            / CONTROL_HZ;
+            / UNITREE_GO2_MODEL_TROT_CONTROL_HZ;
         if t_s - segment_start_s >= SETTLING_S {
-            let held_error = target_rad - self.heading_rad;
+            let held_error = target_rad - self.trot.heading_rad();
             self.held_sq += held_error * held_error;
             self.held_count += 1;
             self.worst_held_rad = self.worst_held_rad.max(held_error.abs());
         }
         self.min_height_m = self.min_height_m.min(after.base_y_m);
-        self.step += 1;
         let next_t_s = self.t_s();
         if SCHEDULE
             .iter()
@@ -339,7 +161,7 @@ impl Walker {
             .any(|(start, _)| t_s < *start && next_t_s >= *start)
             || (t_s < DURATION_S && next_t_s >= DURATION_S)
         {
-            self.segment_end_heading_rad.push(self.heading_rad);
+            self.segment_end_heading_rad.push(self.trot.heading_rad());
         }
     }
 
@@ -424,7 +246,7 @@ fn main() {
         distance_m: span_m * 0.8 + 0.9,
     };
 
-    let total_steps = (DURATION_S * CONTROL_HZ) as u64;
+    let total_steps = (DURATION_S * UNITREE_GO2_MODEL_TROT_CONTROL_HZ) as u64;
     let every = total_steps / FRAME_COUNT as u64;
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
     let camera = Camera::new(WIDTH, HEIGHT, std::f64::consts::FRAC_PI_4);
@@ -435,7 +257,7 @@ fn main() {
     fs::create_dir_all(&frames_dir).expect("create frame directory");
     let mut frame = 0_usize;
     let walker = run(|walker| {
-        if !walker.step.is_multiple_of(every) || frame >= FRAME_COUNT {
+        if !walker.trot.steps().is_multiple_of(every) || frame >= FRAME_COUNT {
             return;
         }
         let rgba = render_frame(

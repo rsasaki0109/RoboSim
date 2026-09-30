@@ -38,7 +38,7 @@
 //!   Rig occlusion draws come from a disjoint keyed stream, so a scan replays
 //!   exactly for a given [`SensorNoiseKey`].
 
-use crate::lidar::{sample_lidar_pattern_swept, LidarRay, LidarSpec, LidarSweep};
+use crate::lidar::{sample_lidar_pattern_swept, LidarRay, LidarRaycaster, LidarSpec, LidarSweep};
 use crate::livox_mid360_coefficients::{
     COEFFICIENTS, HARMONICS, NOD_RAD_PER_FIRING, ROTOR_RAD_PER_FIRING,
 };
@@ -47,7 +47,7 @@ use rne_core::{mix64, KeyedRandom};
 use rne_data::PointCloud;
 use rne_ecs::World;
 use rne_math::Vec3;
-use rne_physics::{PhysicsBackend, PhysicsWorldId};
+use rne_physics::PhysicsWorldId;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 
@@ -382,8 +382,8 @@ pub fn livox_mid360_near_blanking_probability(range_m: f64) -> f64 {
 // Each argument is an independent input the caller already owns; bundling them would
 // only relocate the arity.
 #[allow(clippy::too_many_arguments)]
-pub fn sample_livox_mid360<B: PhysicsBackend>(
-    backend: &B,
+pub fn sample_livox_mid360<R: LidarRaycaster + ?Sized>(
+    backend: &R,
     physics_world: PhysicsWorldId,
     world: &World,
     sweep: &LidarSweep,

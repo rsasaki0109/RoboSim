@@ -118,6 +118,16 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- Example 130 walks the Go2 around a room, steering to waypoints, with an
+  upside-down Livox Mid-360 on its back: `UrdfSceneSim::sample_livox_mid360`
+  scans the scene without the robot's own links (their returns come from the
+  measured rig table), and `unitree_go2_mid360_mount` places the sensor. While
+  walking, every floor-facing elevation band's no-return fraction stays
+  between the two recordings'. `rne_sensor::LidarRaycaster` lets any raycast
+  source, not only a `PhysicsBackend`, feed a scan.
+- `rne_ai::UnitreeGo2ModelTrot` is example 126's model-based Go2 trot as a
+  library controller, commanded by forward speed and yaw rate; example 126
+  now runs on it with unchanged results.
 - `rne_sensor::livox` models the Livox Mid-360 from real Go2 recordings:
   `LivoxMid360Pattern` reproduces its non-repetitive four-line firing pattern
   (a 91-term fit over the measured rotor and elevation-nod phases; 0.128°

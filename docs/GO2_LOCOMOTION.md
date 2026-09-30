@@ -42,7 +42,9 @@ over 46 s. Nothing below this section carries over to that model:
   12 N·m.
 
 What does walk it is a controller of the kind Pinocchio-based quadruped
-stacks run, at 500 Hz on joint torques (`UrdfSceneSim::set_fixed_delta`):
+stacks run, at 500 Hz on joint torques (`UrdfSceneSim::set_fixed_delta`),
+available as `rne_ai::UnitreeGo2ModelTrot` (commanded by forward speed and yaw
+rate; example 130 steers it to waypoints):
 
 * foot linear Jacobians from the simulated link frames, column `axis × (foot
   − joint)` per revolute joint;
