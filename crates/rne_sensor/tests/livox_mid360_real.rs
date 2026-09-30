@@ -8,8 +8,8 @@ use rne_physics::{
     PhysicsWorldId, RaycastHit, RaycastQuery,
 };
 use rne_sensor::{
-    livox_mid360_spec, sample_livox_mid360, LidarRigOcclusion, LidarSweep, LivoxMid360Pattern,
-    SensorNoiseKey,
+    livox_mid360_near_blanking_probability, livox_mid360_spec, sample_livox_mid360,
+    LidarRigOcclusion, LidarSweep, LivoxMid360Pattern, SensorNoiseKey,
 };
 use rne_world::Transform3;
 use serde::Deserialize;
@@ -132,7 +132,7 @@ impl PhysicsBackend for EmptyPhysics {
 #[test]
 fn self_returns_match_the_recorded_rate_and_replay() {
     // Real Go2 recordings return 5.49 % (EIL_Box) and 5.48 % (EIL_Mask2) of all slots
-    // from the robot itself within 0.35 m; the model returns 5.37 % over these frames.
+    // from the robot itself within 0.35 m; the model returns 5.42 % over these frames.
     let rig = go2_rig();
     let spec = livox_mid360_spec();
     let world = World::new();
@@ -178,4 +178,151 @@ fn self_returns_match_the_recorded_rate_and_replay() {
         (0.050..0.060).contains(&fraction),
         "self-return fraction {fraction}"
     );
+}
+
+/// A flat floor at `y = 0` made of one entity.
+struct FloorPhysics {
+    entity: rne_ecs::Entity,
+}
+
+impl PhysicsBackend for FloorPhysics {
+    type BodyHandle = ();
+    type ColliderHandle = ();
+
+    fn create_world(&mut self, _: PhysicsWorldDesc) -> Result<PhysicsWorldId, PhysicsError> {
+        Ok(PhysicsWorldId::DEFAULT)
+    }
+    fn sync_from_ecs(&mut self, _: &mut World, _: PhysicsWorldId) -> Result<(), PhysicsError> {
+        Ok(())
+    }
+    fn step(&mut self, _: PhysicsWorldId, _: SimDuration) -> Result<(), PhysicsError> {
+        Ok(())
+    }
+    fn sync_to_ecs(&mut self, _: &mut World, _: PhysicsWorldId) -> Result<(), PhysicsError> {
+        Ok(())
+    }
+    fn raycast(
+        &self,
+        _: PhysicsWorldId,
+        query: RaycastQuery,
+    ) -> Result<Vec<RaycastHit>, PhysicsError> {
+        if query.direction.y >= -1e-9 {
+            return Ok(Vec::new());
+        }
+        let distance_m = -query.origin_m.y / query.direction.y;
+        if distance_m <= 0.0 || distance_m > query.max_distance_m {
+            return Ok(Vec::new());
+        }
+        Ok(vec![RaycastHit {
+            entity: self.entity,
+            point_m: query.origin_m + query.direction * distance_m,
+            normal: Vec3::Y,
+            distance_m,
+        }])
+    }
+    fn contacts(&self, _: PhysicsWorldId) -> Result<&[ContactEvent], PhysicsError> {
+        Ok(&[])
+    }
+    fn capabilities(&self) -> &[PhysicsCapability] {
+        &[]
+    }
+}
+
+/// Per 4° Livox-elevation band from 24°: (no-return fraction, self-return fraction).
+fn floor_bands(material: rne_sensor::LidarMaterial, frames: u64) -> Vec<(f64, f64)> {
+    let mut world = World::new();
+    let floor = rne_ecs::spawn_named(&mut world, "floor");
+    world.entity_mut(floor).insert(material);
+    let physics = FloorPhysics { entity: floor };
+    let rig = go2_rig();
+    let spec = livox_mid360_spec();
+    // Upside down at the measured 0.447 m: Livox +z points at the floor.
+    let pose = Transform3::from_translation_rotation(
+        Vec3::new(0.0, 0.447, 0.0),
+        Quat::from_rotation_x(std::f64::consts::PI),
+    );
+    let sweep = LidarSweep::stationary(pose);
+    let pattern = LivoxMid360Pattern::new();
+    let mut slots = [0_usize; 7];
+    let mut empty = [0_usize; 7];
+    let mut selfs = [0_usize; 7];
+    for frame in 0..frames {
+        let rays = pattern.frame_rays(frame);
+        let cloud = sample_livox_mid360(
+            &physics,
+            PhysicsWorldId::DEFAULT,
+            &world,
+            &sweep,
+            &spec,
+            &pattern,
+            frame,
+            Some(&rig),
+            SensorNoiseKey::new(3, spec.seed, 2, frame),
+        );
+        let mut returned = std::collections::HashMap::new();
+        for (index, point) in cloud.points_m.iter().enumerate() {
+            let key = (cloud.ray_indices[index], cloud.channel_indices[index]);
+            returned.insert(key, (*point - pose.translation).length());
+        }
+        for ray in &rays {
+            // Livox elevation is the engine elevation (both are asin of the up component).
+            let band = ((ray.elevation_rad.to_degrees() - 24.0) / 4.0).floor();
+            if !(0.0..7.0).contains(&band) {
+                continue;
+            }
+            let band = band as usize;
+            slots[band] += 1;
+            match returned.get(&(ray.column, ray.channel)) {
+                None => empty[band] += 1,
+                Some(range_m) if *range_m < 0.35 => selfs[band] += 1,
+                Some(_) => {}
+            }
+        }
+    }
+    (0..7)
+        .map(|band| {
+            (
+                empty[band] as f64 / slots[band] as f64,
+                selfs[band] as f64 / slots[band] as f64,
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn steep_floor_bands_match_the_recordings() {
+    // With the sensor upside down 0.447 m above a flat floor, every ray from 24° to 52°
+    // Livox elevation lands on the floor within 1.1 m or on the robot, so these bands
+    // compare with the recordings without modelling the rooms. Floor returns this
+    // close saturate, so the floor material does not matter here; the loss comes from
+    // the rig table and near-range blanking.
+    //
+    // Recorded no-return fraction per 4° band (EIL_Box; EIL_Mask2 agrees from 40° up
+    // and is higher below, where its room leaves more directions empty) and self-return
+    // fraction (mean of both recordings).
+    const RECORDED_NO_RETURN: [f64; 7] = [0.338, 0.343, 0.410, 0.533, 0.673, 0.772, 0.991];
+    const RECORDED_SELF: [f64; 7] = [0.065, 0.088, 0.127, 0.139, 0.111, 0.060, 0.001];
+    let bands = floor_bands(rne_sensor::LidarMaterial::new(0.05, 0.0, 1.0), 10);
+    for (index, (empty, selfs)) in bands.iter().enumerate() {
+        let band_deg = 24 + 4 * index;
+        assert!(
+            (empty - RECORDED_NO_RETURN[index]).abs() < 0.04,
+            "band {band_deg}: no-return {empty:.3} vs recorded {}",
+            RECORDED_NO_RETURN[index]
+        );
+        assert!(
+            (selfs - RECORDED_SELF[index]).abs() < 0.015,
+            "band {band_deg}: self {selfs:.3} vs recorded {}",
+            RECORDED_SELF[index]
+        );
+    }
+}
+
+#[test]
+fn near_blanking_alternates_returns_on_a_close_surface() {
+    // Recorded: a surface closer than 0.55 m returns on every other firing of a line.
+    assert_eq!(livox_mid360_near_blanking_probability(0.3), 1.0);
+    assert!(livox_mid360_near_blanking_probability(0.65) > 0.4);
+    assert!(livox_mid360_near_blanking_probability(0.65) < 0.55);
+    assert_eq!(livox_mid360_near_blanking_probability(1.0), 0.0);
 }

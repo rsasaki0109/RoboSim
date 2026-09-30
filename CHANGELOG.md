@@ -124,8 +124,12 @@ All notable changes to Robot Native Engine are documented in this file.
   median error on a held-out recording, below the datasheet's 0.15°),
   `livox_mid360_spec` carries the datasheet range and detection figures, and
   `sample_livox_mid360` applies the measured Go2 rig occlusion
-  (`assets/sensors/livox_mid360/go2_rig_occlusion.json`: four mount posts and
-  5.4 % self returns). `sample_lidar_pattern_swept` and `LidarRay` cast any
+  (`assets/sensors/livox_mid360/go2_rig_occlusion.json`: four mount posts,
+  5.4 % self returns, and the steep-angle floor loss) plus the measured
+  near-range blanking, which makes a line return on every other firing along
+  surfaces closer than 0.55 m. Upside down above a flat floor, per-band
+  no-return fractions from 24° to 52° match the recording within 0.04.
+  `sample_lidar_pattern_swept` and `LidarRay` cast any
   explicit ray pattern through the physics-aware LiDAR model. See
   `docs/LIVOX_MID360.md`.
 - `MobileManipulatorSim::weld_grasp_in_place` holds an object where a linear

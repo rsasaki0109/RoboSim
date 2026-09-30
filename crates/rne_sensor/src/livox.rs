@@ -72,6 +72,8 @@ const FIRINGS_PER_PACKET: u64 = LIVOX_MID360_POINTS_PER_PACKET / LIVOX_MID360_LI
 const PACKETS_PER_FRAME_NUM: u64 = 625;
 const PACKETS_PER_FRAME_DEN: u64 = 3;
 const RIG_RANDOM_DOMAIN_V1: u64 = 0x4D49_4433_3630_5247;
+/// Keyed-stream slots at and above this value belong to near-range blanking draws.
+const BLANKING_SLOT_BASE: u64 = 1 << 40;
 
 /// Physics-aware settings of a Livox Mid-360.
 ///
@@ -324,13 +326,59 @@ impl LidarRigOcclusion {
     }
 }
 
-/// Samples one Mid-360 frame: pattern, rig occlusion, and physics-aware returns.
+/// Probability that a return from a line's previous firing at the given range blanks
+/// the line's next firing, as `(range_m, probability)` knots.
+///
+/// Measured on both recordings: while a line keeps seeing a surface closer than about
+/// 0.8 m, its returns alternate with empty firings, and below 0.55 m the alternation
+/// is essentially unbroken. The two recordings agree within 0.04 at every knot; these
+/// are their means, conditioned on the surface continuing on both sides.
+const NEAR_BLANKING_KNOTS: [(f64, f64); 16] = [
+    (0.5125, 0.997),
+    (0.5375, 0.985),
+    (0.5625, 0.957),
+    (0.5875, 0.867),
+    (0.6125, 0.735),
+    (0.6375, 0.580),
+    (0.6625, 0.429),
+    (0.6875, 0.265),
+    (0.7125, 0.151),
+    (0.7375, 0.098),
+    (0.7625, 0.060),
+    (0.7875, 0.028),
+    (0.8125, 0.010),
+    (0.8375, 0.003),
+    (0.8625, 0.002),
+    (0.8875, 0.0),
+];
+
+/// Returns the probability that a previous-firing return at `range_m` blanks the next
+/// firing of the same line.
+pub fn livox_mid360_near_blanking_probability(range_m: f64) -> f64 {
+    let (first_range_m, _) = NEAR_BLANKING_KNOTS[0];
+    if !range_m.is_finite() || range_m <= first_range_m {
+        return 1.0;
+    }
+    for pair in NEAR_BLANKING_KNOTS.windows(2) {
+        let ((r0, p0), (r1, p1)) = (pair[0], pair[1]);
+        if range_m <= r1 {
+            return p0 + (p1 - p0) * (range_m - r0) / (r1 - r0);
+        }
+    }
+    0.0
+}
+
+/// Samples one Mid-360 frame: pattern, rig occlusion, near-range blanking, and
+/// physics-aware returns.
 ///
 /// Rays the rig blocks produce nothing; rays it reflects produce a self return at the
-/// measured range; every other ray is cast through [`sample_lidar_pattern_swept`]. The
-/// sweep spans the frame, so a moving platform distorts the cloud as the real sensor
-/// does. `frame_index` selects the frame of the continuous firing stream and should
-/// advance by one per call.
+/// measured range; every other ray is cast through [`sample_lidar_pattern_swept`].
+/// A cast return then blanks the same line's next firing with
+/// [`livox_mid360_near_blanking_probability`] of its range. Self returns come from the
+/// measured rig table, which already contains their blanking, so they neither blank
+/// nor get blanked. The sweep spans the frame, so a moving platform distorts the cloud
+/// as the real sensor does. `frame_index` selects the frame of the continuous firing
+/// stream and should advance by one per call.
 // Each argument is an independent input the caller already owns; bundling them would
 // only relocate the arity.
 #[allow(clippy::too_many_arguments)]
@@ -346,75 +394,127 @@ pub fn sample_livox_mid360<B: PhysicsBackend>(
     noise_key: SensorNoiseKey,
 ) -> PointCloud {
     let rays = pattern.frame_rays(frame_index);
-    let Some(rig) = rig else {
-        return sample_lidar_pattern_swept(
-            backend,
-            physics_world,
-            world,
-            sweep,
-            spec,
-            &rays,
-            noise_key,
-        );
-    };
-
-    let dense = rig.dense_index();
     let random = KeyedRandom::new(
         noise_key.root_seed,
         RIG_RANDOM_DOMAIN_V1 ^ mix64(noise_key.sensor_seed),
     );
     let mut cast = Vec::with_capacity(rays.len());
     let mut self_returns = Vec::new();
-    for (index, ray) in rays.iter().enumerate() {
-        let direction = local_angles_to_livox(ray.azimuth_rad, ray.elevation_rad);
-        let outcome = match rig.bin(direction).and_then(|bin| dense[bin]) {
-            None => RigOutcome::Pass,
-            Some(cell) => {
-                let draw = random.sample_unit_f64(
-                    noise_key.stable_sensor_id,
-                    noise_key.sample_index,
-                    index as u64,
-                );
-                if draw < cell.block_probability {
-                    RigOutcome::Blocked
-                } else if draw < cell.block_probability + cell.self_return_probability {
-                    RigOutcome::SelfReturn(cell.self_return_range_m)
-                } else {
-                    RigOutcome::Pass
+    match rig {
+        None => cast.extend_from_slice(&rays),
+        Some(rig) => {
+            let dense = rig.dense_index();
+            for (index, ray) in rays.iter().enumerate() {
+                let direction = local_angles_to_livox(ray.azimuth_rad, ray.elevation_rad);
+                let outcome = match rig.bin(direction).and_then(|bin| dense[bin]) {
+                    None => RigOutcome::Pass,
+                    Some(cell) => {
+                        let draw = random.sample_unit_f64(
+                            noise_key.stable_sensor_id,
+                            noise_key.sample_index,
+                            index as u64,
+                        );
+                        if draw < cell.block_probability {
+                            RigOutcome::Blocked
+                        } else if draw < cell.block_probability + cell.self_return_probability {
+                            RigOutcome::SelfReturn(cell.self_return_range_m)
+                        } else {
+                            RigOutcome::Pass
+                        }
+                    }
+                };
+                match outcome {
+                    RigOutcome::Pass => cast.push(*ray),
+                    RigOutcome::Blocked => {}
+                    RigOutcome::SelfReturn(range_m) => self_returns.push((*ray, range_m)),
                 }
             }
-        };
-        match outcome {
-            RigOutcome::Pass => cast.push(*ray),
-            RigOutcome::Blocked => {}
-            RigOutcome::SelfReturn(range_m) => self_returns.push((*ray, range_m)),
         }
     }
 
-    let mut cloud =
+    let cast_cloud =
         sample_lidar_pattern_swept(backend, physics_world, world, sweep, spec, &cast, noise_key);
-    let period_s = spec.rotation_period_s;
-    for (ray, range_m) in self_returns {
-        let fraction = if period_s > 0.0 {
-            (ray.time_s / period_s).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let pose = sweep.pose_at(fraction);
-        let (sin_el, cos_el) = ray.elevation_rad.sin_cos();
-        let (sin_az, cos_az) = ray.azimuth_rad.sin_cos();
-        let local = Vec3::new(cos_el * cos_az, sin_el, cos_el * sin_az);
-        let origin_m = pose.translation + Vec3::new(0.0, spec.height_offset_m, 0.0);
-        cloud.push_return(
-            origin_m + (pose.rotation * local) * range_m,
-            rig.self_return_intensity as f32,
-            ray.column,
-            1,
-            ray.channel,
-            if period_s > 0.0 { ray.time_s } else { 0.0 },
-        );
+    let mut cloud = blank_near_returns(&cast_cloud, sweep, spec, &random, noise_key);
+    if let Some(rig) = rig {
+        for (ray, range_m) in self_returns {
+            let origin_m = ray_origin_m(sweep, spec, ray.time_s);
+            let pose = sweep.pose_at(sweep_fraction(spec, ray.time_s));
+            let (sin_el, cos_el) = ray.elevation_rad.sin_cos();
+            let (sin_az, cos_az) = ray.azimuth_rad.sin_cos();
+            let local = Vec3::new(cos_el * cos_az, sin_el, cos_el * sin_az);
+            cloud.push_return(
+                origin_m + (pose.rotation * local) * range_m,
+                rig.self_return_intensity as f32,
+                ray.column,
+                1,
+                ray.channel,
+                if spec.rotation_period_s > 0.0 {
+                    ray.time_s
+                } else {
+                    0.0
+                },
+            );
+        }
     }
     cloud
+}
+
+fn sweep_fraction(spec: &LidarSpec, time_s: f64) -> f64 {
+    if spec.rotation_period_s > 0.0 {
+        (time_s / spec.rotation_period_s).clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+fn ray_origin_m(sweep: &LidarSweep, spec: &LidarSpec, time_s: f64) -> Vec3 {
+    sweep.pose_at(sweep_fraction(spec, time_s)).translation
+        + Vec3::new(0.0, spec.height_offset_m, 0.0)
+}
+
+/// Drops returns that follow a near return on the same line, in emission order.
+fn blank_near_returns(
+    cloud: &PointCloud,
+    sweep: &LidarSweep,
+    spec: &LidarSpec,
+    random: &KeyedRandom,
+    noise_key: SensorNoiseKey,
+) -> PointCloud {
+    let mut kept = PointCloud::new();
+    let mut last: [Option<(u32, f64)>; LIVOX_MID360_LINE_COUNT as usize] =
+        [None; LIVOX_MID360_LINE_COUNT as usize];
+    for index in 0..cloud.points_m.len() {
+        let point_m = cloud.points_m[index];
+        let column = cloud.ray_indices[index];
+        let channel = cloud.channel_indices[index];
+        let timestamp_s = cloud.timestamps_s[index];
+        let range_m = (point_m - ray_origin_m(sweep, spec, timestamp_s)).length();
+        let line = usize::from(channel % LIVOX_MID360_LINE_COUNT);
+        if let Some((previous_column, previous_range_m)) = last[line] {
+            if previous_column + 1 == column {
+                let draw = random.sample_unit_f64(
+                    noise_key.stable_sensor_id,
+                    noise_key.sample_index,
+                    BLANKING_SLOT_BASE
+                        + u64::from(column) * u64::from(LIVOX_MID360_LINE_COUNT)
+                        + u64::from(channel),
+                );
+                if draw < livox_mid360_near_blanking_probability(previous_range_m) {
+                    continue;
+                }
+            }
+        }
+        last[line] = Some((column, range_m));
+        kept.push_return(
+            point_m,
+            cloud.intensities[index],
+            column,
+            cloud.return_indices[index],
+            channel,
+            timestamp_s,
+        );
+    }
+    kept
 }
 
 #[cfg(test)]

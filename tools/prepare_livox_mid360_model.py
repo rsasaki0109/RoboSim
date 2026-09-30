@@ -42,6 +42,24 @@ LINES = 4
 KA, KP = 3, 6
 NOMINAL_NOD_PERIOD_FIRINGS = 5100.0
 AZ_BIN_DEG, EL_BIN_DEG, EL_MIN_DEG, EL_BINS = 2.0, 2.0, -8.0, 32
+# Near-range blanking knots (range_m, probability); keep in sync with
+# NEAR_BLANKING_KNOTS in crates/rne_sensor/src/livox.rs.
+NEAR_BLANKING_KNOTS = [
+    (0.5125, 0.997), (0.5375, 0.985), (0.5625, 0.957), (0.5875, 0.867),
+    (0.6125, 0.735), (0.6375, 0.580), (0.6625, 0.429), (0.6875, 0.265),
+    (0.7125, 0.151), (0.7375, 0.098), (0.7625, 0.060), (0.7875, 0.028),
+    (0.8125, 0.010), (0.8375, 0.003), (0.8625, 0.002), (0.8875, 0.0),
+]
+# On the Go2 the upside-down sensor sees the floor within 1.2 m above this elevation;
+# there the whole row is fixed to the mount, so no environment baseline is removed.
+FLOOR_ZONE_MIN_ELEVATION_DEG = 22.0
+
+
+def near_blanking_probability(r):
+    r = np.asarray(r, float)
+    knots_r = np.array([k[0] for k in NEAR_BLANKING_KNOTS])
+    knots_p = np.array([k[1] for k in NEAR_BLANKING_KNOTS])
+    return np.where(r <= knots_r[0], 1.0, np.interp(r, knots_r, knots_p, right=0.0))
 
 
 # --------------------------------------------------------------------------- extract
@@ -281,7 +299,13 @@ def slot_grid(data, model, a_off, p_off, frames, stride=2):
     for a, e, rr in zip(ai[near], ei[near], r[near]):
         ranges[a][e].append(rr)
     med = np.array([[np.median(c) if c else 0.0 for c in row] for row in ranges])
-    return total, zero, self_hits, med
+    # Blanking probability each non-self return imposes on the next firing.
+    cast = valid & ~near
+    blanking = np.zeros(shape)
+    cast_count = np.zeros(shape)
+    np.add.at(cast_count, (ai[cast], ei[cast]), 1)
+    np.add.at(blanking, (ai[cast], ei[cast]), near_blanking_probability(r[cast]))
+    return total, zero, self_hits, med, cast_count, blanking
 
 
 def build(box: str, mask2: str, model_path: str, mask2_track: str) -> None:
@@ -292,20 +316,40 @@ def build(box: str, mask2: str, model_path: str, mask2_track: str) -> None:
         slot_grid(box, model, mb["a_off"], mb["p_off"], (0, 400)),
         slot_grid(mask2, model, m2["a_off"], m2["p_off"], (20, 300)),
     ]
-    # The rig blocks a slot in both recordings; the environment does not. Excess
-    # no-return probability over each elevation row's 20th-percentile baseline,
-    # minimized over the two recordings, keeps only the part fixed to the sensor.
+    # A slot is blocked, returns from the robot, or reaches a surface. Blanking hides
+    # some surface returns: with x the fraction of slots reaching a surface and p the
+    # mean blanking probability of the bin's returns, the observed surface-return
+    # fraction is R = x / (1 + p x), so x = R / (1 - p R). Outside the floor zone the
+    # environment can leave slots empty too, so each row's 20th-percentile block level
+    # is removed there; the lower of the two recordings keeps what is fixed to the
+    # sensor.
     blocks, selfs = [], []
-    for total, zero, self_hits, _ in grids:
-        f = zero / np.maximum(total, 1)
-        base = np.percentile(f, 20, axis=0)
-        blocks.append(np.clip((f - base) / np.maximum(1 - base, 1e-6), 0, 1))
-        selfs.append(self_hits / np.maximum(total, 1))
-    enough = (grids[0][0] >= 40) & (grids[1][0] >= 40)
-    block = np.where(enough, np.minimum(*blocks), 0.0)
+    row_el = EL_MIN_DEG + EL_BIN_DEG * np.arange(EL_BINS)
+    for total, zero, self_hits, _, cast_count, blanking in grids:
+        n = np.maximum(total, 1)
+        s_frac = self_hits / n
+        r_frac = cast_count / n
+        p_mean = blanking / np.maximum(cast_count, 1)
+        reach = np.clip(r_frac / np.maximum(1 - p_mean * r_frac, 1e-6), 0, 1 - s_frac)
+        b = np.clip(1 - s_frac - reach, 0, 1)
+        base = np.percentile(b, 20, axis=0)
+        base = np.where(row_el >= FLOOR_ZONE_MIN_ELEVATION_DEG, 0.0, base)
+        blocks.append(np.clip((b - base) / np.maximum(1 - base, 1e-6), 0, 1))
+        selfs.append(s_frac)
+    # Bins that only one recording samples well (the top of the elevation band) take
+    # that recording's value.
+    has = [g[0] >= 40 for g in grids]
+    both = has[0] & has[1]
+    block = np.where(both, np.minimum(*blocks), np.where(has[0], blocks[0], np.where(has[1], blocks[1], 0.0)))
+    # In the floor zone the loss is fixed to the mount along the whole row, so bins
+    # neither recording sampled take the row median of the sampled ones.
+    sampled = has[0] | has[1]
+    for e in range(EL_BINS):
+        if row_el[e] >= FLOOR_ZONE_MIN_ELEVATION_DEG and sampled[:, e].any():
+            block[~sampled[:, e], e] = np.median(block[sampled[:, e], e])
     # Returns within 0.35 m come from the robot in both recordings, so average them.
-    self_p = np.where(enough, 0.5 * (selfs[0] + selfs[1]), 0.0)
-    block[block < 0.1] = 0.0
+    self_p = np.where(both, 0.5 * (selfs[0] + selfs[1]), np.where(has[0], selfs[0], np.where(has[1], selfs[1], 0.0)))
+    block[block < 0.05] = 0.0
     self_p[self_p < 0.005] = 0.0
     self_range = np.where(grids[0][3] > 0, grids[0][3], grids[1][3])
     cells = []

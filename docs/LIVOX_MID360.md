@@ -73,13 +73,61 @@ over 40 s. That moves points along the scan path without changing coverage, so
 ## Rig occlusion
 
 `assets/sensors/livox_mid360/go2_rig_occlusion.json` holds 2°×2° bins in
-Livox-frame azimuth and elevation, each with a probability of no return (the
-mount posts inside the 0.1 m blind zone), a probability of a self return, and
-the self-return range. The no-return part is the excess over each elevation
-row's environment baseline, taking the lower of the two recordings, so only
-what is fixed to the sensor remains. The self-return part is the mean of the
-two recordings. Across ten simulated frames, 5.37 % of slots return from the
-rig; the recordings show 5.48–5.49 %.
+Livox-frame azimuth and elevation, each with a probability of no return, a
+probability of a self return, and the self-return range.
+
+Per bin, a slot is blocked, returns from the robot (within 0.35 m), or reaches
+a surface. Near-range blanking (below) hides some surface returns, so the
+fraction reaching a surface is recovered from the observed surface-return
+fraction `R` and the bin's mean blanking probability `p` as `R / (1 − p R)`;
+the rest is the block probability. Two regions are then treated differently:
+
+- **Floor zone (≥ 22° Livox elevation).** Upside down at 0.447 m, the sensor
+  sees the floor within 1.2 m here, so the whole row is fixed to the mount:
+  mount posts, legs, and the dark floor losing returns at steep angles all
+  stay in the table. Bins neither recording sampled take the row median.
+- **Elsewhere.** The room can leave directions empty, so each row's
+  20th-percentile block level is removed first.
+
+Each bin takes the lower of the two recordings; the self-return part is their
+mean. Across ten simulated frames, 5.42 % of slots return from the rig; the
+recordings show 5.48–5.49 %.
+
+## Near-range blanking
+
+A line that returns from a surface closer than about 0.8 m loses its next
+firing. Below 0.55 m the alternation is unbroken: along a close surface a line
+returns on every other firing, and consecutive near returns are 2 firings
+apart 100,606 times against 1,404 for 1 and 212 for 3 (EIL_Box, line 0). The
+probability that a return at range `r` blanks the next firing, measured where
+the surface continues on both sides:
+
+| r (m) | 0.51 | 0.56 | 0.61 | 0.66 | 0.69 | 0.71 | 0.76 | 0.81 | 0.89 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| EIL_Box | 0.997 | 0.961 | 0.754 | 0.432 | 0.258 | 0.140 | 0.058 | 0.009 | 0.002 |
+| EIL_Mask2 | 0.997 | 0.953 | 0.716 | 0.425 | 0.271 | 0.162 | 0.061 | 0.010 | 0.003 |
+
+`livox_mid360_near_blanking_probability` interpolates the mean of the two.
+Blanking can remove at most half of a close surface's returns; the rest of the
+steep-angle loss is in the rig table.
+
+## Floor check
+
+Upside down 0.447 m above a flat floor, every ray from 24° to 52° lands on the
+floor within 1.1 m or on the robot, so these bands compare with the
+recordings without modelling the rooms (`steep_floor_bands_match_the_recordings`,
+ten frames):
+
+| Livox elevation | 24° | 28° | 32° | 36° | 40° | 44° | 48° |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| no return, model | 0.314 | 0.311 | 0.380 | 0.503 | 0.650 | 0.776 | 0.987 |
+| no return, EIL_Box | 0.338 | 0.343 | 0.410 | 0.533 | 0.673 | 0.772 | 0.991 |
+| no return, EIL_Mask2 | 0.489 | 0.521 | 0.553 | 0.594 | 0.709 | 0.794 | 0.995 |
+| self return, model | 0.065 | 0.085 | 0.124 | 0.135 | 0.105 | 0.057 | 0.000 |
+| self return, recordings | 0.065 | 0.088 | 0.127 | 0.139 | 0.111 | 0.060 | 0.001 |
+
+EIL_Mask2 loses more below 40° because its room leaves more of those
+directions empty; the table keeps the lower recording.
 
 ## Sensor settings
 
@@ -91,8 +139,8 @@ measured floor spread and pattern residual, so both are upper bounds.
 
 Timestamps, latency, and noise follow [`LIDAR_SIMULATION.md`](LIDAR_SIMULATION.md):
 point `n` of a frame is stamped `n × 5 µs` after the frame's first firing, frame
-latency is the owning sensor's `latency_ticks`, and rig draws use a keyed
-stream disjoint from the other noise, so a frame replays exactly.
+latency is the owning sensor's `latency_ticks`, and rig and blanking draws use
+keyed streams disjoint from the other noise, so a frame replays exactly.
 
 ## What is not established
 
@@ -102,9 +150,13 @@ stream disjoint from the other noise, so a frame replays exactly.
 - **No-return slots in the output.** The driver keeps no-return slots as zero
   points; `PointCloud` holds returns only. A Livox-format ROS 2 publisher
   would have to re-insert them.
-- **Floor and wall materials.** The dark-floor dropout (no-return rates up to
-  74 % at 0.4–0.8 m) comes from the environment, not the sensor. It has not
-  yet been calibrated into `LidarMaterial` values.
+- **Floor material versus sensor.** Steep-angle loss beyond blanking is in the
+  rig table because both recordings were made on floors that return very
+  little (intensity median 0–3 of 255). Whether it comes from the floors or
+  from reduced near-range sensitivity is not separated, so on a bright floor
+  the model probably loses too much there.
+- **Mount-specific floor zone.** The floor-zone rows assume this mount height
+  and orientation; another mount needs its own table.
 - **Other units.** Both recordings come from one Mid-360 on one Go2. The rotor
   and nod rates agree to 0.03 % between them, but a different unit or firmware
   may differ.

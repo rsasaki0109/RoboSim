@@ -40,10 +40,10 @@ pub use lidar::{
     LidarFailureBehavior, LidarRay, LidarSpec, LidarSweep, RANGE_REFERENCE_M,
 };
 pub use livox::{
-    livox_mid360_spec, sample_livox_mid360, LidarRigOcclusion, LidarRigOcclusionCell,
-    LivoxMid360Pattern, LIVOX_MID360_FIRING_PERIOD_S, LIVOX_MID360_FRAME_PERIOD_S,
-    LIVOX_MID360_LINE_COUNT, LIVOX_MID360_MAX_ELEVATION_RAD, LIVOX_MID360_MIN_ELEVATION_RAD,
-    LIVOX_MID360_POINTS_PER_PACKET, LIVOX_MID360_POINT_PERIOD_S,
+    livox_mid360_near_blanking_probability, livox_mid360_spec, sample_livox_mid360,
+    LidarRigOcclusion, LidarRigOcclusionCell, LivoxMid360Pattern, LIVOX_MID360_FIRING_PERIOD_S,
+    LIVOX_MID360_FRAME_PERIOD_S, LIVOX_MID360_LINE_COUNT, LIVOX_MID360_MAX_ELEVATION_RAD,
+    LIVOX_MID360_MIN_ELEVATION_RAD, LIVOX_MID360_POINTS_PER_PACKET, LIVOX_MID360_POINT_PERIOD_S,
 };
 pub use noise::{NoiseModel, SensorNoiseKey};
 pub use resources::SensorGravity;
