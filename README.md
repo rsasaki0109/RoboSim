@@ -182,59 +182,34 @@ throughout: it moves 0.038 m on the tines across the whole carry.
 ## Go2 locomotion
 
 <p align="center">
-  <img src="docs/media/go2-heading-steer.gif" alt="The official Go2 trotting head first along an S: straight, a left 90-degree turn, straight, a right 90-degree turn, straight, with its path drawn on the floor coloured by the commanded heading and a yellow arrow showing the heading it is steering to" width="820">
-</p>
-
-The official Go2 walks head first through an S on a model-based trot of the
-kind Pinocchio-based quadruped stacks run: 500 Hz joint torques, foot
-Jacobians from the link frames, stance legs pushing `tau = -J^T f` for weight,
-height, speed and yaw rate, swing feet placed by the Raibert heuristic and
-tracked by Cartesian PD. A heading loop steers it; held headings stay within
-0.04 rad RMS (0.15 rad worst) while it covers 8.5 m. This runs on
-`unitree_go2_jump`, the Go2 with its feet attached: the older walking asset
-leaves them on the floor ([#346](https://github.com/rsasaki0109/RobotNativeEngine/issues/346)),
-and the results measured on it are marked as such in
-[docs/GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md).
-[source](examples/126_go2_heading_steer/main.rs)
-
-<p align="center">
   <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/go2-mid360-room.png">
-    <img src="docs/media/go2-mid360-room.gif" alt="The Go2 trots around a table in a room, steering to waypoints, while the upside-down Livox Mid-360 on its back scans: each 0.1 s frame's returns are drawn coloured by height, showing rings on the floor, the table's side, and the walls" width="720">
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/showcase-go2-door.png">
+    <img src="docs/media/showcase-go2-door.gif" alt="A Unitree Go2 with an arm on its back pushes a swing door open with the pad on its arm, walks through the doorway, walks around the open door and pushes it shut from the other side, with its Livox Mid-360 returns drawn coloured by height" width="820">
   </picture>
 </p>
-
-The same trot steers to waypoints around a room while an upside-down Livox
-Mid-360 on its back scans at 10 Hz. The sensor model is fitted to real Go2
-recordings: its non-repetitive four-line pattern matches held-out real returns
-to 0.13° median, and the rig occlusion, self returns, and near-range blanking
-are measured. While the Go2 walks the loop, the no-return fraction of every
-floor-facing elevation band stays between the two recordings'
-([docs/LIVOX_MID360.md](docs/LIVOX_MID360.md)).
-[source](examples/130_go2_mid360_room/main.rs)
-
-<p align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/go2-mid360-navigation.png">
-    <img src="docs/media/go2-mid360-navigation.gif" alt="Cutaway view of two rooms joined by a doorway: the Go2 walks from one room through the doorway to a goal in the far corner of the other and back, while the occupancy map its Mid-360 builds grows on the floor, known free space lighter than unexplored floor and walls marked in pink, with its planned path in yellow" width="720">
-  </picture>
-</p>
-
-With no map given, the Go2 navigates between two rooms on what its Mid-360
-sees: each frame's returns, in the sensor frame at their emission times, are
-levelled by IMU attitude, de-skewed by leg odometry, and cut into a 2D scan for
-`rne_slam`'s online SLAM; A* on the inflated map plans through unexplored
-space and replans every second, so the robot finds the doorway as the partition
-appears. It reaches both goals (0.25 m and 0.28 m from them) with 0.042 m RMS
-localization error while leg odometry alone drifts 7.1 m.
-[source](examples/131_go2_mid360_navigation/main.rs)
 
 With an arm on its back, the Go2 walks through a swing door and shuts it
-behind itself (the showcase above). Nothing holds or drives the 6 kg door: the pad on the arm
+behind itself. Nothing holds or drives the 6 kg door: the pad on the arm
 pushes it open to 87° and back against its stop, and no other part of the
-robot ever touches it. Every command comes from the Mid-360 localization
-above (0.052 m RMS). [docs/GO2_DOOR.md](docs/GO2_DOOR.md) ·
+robot ever touches it. Every command comes from its own Livox Mid-360
+localization (0.052 m RMS), with the sensor model fitted to real Go2
+recordings. [docs/GO2_DOOR.md](docs/GO2_DOOR.md) ·
 [source](examples/132_go2_door/main.rs)
+
+The pieces underneath, each with its own GIF in the docs:
+
+- **Model-based trot** on `unitree_go2_jump`, the Go2 with its feet attached:
+  500 Hz joint torques, stance `tau = -J^T f`, Raibert swing; held headings
+  stay within 0.04 rad RMS over 8.5 m.
+  [docs/GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md#walking-with-feet-a-model-based-trot)
+- **Livox Mid-360** fitted to real Go2 recordings: non-repetitive pattern to
+  0.13° on a held-out recording, measured rig occlusion and near-range
+  blanking; walking, every floor-facing band's no-return fraction stays
+  between the recordings'. [docs/LIVOX_MID360.md](docs/LIVOX_MID360.md)
+- **Navigation with no map given**: online SLAM on the Mid-360, A* through
+  unexplored space, both rooms reached with 0.042 m RMS localization while
+  leg odometry alone drifts 7.1 m.
+  [docs/LIVOX_MID360.md](docs/LIVOX_MID360.md#navigating-on-the-mid-360)
 
 ## G1 locomotion
 

@@ -144,6 +144,10 @@ keyed streams disjoint from the other noise, so a frame replays exactly.
 
 ## On the Go2 in simulation
 
+<p align="center">
+  <img src="media/go2-mid360-room.gif" alt="The Go2 trots around a table in a room, steering to waypoints, while the upside-down Livox Mid-360 on its back scans: each 0.1 s frame's returns are drawn coloured by height" width="720">
+</p>
+
 `UrdfSceneSim::sample_livox_mid360` scans a URDF scene with every raycast
 skipping the robot's own links, whose returns come from the rig table instead;
 `unitree_go2_mid360_mount()` places the sensor upside down 0.147 m above and
@@ -165,6 +169,10 @@ The walk takes 74.4 s, keeps at least 0.88 m from walls and furniture, and the
 body never drops below 0.263 m.
 
 ## Navigating on the Mid-360
+
+<p align="center">
+  <img src="media/go2-mid360-navigation.gif" alt="Cutaway view of two rooms joined by a doorway: the Go2 walks from one room through the doorway to a goal in the far corner of the other and back, while the occupancy map its Mid-360 builds is revealed on the floor and its planned path is drawn in yellow" width="720">
+</p>
 
 Example 131 gives the Go2 no map. Two rooms are joined by a 1.0 m doorway, and
 the robot must reach the far corner of the second room and come back. Per

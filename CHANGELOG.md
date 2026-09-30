@@ -126,7 +126,9 @@ All notable changes to Robot Native Engine are documented in this file.
   use it, read clearance from the scene's colliders, and match all 360 scan
   beams on a finer grid (localization 0.042 m and 0.052 m RMS).
 - The README's lift section shows one GIF (goods-in to delivery); the
-  two-truck relay moves to `docs/DEMOS.md`.
+  two-truck relay moves to `docs/DEMOS.md`. The README's Go2 section shows
+  only the door GIF, with the trot, Mid-360, and navigation GIFs in
+  `docs/GO2_LOCOMOTION.md` and `docs/LIVOX_MID360.md`.
 - Example 132 walks an arm-carrying Go2 (`unitree_go2_arm`: a generic 1.3 kg
   4-DOF arm with a push pad) through a damped swing door (`swing_door`) and
   shuts it behind itself, moving the door only by the pad's contact and
