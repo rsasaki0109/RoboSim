@@ -35,6 +35,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use go2_indoor::{
+    clearance_m, static_obstacles, two_room_floors, DecorOptions, Interior, StaticObject,
+};
 use png::{BitDepth, ColorType, Encoder};
 use rne_ai::{
     build_visual_render_scene, unitree_go2_mid360_mount, UnitreeGo2ModelTrot,
@@ -124,29 +127,14 @@ const ROBOT_LINKS: [&str; 19] = [
 /// The only link allowed to touch the door: it carries the push pad.
 const PAD_LINK: &str = "arm_wrist";
 
-/// Static walls and furniture in world `(centre [x, z], half extents [x, z])`.
-const OBSTACLES: [([f64; 2], [f64; 2]); 11] = [
-    ([-2.45, 0.0], [0.05, 2.5]),
-    ([7.05, 0.0], [0.05, 2.5]),
-    ([2.3, -2.45], [4.8, 0.05]),
-    ([2.3, 2.45], [4.8, 0.05]),
-    ([2.4, -1.1], [0.05, 1.3]),
-    ([2.4, 1.8], [0.05, 0.6]),
-    ([0.2, -1.3], [0.8, 0.45]),
-    ([-1.5, 1.4], [0.3, 0.3]),
-    ([4.3, -1.9], [0.8, 0.25]),
-    ([5.0, 0.9], [0.25, 0.25]),
-    ([6.4, -0.6], [0.3, 0.3]),
-];
-
 const WIDTH: u32 = 960;
 const HEIGHT: u32 = 540;
 const CLEAR_COLOR: [f32; 4] = [0.035, 0.05, 0.08, 1.0];
-/// README showcase: 48 frames, one every 2.4 s, 96 colours (1.69 MB).
+/// README showcase: 48 frames, one every 2.4 s, 64 colours (1.74 MB).
 const SHOWCASE_LIDAR_FRAMES_PER_GIF_FRAME: u64 = 24;
 const SHOWCASE_FRAMES: usize = 48;
 const SHOWCASE_POSTER_FRAME: usize = 13;
-const SHOWCASE_COLORS: u32 = 96;
+const SHOWCASE_COLORS: u32 = 64;
 const COLORMAP_BUCKETS: usize = 16;
 
 fn repo_path(relative: &str) -> PathBuf {
@@ -226,6 +214,7 @@ struct Run {
     error_samples: u64,
     min_clearance_m: f64,
     min_height_m: f64,
+    obstacles: Vec<StaticObject>,
 }
 
 impl Run {
@@ -268,6 +257,7 @@ impl Run {
         )
         .expect("map grid");
         let start = true_pose(&sim);
+        let obstacles = static_obstacles(sim.world());
         let mut run = Self {
             sim,
             trot,
@@ -276,7 +266,7 @@ impl Run {
             pattern: LivoxMid360Pattern::new(),
             frame_index: 0,
             frame_start_pose,
-            slam: Slam2d::new(grid, SlamConfig::default()),
+            slam: Slam2d::new(grid, slam_config()),
             odom: start,
             odom_at_frame_start: start,
             slam_pose: start,
@@ -297,6 +287,7 @@ impl Run {
             error_samples: 0,
             min_clearance_m: f64::MAX,
             min_height_m: f64::MAX,
+            obstacles,
         };
         run.set_arm(STOW_POSE);
         run
@@ -442,9 +433,10 @@ impl Run {
             self.true_trail.push([observed.base_x_m, observed.base_z_m]);
         }
         self.min_height_m = self.min_height_m.min(observed.base_y_m);
-        self.min_clearance_m = self
-            .min_clearance_m
-            .min(clearance_m([observed.base_x_m, observed.base_z_m]));
+        self.min_clearance_m = self.min_clearance_m.min(clearance_m(
+            &self.obstacles,
+            [observed.base_x_m, observed.base_z_m],
+        ));
         self.door_max_rad = self.door_max_rad.max(self.door_rad());
         for link in ROBOT_LINKS {
             if self.sim.named_entities_in_contact("door_leaf", link) {
@@ -588,6 +580,18 @@ impl Run {
     }
 }
 
+/// Scan matching over all 360 beams, searched on a finer grid than the default.
+fn slam_config() -> SlamConfig {
+    let mut config = SlamConfig {
+        max_beams: 360,
+        ..SlamConfig::default()
+    };
+    config.matcher.linear_samples = 7;
+    config.matcher.angular_samples = 7;
+    config.matcher.levels = 4;
+    config
+}
+
 /// The base's true planar pose in the navigation frame, for scoring only.
 fn true_pose(sim: &UrdfSceneSim) -> Pose2d {
     let base = sim.named_transform("base").expect("base pose");
@@ -596,17 +600,6 @@ fn true_pose(sim: &UrdfSceneSim) -> Pose2d {
         -base.translation.z,
         yaw_of(base.rotation),
     )
-}
-
-fn clearance_m(position: [f64; 2]) -> f64 {
-    OBSTACLES
-        .iter()
-        .map(|(center, half)| {
-            let dx = ((position[0] - center[0]).abs() - half[0]).max(0.0);
-            let dz = ((position[1] - center[1]).abs() - half[1]).max(0.0);
-            dx.hypot(dz)
-        })
-        .fold(f64::MAX, f64::min)
 }
 
 fn run(mut on_frame: impl FnMut(&Run)) -> Run {
@@ -758,6 +751,7 @@ fn capture_showcase() {
     let mut backend = WgpuRenderBackend::new().expect("initialize wgpu");
     let camera = Camera::new(WIDTH, HEIGHT, std::f64::consts::FRAC_PI_4);
     let mut mesh_cache = MeshRenderCache::new();
+    let interior = Interior::new(two_room_floors());
     let frames_dir = repo_path("target/rne-showcase-go2-door");
     let _ = fs::remove_dir_all(&frames_dir);
     fs::create_dir_all(&frames_dir).expect("create frame directory");
@@ -772,7 +766,14 @@ fn capture_showcase() {
         {
             return;
         }
-        let rgba = render_frame(&mut backend, &camera, &mut mesh_cache, run, &view);
+        let rgba = render_frame(
+            &mut backend,
+            &camera,
+            &mut mesh_cache,
+            &interior,
+            run,
+            &view,
+        );
         write_png(
             &frames_dir.join(format!("frame-{:03}.png", hashes.len())),
             &rgba,
@@ -892,18 +893,12 @@ fn render_frame(
     backend: &mut WgpuRenderBackend,
     camera: &Camera,
     mesh_cache: &mut MeshRenderCache,
+    interior: &Interior,
     run: &Run,
     view: &CameraOrbit,
 ) -> Vec<u8> {
     let mut scene = build_visual_render_scene(run.sim.world());
-    scene
-        .items
-        .retain(|item| !matches!(item.shape, VisualShape::Box { size_m } if size_m.x >= 20.0));
-    scene.items.push(box_item(
-        Vec3::new(2.3, -0.005, 0.0),
-        Vec3::new(9.6, 0.01, 5.0),
-        [0.08, 0.09, 0.11, 1.0],
-    ));
+    interior.decorate(&mut scene, run.sim.world(), DecorOptions::default());
     let mut trail = QuadMesh::default();
     for pair in run.true_trail.windows(2) {
         trail.add_segment(
@@ -963,21 +958,6 @@ fn append_height_colored_points(scene: &mut RenderScene, cloud: &PointCloud) {
     for (bucket, mesh) in buckets.into_iter().enumerate() {
         let t = bucket as f64 / (COLORMAP_BUCKETS - 1) as f64;
         push_mesh(scene, mesh, turbo_colormap(0.1 + 0.85 * t));
-    }
-}
-
-fn box_item(translation: Vec3, scale: Vec3, color: [f32; 4]) -> RenderSceneItem {
-    RenderSceneItem {
-        transform: Transform3 {
-            translation,
-            rotation: Quat::IDENTITY,
-            scale,
-        },
-        shape: VisualShape::Box { size_m: Vec3::ONE },
-        color_rgba: color,
-        mesh: None,
-        base_color_texture: None,
-        material: Default::default(),
     }
 }
 

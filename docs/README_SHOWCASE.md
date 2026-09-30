@@ -30,10 +30,10 @@ observation state.
 | Real indoor 3DGS mobile manipulation | `house-mobile-manipulation.gif` / `.png` | 1,158,109 | 737,087 | 960 x 540 |
 | OpenArm v2 bimanual control | `showcase-openarm.gif` / `.png` | 1,983,788 | 56,163 | 960 x 540 |
 | Factory inspection | `showcase-factory.gif` / `.png` | 2,638,709 | 88,762 | 960 x 540 |
-| Go2 door with an arm | `showcase-go2-door.gif` / `.png` | 1,687,139 | 85,715 | 960 x 540 |
+| Go2 door with an arm | `showcase-go2-door.gif` / `.png` | 1,735,164 | 526,722 | 960 x 540 |
 | PLATEAU UAV RGB-D flight | `showcase-uav.gif` / `.png` | 4,451,885 | 585,765 | 960 x 540 |
 
-The current GIF total is **11,919,630 bytes**, below the 12,000,000-byte
+The current GIF total is **11,967,655 bytes**, below the 12,000,000-byte
 combined ceiling. `showcase-media-check` verifies the exact total; regeneration
 must update the manifest's sizes and hashes in the same change.
 

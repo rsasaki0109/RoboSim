@@ -1698,6 +1698,7 @@ dependencies = [
 name = "go2_door"
 version = "0.4.0"
 dependencies = [
+ "go2_indoor",
  "png",
  "rne_ai",
  "rne_data",
@@ -1736,6 +1737,18 @@ dependencies = [
  "rne_math",
  "rne_render",
  "rne_render_wgpu",
+]
+
+[[package]]
+name = "go2_indoor"
+version = "0.4.0"
+dependencies = [
+ "rne_ecs",
+ "rne_math",
+ "rne_physics",
+ "rne_render",
+ "rne_robot",
+ "rne_world",
 ]
 
 [[package]]
@@ -1801,6 +1814,7 @@ dependencies = [
 name = "go2_mid360_navigation"
 version = "0.4.0"
 dependencies = [
+ "go2_indoor",
  "image",
  "png",
  "rne_ai",

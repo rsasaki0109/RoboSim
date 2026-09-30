@@ -118,10 +118,19 @@ All notable changes to Robot Native Engine are documented in this file.
 
 ### Added
 
+- `examples/go2_indoor` dresses the Go2 examples' two rooms (wood and tile
+  floors, rug, plastered walls with baseboards, kitchen island, bookshelf,
+  crates, sofa, plants, counter) with procedural textures, drawing every model
+  inside its collider so the robot's sensors see what is shown; the sofa,
+  plants, and counter are new colliders in the scenes. Examples 131 and 132
+  use it, read clearance from the scene's colliders, and match all 360 scan
+  beams on a finer grid (localization 0.042 m and 0.052 m RMS).
+- The README's lift section shows one GIF (goods-in to delivery); the
+  two-truck relay moves to `docs/DEMOS.md`.
 - Example 132 walks an arm-carrying Go2 (`unitree_go2_arm`: a generic 1.3 kg
   4-DOF arm with a push pad) through a damped swing door (`swing_door`) and
   shuts it behind itself, moving the door only by the pad's contact and
-  steering only on its Mid-360 localization: the door opens to 86° and ends
+  steering only on its Mid-360 localization: the door opens to 87° and ends
   against its stop, and no other robot link touches it. See
   `docs/GO2_DOOR.md`. It replaces the office AGV on the README front-page
   showcase (the office AGV moves to `docs/DEMOS.md`). `UnitreeGo2ModelTrot::with_total_mass_kg` gives the
@@ -130,7 +139,7 @@ All notable changes to Robot Native Engine are documented in this file.
   recording-matched Mid-360: returns in the sensor frame at emission time,
   levelled by IMU attitude, de-skewed by drifting leg odometry, and cut into a
   2D scan for `rne_slam::Slam2d`; A* through unexplored space with replanning
-  finds the doorway. Both goals are reached with 0.099 m RMS localization
+  finds the doorway. Both goals are reached with 0.042 m RMS localization
   error while odometry alone drifts 7.1 m.
 - Example 130 walks the Go2 around a room, steering to waypoints, with an
   upside-down Livox Mid-360 on its back: `UrdfSceneSim::sample_livox_mid360`

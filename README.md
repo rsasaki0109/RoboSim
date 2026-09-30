@@ -52,7 +52,7 @@ camera state; gates and regeneration commands are in
         <img src="docs/media/showcase-go2-door.gif" alt="A Unitree Go2 with an arm on its back pushes a swing door open with the pad on its arm, walks through the doorway, walks around the open door and pushes it shut from the other side, with its Livox Mid-360 returns drawn coloured by height" width="460">
       </picture>
       <br><b>Go2 · door with an arm</b><br>
-      <sub>The Go2 pushes a free-swinging 6 kg door open with the pad on its arm, walks through, and pushes it back against its stop; the pad is the only part of the robot that ever touches the door. It steers only on its own Livox Mid-360 localization (0.06 m RMS), with the sensor model fitted to real Go2 recordings. <a href="docs/media/showcase-go2-door.json">metadata</a> · <a href="docs/GO2_DOOR.md">details</a></sub>
+      <sub>The Go2 pushes a free-swinging 6 kg door open with the pad on its arm, walks through, and pushes it back against its stop; the pad is the only part of the robot that ever touches the door. It steers only on its own Livox Mid-360 localization (0.05 m RMS), with the sensor model fitted to real Go2 recordings. <a href="docs/media/showcase-go2-door.json">metadata</a> · <a href="docs/GO2_DOOR.md">details</a></sub>
     </td>
     <td width="50%" align="center">
       <picture>
@@ -167,27 +167,17 @@ SLAM with loop closure and AMCL (a ROS 2 adapter maps to Nav2). Details:
 
 ## Logistics across floors
 
-<table>
-  <tr>
-    <td width="50%" align="center">
-      <img src="docs/media/warehouse-logistics.gif" alt="Forklift AGV lifting a case off a goods-in stand, carrying it into a lift, riding to the upper floor and setting it down on an outbound stand" width="460">
-      <br><b>Goods-in to delivery</b><br>
-      <sub>A forklift AGV takes a case off a stand, calls the lift, rides up with the load and sets it down on the floor above. The mast is a prismatic joint with a position servo and the case is an ordinary dynamic body throughout: it moves 0.038 m on the tines across the whole carry. <a href="examples/123_warehouse_logistics/main.rs">source</a></sub>
-    </td>
-    <td width="50%" align="center">
-      <img src="docs/media/multi-floor-lift.gif" alt="Delivery robot pressing a lift call button, boarding the car and riding to the floor above, with the hoist ropes and counterweight moving in the shaft" width="460">
-      <br><b>Calling and riding a lift</b><br>
-      <sub>The call button reads solved contact force from the robot's own body, the car and doors are <code>rne_nav::Elevator</code> state, and the car carries the robot by ordinary contact rather than by parenting it. The robot is drawn at its solved pose and stays within 0.2° of upright; its height on the car moves 0.7 mm during the ride. <a href="examples/122_multi_floor_media/main.rs">source</a></sub>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center">
-      <img src="docs/media/warehouse-relay.gif" alt="An orange forklift takes a case off the goods-in stand, turns round and sets it on a stand inside the lift car; the car carries the case up alone and a blue forklift on the upper floor takes it out, turns round and sets it on the outbound bay" width="700">
-      <br><b>Two trucks, one lift</b><br>
-      <sub>A truck on each floor and the lift as the conveyor between them. The ground-floor truck sets the case on a stand inside the car and backs out; the car goes up with only the case; the upper-floor truck forks it out and delivers it. A light-curtain check holds the doors while anything is in the doorway, and the case moves 6 mm and 1.5 mm on the two trucks' tines. Driving and turning are commanded; the wheels are not modelled. <a href="examples/125_warehouse_relay/main.rs">source</a></sub>
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/media/warehouse-logistics.gif" alt="Forklift AGV lifting a case off a goods-in stand, carrying it into a lift, riding to the upper floor and setting it down on an outbound stand" width="720">
+</p>
+
+**Goods-in to delivery.** A forklift AGV takes a case off a stand, calls the
+lift, rides up with the load and sets it down on the floor above. The mast is a
+prismatic joint with a position servo and the case is an ordinary dynamic body
+throughout: it moves 0.038 m on the tines across the whole carry.
+[source](examples/123_warehouse_logistics/main.rs) · more lift demos in
+[Multi-floor navigation](docs/MULTI_FLOOR_NAVIGATION.md) and
+[More demos](docs/DEMOS.md#two-trucks-one-lift)
 
 ## Go2 locomotion
 
@@ -235,15 +225,15 @@ sees: each frame's returns, in the sensor frame at their emission times, are
 levelled by IMU attitude, de-skewed by leg odometry, and cut into a 2D scan for
 `rne_slam`'s online SLAM; A* on the inflated map plans through unexplored
 space and replans every second, so the robot finds the doorway as the partition
-appears. It reaches both goals (0.27 m and 0.24 m from them) with 0.099 m RMS
+appears. It reaches both goals (0.25 m and 0.28 m from them) with 0.042 m RMS
 localization error while leg odometry alone drifts 7.1 m.
 [source](examples/131_go2_mid360_navigation/main.rs)
 
 With an arm on its back, the Go2 walks through a swing door and shuts it
 behind itself (the showcase above). Nothing holds or drives the 6 kg door: the pad on the arm
-pushes it open to 86° and back against its stop, and no other part of the
+pushes it open to 87° and back against its stop, and no other part of the
 robot ever touches it. Every command comes from the Mid-360 localization
-above (0.059 m RMS). [docs/GO2_DOOR.md](docs/GO2_DOOR.md) ·
+above (0.052 m RMS). [docs/GO2_DOOR.md](docs/GO2_DOOR.md) ·
 [source](examples/132_go2_door/main.rs)
 
 ## G1 locomotion

@@ -179,17 +179,21 @@ the robot must reach the far corner of the second room and come back. Per
   each frame to the pose at its end;
 - a 720-beam 2D scan of the returns 0.15–0.65 m above the floor.
 
-`Slam2d` processes a keyframe every 0.15 m or 0.15 rad; A* plans on the map
+`Slam2d` processes a keyframe every 0.15 m or 0.15 rad, matching all 360 scan
+beams on a finer search grid than its default (7 samples per axis, 4 levels); A* plans on the map
 inflated to keep the base centre 0.30 m from obstacles, treats unexplored cells
 as traversable, and replans every second.
 
 | Measure | Result |
 | --- | --- |
-| Goals reached | 2 / 2 in 85.8 s, 0.27 m and 0.24 m from them |
-| Localization error | 0.099 m RMS, 0.147 m worst |
+| Goals reached | 2 / 2 in 85.2 s, 0.25 m and 0.28 m from them |
+| Localization error | 0.042 m RMS, 0.060 m worst |
 | Leg odometry alone | 7.1 m worst |
-| Clearance | at least 0.40 m |
-| Occupied map cells within 10 cm of a real obstacle | 87.9 % of 1,424 |
+
+The rooms carry furniture (a sofa, plants, a counter) whose colliders are the
+envelopes the dressed render draws inside; see [GO2_DOOR.md](GO2_DOOR.md#dressed-interior).
+| Clearance | at least 0.41 m |
+| Occupied map cells within 10 cm of a real obstacle | 100 % of 1,065 |
 
 ## What is not established
 

@@ -89,3 +89,54 @@ translation_m = [6.4, 0.25, -0.6]
 visual = { shape = "box", size_m = [0.6, 0.5, 0.6], color_rgba = [0.78, 0.60, 0.30, 1.0] }
 collision = { shape = "box", size_m = [0.6, 0.5, 0.6] }
 body_type = "fixed"
+
+# Furniture added for the dressed interior. Each collider is the envelope the
+# render draws inside, so the Mid-360 and the planner see what is drawn.
+[[objects]]
+name = "sofa_seat"
+translation_m = [0.1, 0.225, 1.975]
+visual = { shape = "box", size_m = [1.5, 0.45, 0.85], color_rgba = [0.30, 0.40, 0.48, 1.0] }
+collision = { shape = "box", size_m = [1.5, 0.45, 0.85] }
+body_type = "fixed"
+
+[[objects]]
+name = "sofa_back"
+translation_m = [0.1, 0.65, 2.3]
+visual = { shape = "box", size_m = [1.5, 0.4, 0.2], color_rgba = [0.30, 0.40, 0.48, 1.0] }
+collision = { shape = "box", size_m = [1.5, 0.4, 0.2] }
+body_type = "fixed"
+
+[[objects]]
+name = "sofa_arm_west"
+translation_m = [-0.725, 0.325, 1.975]
+visual = { shape = "box", size_m = [0.15, 0.65, 0.85], color_rgba = [0.30, 0.40, 0.48, 1.0] }
+collision = { shape = "box", size_m = [0.15, 0.65, 0.85] }
+body_type = "fixed"
+
+[[objects]]
+name = "sofa_arm_east"
+translation_m = [0.925, 0.325, 1.975]
+visual = { shape = "box", size_m = [0.15, 0.65, 0.85], color_rgba = [0.30, 0.40, 0.48, 1.0] }
+collision = { shape = "box", size_m = [0.15, 0.65, 0.85] }
+body_type = "fixed"
+
+[[objects]]
+name = "plant_a"
+translation_m = [-2.05, 0.55, -2.05]
+visual = { shape = "sphere", radius_m = 0.25, color_rgba = [0.20, 0.50, 0.28, 1.0] }
+collision = { shape = "capsule", half_height_m = 0.3, radius_m = 0.25 }
+body_type = "fixed"
+
+[[objects]]
+name = "plant_b"
+translation_m = [6.7, 0.55, -2.05]
+visual = { shape = "sphere", radius_m = 0.25, color_rgba = [0.20, 0.50, 0.28, 1.0] }
+collision = { shape = "capsule", half_height_m = 0.3, radius_m = 0.25 }
+body_type = "fixed"
+
+[[objects]]
+name = "counter"
+translation_m = [3.5, 0.5, 2.175]
+visual = { shape = "box", size_m = [1.4, 1.0, 0.45], color_rgba = [0.70, 0.58, 0.44, 1.0] }
+collision = { shape = "box", size_m = [1.4, 1.0, 0.45] }
+body_type = "fixed"

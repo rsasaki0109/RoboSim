@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 png = { workspace = true }
+go2_indoor = { path = "../go2_indoor" }
 rne_ai = { workspace = true }
 rne_data = { workspace = true }
 rne_math = { workspace = true }

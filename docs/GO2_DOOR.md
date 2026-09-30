@@ -50,18 +50,36 @@ read only to score the run.
 
 | Measure | Result | Gate |
 | --- | --- | --- |
-| Door opened to | 1.509 rad (86°) | > 1.4 rad |
+| Door opened to | 1.511 rad (87°) | > 1.4 rad |
 | Door left at | 0.000 rad (against its stop) | < 0.02 rad |
-| Pad in contact with the door | 16.7 s | > 0 |
+| Pad in contact with the door | 16.6 s | > 0 |
 | Any other robot link in contact with the door | never | never |
-| Localization error | 0.059 m RMS, 0.113 m worst | RMS < 0.15 m |
-| Clearance to walls and furniture | at least 0.49 m | > 0.3 m |
-| Lowest body height | 0.260 m | > 0.2 m |
-| Whole sequence | 116.4 s | finishes |
+| Localization error | 0.052 m RMS, 0.096 m worst | RMS < 0.15 m |
+| Clearance to walls and furniture | at least 0.48 m | > 0.3 m |
+| Lowest body height | 0.258 m | > 0.2 m |
+| Whole sequence | 117.9 s | finishes |
 
 With the robot steered by the simulation's true pose instead, the straight
 closing push alone left the door at 0.031 rad; under the ~0.06 m localization
 error it left it at 0.060–0.078 rad, which is why the final nudge exists.
+
+## Dressed interior
+
+`examples/go2_indoor` dresses the two rooms for examples 131 and 132: oak
+planks in room A, grey tiles in room B, a rug, plaster walls with baseboards,
+a kitchen island, a bookshelf, board and cardboard crates, a sofa, plants, and a
+counter. Every model is drawn **inside its object's collider**, and the sofa
+is three colliders (seat, back, arms) so its seat really is lower than its
+back: the Mid-360, the planner, and the clearance checks see what is drawn.
+Floors and the rug are flat overlays. Textures are procedural and
+deterministic, so captures replay byte for byte. Clearance checks read the
+scene's fixed colliders (`go2_indoor::static_obstacles`) rather than a copied
+list.
+
+The added furniture changed the SLAM trajectory enough to push this run's
+localization error from 0.059 m to 0.129 m RMS with the default matcher. With
+all 360 scan beams and a finer search (7 samples per axis, 4 levels) it is
+0.052 m, and example 131 went from 0.099 m to 0.042 m on the same settings.
 
 ## Known limitations
 
