@@ -1779,6 +1779,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "go2_mid360_room"
+version = "0.4.0"
+dependencies = [
+ "image",
+ "png",
+ "rne_ai",
+ "rne_data",
+ "rne_math",
+ "rne_render",
+ "rne_render_wgpu",
+ "rne_sensor",
+ "rne_world",
+ "serde_json",
+]
+
+[[package]]
 name = "go2_pure_torque"
 version = "0.4.0"
 dependencies = [

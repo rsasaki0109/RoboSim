@@ -142,6 +142,28 @@ point `n` of a frame is stamped `n × 5 µs` after the frame's first firing, fra
 latency is the owning sensor's `latency_ticks`, and rig and blanking draws use
 keyed streams disjoint from the other noise, so a frame replays exactly.
 
+## On the Go2 in simulation
+
+`UrdfSceneSim::sample_livox_mid360` scans a URDF scene with every raycast
+skipping the robot's own links, whose returns come from the rig table instead;
+`unitree_go2_mid360_mount()` places the sensor upside down 0.147 m above and
+0.20 m ahead of the `base` link (the height puts it 0.447 m above the floor in
+the trot; the forward offset is estimated from the extent of the self returns).
+Standing on a flat floor, every cast return lands on the floor and none on the
+robot (`standing_go2_mid360_sees_the_floor_and_not_itself`).
+
+Example 130 walks the Go2 on `UnitreeGo2ModelTrot` around a table in a
+7 m x 5 m room, steering to five waypoints, and sweeps each frame over the
+0.1 s the robot moved during it:
+
+| Measure | Model, walking | Recordings, walking |
+| --- | --- | --- |
+| Returns per frame | 12,258 | about 11,800 (EIL_Box) |
+| No return, 24° / 32° / 40° / 44° / 48° | 0.336 / 0.486 / 0.698 / 0.789 / 0.987 | 0.338–0.489 / 0.410–0.553 / 0.673–0.709 / 0.772–0.794 / 0.991–0.995 |
+
+The walk takes 74.4 s, keeps at least 0.88 m from walls and furniture, and the
+body never drops below 0.263 m.
+
 ## What is not established
 
 - **Timestamp jitter.** Real `t` values carry packet-level host jitter (−270

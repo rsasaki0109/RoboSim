@@ -207,6 +207,22 @@ and the results measured on it are marked as such in
 [docs/GO2_LOCOMOTION.md](docs/GO2_LOCOMOTION.md).
 [source](examples/126_go2_heading_steer/main.rs)
 
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/media/go2-mid360-room.png">
+    <img src="docs/media/go2-mid360-room.gif" alt="The Go2 trots around a table in a room, steering to waypoints, while the upside-down Livox Mid-360 on its back scans: each 0.1 s frame's returns are drawn coloured by height, showing rings on the floor, the table's side, and the walls" width="720">
+  </picture>
+</p>
+
+The same trot steers to waypoints around a room while an upside-down Livox
+Mid-360 on its back scans at 10 Hz. The sensor model is fitted to real Go2
+recordings: its non-repetitive four-line pattern matches held-out real returns
+to 0.13° median, and the rig occlusion, self returns, and near-range blanking
+are measured. While the Go2 walks the loop, the no-return fraction of every
+floor-facing elevation band stays between the two recordings'
+([docs/LIVOX_MID360.md](docs/LIVOX_MID360.md)).
+[source](examples/130_go2_mid360_room/main.rs)
+
 ## G1 locomotion
 
 ![The official Unitree G1 completing a backflip in native RoboSim/Rapier dynamics and landing on its feet](docs/media/unitree-g1-robosim-native-backflip.gif)

@@ -40,7 +40,7 @@ use rne_core::{mix64, KeyedRandom};
 use rne_data::PointCloud;
 use rne_ecs::{Entity, World};
 use rne_math::Vec3;
-use rne_physics::{PhysicsBackend, PhysicsWorldId, RaycastHit, RaycastQuery};
+use rne_physics::{PhysicsBackend, PhysicsError, PhysicsWorldId, RaycastHit, RaycastQuery};
 use rne_world::Transform3;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -210,6 +210,32 @@ impl LidarSweep {
             rotation: self.start.rotation.slerp(self.end.rotation, fraction),
             scale: self.start.scale.lerp(self.end.scale, fraction),
         }
+    }
+}
+
+/// Source of the raycasts a `LiDAR` scan is built from.
+///
+/// Every [`PhysicsBackend`] is one. Implement it directly to scan a filtered view of a
+/// scene — for example one that leaves out the robot carrying the sensor — without
+/// owning a backend. Implementations must follow the ordering contract of
+/// [`PhysicsBackend::raycast`]: hits by increasing distance, ties broken by stable
+/// entity order.
+pub trait LidarRaycaster {
+    /// Executes one raycast query.
+    fn lidar_raycast(
+        &self,
+        physics_world: PhysicsWorldId,
+        query: RaycastQuery,
+    ) -> Result<Vec<RaycastHit>, PhysicsError>;
+}
+
+impl<B: PhysicsBackend> LidarRaycaster for B {
+    fn lidar_raycast(
+        &self,
+        physics_world: PhysicsWorldId,
+        query: RaycastQuery,
+    ) -> Result<Vec<RaycastHit>, PhysicsError> {
+        self.raycast(physics_world, query)
     }
 }
 
@@ -471,8 +497,8 @@ struct RayGeometry {
     timestamp_s: f64,
 }
 
-fn sample_lidar_impl<B: PhysicsBackend>(
-    backend: &B,
+fn sample_lidar_impl<R: LidarRaycaster + ?Sized>(
+    backend: &R,
     physics_world: PhysicsWorldId,
     world: Option<&World>,
     sweep: &LidarSweep,
@@ -519,8 +545,8 @@ fn sample_lidar_impl<B: PhysicsBackend>(
 ///
 /// The noise ordinal of each ray is its index in `rays`, so a given pattern, spec and
 /// key always reproduce the same cloud.
-pub fn sample_lidar_pattern_swept<B: PhysicsBackend>(
-    backend: &B,
+pub fn sample_lidar_pattern_swept<R: LidarRaycaster + ?Sized>(
+    backend: &R,
     physics_world: PhysicsWorldId,
     world: &World,
     sweep: &LidarSweep,
@@ -590,8 +616,8 @@ struct PlannedRay {
     timestamp_s: f64,
 }
 
-fn cast_planned_rays<B: PhysicsBackend>(
-    backend: &B,
+fn cast_planned_rays<R: LidarRaycaster + ?Sized>(
+    backend: &R,
     physics_world: PhysicsWorldId,
     world: Option<&World>,
     sweep: &LidarSweep,
@@ -677,8 +703,8 @@ enum RayFailure {
 
 // Each parameter is an independent named SI-unit quantity; bundling into a config struct here would only relocate the arity, not reduce it.
 #[allow(clippy::too_many_arguments)]
-fn evaluate_ray<B: PhysicsBackend>(
-    backend: &B,
+fn evaluate_ray<R: LidarRaycaster + ?Sized>(
+    backend: &R,
     physics_world: PhysicsWorldId,
     world: Option<&World>,
     ray: &RayGeometry,
@@ -687,7 +713,7 @@ fn evaluate_ray<B: PhysicsBackend>(
     random: &KeyedRandom,
     noise_key: SensorNoiseKey,
 ) -> Result<Vec<PendingReturn>, RayFailure> {
-    let mut hits = match backend.raycast(physics_world, raycast_query(ray, spec)) {
+    let mut hits = match backend.lidar_raycast(physics_world, raycast_query(ray, spec)) {
         Ok(hits) => hits,
         Err(_) if spec.failure_behavior == LidarFailureBehavior::DropRay => {
             return Err(RayFailure::Skip)
@@ -791,8 +817,8 @@ fn ray_direction(
 }
 
 /// Integrates the beam footprint by casting sub-rays across the divergence cone.
-fn sample_beam_footprint<B: PhysicsBackend>(
-    backend: &B,
+fn sample_beam_footprint<R: LidarRaycaster + ?Sized>(
+    backend: &R,
     physics_world: PhysicsWorldId,
     ray: &RayGeometry,
     spec: &LidarSpec,
@@ -829,7 +855,7 @@ fn sample_beam_footprint<B: PhysicsBackend>(
             continue;
         }
 
-        let hits = backend.raycast(
+        let hits = backend.lidar_raycast(
             physics_world,
             RaycastQuery {
                 origin_m: ray.origin_m,
