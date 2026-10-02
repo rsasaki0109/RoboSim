@@ -262,8 +262,6 @@ puts joint sliders, a floor/obstacle editor, and RGB/depth/LiDAR views for a
 URDF or MJCF model in one browser window:
 `cargo run --release --locked -p robot_workbench`.
 
-<img src="docs/media/robot-workbench.png" alt="Robot workbench showing SO-101 joint controls, scene editing, RGB, depth and LiDAR views" width="460">
-
 ## Independent integrations
 
 The native release archive includes a one-command installed product proof:
